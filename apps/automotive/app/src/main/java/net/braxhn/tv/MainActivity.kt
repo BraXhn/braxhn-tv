@@ -282,6 +282,8 @@ fun SettingsScreen() {
             Button(onClick = { scope.launch { Api.logout() } }, colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Color(0xFFFF5D6C)),
                 modifier = Modifier.padding(top = 24.dp).height(52.dp)) { Text("Logga ut") }
         }
+        item { Text("Nedladdat för offline", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
+        item { DownloadsList() }
         item { Text("Video kan bara spelas när bilen står parkerad.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
     }
 }
@@ -334,6 +336,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                                 Text(if (it.watched == true) "Markera osedd" else "Markera sedd")
                             }
                         }
+                        DownloadRow(it)
                         it.audio?.takeIf { a -> a.size > 1 }?.let { list ->
                             Text("Ljud", fontWeight = FontWeight.SemiBold)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -375,6 +378,40 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         e.overview?.let { o -> Text(o, color = Color.Gray, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 14.sp) }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DownloadRow(item: MediaItem) {
+    val scope = rememberCoroutineScope()
+    val records by Downloads.records.collectAsState()
+    val active by Downloads.active.collectAsState()
+    var error by remember { mutableStateOf<String?>(null) }
+    val done = records.any { it.id == item.id }
+    val p = active[item.id]
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        when {
+            done -> OutlinedButton(onClick = { Downloads.remove(item.id) }) { Text("Ta bort nedladdning") }
+            p != null -> { LinearProgressIndicator(progress = { p }, modifier = Modifier.width(200.dp)); Text(if (p < 0.5f) "Förbereder…" else "Laddar ner…", color = Color.Gray) }
+            else -> listOf("1080" to "Ladda ner HD", "480" to "Ladda ner (liten)").forEach { (q, label) ->
+                OutlinedButton(onClick = { error = null; scope.launch { runCatching { Downloads.download(item, q) }.onFailure { e -> error = e.message } } }) { Text(label) }
+            }
+        }
+        error?.let { Text(it, color = Color(0xFFFF5D6C), fontSize = 13.sp) }
+    }
+}
+
+@Composable
+fun DownloadsList() {
+    val records by Downloads.records.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (records.isEmpty()) Text("Inget nedladdat.", color = Color.Gray)
+        records.forEach { r ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(r.title, fontWeight = FontWeight.SemiBold); Text("${r.subtitle} · ${r.size / 1_000_000} MB", color = Color.Gray, fontSize = 13.sp) }
+                TextButton(onClick = { Downloads.remove(r.id) }) { Text("Ta bort") }
             }
         }
     }

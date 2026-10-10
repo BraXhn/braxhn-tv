@@ -63,6 +63,15 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
 
     // Läs in objekt + uppspelningsbeslut och starta
     LaunchedEffect(req) {
+        // Nedladdad fil: spela lokalt (fungerar utan nät)
+        Downloads.localFile(req.id)?.let { f ->
+            status = "Offline"
+            item = runCatching { Api.get<MediaItem>("/api/items/${req.id}") }.getOrNull()
+            pb = runCatching { Api.get<Playback>("/api/items/${req.id}/playback", Api.capabilities(req.audio, null)) }.getOrNull()
+            player.setMediaItem(M3Item.fromUri(Uri.fromFile(f)), (req.start * 1000).toLong())
+            player.prepare(); player.playWhenReady = true
+            return@LaunchedEffect
+        }
         try {
             val it: MediaItem = Api.get("/api/items/${req.id}")
             item = it
