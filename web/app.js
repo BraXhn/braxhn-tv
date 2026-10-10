@@ -178,6 +178,7 @@ views.item = async (id) => {
     <span>Ljud</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
     <span>Undertexter</span><b>${it.subtitles.map(s => esc(s.label)).join(', ') || '–'}</b>
     ${it.hdr ? `<span>HDR</span><b>${esc(it.hdr.toUpperCase())} – tonmappas automatiskt på skärmar utan HDR</b>` : ''}
+    ${it.recap ? `<span>Sammanfattning</span><b>${fmtTime(it.recap.start)}–${fmtTime(it.recap.end)}</b>` : ''}
     ${it.intro ? `<span>Intro</span><b>${fmtTime(it.intro.start)}–${fmtTime(it.intro.end)}</b>` : ''}
     ${it.credits ? `<span>Eftertexter</span><b>från ${fmtTime(it.credits)}</b>` : ''}
     <span>Uppspelning</span><b id="pbinfo">…</b></div>
@@ -526,6 +527,8 @@ views.admin = async () => {
     <label class="switch"><input type="checkbox" id="svpn" ${S.trustVpnRange ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Räkna VPN-nätet 100.64.0.0/10 (NetBird/Tailscale) som hemma <span class="muted">(behövs normalt inte om VPN:et routas via routern)</span></label>
     <label>Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="kommaseparerade CIDR">
     <label class="switch"><input type="checkbox" id="sunr" ${S.allowUnrated ? 'checked' : ''}> Barnprofiler får se titlar utan känd åldersgräns</label>
+    <label class="switch"><input type="checkbox" id="strick" ${S.trickplay ? 'checked' : ''}> Skapa förhandsbilder för spolning (kräver lite diskutrymme och tid vid skanning)</label>
+    <label class="switch"><input type="checkbox" id="srecap" ${S.detectRecap ? 'checked' : ''}> Leta efter "tidigare i serien" (analyserar hela föregående avsnitt)</label>
     <label class="switch"><input type="checkbox" id="swatch" ${S.watchEnabled ? 'checked' : ''}> Skanna direkt när filer läggs till (filbevakning – ${S.watching} bibliotek bevakas)</label>
     <div class="row"><div style="flex:1"><label>Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
     <div style="flex:1"><label>Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
@@ -590,7 +593,7 @@ views.admin = async () => {
   $('#secform').onsubmit = async (e) => {
     e.preventDefault();
     const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
-      allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked };
+      allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked, trickplay: $('#strick').checked, detectRecap: $('#srecap').checked };
     if (!$('#sadm').disabled) body.adminAnywhere = $('#sadm').checked;
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
     if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
@@ -762,7 +765,9 @@ async function play(id, start = 0) {
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
       ${it.nextId ? '<button class="ghost small" id="pnext">Nästa ⏭</button>' : ''}</div>
-    <button class="skip" id="pskip" hidden></button>`;
+    <button class="skip" id="pskip" hidden></button>
+    <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
+      <div class="track" id="track"><i id="tfill"></i></div></div>`;
   el.hidden = false; document.body.style.overflow = 'hidden';
   $('#pq').value = P.q; if ($('#pa')) $('#pa').value = P.audio; $('#ps').value = P.sub;
   $('#pclose').onclick = () => closePlayer();
@@ -779,7 +784,29 @@ async function play(id, start = 0) {
   if ($('#pair')) $('#pair').onclick = () => $('#vid').webkitShowPlaybackTargetPicker();
   if ($('#pnext')) $('#pnext').onclick = () => { sendProgress(true); play(it.nextId, 0); };
   const v = $('#vid');
-  v.addEventListener('timeupdate', () => { if (!P) return; if (Date.now() - P.lastSent > 10000) sendProgress(); markers(); });
+  v.addEventListener('timeupdate', () => {
+    if (!P) return; if (Date.now() - P.lastSent > 10000) sendProgress(); markers();
+    const d = P.it.duration || v.duration; if (d) $('#tfill').style.width = Math.min(100, v.currentTime / d * 100) + '%';
+  });
+  // Spolningslist med förhandsbilder
+  api(`/items/${it.id}/trickplay`).then(tp => { if (P && P.it.id === it.id) P.tp = tp; }).catch(() => {});
+  const track = $('#track'), prev = $('#prev');
+  const tAt = (e) => { const r = track.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (P.it.duration || v.duration || 0); };
+  track.onmousemove = (e) => {
+    if (!P) return;
+    const t = tAt(e), r = track.getBoundingClientRect();
+    $('#ptime').textContent = fmtTime(t);
+    const tp = P.tp, img = $('#pimg');
+    if (tp) {
+      const i = Math.min(tp.count - 1, Math.floor(t / tp.interval)), per = tp.cols * tp.rows, sheet = Math.floor(i / per) + tp.first, k = i % per;
+      Object.assign(img.style, { width: tp.w + 'px', height: tp.h + 'px', backgroundImage: `url(/api/items/${P.it.id}/trickplay/${sheet})`,
+        backgroundPosition: `-${(k % tp.cols) * tp.w}px -${Math.floor(k / tp.cols) * tp.h}px`, display: 'block' });
+    } else img.style.display = 'none';
+    prev.hidden = false;
+    prev.style.left = Math.max(0, Math.min(r.width - prev.offsetWidth, e.clientX - r.left - prev.offsetWidth / 2)) + 'px';
+  };
+  track.onmouseleave = () => { prev.hidden = true; };
+  track.onclick = (e) => { v.currentTime = tAt(e); };
   v.addEventListener('pause', () => P && sendProgress());
   v.addEventListener('ended', () => P && onEnded());
   v.addEventListener('error', () => {
@@ -794,7 +821,10 @@ async function play(id, start = 0) {
 function markers() {
   const v = $('#vid'), b = $('#pskip'), pb = P.pb; if (!v || !b || !pb) return;
   const t = v.currentTime;
-  if (pb.intro && t >= pb.intro.start && t < pb.intro.end - 1) {
+  if (pb.recap && t >= pb.recap.start && t < pb.recap.end - 1) {
+    if (b.dataset.k !== 'recap') { b.dataset.k = 'recap'; b.textContent = 'Hoppa över sammanfattning ⏭'; b.onclick = () => { v.currentTime = pb.recap.end; b.hidden = true; }; }
+    b.hidden = false;
+  } else if (pb.intro && t >= pb.intro.start && t < pb.intro.end - 1) {
     if (b.dataset.k !== 'intro') { b.dataset.k = 'intro'; b.textContent = 'Hoppa över intro ⏭'; b.onclick = () => { v.currentTime = pb.intro.end; b.hidden = true; }; }
     b.hidden = false;
   } else if (pb.credits && P.it.nextId && t >= pb.credits && t < pb.credits + 60) {

@@ -78,7 +78,7 @@ class App : Application() {
 @Serializable data class PlaybackSubtitle(val id: String, val label: String, val lang: String? = null, val url: String)
 @Serializable data class Playback(
     val mode: String, val url: String, val reasons: List<String> = emptyList(), val subtitles: List<PlaybackSubtitle> = emptyList(),
-    val intro: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
+    val intro: Marker? = null, val recap: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
     val remote: Boolean? = null, val tonemap: Boolean? = null
 )
 

@@ -106,7 +106,7 @@ async function scanLibrary(lib) {
     const info = await probe(f);
     if (lib.type === 'movie') {
       const p = parseMovie(f);
-      if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0 WHERE id=?`,
+      if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
         st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
       else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, mtime,
@@ -117,7 +117,7 @@ async function scanLibrary(lib) {
       if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
       const showId = showFor(lib, p.show, p.year);
       const title = p.epTitle || `Avsnitt ${p.episode}`;
-      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0 WHERE id=?`,
+      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
         showId, p.season, p.episode, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
       else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, f,
@@ -138,6 +138,7 @@ async function scanLibrary(lib) {
   status.done = 0; status.total = kf.length;
   for (const it of kf) { status.done++; await hooks.keyframes?.(it); }
   if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }
+  if (hooks.trickplay) await hooks.trickplay(lib, status);
 }
 // Kopplas in från stream.js / intro.js för att undvika cirkulära importer
 export const hooks = {};

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { all, run, CACHE } from './db.js';
+import { all, run, CACHE, getSetting } from './db.js';
 
 const SR = 5512, FRAME = 2048, HOP = 256;
 const FPS = SR / HOP;                       // fingeravtryck per sekund (~21,5)
@@ -85,8 +85,9 @@ async function fpFor(it, part) {
     return { hashes: new Uint32Array(b.buffer.slice(b.byteOffset + 4, b.byteOffset + 4 + n * 4)), silent: new Uint8Array(b.buffer.slice(b.byteOffset + 4 + n * 4, b.byteOffset + 4 + n * 5)), offset: b.readDoubleLE(4 + n * 5) };
   } catch {}
   const dur = it.duration || 0;
-  const len = part === 'i' ? Math.min(INTRO_WIN, dur * 0.45) : Math.min(END_WIN, dur * 0.35);
-  const offset = part === 'i' ? 0 : Math.max(0, dur - len);
+  // i = början, e = slutet, f = hela avsnittet (för att hitta "tidigare i serien")
+  const len = part === 'i' ? Math.min(INTRO_WIN, dur * 0.45) : part === 'f' ? dur : Math.min(END_WIN, dur * 0.35);
+  const offset = part === 'e' ? Math.max(0, dur - len) : 0;
   const fp = fingerprint(await readPcm(it.path, offset, len));
   const n = fp.hashes.length, out = Buffer.alloc(4 + n * 5 + 8);
   out.writeUInt32LE(n, 0);
@@ -188,6 +189,64 @@ async function season(eps, status) {
     run('UPDATE items SET intro_start=?, intro_end=?, credits_start=?, markers_done=1 WHERE id=?',
       is, r.intro ? r.intro.t : null, r.credits ? r.credits.s : null, e.id);
   }
+  // "Tidigare i serien": klipp i början av avsnitt N som finns någonstans i avsnitt N-1
+  if (getSetting('detect_recap', '1') === '1') {
+    for (let k = 1; k < eps.length; k++) {
+      try {
+        const A = await load(eps[k], 'i'), P = await load(eps[k - 1], 'f');
+        if (!A || !P) continue;
+        const r = res.get(eps[k].id);
+        const rc = findRecap(A, P, r.intro ? [r.intro.s, r.intro.t] : null);
+        run('UPDATE items SET recap_start=?, recap_end=? WHERE id=?', rc ? rc[0] : null, rc ? rc[1] : null, eps[k].id);
+      } catch (er) { console.warn('[recap]', eps[k].path, er.message); }
+    }
+  }
+}
+
+/**
+ * Letar korta fönster (2 s) i början av avsnittet som matchar var som helst i föregående avsnitt.
+ * Fönster som överlappar introt räknas bort (introt finns ju i alla avsnitt).
+ */
+export function findRecap(A, P, intro, maxStart = 420) {
+  const W = Math.round(2 * FPS), STEP = Math.round(W / 2);
+  const idx = new Map();
+  for (let j = 0; j < P.hashes.length; j++) {
+    if (P.silent[j]) continue;
+    const v = P.hashes[j] >>> 16;
+    let l = idx.get(v); if (!l) idx.set(v, l = []);
+    if (l.length < 32) l.push(j);
+  }
+  const limit = Math.min(A.hashes.length - W, Math.round(maxStart * FPS));
+  const hits = [];
+  for (let i = 0; i < limit; i += STEP) {
+    const t0 = toSec(A, i), t1 = toSec(A, i + W);
+    if (intro && t1 > intro[0] - 1 && t0 < intro[1] + 1) continue;
+    const votes = new Map();
+    for (let k = i; k < i + W; k++) {
+      if (A.silent[k]) continue;
+      const l = idx.get(A.hashes[k] >>> 16); if (!l || l.length >= 32) continue;
+      for (const j of l) { const d = j - k; votes.set(d, (votes.get(d) || 0) + 1); }
+    }
+    let best = null, bn = 0;
+    for (const [d, n] of votes) if (n > bn) { bn = n; best = d; }
+    if (best === null || bn < 3) continue;
+    let err = 0, cnt = 0;
+    for (let k = i; k < i + W; k++) {
+      const j = k + best; if (j < 0 || j >= P.hashes.length) continue;
+      err += (A.silent[k] || P.silent[j]) ? 16 : popcount(A.hashes[k] ^ P.hashes[j]); cnt++;
+    }
+    if (cnt > W * 0.8 && err / cnt / 32 < 0.25) hits.push([t0, t1]);
+  }
+  if (!hits.length) return null;
+  // Slå ihop träffar med högst 8 s mellanrum; ta den första sammanhängande gruppen
+  const groups = [];
+  for (const h of hits) {
+    const g = groups[groups.length - 1];
+    if (g && h[0] - g[1] <= 8) g[1] = Math.max(g[1], h[1]); else groups.push([h[0], h[1]]);
+  }
+  const g = groups.find(x => x[1] - x[0] >= 12);
+  if (!g) return null;
+  return [g[0] < 4 ? 0 : g[0], g[1]];
 }
 
 export async function detectMarkers(lib, status) {

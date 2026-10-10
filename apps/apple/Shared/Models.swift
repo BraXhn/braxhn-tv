@@ -145,6 +145,7 @@ struct Playback: Decodable {
     let reasons: [String]
     let subtitles: [PlaybackSubtitle]
     let intro: Marker?
+    let recap: Marker?
     let credits: Double?
     let duration: Double?
     let quality: String?

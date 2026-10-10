@@ -11,9 +11,11 @@ import * as st from './stream.js';
 import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
 import * as act from './activity.js';
+import * as trick from './trickplay.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
+hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -36,7 +38,8 @@ function shape(r) {
   if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title });
   if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched });
   else Object.assign(o, { position: r.p_pos || 0, watched: !!r.p_watched, height: r.height,
-    intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null });
+    intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null,
+    recap: r.recap_end ? { start: r.recap_start || 0, end: r.recap_end } : null, trickplay: r.trickplay === 1 });
   return o;
 }
 // ---------- åldersgräns för profiler ----------
@@ -508,6 +511,21 @@ function similarTo(uid, it, limit) {
     .filter(o => o.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, limit).map(o => o.x);
 }
 
+// Förhandsbilder vid spolning
+route('GET', '/api/items/:id/trickplay', user, (c) => {
+  const it = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
+  const i = trick.info(it);
+  i ? send(c.res, 200, i) : fail(c.res, 404, 'Inga förhandsbilder');
+});
+route('GET', '/api/items/:id/trickplay/:n', img, (c) => {
+  const it = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
+  const f = trick.sprite(it, parseInt(c.p.n));
+  if (!f) return fail(c.res, 404, 'Finns inte');
+  fs.readFile(f, (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+});
+
 // Bilder
 route('GET', '/api/collection-image/:cid/:type', img, (c) => {
   if (!['poster', 'backdrop'].includes(c.p.type)) return fail(c.res, 404, '');
@@ -558,6 +576,7 @@ route('GET', '/api/items/:id/playback', user, (c) => {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
     duration: it.duration, subtitles: subs, token, remote, quality: d.q,
     intro: it.intro_end ? { start: it.intro_start || 0, end: it.intro_end } : null, credits: it.credits_start || null,
+    recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
 });
@@ -662,7 +681,8 @@ route('GET', '/api/settings', admin, (c) => {
     adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
-    watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated()
+    watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
+    trickplay: getSetting('trickplay', process.env.TRICKPLAY || '1') === '1', detectRecap: getSetting('detect_recap', '1') === '1'
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -700,6 +720,8 @@ route('PUT', '/api/settings', admin, async (c) => {
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
     setSetting('trusted_networks', nets.join(','));
   }
+  if (b.trickplay != null) setSetting('trickplay', b.trickplay ? '1' : '0');
+  if (b.detectRecap != null) setSetting('detect_recap', b.detectRecap ? '1' : '0');
   if (b.allowUnrated != null) setSetting('allow_unrated', b.allowUnrated ? '1' : '0');
   if (b.backupEnabled != null) setSetting('backup_enabled', b.backupEnabled ? '1' : '0');
   if (b.backupKeep != null) setSetting('backup_keep', Math.max(1, Math.min(365, parseInt(b.backupKeep) || 14)));

@@ -195,3 +195,11 @@ tr.warnrow td{background:rgba(255,93,108,.06)}
 .pcard{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--text);font-size:16px;width:130px}
 .pav{width:110px;height:110px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:46px;font-weight:800;color:#fff;transition:box-shadow .15s}
 .pcard:hover .pav,.pcard:focus .pav{box-shadow:0 0 0 3px var(--text)}
+#player .scrub{position:absolute;left:18px;right:18px;bottom:62px;height:26px;display:flex;align-items:center;transition:opacity .3s}
+#player.idle .scrub{opacity:0;pointer-events:none}
+#player .scrub .track{position:relative;flex:1;height:6px;background:rgba(255,255,255,.25);border-radius:3px;cursor:pointer}
+#player .scrub .track:hover{height:9px}
+#player .scrub .track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
+#player .scrub .preview{position:absolute;bottom:22px;display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none}
+#player .scrub .pimg{border:2px solid #fff;border-radius:6px;background-color:#000;background-repeat:no-repeat}
+#player .scrub .preview span{background:rgba(0,0,0,.8);padding:2px 8px;border-radius:4px;font-size:13px}

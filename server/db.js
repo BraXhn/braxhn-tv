@@ -67,6 +67,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts INTEGER NOT
 CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);`);
 addCol('items', 'genres', 'TEXT');
+addCol('items', 'recap_start', 'REAL');
+addCol('items', 'recap_end', 'REAL');
+addCol('items', 'trickplay', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'cert', 'TEXT');
 addCol('items', 'age', 'INTEGER');
 addCol('items', 'collection_id', 'INTEGER');

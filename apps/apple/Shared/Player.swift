@@ -144,7 +144,8 @@ final class PlayerController: ObservableObject {
         else if !subtitleText.isEmpty { subtitleText = "" }
         // Hoppa över intro / nästa avsnitt
         var skip: String?
-        if let i = pb?.intro, t >= i.start, t < i.end - 1 { skip = "Hoppa över intro" }
+        if let r = pb?.recap, t >= r.start, t < r.end - 1 { skip = "Hoppa över sammanfattning" }
+        else if let i = pb?.intro, t >= i.start, t < i.end - 1 { skip = "Hoppa över intro" }
         else if let c = pb?.credits, item?.nextId != nil, t >= c, t < c + 60 { skip = "Nästa avsnitt" }
         if skip != skipTitle { skipTitle = skip }
         // Tittarstatus var 10:e sekund
@@ -156,7 +157,9 @@ final class PlayerController: ObservableObject {
 
     func skip() {
         guard let t = skipTitle else { return }
-        if t == "Hoppa över intro", let i = pb?.intro {
+        if t == "Hoppa över sammanfattning", let r = pb?.recap {
+            player.seek(to: CMTime(seconds: r.end, preferredTimescale: 600))
+        } else if t == "Hoppa över intro", let i = pb?.intro {
             player.seek(to: CMTime(seconds: i.end, preferredTimescale: 600))
         } else if let next = item?.nextId {
             Task { await start(itemId: next, at: 0, audio: nil, subtitle: nil) }
