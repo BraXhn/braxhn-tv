@@ -1042,6 +1042,13 @@ route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
 });
 route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
+route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
+  const e = get(`SELECT e.*, p.title AS ptitle, q.position, q.played FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id
+    LEFT JOIN podcast_progress q ON q.episode_id=e.id AND q.user_id=? WHERE e.id=?`, c.user.id, +c.p.eid);
+  if (!e) return fail(c.res, 404, 'Finns inte');
+  send(c.res, 200, { id: e.id, podcast: e.podcast_id, podcastTitle: e.ptitle, title: e.title, description: e.description, published: e.published, duration: e.duration,
+    downloaded: !!e.file, position: e.position || 0, played: !!e.played });
+});
 const podEp = (c) => { const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
 route('GET', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 route('HEAD', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });

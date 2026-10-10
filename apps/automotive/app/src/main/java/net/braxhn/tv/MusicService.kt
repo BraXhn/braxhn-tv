@@ -22,6 +22,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
 
 // ---- musikmodeller (matchar /api/music) ----
@@ -33,6 +37,15 @@ import kotlinx.serialization.Serializable
 @Serializable data class MArtistDetail(val id: Int, val name: String, val albums: List<MAlbum> = emptyList(), val popular: List<MTrack> = emptyList())
 @Serializable data class MPlaylist(val id: Int, val name: String, val tracks: Int? = null)
 @Serializable data class MPlaylistDetail(val id: Int, val name: String, val trackList: List<MTrack> = emptyList())
+@Serializable data class BFile(val id: Int, val idx: Int, val offset: Double = 0.0, val duration: Double? = null)
+@Serializable data class BBook(val id: Int, val title: String, val author: String? = null, val duration: Double? = null, val cover: Boolean = false,
+                               val position: Double = 0.0, val finished: Boolean = false, val files: List<BFile> = emptyList())
+@Serializable data class BList(@kotlinx.serialization.SerialName("continue") val cont: List<BBook> = emptyList(), val books: List<BBook> = emptyList())
+@Serializable data class PPod(val id: Int, val title: String? = null, val author: String? = null, val image: Boolean = false, val unplayed: Int = 0)
+@Serializable data class PEp(val id: Int, val podcast: Int, val podcastTitle: String? = null, val title: String, val duration: Double? = null,
+                             val position: Double = 0.0, val played: Boolean = false, val published: Long? = null)
+@Serializable data class PList(val podcasts: List<PPod> = emptyList(), val latest: List<PEp> = emptyList())
+@Serializable data class PDetail(val id: Int, val title: String? = null, val image: Boolean = false, val episodes: List<PEp> = emptyList())
 @Serializable data class MHome(val recentAlbums: List<MAlbum> = emptyList(), val recentlyPlayed: List<MAlbum> = emptyList(), val favorites: List<MTrack> = emptyList())
 
 /**
@@ -47,6 +60,10 @@ class MusicService : MediaLibraryService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var session: MediaLibrarySession? = null
     private var libId: Int? = null
+    private var bookLibId: Int? = null
+    private var libsLoaded = false
+    /** Ljudbok som spelas: filernas startpositioner (för att räkna global position och spara den) */
+    private var currentBook: BBook? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -59,6 +76,22 @@ class MusicService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         session = MediaLibrarySession.Builder(this, player, Callback()).build()
+        // Spara position för ljudböcker och poddar var 15:e sekund och vid paus
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) saveSpoken(player) }
+        })
+        scope.launch(Dispatchers.Main) { while (true) { delay(15000); if (player.isPlaying) saveSpoken(player) } }
+    }
+
+    private fun saveSpoken(player: ExoPlayer) {
+        val id = player.currentMediaItem?.mediaId ?: return
+        val pos = player.currentPosition / 1000.0
+        val p = id.split(":")
+        when (p[0]) {
+            "bf" -> { val b = currentBook ?: return; val f = b.files.getOrNull(p[2].toInt()) ?: return
+                Api.appScope.launch { runCatching { Api.post("/api/audiobooks/book/${b.id}/progress", buildJsonObject { put("position", f.offset + pos) }) } } }
+            "pe" -> Api.appScope.launch { runCatching { Api.post("/api/podcasts/episodes/${p[1]}/progress", buildJsonObject { put("position", pos) }) } }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -90,11 +123,39 @@ class MusicService : MediaLibraryService() {
         .build()
     private fun album(a: MAlbum) = folder("al:${a.id}", a.title, listOfNotNull(a.artist, a.year?.toString()).joinToString(" · "), coverUri(a.id, a.cover), MediaMetadata.MEDIA_TYPE_ALBUM)
 
-    private suspend fun lib(): Int? {
-        libId?.let { return it }
+    private suspend fun loadLibs() {
+        if (libsLoaded) return
         Api.refreshImageToken()
         val l: List<Library> = Api.get("/api/libraries")
-        return l.firstOrNull { it.type == "music" }?.id.also { libId = it }
+        libId = l.firstOrNull { it.type == "music" }?.id
+        bookLibId = l.firstOrNull { it.type == "audiobook" }?.id
+        libsLoaded = true
+    }
+    private suspend fun lib(): Int? { loadLibs(); return libId }
+
+    private fun img(path: String): Uri? { val t = Api.imageToken.value ?: return null; return Uri.parse(Api.url(path, mapOf("t" to t))) }
+    private fun playable(id: String, title: String, sub: String?, art: Uri?, type: Int) = MediaItem.Builder().setMediaId(id).setMediaMetadata(
+        MediaMetadata.Builder().setTitle(title).setSubtitle(sub).setArtist(sub).setArtworkUri(art).setIsBrowsable(false).setIsPlayable(true).setMediaType(type).build()).build()
+    private fun bookItem(b: BBook) = playable("b:${b.id}", b.title, listOfNotNull(b.author, if (b.position > 30 && !b.finished) "påbörjad" else null).joinToString(" · "),
+        if (b.cover) img("/api/audiobooks/cover/${b.id}") else null, MediaMetadata.MEDIA_TYPE_AUDIO_BOOK)
+    private fun epItem(e: PEp) = playable("pe:${e.id}", e.title, listOfNotNull(e.podcastTitle, if (e.played) "lyssnad" else null).joinToString(" · "),
+        img("/api/podcasts/${e.podcast}/image"), MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+    private fun epMedia(e: PEp) = epItem(e).buildUpon().setUri(Uri.parse(Api.absolute("/api/podcasts/episodes/${e.id}/stream"))).build()
+
+    /** Bok → kö med en post per fil, startar i rätt fil och på rätt ställe */
+    private suspend fun bookQueue(id: String): MediaSession.MediaItemsWithStartPosition? {
+        val b = Api.get<BBook>("/api/audiobooks/book/$id")
+        if (b.files.isEmpty()) return null
+        currentBook = b
+        val pos = if (b.finished) 0.0 else b.position
+        val idx = b.files.indexOfLast { it.offset <= pos }.coerceAtLeast(0)
+        val items = b.files.mapIndexed { i, f ->
+            MediaItem.Builder().setMediaId("bf:${b.id}:$i").setUri(Uri.parse(Api.absolute("/api/audiobooks/files/${f.id}/stream?a=$audioCaps")))
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(b.title).setArtist(b.author).setAlbumTitle(b.title)
+                    .setArtworkUri(if (b.cover) img("/api/audiobooks/cover/${b.id}") else null).setTrackNumber(i + 1)
+                    .setIsBrowsable(false).setIsPlayable(true).setMediaType(MediaMetadata.MEDIA_TYPE_AUDIO_BOOK_CHAPTER).build()).build()
+        }
+        return MediaSession.MediaItemsWithStartPosition(items, idx, ((pos - b.files[idx].offset) * 1000).toLong().coerceAtLeast(0))
     }
 
     /** Spår i ett sammanhang (album, spellista, favoriter …) – används både för bläddring och kö. */
@@ -110,16 +171,30 @@ class MusicService : MediaLibraryService() {
     }
 
     private suspend fun children(parent: String): List<MediaItem> {
-        val l = lib() ?: return emptyList()
+        loadLibs()
+        // Ljudböcker och poddar fungerar även utan musikbibliotek
+        when {
+            parent == "books" -> { val bl = bookLibId ?: return emptyList(); val r = Api.get<BList>("/api/audiobooks/$bl", mapOf("sort" to "recent"))
+                return (r.cont + r.books.filter { b -> r.cont.none { it.id == b.id } }).map(::bookItem) }
+            parent == "pods" -> { val r = Api.get<PList>("/api/podcasts")
+                return listOf(folder("podlatest", "Senaste avsnitten", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)) +
+                    r.podcasts.map { folder("pod:${it.id}", it.title ?: "Podd", if (it.unplayed > 0) "${it.unplayed} nya" else it.author, if (it.image) img("/api/podcasts/${it.id}/image") else null, MediaMetadata.MEDIA_TYPE_PODCAST) } }
+            parent == "podlatest" -> return Api.get<PList>("/api/podcasts").latest.map(::epItem)
+            parent.startsWith("pod:") -> { val d = Api.get<PDetail>("/api/podcasts/${parent.removePrefix("pod:")}"); return d.episodes.take(100).map { epItem(it.copy(podcastTitle = d.title)) } }
+        }
+        val l = lib()
+        if (parent == ROOT) return listOfNotNull(
+            l?.let { folder("recent", "Spelat nyligen", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
+            l?.let { folder("new", "Nytt", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
+            l?.let { folder("albums", "Album", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
+            l?.let { folder("artists", "Artister", type = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS) },
+            l?.let { folder("playlists", "Spellistor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS) },
+            l?.let { folder("favorites", "Favoriter", type = MediaMetadata.MEDIA_TYPE_PLAYLIST) },
+            bookLibId?.let { folder("books", "Ljudböcker", type = MediaMetadata.MEDIA_TYPE_FOLDER_AUDIO_BOOKS) },
+            folder("pods", "Poddar", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
+        )
+        if (l == null) return emptyList()
         return when {
-            parent == ROOT -> listOf(
-                folder("recent", "Spelat nyligen", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-                folder("new", "Nytt", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-                folder("albums", "Album", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-                folder("artists", "Artister", type = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
-                folder("playlists", "Spellistor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
-                folder("favorites", "Favoriter", type = MediaMetadata.MEDIA_TYPE_PLAYLIST)
-            )
             parent == "recent" -> Api.get<MHome>("/api/music/$l/home").recentlyPlayed.map(::album)
             parent == "new" -> Api.get<MHome>("/api/music/$l/home").recentAlbums.map(::album)
             parent == "albums" -> Api.get<List<MAlbum>>("/api/music/$l/albums", mapOf("sort" to "artist")).map(::album)
@@ -171,6 +246,12 @@ class MusicService : MediaLibraryService() {
                 ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
             val one = mediaItems.singleOrNull()?.mediaId
             val parts = one?.split(":")
+            if (parts != null && parts[0] == "b") runCatching { bookQueue(parts[1]) }.getOrNull()?.let { return@future it }
+            if (parts != null && parts[0] == "pe") runCatching {
+                val e = Api.get<PEp>("/api/podcasts/episodes/${parts[1]}")
+                MediaSession.MediaItemsWithStartPosition(listOf(epMedia(e)), 0, if (e.played) 0 else (e.position * 1000).toLong())
+            }.getOrNull()?.let { return@future it }
+            if (parts == null || parts[0] != "bf") currentBook = null
             if (parts != null && parts.size >= 3 && parts[0] == "t") {
                 val list = runCatching { tracksOf(parts[2]) }.getOrDefault(emptyList())
                 val idx = list.indexOfFirst { it.id.toString() == parts[1] }
