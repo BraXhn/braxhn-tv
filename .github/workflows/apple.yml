@@ -1,0 +1,25 @@
+name: Apple-app (iOS, iPadOS, tvOS)
+on:
+  push:
+    branches: [main]
+    paths: ['apps/apple/**', '.github/workflows/apple.yml']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    strategy:
+      matrix:
+        include:
+          - scheme: BraXhnTV-iOS
+            dest: generic/platform=iOS Simulator
+          - scheme: BraXhnTV-tvOS
+            dest: generic/platform=tvOS Simulator
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Generera Xcode-projekt
+        working-directory: apps/apple
+        run: xcodegen generate
+      - name: Kompilera ${{ matrix.scheme }} (osignerat, kontrollerar att koden bygger)
+        working-directory: apps/apple
+        run: xcodebuild -project BraXhnTV.xcodeproj -scheme "${{ matrix.scheme }}" -destination "${{ matrix.dest }}" -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -50; exit ${PIPESTATUS[0]}

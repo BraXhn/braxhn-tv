@@ -1,0 +1,25 @@
+services:
+  braxhn-tv:
+    build: .
+    image: braxhn-tv:local
+    container_name: braxhn-tv
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8420:8420"
+      - "8443:8443"   # inbyggd HTTPS (valfritt)
+    environment:
+      - PUID=99
+      - PGID=100
+      - HWACCEL=none          # none | vaapi (Intel/AMD) | qsv (Intel) | nvenc (NVIDIA)
+      # - TMDB_API_KEY=din_nyckel          # valfritt, kan även sättas i webbgränssnittet
+      # - OPENSUBTITLES_API_KEY=din_nyckel  # valfritt
+      # - PUBLIC_URL=https://tv.dindomän.se
+      - REMOTE_QUALITY=1080
+    volumes:
+      - ./config:/config
+      - /mnt/user/media:/media:ro
+      - /tmp/braxhn-tv-transcode:/transcode
+    # devices:
+    #   - /dev/dri:/dev/dri   # för HWACCEL=vaapi/qsv

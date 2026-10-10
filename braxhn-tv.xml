@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>braxhn-tv</Name>
+  <Repository>ghcr.io/braxhn/braxhn-tv:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/BraXhn/braxhn-tv/issues</Support>
+  <Project>https://github.com/BraXhn/braxhn-tv</Project>
+  <Overview>BraXhn TV – egen, fri mediaserver för filmer och serier. Webbgränssnitt och appar (iPhone, iPad, Apple TV, Android Automotive). Remux utan omkodning, HDR→SDR-tonmappning, automatisk intro-hoppning, undertexter (inbränning, OpenSubtitles), Chromecast/AirPlay och strömning utanför hemmet. Inga konton, inga prenumerationer, ingen molntjänst.</Overview>
+  <Category>MediaServer:Video</Category>
+  <WebUI>http://[IP]:[PORT:8420]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/braxhn-tv.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/web/icon.png</Icon>
+  <ExtraParams>--restart unless-stopped --security-opt=no-new-privileges:true</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI-port" Target="8420" Default="8420" Mode="tcp" Description="Port för webbgränssnittet" Type="Port" Display="always" Required="true" Mask="false">8420</Config>
+  <Config Name="HTTPS-port" Target="8443" Default="8443" Mode="tcp" Description="Inbyggd HTTPS (aktiveras när cert.pem och key.pem finns i /config/tls). Behövs inte om du kör Nginx Proxy Manager." Type="Port" Display="advanced" Required="false" Mask="false">8443</Config>
+  <Config Name="Konfiguration" Target="/config" Default="/mnt/user/appdata/braxhn-tv" Mode="rw" Description="Databas, bilder och inställningar" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/braxhn-tv</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="ro" Description="Mappen med dina filmer och serier (skrivskyddad). Biblioteken väljs sedan i webbgränssnittet." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Omkodningscache" Target="/transcode" Default="/tmp/braxhn-tv-transcode" Mode="rw" Description="Tillfälliga filer vid omkodning. /tmp = RAM i Unraid (snabbt). Byt till t.ex. /mnt/cache/appdata/braxhn-tv/transcode om du har lite RAM." Type="Path" Display="always" Required="true" Mask="false">/tmp/braxhn-tv-transcode</Config>
+  <Config Name="Hårdvaruomkodning" Target="HWACCEL" Default="none|vaapi|qsv|nvenc" Mode="" Description="none = processor. vaapi = Intel/AMD-GPU (lägg även till enheten /dev/dri nedan). qsv = Intel Quick Sync. nvenc = NVIDIA (kräver Nvidia-Driver-pluginen och --runtime=nvidia i Extra Parameters)." Type="Variable" Display="always" Required="false" Mask="false">none</Config>
+  <Config Name="GPU-enhet" Target="/dev/dri" Default="/dev/dri" Mode="" Description="Endast för vaapi/qsv. Ta bort raden om datorn saknar Intel/AMD-grafik." Type="Device" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="TMDB API-nyckel" Target="TMDB_API_KEY" Default="" Mode="" Description="Valfritt. Gratis nyckel från themoviedb.org ger affischer, beskrivningar och betyg. Kan även anges i webbgränssnittet." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Publik adress" Target="PUBLIC_URL" Default="" Mode="" Description="Valfritt: adressen utifrån, t.ex. https://tv.dindomän.se (för Chromecast och appar utanför hemmet). Kan även sättas i webbgränssnittet." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Maxkvalitet utanför hemmet" Target="REMOTE_QUALITY" Default="1080|orig|720|480|360" Mode="" Description="Automatisk kvalitetsgräns för tittare utanför hemnätverket (anpassa efter din uppladdningshastighet)." Type="Variable" Display="always" Required="false" Mask="false">1080</Config>
+  <Config Name="OpenSubtitles API-nyckel" Target="OPENSUBTITLES_API_KEY" Default="" Mode="" Description="Valfritt: gratis nyckel från opensubtitles.com för att söka och ladda ner undertexter." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Tonmappning" Target="TONEMAP" Default="hable|mobius|reinhard" Mode="" Description="Algoritm för HDR→SDR med processor." Type="Variable" Display="advanced" Required="false" Mask="false">hable</Config>
+  <Config Name="Betrodda nät" Target="TRUSTED_NETWORKS" Default="" Mode="" Description="Valfritt: extra nät (CIDR, kommaseparerade) som räknas som hemma. Hemnät (192.168/10/172.16) och VPN 100.64.0.0/10 ingår alltid. Administration tillåts bara från betrodda nät." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Max omkodningar" Target="MAX_TRANSCODES" Default="4" Mode="" Description="Max antal samtidiga omkodningar totalt (skydd mot överbelastning). Remux räknas inte." Type="Variable" Display="advanced" Required="false" Mask="false">4</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Användar-id (99 = nobody i Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Grupp-id (100 = users i Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Automatisk skanning (min)" Target="SCAN_INTERVAL" Default="60" Mode="" Description="Hur ofta biblioteken skannas efter nya filer. 0 = av. Kan ändras i webbgränssnittet." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
+  <Config Name="x264-preset" Target="X264_PRESET" Default="veryfast" Mode="" Description="Hastighet/kvalitet vid omkodning med processor: ultrafast, superfast, veryfast, faster, fast, medium" Type="Variable" Display="advanced" Required="false" Mask="false">veryfast</Config>
+</Container>

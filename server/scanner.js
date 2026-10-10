@@ -1,0 +1,258 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { db, get, all, run, now, getSetting, IMAGES } from './db.js';
+
+const pexec = promisify(execFile);
+const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
+  '.wmv', '.mpg', '.mpeg', '.flv', '.ogv']);
+const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|webrip|web-dl|webdl|web|hdtv|dvdrip|dvd|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|eac3|dts|remux|proper|repack|extended|unrated|hdr|10bit|multi|swesub|nordic)\b.*$/i;
+
+export const status = { running: false, library: null, phase: '', done: 0, total: 0, last: null };
+
+const clean = (s) => s.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
+const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
+
+export function parseMovie(file) {
+  const tryName = (name) => {
+    const m = name.match(/^(.*)[\s._(\[-]+((?:19|20)\d\d)(?=[\s._)\]-]|$)/); // sista årtalet (t.ex. Blade Runner 2049 (2017))
+    return m && clean(m[1]) ? { title: clean(m[1]), year: +m[2] } : null;
+  };
+  const base = path.basename(file, path.extname(file));
+  const folder = path.basename(path.dirname(file));
+  return tryName(base) || tryName(folder) || { title: clean(base.replace(JUNK, '')) || base, year: null };
+}
+
+export function parseEpisode(rel) {
+  const parts = rel.split(path.sep);
+  const base = path.basename(rel, path.extname(rel));
+  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,3})/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
+  let season, episode, before = base;
+  if (m) { season = +m[1]; episode = +m[2]; before = base.slice(0, m.index); }
+  else {
+    const e = base.match(/(?:^|[\s._-])(?:e|ep|episode|avsnitt|del)[\s._-]*(\d{1,3})/i);
+    if (!e) return null;
+    episode = +e[1]; before = base.slice(0, e.index);
+    const sf = parts.find(p => /^(season|säsong|s)[\s._-]*\d+$/i.test(p));
+    season = sf ? +sf.match(/\d+/)[0] : 1;
+  }
+  const show = parts.length > 1 ? parts[0] : clean(before);
+  if (!show) return null;
+  const y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
+  const after = m ? clean(base.slice(m.index + m[0].length).replace(JUNK, '')).replace(/^[-–\s]+/, '') : '';
+  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season, episode, epTitle: after || null };
+}
+
+async function probe(file) {
+  try {
+    const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json',
+      '-show_format', '-show_streams', file], { maxBuffer: 16 << 20, timeout: 60000 });
+    const j = JSON.parse(stdout);
+    const streams = (j.streams || []).map(s => ({
+      index: s.index, type: s.codec_type, codec: s.codec_name,
+      lang: s.tags?.language || null, title: s.tags?.title || null,
+      channels: s.channels || null, width: s.width || null, height: s.height || null,
+      default: !!s.disposition?.default, forced: !!s.disposition?.forced,
+      hi: !!s.disposition?.hearing_impaired,
+      pix: s.pix_fmt || null, transfer: s.color_transfer || null, primaries: s.color_primaries || null,
+      dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))
+    })).filter(s => ['video', 'audio', 'subtitle'].includes(s.type) && !(s.type === 'video' && ['mjpeg', 'png'].includes(s.codec)));
+    const v = streams.find(s => s.type === 'video'), a = streams.find(s => s.type === 'audio');
+    const hdr = !v ? null : v.transfer === 'smpte2084' ? (v.dovi ? 'dovi' : 'hdr10') : v.transfer === 'arib-std-b67' ? 'hlg' : v.dovi ? 'dovi' : null;
+    return { hdr,
+      duration: parseFloat(j.format?.duration) || null, container: j.format?.format_name || null,
+      vcodec: v?.codec || null, acodec: a?.codec || null, width: v?.width || null, height: v?.height || null,
+      streams: JSON.stringify(streams)
+    };
+  } catch (e) {
+    console.warn('[scan] ffprobe misslyckades:', file, e.message);
+    return { hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' };
+  }
+}
+
+function* walk(dir) {
+  let ents;
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of ents) {
+    if (e.name.startsWith('.') || /^(sample|extras|featurettes|@eaDir)$/i.test(e.name)) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) yield* walk(p);
+    else if (e.isFile() && VIDEO.has(path.extname(e.name).toLowerCase()) && !/\bsample\b/i.test(e.name)) yield p;
+  }
+}
+
+function showFor(lib, name, year) {
+  const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND title=? COLLATE NOCASE`, lib.id, name);
+  if (r) return r.id;
+  return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,added) VALUES(?,?,?,?,?,?)`,
+    lib.id, 'show', name, sortTitle(name), year, now()).lastInsertRowid);
+}
+
+async function scanLibrary(lib) {
+  status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
+  const files = [...walk(lib.path)];
+  status.total = files.length;
+  const known = new Map(all(`SELECT id,path,size,mtime FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
+  const seen = new Set();
+  status.phase = 'Analyserar filer';
+  for (const f of files) {
+    status.done++;
+    seen.add(f);
+    let st; try { st = fs.statSync(f); } catch { continue; }
+    const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
+    if (k && k.size === st.size && k.mtime === mtime) continue;
+    const info = await probe(f);
+    if (lib.type === 'movie') {
+      const p = parseMovie(f);
+      if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0 WHERE id=?`,
+        st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+      else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, mtime,
+        info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+      run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
+    } else {
+      const p = parseEpisode(path.relative(lib.path, f));
+      if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
+      const showId = showFor(lib, p.show, p.year);
+      const title = p.epTitle || `Avsnitt ${p.episode}`;
+      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0 WHERE id=?`,
+        showId, p.season, p.episode, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+      else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, f,
+        st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+      run(`UPDATE items SET added=? WHERE id=?`, now(), showId);
+      run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
+    }
+  }
+  // Ta bort försvunna filer och tomma serier
+  for (const [p, r] of known) if (!seen.has(p)) { run('DELETE FROM items WHERE id=?', r.id); removeImages(r.id); }
+  for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
+    run('DELETE FROM items WHERE id=?', s.id); removeImages(s.id);
+  }
+  await metadata(lib);
+  await thumbnails(lib);
+  status.phase = 'Indexerar nyckelbilder (för remux)';
+  const kf = all(`SELECT * FROM items WHERE library_id=? AND vcodec='h264' AND path IS NOT NULL`, lib.id);
+  status.done = 0; status.total = kf.length;
+  for (const it of kf) { status.done++; await hooks.keyframes?.(it); }
+  if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }
+}
+// Kopplas in från stream.js / intro.js för att undvika cirkulära importer
+export const hooks = {};
+
+export function removeImages(id) {
+  for (const t of ['poster', 'backdrop', 'thumb']) fs.rm(path.join(IMAGES, `${id}-${t}.jpg`), { force: true }, () => {});
+}
+
+// ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
+function tmdbKey() { return getSetting('tmdb_key') || process.env.TMDB_API_KEY || ''; }
+async function tmdb(p, params = {}) {
+  const key = tmdbKey();
+  const q = new URLSearchParams({ language: getSetting('language', 'sv-SE'), ...params });
+  const headers = { accept: 'application/json' };
+  if (key.startsWith('eyJ')) headers.authorization = 'Bearer ' + key; else q.set('api_key', key);
+  const r = await fetch(`https://api.themoviedb.org/3${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) });
+  if (r.status === 429) { await new Promise(s => setTimeout(s, 2000)); return tmdb(p, params); }
+  if (!r.ok) throw new Error(`TMDB ${r.status}`);
+  return r.json();
+}
+async function image(tmdbPath, size, id, type) {
+  if (!tmdbPath) return 0;
+  try {
+    const r = await fetch(`https://image.tmdb.org/t/p/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) return 0;
+    fs.writeFileSync(path.join(IMAGES, `${id}-${type}.jpg`), Buffer.from(await r.arrayBuffer()));
+    return 1;
+  } catch { return 0; }
+}
+
+export async function refreshItem(item, tmdbId = null) {
+  if (item.kind === 'movie') {
+    let id = tmdbId;
+    if (!id) {
+      const s = await tmdb('/search/movie', { query: item.title, ...(item.year ? { year: item.year } : {}) });
+      id = s.results?.[0]?.id;
+    }
+    if (!id) return false;
+    const d = await tmdb(`/movie/${id}`);
+    const poster = await image(d.poster_path, 'w500', item.id, 'poster');
+    const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
+    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,
+      d.title || item.title, sortTitle(d.title || item.title), parseInt(d.release_date) || item.year,
+      d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
+    return true;
+  }
+  if (item.kind === 'show') {
+    let id = tmdbId;
+    if (!id) {
+      const s = await tmdb('/search/tv', { query: item.title, ...(item.year ? { first_air_date_year: item.year } : {}) });
+      id = s.results?.[0]?.id;
+    }
+    if (!id) return false;
+    const d = await tmdb(`/tv/${id}`);
+    const poster = await image(d.poster_path, 'w500', item.id, 'poster');
+    const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
+    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,
+      d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
+      d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
+    const seasons = all(`SELECT DISTINCT season FROM items WHERE parent_id=?`, item.id).map(r => r.season);
+    for (const sn of seasons) {
+      let sd; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch { continue; }
+      for (const ep of sd.episodes || []) {
+        const e = get(`SELECT id,thumb FROM items WHERE parent_id=? AND season=? AND episode=?`, item.id, sn, ep.episode_number);
+        if (!e) continue;
+        const still = e.thumb ? 0 : await image(ep.still_path, 'w300', e.id, 'thumb');
+        run(`UPDATE items SET title=COALESCE(?,title),sort_title=COALESCE(?,sort_title),overview=?,rating=?,thumb=MAX(thumb,?),meta_done=1 WHERE id=?`,
+          ep.name || null, ep.name ? sortTitle(ep.name) : null, ep.overview || null, ep.vote_average || null, still, e.id);
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+async function metadata(lib) {
+  if (!tmdbKey()) return;
+  const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0`, lib.id);
+  status.phase = 'Hämtar metadata'; status.done = 0; status.total = todo.length;
+  for (const it of todo) {
+    status.done++;
+    try { if (!(await refreshItem(it))) run('UPDATE items SET meta_done=2 WHERE id=?', it.id); }
+    catch (e) { console.warn('[meta]', it.title, e.message); }
+  }
+}
+
+export async function extractThumb(it) {
+  const at = Math.min(Math.max((it.duration || 60) * 0.15, 1), 600);
+  const out = path.join(IMAGES, `${it.id}-thumb.jpg`);
+  try {
+    await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-ss', String(at), '-i', it.path,
+      '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', out], { timeout: 60000 });
+    if (fs.existsSync(out)) run('UPDATE items SET thumb=1 WHERE id=?', it.id);
+  } catch (e) { console.warn('[thumb]', it.path, e.message); }
+}
+
+async function thumbnails(lib) {
+  const todo = all(`SELECT id,path,duration FROM items WHERE library_id=? AND kind IN('movie','episode') AND thumb=0 AND vcodec IS NOT NULL`, lib.id);
+  status.phase = 'Skapar miniatyrer'; status.done = 0; status.total = todo.length;
+  for (const it of todo) { status.done++; await extractThumb(it); }
+  // Serier utan affisch: använd första avsnittets miniatyr
+  for (const sh of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND poster=0 AND thumb=0`, lib.id)) {
+    const ep = get(`SELECT id FROM items WHERE parent_id=? AND thumb=1 ORDER BY season, episode LIMIT 1`, sh.id);
+    if (!ep) continue;
+    try { fs.copyFileSync(path.join(IMAGES, `${ep.id}-thumb.jpg`), path.join(IMAGES, `${sh.id}-thumb.jpg`)); run('UPDATE items SET thumb=1 WHERE id=?', sh.id); } catch {}
+  }
+}
+
+let queue = Promise.resolve();
+export function scan(libId = null) {
+  queue = queue.then(async () => {
+    const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
+    status.running = true;
+    try { for (const l of libs) await scanLibrary(l); }
+    catch (e) { console.error('[scan] fel:', e); }
+    finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); }
+  });
+  return queue;
+}

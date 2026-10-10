@@ -1,0 +1,11 @@
+{
+  "name": "braxhn-tv",
+  "version": "0.3.0",
+  "description": "BraXhn TV - fri, självhostad mediaserver (inga prenumerationer, inga externa konton)",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=22.13" },
+  "scripts": { "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js" }
+}

@@ -1,0 +1,58 @@
+name: BraXhnTV
+options:
+  bundleIdPrefix: net.braxhn
+  deploymentTarget:
+    iOS: "16.0"
+    tvOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Fyll i ditt Team-ID (Xcode → Settings → Accounts) eller välj team i Xcode efter generering
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_PREVIEWS: YES
+targets:
+  BraXhnTV-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shared
+      - path: iOS
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: BraXhn TV
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIBackgroundModes: [audio]
+        NSLocalNetworkUsageDescription: BraXhn TV ansluter till din mediaserver på hemnätverket.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.braxhn.tv
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    scheme: {}
+  BraXhnTV-tvOS:
+    type: application
+    platform: tvOS
+    sources:
+      - path: Shared
+    info:
+      path: tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: BraXhn TV
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: BraXhn TV ansluter till din mediaserver på hemnätverket.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.braxhn.tv.appletv
+        TARGETED_DEVICE_FAMILY: "3"
+    scheme: {}

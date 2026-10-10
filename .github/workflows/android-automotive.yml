@@ -1,0 +1,35 @@
+name: Android Automotive-app (APK)
+on:
+  push:
+    branches: [main]
+    paths: ['apps/automotive/**', '.github/workflows/android-automotive.yml']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.BRAXHN_KEYSTORE_B64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.9' }
+      # Valfritt: egen signeringsnyckel via repo-hemligheter (annars debug-signerad)
+      - name: Signeringsnyckel
+        if: env.HAS_KEY == 'true'
+        run: echo "${{ secrets.BRAXHN_KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/release.jks && echo "BRAXHN_KEYSTORE=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
+      - name: Bygg APK och AAB
+        working-directory: apps/automotive
+        env:
+          BRAXHN_KEYSTORE_PASSWORD: ${{ secrets.BRAXHN_KEYSTORE_PASSWORD }}
+          BRAXHN_KEY_ALIAS: ${{ secrets.BRAXHN_KEY_ALIAS }}
+          BRAXHN_KEY_PASSWORD: ${{ secrets.BRAXHN_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease bundleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: braxhn-tv-automotive
+          path: |
+            apps/automotive/app/build/outputs/apk/release/*.apk
+            apps/automotive/app/build/outputs/bundle/release/*.aab
