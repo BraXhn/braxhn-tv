@@ -141,6 +141,7 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 | **Mediafiler** | ffmpeg får bara läsa lokala filer (`-protocol_whitelist file,pipe`), och undertextformat bestäms från filändelsen. |
 | **Tvåstegsbyte** | Att aktivera eller byta 2FA kräver lösenordet, så en stulen session räcker inte för att ta över kontot. |
 | **Docker** | Servern körs som PUID/PGID (inte root), med `no-new-privileges` och mediamappen skrivskyddad. |
+| **Kodens integritet** | Tredjepartsfiler (hls.js, qrcode-generator) ligger i repot med checksummor som kontrolleras i CI och vid bygget – inget hämtas från CDN. Imagen innehåller `integrity.json` med SHA-256 för alla programfiler; säkerhetskontrollen larmar om något ändrats i containern. GitHub Actions är låsta på commit-SHA (uppdateras av Dependabot), och varje image byggs med SBOM och provenance och signeras med Sigstore. |
 | **Säkerhetslogg och säkerhetskontroll** | Inloggningar, misslyckade försök och adminändringar loggas med IP-adress. **Administration** visar en checklista över vad som bör åtgärdas. |
 
 **Viktigt om omvänd proxy och klientens IP-adress**
@@ -163,6 +164,14 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 > **Uppgradering till 0.4:** Inga åtgärder krävs. Databasen uppgraderas automatiskt. Uppdatera apparna för musik, offline och "tidigare i serien".
 
 > **Uppgradering till 0.3:** Alla loggas ut en gång eftersom token nu lagras hashade. Apparna måste också uppdateras till den nya versionen. Logga in igen i webben och i apparna. Befintliga lösenord fungerar, men svaga lösenord ger en uppmaning att byta.
+
+## Verifiera imagen
+
+```
+cosign verify ghcr.io/braxhn/braxhn-tv:latest \
+  --certificate-identity-regexp 'https://github.com/BraXhn/braxhn-tv/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Live-TV och inspelning
 
