@@ -246,3 +246,6 @@ body.hasbar main{padding-bottom:110px}
   .mhero{flex-direction:column;align-items:flex-start}
   .cover.big{width:160px;height:160px;flex:none}
 }
+#player .partybox{position:absolute;right:18px;top:64px;width:320px;background:rgba(21,24,33,.95);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+#player .pchat{max-height:180px;overflow:auto;font-size:13px;display:flex;flex-direction:column;gap:3px}
+#player .partybox input{font-size:13px;padding:6px 10px}

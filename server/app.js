@@ -13,6 +13,7 @@ import { detectMarkers } from './intro.js';
 import * as act from './activity.js';
 import * as trick from './trickplay.js';
 import * as music from './music.js';
+import * as party from './party.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -450,6 +451,39 @@ route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
+
+
+// ---------- Titta tillsammans ----------
+route('POST', '/api/party', user, async (c) => {
+  const { itemId } = await readJson(c.req);
+  const it = get(`SELECT * FROM items WHERE id=? AND kind != 'show'`, +itemId);
+  if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
+  const id = party.createRoom(c.user, it.id);
+  audit('party_created', { ...ctx(c), detail: it.title });
+  send(c.res, 200, { id });
+});
+const roomFor = (c) => {
+  const r = party.getRoom(c.p.rid);
+  if (!r) { fail(c.res, 404, 'Rummet finns inte längre'); return null; }
+  const it = get('SELECT * FROM items WHERE id=?', r.itemId);
+  if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
+  return r;
+};
+route('GET', '/api/party/:rid', user, (c) => { const r = roomFor(c); if (r) send(c.res, 200, party.roomInfo(r)); });
+route('GET', '/api/party/:rid/events', user, (c) => { const r = roomFor(c); if (r) party.subscribe(r, c.user, c.req, c.res); });
+route('POST', '/api/party/:rid/state', user, async (c) => {
+  const r = roomFor(c); if (!r) return;
+  const b = await readJson(c.req);
+  if (b.itemId) { const it = get(`SELECT * FROM items WHERE id=? AND kind != 'show'`, +b.itemId); if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte'); }
+  party.setState(r, c.user, b);
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/party/:rid/chat', user, async (c) => { const r = roomFor(c); if (!r) return; party.chat(r, c.user, (await readJson(c.req)).text); send(c.res, 200, { ok: true }); });
+route('DELETE', '/api/party/:rid', user, (c) => {
+  const r = party.getRoom(c.p.rid);
+  if (r && (r.host === c.user.id || c.user.is_admin)) party.closeRoom(r.id);
+  send(c.res, 200, { ok: true });
+});
 
 // ---------- Min lista ----------
 route('GET', '/api/watchlist', user, (c) => send(c.res, 200,

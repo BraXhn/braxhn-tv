@@ -746,7 +746,10 @@ function loadHls() {
   return add('/vendor/hls.min.js');
 }
 
-async function play(id, start = 0) {
+async function play(id, start = 0, opts = {}) {
+  const partyId = opts.party || (P && P.party) || null;
+  const keepParty = P && P.party && P.party === partyId ? P.es : null;
+  if (keepParty) P.es = null; // behåll anslutningen till rummet vid byte av avsnitt
   const it = await api('/items/' + id);
   if (M.audio && !M.audio.paused) M.audio.pause();
   if (P) closePlayer(false);
@@ -755,7 +758,8 @@ async function play(id, start = 0) {
   const subPref = store.get('sublang', '');
   const textSubs = it.subtitles.filter(s => !s.bitmap);
   const defSub = textSubs.find(s => s.forced) || (subPref && textSubs.find(s => s.lang === subPref));
-  P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null };
+  P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
+    party: partyId, es: keepParty, applying: false };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
   el.innerHTML = `<video id="vid" controls autoplay playsinline x-webkit-airplay="allow"></video>
     <div class="pbar"><button class="ghost small" id="pclose">← Tillbaka</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
@@ -765,7 +769,11 @@ async function play(id, start = 0) {
       <span id="poff" class="row" hidden><button class="ghost small" data-off="-0.5" title="Undertext tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Undertext senare">+</button></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
+      <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button>
       ${it.nextId ? '<button class="ghost small" id="pnext">Nästa ⏭</button>' : ''}</div>
+    <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose">✕</button></div>
+      <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
+      <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
     <button class="skip" id="pskip" hidden></button>
     <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
       <div class="track" id="track"><i id="tfill"></i></div></div>`;
@@ -783,7 +791,21 @@ async function play(id, start = 0) {
   $$('[data-off]').forEach(b => b.onclick = () => { P.offset = Math.round((P.offset + +b.dataset.off) * 10) / 10; setSubs(); });
   if ($('#pcast')) $('#pcast').onclick = () => castItem(it, $('#vid').currentTime);
   if ($('#pair')) $('#pair').onclick = () => $('#vid').webkitShowPlaybackTargetPicker();
-  if ($('#pnext')) $('#pnext').onclick = () => { sendProgress(true); play(it.nextId, 0); };
+  if ($('#pnext')) $('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
+  $('#pparty').onclick = async () => {
+    if (!P.party) {
+      try { const r = await api('/party', { method: 'POST', body: { itemId: it.id } }); P.party = r.id; pushState(); joinParty(); toast('Rum skapat – dela länken'); }
+      catch (e) { return toast(e.message); }
+    }
+    $('#partybox').hidden = !$('#partybox').hidden;
+  };
+  $('#pbclose').onclick = () => { $('#partybox').hidden = true; };
+  $('#pcopy').onclick = () => { navigator.clipboard?.writeText($('#plink').value).then(() => toast('Länken kopierad')); };
+  $('#pmsg').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { api(`/party/${P.party}/chat`, { method: 'POST', body: { text: e.target.value } }).catch(() => {}); e.target.value = ''; } };
+  // Lokala händelser skickas till rummet (men inte de som kommer från rummet självt)
+  const pushState = () => { if (P?.party && !P.applying) api(`/party/${P.party}/state`, { method: 'POST', body: { playing: !$('#vid').paused, position: $('#vid').currentTime } }).catch(() => {}); };
+  ['play', 'pause', 'seeked'].forEach(ev => $('#vid').addEventListener(ev, pushState));
+  if (P.party) joinParty();
   const v = $('#vid');
   v.addEventListener('timeupdate', () => {
     if (!P) return; if (Date.now() - P.lastSent > 10000) sendProgress(); markers();
@@ -908,13 +930,53 @@ function onEnded() {
   let n = 8;
   box.innerHTML = `<b>Nästa avsnitt om <span id="cd">${n}</span> s</b><div class="row"><button class="primary small" id="go">Spela nu</button><button class="ghost small" id="stay">Avbryt</button></div>`;
   P.el.append(box);
-  P.nextTimer = setInterval(() => { n--; const cd = $('#cd'); if (cd) cd.textContent = n; if (n <= 0) { clearInterval(P.nextTimer); play(it.nextId, 0); } }, 1000);
-  $('#go').onclick = () => { clearInterval(P.nextTimer); play(it.nextId, 0); };
+  P.nextTimer = setInterval(() => { n--; const cd = $('#cd'); if (cd) cd.textContent = n; if (n <= 0) { clearInterval(P.nextTimer); goNext(it.nextId); } }, 1000);
+  $('#go').onclick = () => { clearInterval(P.nextTimer); goNext(it.nextId); };
   $('#stay').onclick = () => { clearInterval(P.nextTimer); box.remove(); };
 }
 
+async function goNext(nextId) {
+  const party = P?.party;
+  await play(nextId, 0);
+  // I ett rum byter alla till nästa avsnitt
+  if (party) api(`/party/${party}/state`, { method: 'POST', body: { itemId: nextId, playing: true, position: 0 } }).catch(() => {});
+}
+function joinParty() {
+  const rid = P.party;
+  $('#plink').value = `${status.publicUrl || location.origin}/#/party/${rid}`;
+  $('#pparty').textContent = '👥 Rummet';
+  if (P.es) return;
+  const es = P.es = new EventSource(`/api/party/${rid}/events`);
+  const apply = (st) => {
+    const v = $('#vid'); if (!v || !P) return;
+    const target = st.position + (st.playing ? (Date.now() - st.at) / 1000 : 0);
+    P.applying = true;
+    if (Math.abs(v.currentTime - target) > 1.5) v.currentTime = target;
+    if (st.playing && v.paused) v.play().catch(() => {});
+    if (!st.playing && !v.paused) v.pause();
+    setTimeout(() => { if (P) P.applying = false; }, 600);
+  };
+  const members = (m) => { const el = $('#pmembers'); if (el) el.textContent = 'Här nu: ' + m.map(x => x.name).join(', '); };
+  const addChat = (c) => { const el = $('#pchat'); if (!el) return; el.insertAdjacentHTML('beforeend', `<div><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`); el.scrollTop = 1e9; };
+  es.addEventListener('hello', (e) => { const d = JSON.parse(e.data); members(d.members); d.chat.forEach(addChat); if (d.state.by !== me.name || d.state.position > 0) apply(d.state); });
+  es.addEventListener('state', (e) => { const st = JSON.parse(e.data); if (st.by !== me.name) apply(st); });
+  es.addEventListener('members', (e) => members(JSON.parse(e.data)));
+  es.addEventListener('chat', (e) => { const c = JSON.parse(e.data); addChat(c); if (c.name !== me.name && $('#partybox').hidden) toast(`${c.name}: ${c.text}`); });
+  es.addEventListener('item', (e) => { const d = JSON.parse(e.data); if (P && P.it.id !== d.itemId) { toast(`${d.by} bytte till nästa avsnitt`); play(d.itemId, 0); } });
+  es.addEventListener('closed', () => { toast('Rummet stängdes'); es.close(); if (P) { P.party = null; P.es = null; } });
+}
+views.party = async (rid) => {
+  try {
+    const r = await api('/party/' + rid);
+    const pos = r.state.position + (r.state.playing ? (Date.now() - r.state.at) / 1000 : 0);
+    location.hash = '#/item/' + r.itemId;
+    setTimeout(() => play(r.itemId, pos, { party: rid }), 50);
+  } catch (e) { main.innerHTML = `<div class="empty"><h2>Rummet finns inte längre</h2><p>${esc(e.message)}</p></div>`; }
+};
+
 function closePlayer(refresh = true) {
   if (!P) return;
+  if (P.es) { P.es.close(); P.es = null; }
   sendProgress(true);
   clearInterval(P.nextTimer);
   if (P.hls) P.hls.destroy();
