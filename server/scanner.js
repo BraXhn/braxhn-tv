@@ -158,7 +158,7 @@ export function removeImages(id) {
 
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
 function tmdbKey() { return getSetting('tmdb_key') || process.env.TMDB_API_KEY || ''; }
-async function tmdb(p, params = {}) {
+export async function tmdb(p, params = {}) {
   const key = tmdbKey();
   const q = new URLSearchParams({ language: getSetting('language', 'sv-SE'), ...params });
   const headers = { accept: 'application/json' };

@@ -92,3 +92,17 @@ test('notiser: ntfy får titel och meddelande', async () => {
   setSetting('notify_events', 'cert');
   assert.equal(await n.notify('security', 'X', 'Y'), false);
 });
+
+test('streamingtjänster: var kan jag se den (från cache, utan nät)', async () => {
+  const s = await import('../server/streaming.js');
+  run('INSERT OR REPLACE INTO watch_cache(kind,tmdb_id,data,fetched) VALUES(?,?,?,?)', 'movie', 603, JSON.stringify({ SE: { link: 'https://www.themoviedb.org/movie/603/watch?locale=SE',
+    flatrate: [{ provider_id: 9, provider_name: 'Amazon Prime Video', logo_path: '/a.jpg' }, { provider_id: 1773, provider_name: 'TV4 Play', logo_path: '/b.jpg' }],
+    rent: [{ provider_id: 2, provider_name: 'Apple TV', logo_path: '/c.jpg' }] } }), Math.floor(Date.now() / 1000));
+  setSetting('my_providers', '1773');
+  const w = await s.providersFor('movie', 603, 'Matrix');
+  assert.equal(w.flatrate[0].name, 'TV4 Play'); // era egna tjänster först
+  assert.equal(w.flatrate[0].url, 'https://www.tv4play.se/sok?q=Matrix');
+  assert.match(w.flatrate[1].url, /primevideo\.com\/search.*phrase=Matrix/);
+  assert.deepEqual(w.onMine, ['TV4 Play']);
+  assert.equal(w.rent[0].logo, 'https://image.tmdb.org/t/p/w92/c.jpg');
+});

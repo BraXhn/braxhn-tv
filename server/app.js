@@ -26,6 +26,7 @@ import * as books from './audiobooks.js';
 import * as pods from './podcasts.js';
 import * as live from './livetv.js';
 import * as dvr from './dvr.js';
+import * as streaming from './streaming.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -120,6 +121,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,
+    streaming: c.user.max_age == null && hasTmdb(),
     liveTv: (c.user.max_age == null || allowUnrated()) && !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') } : null
 }));
 route('POST', '/api/setup', pub, async (c) => {
@@ -1070,6 +1072,35 @@ route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
 route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 
+// ---------- Streamingtjänster ("var kan jag se den?") ----------
+route('GET', '/api/items/:id/watch', user, async (c) => {
+  let it = get('SELECT * FROM items WHERE id=?', +c.p.id); if (!it) return fail(c.res, 404, 'Finns inte');
+  if (it.kind === 'episode') it = get('SELECT * FROM items WHERE id=?', it.parent_id);
+  if (!it?.tmdb_id || !hasTmdb()) return send(c.res, 200, null);
+  try { send(c.res, 200, await streaming.providersFor(it.kind, it.tmdb_id, it.title)); } catch { send(c.res, 200, null); }
+});
+route('GET', '/api/streaming/providers', user, async (c) => {
+  if (!hasTmdb()) return fail(c.res, 400, 'Kräver en TMDB-nyckel (Administration → Inställningar)');
+  try { send(c.res, 200, { region: streaming.region(), mine: streaming.myProviders(), all: await streaming.allProviders() }); } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+route('PUT', '/api/streaming/mine', admin, async (c) => {
+  const { ids } = await readJson(c.req);
+  setSetting('my_providers', (Array.isArray(ids) ? ids : []).map(Number).filter(n => n > 0).slice(0, 30).join(','));
+  send(c.res, 200, { ok: true });
+});
+route('GET', '/api/streaming/discover', user, async (c) => {
+  if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler');
+  if (!hasTmdb()) return fail(c.res, 400, 'Kräver en TMDB-nyckel');
+  const ids = String(c.q.get('providers') || '').split(',').map(Number).filter(Boolean);
+  try { send(c.res, 200, await streaming.discover(c.q.get('kind') === 'show' ? 'show' : 'movie', ids, parseInt(c.q.get('page')) || 1, parseInt(c.q.get('genre')) || null)); }
+  catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+route('GET', '/api/streaming/title/:kind/:tid', user, async (c) => {
+  if (!hasTmdb()) return fail(c.res, 400, 'Kräver en TMDB-nyckel');
+  try { send(c.res, 200, await streaming.providersFor(c.p.kind === 'show' ? 'show' : 'movie', +c.p.tid, String(c.q.get('title') || '').slice(0, 200))); }
+  catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+
 // ---------- Live-TV och inspelningar ----------
 const LIVE_SCOPE = 4e9, REC_SCOPE = 5e9;
 const liveOk = (c) => { if (c.user.max_age != null && !allowUnrated()) { fail(c.res, 403, 'Live-TV är inte tillgängligt i barnprofiler'); return false; } return true; };
@@ -1220,11 +1251,14 @@ route('GET', '/api/requests/search', user, async (c) => {
   const kind = c.q.get('kind') === 'show' ? 'show' : 'movie';
   try {
     const res = await tmdbSearch(kind, String(c.q.get('q') || '').slice(0, 100), null);
-    send(c.res, 200, res.map(r => {
+    const mine = streaming.myProviders().length > 0;
+    send(c.res, 200, await Promise.all(res.map(async r => {
       const lib = get('SELECT id FROM items WHERE tmdb_id=? AND kind=?', r.id, kind);
       const rq = get('SELECT status FROM requests WHERE tmdb_id=? AND kind=?', r.id, kind);
-      return { ...r, kind, inLibrary: lib?.id || null, request: rq?.status || null };
-    }));
+      // Finns den redan på en tjänst ni har? Då behöver den inte laddas ner.
+      const streams = mine && !lib ? (await streaming.providersFor(kind, r.id, r.title).catch(() => null))?.onMine || [] : [];
+      return { ...r, kind, inLibrary: lib?.id || null, request: rq?.status || null, streaming: streams };
+    })));
   } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
 async function sendRequest(row) {

@@ -183,7 +183,7 @@ function heroHtml(it, extra = '') {
   return `<div class="hero">${it.backdrop ? `<div class="bd" style="background-image:url(/api/image/${it.id}/backdrop)"></div>` : ''}
     <div class="in"><div class="poster card">${art({ ...it, position: 0 })}</div>
     <div><h1>${esc(it.title)}</h1><div class="meta">${meta}</div>
-    ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}</div></div></div>`;
+    ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;
 }
 
 views.item = async (id) => {
@@ -726,6 +726,72 @@ views.dvr = async () => {
   });
 };
 
+// ---------- streamingtjänster ----------
+const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Öppna i ${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
+const provBlock = (w) => {
+  if (!w) return '';
+  const sub = [...w.flatrate, ...w.free], pay = [...w.rent, ...w.buy.filter(b => !w.rent.some(r => r.id === b.id))];
+  if (!sub.length && !pay.length) return '';
+  return `${sub.length ? `<div class="provrow"><span class="muted small">Ingår i</span>${provLinks(sub)}</div>` : ''}${pay.length ? `<div class="provrow"><span class="muted small">Hyr/köp</span>${provLinks(pay.slice(0, 6))}</div>` : ''}
+    <div class="muted small" style="margin-top:4px">Uppgifter från JustWatch via TMDB. Öppnas i tjänstens app eller webbplats.</div>`;
+};
+async function fillWatch() {
+  const el = $('[data-wid]'); if (!el) return;
+  const w = await api(`/items/${el.dataset.wid}/watch`).catch(() => null);
+  const html = provBlock(w);
+  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:15px;margin:14px 0 6px">Finns även på</h3>${html}`;
+}
+views.streaming = async () => {
+  if (me.kid) { location.hash = '#/'; return; }
+  const P_ = await api('/streaming/providers').catch(e => ({ error: e.message }));
+  if (P_.error) { main.innerHTML = `<div class="empty"><p>${esc(P_.error)}</p></div>`; return; }
+  const kind = store.get('stkind', 'movie');
+  const sel = (store.get('stprov', '') || P_.mine.join(',')).split(',').map(Number).filter(Boolean);
+  const shown = P_.all.filter(p => P_.mine.includes(p.id) || sel.includes(p.id));
+  main.innerHTML = `<div class="toolbar"><h1>Strömmande</h1><span class="muted">Det som finns på era tjänster just nu</span>
+      <select id="stk" style="margin-left:auto"><option value="movie">Filmer</option><option value="show">Serier</option></select>${me.adminHere ? '<button class="ghost" id="stmine">Välj era tjänster</button>' : ''}</div>
+    ${P_.mine.length ? `<div class="provrow" id="stchips">${shown.map(p => `<button class="prov chip${sel.includes(p.id) ? ' mine' : ''}" data-pv="${p.id}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></button>`).join('')}</div>
+      <div class="grid" id="stgrid" style="margin-top:16px"><div class="spin"></div></div><div class="row" style="justify-content:center;margin:16px 0"><button class="ghost" id="stmore" hidden>Visa fler</button></div>`
+    : `<div class="empty"><p>${me.adminHere ? 'Välj vilka tjänster ni har (t.ex. Prime Video och TV4 Play) så visas deras utbud här.' : 'En administratör behöver välja vilka tjänster ni har.'}</p></div>`}
+    <p class="muted small">BraXhn TV kan inte spela upp innehåll från tjänsterna (de är kopieringsskyddade) – ett klick öppnar titeln i tjänstens egen app eller webbplats.</p>`;
+  $('#stk').value = kind;
+  $('#stk').onchange = (e) => { store.set('stkind', e.target.value); route(); };
+  if ($('#stmine')) $('#stmine').onclick = () => {
+    const d = document.createElement('dialog'); d.className = 'wide';
+    d.innerHTML = `<h2>Era streamingtjänster</h2><div class="provpick">${P_.all.map(p => `<label class="prov"><input type="checkbox" value="${p.id}" ${P_.mine.includes(p.id) ? 'checked' : ''}>${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('')}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="pc">Avbryt</button><button class="primary" id="ps">Spara</button></div>`;
+    document.body.append(d); d.showModal();
+    $('#pc', d).onclick = () => { d.close(); d.remove(); };
+    $('#ps', d).onclick = async () => { const ids = $$('input:checked', d).map(i => +i.value); await api('/streaming/mine', { method: 'PUT', body: { ids } }); store.set('stprov', ''); d.close(); d.remove(); route(); };
+  };
+  if (!P_.mine.length) return;
+  $$('[data-pv]').forEach(b => b.onclick = () => { const id = +b.dataset.pv; const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); store.set('stprov', [...s].join(',') || P_.mine.join(',')); route(); });
+  let page = 1, results = [];
+  const load = async () => {
+    const r = await api(`/streaming/discover?kind=${kind}&providers=${sel.join(',')}&page=${page}`);
+    results = results.concat(r.results);
+    $('#stgrid').innerHTML = results.map((x, i) => `<a class="card" href="#" data-st="${i}"><div class="art">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : `<div class="ph">${esc(x.title)}</div>`}${x.inLibrary ? '<span class="badge">Hemma</span>' : ''}</div><div class="t">${esc(x.title)}</div><div class="s">${x.year || ''}</div></a>`).join('') || '<p class="muted">Inget hittades.</p>';
+    $('#stmore').hidden = page >= r.pages;
+    $$('[data-st]').forEach(a => a.onclick = (e) => { e.preventDefault(); streamDialog(results[+a.dataset.st]); });
+  };
+  $('#stmore').onclick = () => { page++; load(); };
+  load().catch(e => { $('#stgrid').innerHTML = `<p class="err">${esc(e.message)}</p>`; });
+};
+async function streamDialog(x) {
+  const d = document.createElement('dialog');
+  d.innerHTML = `<div class="row" style="align-items:flex-start;gap:16px;flex-wrap:nowrap">${x.poster ? `<img src="${esc(x.poster)}" alt="" style="width:110px;border-radius:8px">` : ''}
+    <div><h2 style="margin-top:0">${esc(x.title)} ${x.year ? `<span class="muted">(${x.year})</span>` : ''}</h2><p class="small">${esc(x.overview || '')}</p></div></div>
+    <div id="sdp"><div class="spin"></div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">${x.inLibrary ? `<a class="btn primary" href="#/item/${x.inLibrary}">▶ Finns hemma – spela</a>` : '<button class="ghost" id="sdr">Önska till biblioteket</button>'}<button class="ghost" id="sdx">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  const close = () => { d.close(); d.remove(); };
+  $('#sdx', d).onclick = close;
+  $$('a[href^="#/"]', d).forEach(a => a.addEventListener('click', close));
+  if ($('#sdr', d)) $('#sdr', d).onclick = async () => { try { const r = await api('/requests', { method: 'POST', body: { kind: x.kind, tmdbId: x.id, title: x.title, year: x.year, poster: x.poster, overview: x.overview } }); toast(REQ_STATUS[r.status]?.[0] || 'Önskad'); close(); } catch (e) { toast(e.message); } };
+  const w = await api(`/streaming/title/${x.kind}/${x.id}?title=${encodeURIComponent(x.title)}`).catch(() => null);
+  if ($('#sdp', d)) $('#sdp', d).innerHTML = provBlock(w) || '<p class="muted small">Inga tjänster hittades.</p>';
+}
+
 const REQ_STATUS = { pending: ['Väntar på godkännande', 'warn-badge'], approved: ['Godkänd', 'ok-badge'], sent: ['Laddas ner', 'ok-badge'],
   available: ['Finns att titta på', 'ok-badge'], declined: ['Nekad', 'warn-badge'], failed: ['Misslyckades', 'warn-badge'] };
 views.requests = async () => {
@@ -755,7 +821,7 @@ views.requests = async () => {
     try {
       const res = await api(`/requests/search?kind=${k}&q=${encodeURIComponent(q)}`);
       $('#rqres').innerHTML = res.map((x, i) => `<div class="mcard">${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
-        <div style="flex:1"><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}<div class="small muted">${esc(x.overview)}</div></div>
+        <div style="flex:1"><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}${x.streaming?.length ? `<div class="small" style="color:var(--ok)">Finns redan på ${esc(x.streaming.join(', '))}</div>` : ''}<div class="small muted">${esc(x.overview)}</div></div>
         <div>${x.inLibrary ? `<a class="btn small" href="#/item/${x.inLibrary}">Finns – titta</a>` : x.request ? `<span class="${REQ_STATUS[x.request]?.[1]}">${REQ_STATUS[x.request]?.[0]}</span>` : `<button class="primary small" data-rqadd="${i}">Önska</button>`}</div></div>`).join('') || '<p class="muted">Inga träffar.</p>';
       $$('[data-rqadd]').forEach(b => b.onclick = async () => {
         const x = res[+b.dataset.rqadd]; b.disabled = true;
@@ -1815,7 +1881,7 @@ function showQueue() {
 async function loadLibs() {
   libs = await api('/libraries');
   $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/${{ music: 'music', audiobook: 'books' }[l.type] || 'lib'}/${l.id}">${esc(l.name)}</a>`).join('')
-    + (me?.liveTv ? '<a href="#/live">Live-TV</a>' : '') + (!me?.kid ? '<a href="#/podcasts">Poddar</a>' : '');
+    + (me?.liveTv ? '<a href="#/live">Live-TV</a>' : '') + (me?.streaming ? '<a href="#/streaming">Strömmande</a>' : '') + (!me?.kid ? '<a href="#/podcasts">Poddar</a>' : '');
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k) { try { sessionStorage.setItem(k, '1'); } catch {} }
@@ -1842,7 +1908,7 @@ async function route() {
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
   main.innerHTML = '<div class="spin"></div>';
-  try { await v(arg, arg2); window.scrollTo(0, 0); }
+  try { await v(arg, arg2); window.scrollTo(0, 0); fillWatch(); }
   catch (e) { if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
 }
 window.addEventListener('hashchange', route);
