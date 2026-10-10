@@ -9,6 +9,7 @@ import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, ho
 import * as st from './stream.js';
 import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
+import * as act from './activity.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -222,6 +223,7 @@ route('POST', '/api/libraries', admin, async (c) => {
   if (!real) return fail(c.res, 400, `Sökvägen måste finnas och ligga under ${MEDIA_ROOT}`);
   const id = Number(run('INSERT INTO libraries(name,type,path) VALUES(?,?,?)', name.trim(), type, real).lastInsertRowid);
   audit('library_added', { ...ctx(c), detail: `${name.trim()} (${real})` });
+  act.watchLibraries(scan);
   scan(id);
   send(c.res, 200, { id });
 });
@@ -229,6 +231,7 @@ route('DELETE', '/api/libraries/:id', admin, (c) => {
   for (const r of all('SELECT id FROM items WHERE library_id=?', c.p.id)) removeImages(r.id);
   audit('library_removed', { ...ctx(c), detail: get('SELECT name FROM libraries WHERE id=?', c.p.id)?.name });
   run('DELETE FROM libraries WHERE id=?', c.p.id);
+  act.watchLibraries(scan);
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/libraries/:id/scan', admin, (c) => { scan(+c.p.id); send(c.res, 200, { ok: true }); });
@@ -310,7 +313,8 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=excluded.position, duration=excluded.duration,
     watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, now());
   if (watched) run('UPDATE progress SET position=0 WHERE user_id=? AND item_id=?', c.user.id, it.id);
-  send(c.res, 200, { watched: !!watched });
+  act.touch(c.user.id, it.id, pos);
+  send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) });
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
   const { watched } = await readJson(c.req);
@@ -352,12 +356,17 @@ route('GET', '/api/image/:id/:type', img, (c) => {
 // Uppspelning
 const mediaItem = (c) => {
   const it = get(`SELECT * FROM items WHERE id=? AND kind!='show'`, c.p.id);
-  if (!it) fail(c.res, 404, 'Finns inte');
+  if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (c.req.url.includes('/api/stream/')) {
+    if (act.isStopped(c.user.id, it.id)) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
+    act.touch(c.user.id, it.id);
+  }
   return it;
 };
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
 route('GET', '/api/items/:id/playback', user, (c) => {
   const it = mediaItem(c); if (!it) return;
+  if (act.isStopped(c.user.id, it.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   const o = st.parseCaps(c.q);
   const remote = !isLocalReq(c.req);
   // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv)
@@ -372,6 +381,7 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${st.hlsParams(d, o, token)}`;
+  act.startPlay({ user: c.user, item: it, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
@@ -482,7 +492,8 @@ route('GET', '/api/settings', admin, (c) => {
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
     adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
-    maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user
+    maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
+    watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount()
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -520,10 +531,37 @@ route('PUT', '/api/settings', admin, async (c) => {
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
     setSetting('trusted_networks', nets.join(','));
   }
+  if (b.backupEnabled != null) setSetting('backup_enabled', b.backupEnabled ? '1' : '0');
+  if (b.backupKeep != null) setSetting('backup_keep', Math.max(1, Math.min(365, parseInt(b.backupKeep) || 14)));
+  if (b.watchEnabled != null) { setSetting('watch_enabled', b.watchEnabled ? '1' : '0'); act.watchLibraries(scan); }
   if (b.maxTranscodes != null) setSetting('max_transcodes', Math.max(1, Math.min(32, parseInt(b.maxTranscodes) || 4)));
   if (b.maxTranscodesUser != null) setSetting('max_transcodes_user', Math.max(1, Math.min(16, parseInt(b.maxTranscodesUser) || 2)));
   audit('settings_changed', { ...ctx(c), detail: changed.join(', ') });
   send(c.res, 200, { ok: true });
+});
+
+// Spelas nu, statistik och säkerhetskopior
+route('GET', '/api/activity', admin, (c) => send(c.res, 200, act.listActive()));
+route('POST', '/api/activity/:key/stop', admin, (c) => {
+  const s = act.stopPlay(c.p.key);
+  if (!s) return fail(c.res, 404, 'Uppspelningen finns inte längre');
+  st.stopUserSessions(s.itemId, s.userId);
+  run("DELETE FROM sessions WHERE user_id=? AND kind='media' AND scope_item=?", s.userId, s.itemId);
+  audit('stream_stopped', { ...ctx(c), detail: `${s.user}: ${s.itemId}` });
+  send(c.res, 200, { ok: true });
+});
+route('GET', '/api/stats', admin, (c) => send(c.res, 200, { ...act.stats(), active: act.listActive().length, transcodes: st.activeTranscodes().length, watching: act.watchingCount() }));
+route('GET', '/api/backups', admin, (c) => send(c.res, 200, { dir: act.BACKUP_DIR, enabled: getSetting('backup_enabled', '1') === '1', keep: +getSetting('backup_keep', '14'), files: act.listBackups() }));
+route('POST', '/api/backups', admin, (c) => {
+  try { const name = act.backupNow(); audit('backup_created', { ...ctx(c), detail: name }); send(c.res, 200, { name }); }
+  catch (e) { fail(c.res, 500, 'Säkerhetskopieringen misslyckades: ' + e.message); }
+});
+route('GET', '/api/backups/:name', admin, (c) => {
+  const f = act.listBackups().find(b => b.name === c.p.name);
+  if (!f) return fail(c.res, 404, 'Finns inte');
+  audit('backup_downloaded', { ...ctx(c), detail: f.name });
+  c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${f.name}"`, 'Content-Length': f.size });
+  fs.createReadStream(path.join(act.BACKUP_DIR, f.name)).pipe(c.res);
 });
 
 // Revisionslogg och säkerhetskontroll
@@ -645,6 +683,9 @@ export async function handle(req, res) {
   }
   fail(res, 404, 'Okänd endpoint');
 }
+
+// Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)
+setTimeout(() => act.watchLibraries(scan), 5000);
 
 // Periodisk skanning
 let lastAuto = Date.now();

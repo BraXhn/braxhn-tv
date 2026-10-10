@@ -326,6 +326,60 @@ views.account = async () => {
   };
 };
 
+
+views.stats = async () => {
+  if (!me.adminHere) { location.hash = '#/'; return; }
+  const [S, B] = await Promise.all([api('/stats'), api('/backups')]);
+  const L = S.library;
+  const gb = (b) => b > 1e12 ? (b / 1e12).toFixed(1) + ' TB' : (b / 1e9).toFixed(0) + ' GB';
+  const hrs = (x) => Math.round(x / 3600);
+  const maxDay = Math.max(1, ...S.days.map(d => d.n));
+  const modeName = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' };
+  main.innerHTML = `
+  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span></div>
+  <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now"><div class="spin"></div></div></div>
+  <div class="tiles">
+    <div class="tile"><b>${L.movies}</b><span>filmer</span></div><div class="tile"><b>${L.shows}</b><span>serier</span></div>
+    <div class="tile"><b>${L.episodes}</b><span>avsnitt</span></div><div class="tile"><b>${gb(L.bytes)}</b><span>media</span></div>
+    <div class="tile"><b>${hrs(L.seconds).toLocaleString('sv-SE')} h</b><span>speltid</span></div>
+    <div class="tile"><b>${S.days.reduce((a, d) => a + d.n, 0)}</b><span>uppspelningar</span></div>
+  </div>
+  <div class="panel"><h2>Uppspelningar per dag</h2>
+    <div class="bars">${S.days.map(d => `<div class="bar" title="${esc(d.day)}: ${d.n}"><i style="height:${Math.max(4, d.n / maxDay * 100)}%"></i><span>${esc(d.day.slice(8))}</span></div>`).join('') || '<p class="muted">Inga uppspelningar ännu.</p>'}</div></div>
+  <div class="grid2">
+    <div class="panel"><h2>Mest sett</h2><table>${S.top.map((t, i) => `<tr><td class="muted">${i + 1}</td><td><a href="#/item/${t.id}">${esc(t.title)}</a></td><td class="r">${t.plays} ggr · ${t.viewers} pers</td></tr>`).join('') || '<tr><td class="muted">–</td></tr>'}</table></div>
+    <div class="panel"><h2>Användare</h2><table>${S.users.map(u => `<tr><td>${esc(u.name)}</td><td class="r">${u.plays} uppspelningar · ${hrs(u.watched_seconds)} h sett</td></tr>`).join('')}</table></div>
+    <div class="panel"><h2>Uppspelningsläge</h2><table>${S.modes.map(m => `<tr><td>${esc(modeName[m.mode] || m.mode)}</td><td class="r">${m.n}</td></tr>`).join('') || '<tr><td class="muted">–</td></tr>'}</table>
+      <p class="muted small">Remux och direktuppspelning belastar servern minst.</p></div>
+    <div class="panel"><h2>Enheter</h2><table>${S.devices.map(d => `<tr><td>${esc(d.device || '?')}</td><td class="r">${d.n}</td></tr>`).join('') || '<tr><td class="muted">–</td></tr>'}</table></div>
+  </div>
+  <div class="panel"><h2>Senaste uppspelningar</h2><table>${S.recent.map(r => `<tr><td class="muted small">${fmtDate(r.ts)}</td><td>${esc(r.user)}</td><td>${esc(r.title)}</td><td class="muted small">${esc(modeName[r.mode] || r.mode || '')}${r.remote ? ' · utifrån' : ''} · ${esc(r.device || '')}</td></tr>`).join('') || '<tr><td class="muted">–</td></tr>'}</table></div>
+  <div class="panel"><h2>Säkerhetskopior</h2>
+    <p class="muted small">Databasen (konton, tittarhistorik, inställningar) kopieras automatiskt varje natt kl. 03 till <code>${esc(B.dir)}</code>. ${B.keep} kopior sparas.</p>
+    <div class="row" style="margin-bottom:10px"><label class="switch"><input type="checkbox" id="bken" ${B.enabled ? 'checked' : ''}> Automatisk säkerhetskopiering</label>
+      <input id="bkkeep" type="number" min="1" max="365" value="${B.keep}" style="width:90px"> <span class="muted small">kopior</span>
+      <button class="ghost small" id="bksave">Spara</button><button class="primary small" id="bknow">Säkerhetskopiera nu</button></div>
+    <table>${B.files.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><a class="btn small" href="/api/backups/${encodeURIComponent(f.name)}">Ladda ner</a></td></tr>`).join('') || '<tr><td class="muted">Inga kopior ännu.</td></tr>'}</table>
+    <p class="muted small">Återställ: stoppa containern, kopiera en fil till <code>/config/braxhn-tv.db</code> och starta igen.</p>
+  </div>`;
+  $('#bknow').onclick = async () => { try { const r = await api('/backups', { method: 'POST' }); toast('Skapade ' + r.name); route(); } catch (e) { toast(e.message); } };
+  $('#bksave').onclick = async () => { await api('/settings', { method: 'PUT', body: { backupEnabled: $('#bken').checked, backupKeep: $('#bkkeep').value } }); toast('Sparat'); };
+  const loadNow = async () => {
+    if (location.hash !== '#/stats') return;
+    try {
+      const A = await api('/activity');
+      $('#nowcount').textContent = A.length ? `(${A.length})` : '';
+      $('#now').innerHTML = A.length ? `<table>${A.map(a => `<tr><td><b>${esc(a.user)}</b><div class="muted small">${esc(a.device)} · ${esc(a.ip)}${a.remote ? ' · utifrån' : ''}</div></td>
+        <td>${esc(a.title)}<div class="prog" style="max-width:260px"><i style="width:${a.duration ? Math.min(100, a.position / a.duration * 100) : 0}%"></i></div></td>
+        <td class="muted small">${esc(modeName[a.mode] || a.mode)}${a.quality && a.quality !== 'orig' ? ' · ' + esc(a.quality) + 'p' : ''}${a.paused ? ' · pausad' : ''}<div>${esc((a.reasons || []).join(', '))}</div></td>
+        <td class="r"><button class="danger small" data-stop="${esc(a.key)}">Stoppa</button></td></tr>`).join('')}</table>` : '<p class="muted">Ingen tittar just nu.</p>';
+      $$('[data-stop]').forEach(b => b.onclick = async () => { if (confirm('Stoppa uppspelningen?')) { await api(`/activity/${b.dataset.stop}/stop`, { method: 'POST' }); loadNow(); } });
+    } catch {}
+    setTimeout(loadNow, 5000);
+  };
+  loadNow();
+};
+
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
@@ -708,7 +762,8 @@ function sendProgress(final = false) {
   P.lastSent = Date.now();
   const body = JSON.stringify({ position: v.currentTime, duration: P.it.duration || v.duration });
   if (final && navigator.sendBeacon) navigator.sendBeacon(`/api/items/${P.it.id}/progress`, new Blob([body], { type: 'application/json' }));
-  else fetch(`/api/items/${P.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+  else fetch(`/api/items/${P.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+    .then(r => r.json()).then(d => { if (d.stop && P) { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }).catch(() => {});
 }
 
 function onEnded() {
