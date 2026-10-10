@@ -1,4 +1,4 @@
-name: Android Automotive-app (APK)
+name: Android-app för bil och Google TV (APK)
 on:
   push:
     branches: [main]

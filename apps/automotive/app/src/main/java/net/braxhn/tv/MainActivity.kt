@@ -50,6 +50,9 @@ sealed class Screen {
     data class Lib(val library: Library) : Screen()
     data class Detail(val id: Int) : Screen()
     data class Play(val id: Int, val start: Double, val audio: Int?, val sub: SubtitleTrack?) : Screen()
+    data object Live : Screen()
+    data object Recordings : Screen()
+    data class LivePlay(val id: Int, val title: String) : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -77,6 +80,9 @@ fun AppRoot() {
         PlayerScreen(current, onClose = pop, onPlay = { stack[stack.lastIndex] = it })
         return
     }
+    if (current is Screen.LivePlay) { LivePlayerScreen(current, onClose = pop); return }
+    var hasLive by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { hasLive = runCatching { Api.get<LiveChannels>("/api/live/channels").channels.isNotEmpty() }.getOrDefault(false) }
     Row(Modifier.fillMaxSize()) {
         // Sidomeny – större träffytor passar bilskärmar
         NavigationRail(containerColor = Color(0xFF151821)) {
@@ -87,6 +93,8 @@ fun AppRoot() {
                 onClick = { stack.clear(); stack.add(Screen.Home) }, icon = { Icon(Icons.Filled.Home, null) }, label = { Text("Hem") })
             NavigationRailItem(selected = current == Screen.Search, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Search) },
                 icon = { Icon(Icons.Filled.Search, null) }, label = { Text("Sök") })
+            if (hasLive) NavigationRailItem(selected = current == Screen.Live || current == Screen.Recordings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Live) },
+                icon = { Icon(Icons.Filled.LiveTv, null) }, label = { Text("Live-TV") })
             NavigationRailItem(selected = current == Screen.Settings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
                 icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Inställningar") })
         }
@@ -100,7 +108,9 @@ fun AppRoot() {
                 is Screen.Settings -> SettingsScreen()
                 is Screen.Lib -> LibraryScreen(current.library, push)
                 is Screen.Detail -> DetailScreen(current.id, push)
-                is Screen.Play -> {}
+                is Screen.Live -> LiveScreen(onPlay = push, push = push)
+                is Screen.Recordings -> RecordingsScreen(onPlay = push)
+                is Screen.Play, is Screen.LivePlay -> {}
             }
         }
     }
@@ -153,7 +163,7 @@ fun LoginScreen() {
 @Composable
 fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (landscape) 280 else 160, onClick: () -> Unit) {
     val h = if (landscape) width * 9 / 16 else width * 3 / 2
-    Column(Modifier.width(width.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick)) {
+    Column(Modifier.width(width.dp).clip(RoundedCornerShape(10.dp)).focusRing().clickable(onClick = onClick)) {
         Box(Modifier.size(width.dp, h.dp).clip(RoundedCornerShape(10.dp)).background(
             Brush.linearGradient(listOf(Color.hsv(hue(item.title), 0.5f, 0.4f), Color.hsv(hue(item.title), 0.6f, 0.18f))))) {
             Text(item.showTitle ?: item.title, Modifier.align(Alignment.Center).padding(8.dp), fontWeight = FontWeight.Bold)
