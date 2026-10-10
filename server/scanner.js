@@ -382,7 +382,7 @@ export function scan(libId = null) {
   queue = queue.then(async () => {
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
     status.running = true;
-    try { for (const l of libs) { if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); } else await scanLibrary(l); } }
+    try { for (const l of libs) { if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); } else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); } else await scanLibrary(l); } }
     catch (e) { console.error('[scan] fel:', e); }
     finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }
   });

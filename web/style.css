@@ -263,3 +263,7 @@ dialog.wide{width:min(760px,94vw)}
 .chapters button{display:flex;justify-content:space-between;gap:16px;width:100%;background:none;border:0;color:inherit;padding:8px 10px;border-radius:6px;cursor:pointer;text-align:left}
 .chapters button:hover,.chapters button.on{background:rgba(255,255,255,.08)}
 .scrub .chap{position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.55)}
+.cover.book span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;font-size:13px;font-weight:700;line-height:1.25}
+.card .prog{height:3px;background:rgba(255,255,255,.15);border-radius:2px;margin-top:6px;overflow:hidden}
+.card .prog i{display:block;height:100%;background:var(--accent)}
+#mspeed{width:auto;padding:4px 6px}

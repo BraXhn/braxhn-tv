@@ -7,12 +7,12 @@ import { get, all, run, now, IMAGES } from './db.js';
 import { send, fail } from './util.js';
 
 const pexec = promisify(execFile);
-const AUDIO = new Set(['.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
+export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
 const COVERS = ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'albumart.jpg'];
 const sortName = (t) => String(t || '').toLowerCase().replace(/^(the|a|an|en|ett)\s+/, '');
 const coverFile = (albumId) => path.join(IMAGES, `a${albumId}-cover.jpg`);
 
-function* walk(dir) {
+export function* walk(dir) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of ents) {
     if (e.name.startsWith('.') || e.name === '@eaDir') continue;
@@ -22,7 +22,7 @@ function* walk(dir) {
   }
 }
 
-async function probe(file) {
+export async function probe(file) {
   const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_format', '-show_streams', file],
     { maxBuffer: 8 << 20, timeout: 60000 });
   const j = JSON.parse(stdout);
@@ -64,8 +64,9 @@ function albumId(lib, artist, title, year, genre, dir) {
     lib.id, artist, title, sortName(title), year, genre, dir, now()).lastInsertRowid);
 }
 
-async function ensureCover(albumIdNum, dir, file, hasPic) {
-  const out = coverFile(albumIdNum);
+async function ensureCover(albumIdNum, dir, file, hasPic) { return makeCover(coverFile(albumIdNum), dir, file, hasPic); }
+/** Omslag från cover.jpg/folder.jpg i mappen, annars inbäddad bild i ljudfilen */
+export async function makeCover(out, dir, file, hasPic) {
   if (fs.existsSync(out)) return true;
   for (const c of COVERS) {
     const f = fs.readdirSync(dir).find(x => x.toLowerCase() === c);
@@ -186,7 +187,7 @@ export function playlist(id, uid) {
 
 // ---------------- strömning av ljud ----------------
 const MIME = { mp3: 'audio/mpeg', aac: 'audio/aac', flac: 'audio/flac', vorbis: 'audio/ogg', opus: 'audio/ogg', alac: 'audio/mp4', pcm_s16le: 'audio/wav' };
-const EXT_MIME = { '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav' };
+const EXT_MIME = { '.m4b': 'audio/mp4', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav' };
 /** Direkt om klienten klarar formatet (med Range för spolning), annars omkodning till AAC (eller MP3) i realtid. */
 export function streamTrack(req, res, t, query) {
   const caps = new Set(String(query.get('a') || 'mp3,aac,flac,opus,vorbis').split(','));

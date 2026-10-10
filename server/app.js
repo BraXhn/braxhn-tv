@@ -22,6 +22,8 @@ import * as updates from './updates.js';
 import * as offsite from './offsite.js';
 import * as arr from './arr.js';
 import * as trakt from './trakt.js';
+import * as books from './audiobooks.js';
+import * as pods from './podcasts.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -29,6 +31,7 @@ hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 hooks.afterScan = () => arr.markAvailable();
+hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -331,7 +334,8 @@ route('POST', '/api/acme/obtain', admin, (c) => {
 // Bibliotek
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
-  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) END AS count FROM libraries l ORDER BY l.type='music', l.name`)));
+  WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
+  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)));
 route('POST', '/api/libraries', admin, async (c) => {
   const { name, type, path: p, anime } = await readJson(c.req);
   const real = insideMedia(String(p || ''));
@@ -983,6 +987,64 @@ route('PUT', '/api/settings', admin, async (c) => {
   audit('settings_changed', { ...ctx(c), detail: changed.join(', ') });
   send(c.res, 200, { ok: true });
 });
+
+// ---------- Ljudböcker ----------
+const bookLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='audiobook'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget ljudboksbibliotek'); return l; };
+route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: l, continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
+route('GET', '/api/audiobooks/book/:bid', user, (c) => { const b = books.book(+c.p.bid, c.user.id); b ? send(c.res, 200, b) : fail(c.res, 404, 'Finns inte'); });
+route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
+  const { position, speed } = await readJson(c.req);
+  const r = books.saveProgress(c.user.id, +c.p.bid, position, speed); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
+});
+route('POST', '/api/audiobooks/book/:bid/bookmarks', user, async (c) => {
+  const { position, note } = await readJson(c.req);
+  if (!get('SELECT 1 FROM books WHERE id=?', +c.p.bid)) return fail(c.res, 404, 'Finns inte');
+  if (get('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id=? AND book_id=?', c.user.id, +c.p.bid).n >= 200) return fail(c.res, 400, 'För många bokmärken');
+  run('INSERT INTO bookmarks(user_id,book_id,position,note,created) VALUES(?,?,?,?,?)', c.user.id, +c.p.bid, Math.max(0, +position || 0), String(note || '').slice(0, 200) || null, now());
+  send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/audiobooks/bookmarks/:mid', user, (c) => { run('DELETE FROM bookmarks WHERE id=? AND user_id=?', +c.p.mid, c.user.id); send(c.res, 200, { ok: true }); });
+route('GET', '/api/audiobooks/cover/:bid', img, (c) => {
+  const f = books.coverPath(+c.p.bid);
+  if (!f) return fail(c.res, 404, 'Inget omslag');
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); fs.createReadStream(f).pipe(c.res);
+});
+const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
+route('GET', '/api/audiobooks/files/:fid/stream', user, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+route('HEAD', '/api/audiobooks/files/:fid/stream', user, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+
+// ---------- Poddar ----------
+route('GET', '/api/podcasts', user, (c) => send(c.res, 200, { podcasts: pods.list(c.user.id), latest: pods.latest(c.user.id, 30), canAdd: c.user.max_age == null }));
+route('POST', '/api/podcasts', user, async (c) => {
+  if (c.user.max_age != null) return fail(c.res, 403, 'Barnprofiler kan inte lägga till poddar');
+  const { url } = await readJson(c.req);
+  try { const id = await pods.subscribe(url, c.user); audit('podcast_added', { ...ctx(c), detail: String(url).slice(0, 200) }); send(c.res, 200, { id }); }
+  catch (e) { fail(c.res, 400, e.message); }
+});
+route('GET', '/api/podcasts/:pid', user, (c) => { const p = pods.podcast(+c.p.pid, c.user.id); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
+route('PUT', '/api/podcasts/:pid', user, async (c) => {
+  const { keep } = await readJson(c.req);
+  if (keep != null) run('UPDATE podcasts SET keep=? WHERE id=?', Math.max(0, Math.min(50, parseInt(keep) || 0)), +c.p.pid);
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/podcasts/:pid/refresh', user, async (c) => { try { send(c.res, 200, await pods.refresh(+c.p.pid)); } catch (e) { fail(c.res, 502, e.message); } });
+route('DELETE', '/api/podcasts/:pid', user, (c) => {
+  const p = get('SELECT * FROM podcasts WHERE id=?', +c.p.pid); if (!p) return fail(c.res, 404, 'Finns inte');
+  if (!c.user.is_admin && p.added_by !== c.user.id) return fail(c.res, 403, 'Bara den som lade till podden eller en administratör kan ta bort den');
+  pods.unsubscribe(p.id); send(c.res, 200, { ok: true });
+});
+route('GET', '/api/podcasts/:pid/image', img, (c) => {
+  const f = pods.imagePath(+c.p.pid); if (!f) return fail(c.res, 404, 'Ingen bild');
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); fs.createReadStream(f).pipe(c.res);
+});
+route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
+  const { position, played } = await readJson(c.req);
+  const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
+});
+route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
+const podEp = (c) => { const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
+route('GET', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('HEAD', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 
 // ---------- Sonarr/Radarr och önskemål ----------
 route('POST', '/api/webhook/arr', pub, async (c) => {
