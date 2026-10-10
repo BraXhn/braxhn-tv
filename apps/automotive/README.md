@@ -1,6 +1,8 @@
-# BraXhn TV för Android Automotive (Polestar 4)
+# BraXhn TV för Android: bilen (Polestar 4) och Google TV
 
-En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Automotive OS med Google inbyggt**, som Polestar 2/3/4 och Volvo. Den fungerar också på vanliga Android-telefoner och surfplattor.
+En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Automotive OS med Google inbyggt**, som Polestar 2/3/4 och Volvo. Samma app fungerar på **Google TV / Android TV** (Chromecast med Google TV, Nvidia Shield, TV-apparater från Sony/Philips/TCL m.fl.) och på vanliga Android-telefoner och surfplattor.
+
+**På Google TV:** installera APK:n (t.ex. med *Downloader*-appen eller `adb install`). Appen syns med en banner på startsidan och styrs med fjärrkontrollen – det som har fokus får en vit ram.
 
 > **Android Auto ≠ Android Automotive.** Android Auto (telefonen speglad till bilskärmen) tillåter inte video alls. Polestar 4 kör Android Automotive OS, där parkerade videoappar är tillåtna.
 
@@ -13,6 +15,10 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - *Hoppa över intro* och *Nästa avsnitt*
 - automatiskt nästa avsnitt
 - tittarstatus
+- **live-TV och inspelningar** (HDHomeRun/IPTV)
+- byte av ljudspår och undertexter under uppspelning, kapitel
+- musik, **ljudböcker och poddar i bilens mediaspelare** (får användas under körning)
+- offline-nedladdning
 
 Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning.
 

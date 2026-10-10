@@ -1,6 +1,6 @@
 # BraXhn TV – egen mediaserver för Unraid
 
-BraXhn TV är en självhostad mediaserver för **filmer, serier och musik**, skriven från grunden. Den kräver inga konton, ingen molntjänst och ingen prenumeration. Allt körs på din egen server.
+BraXhn TV är en självhostad mediaserver för **filmer, serier, musik, ljudböcker, poddar och live-TV**, skriven från grunden. Den kräver inga konton, ingen molntjänst och ingen prenumeration. Allt körs på din egen server.
 
 ## Innehåll
 
@@ -8,7 +8,7 @@ BraXhn TV är en självhostad mediaserver för **filmer, serier och musik**, skr
 server/   Node.js-server (inga npm-beroenden): API, skanner, strömning, intro-detektering
 web/      Webbgränssnitt (fungerar i alla webbläsare, installerbart som webbapp)
 apps/apple/       App för iPhone, iPad och Apple TV (SwiftUI)  → se apps/apple/README.md
-apps/automotive/  App för Android Automotive, t.ex. Polestar 4 (Kotlin) → se apps/automotive/README.md
+apps/automotive/  Android-app för bilen (Android Automotive, t.ex. Polestar 4) och Google TV/Android TV (Kotlin) → se apps/automotive/README.md
 braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install.sh
 ```
 
@@ -16,8 +16,8 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 
 | Område | Vad som ingår |
 |---|---|
-| Bibliotek | Filmer, serier och **musik**, mappväljare. Nya filer upptäcks direkt med **filbevakning** (med periodisk skanning som reserv). Igenkänning via filnamn (`S01E02`, `Film (2020)`). |
-| Metadata | Affischer, beskrivningar, betyg och avsnittsnamn via TMDB (gratis nyckel, valfritt). Utan nyckel skapas miniatyrbilder ur videon. |
+| Bibliotek | Filmer, serier, **musik** och **ljudböcker**, mappväljare. Nya filer upptäcks direkt med **filbevakning** (med periodisk skanning som reserv). Igenkänning via filnamn (`S01E02`, `Film (2020)`). |
+| Metadata | Affischer, beskrivningar, betyg och avsnittsnamn via TMDB (gratis nyckel, valfritt). Utan nyckel skapas miniatyrbilder ur videon. **Fel titel?** – sök och välj rätt i TMDB, matchningen låses. **Anime** med absolut numrering (`Serie - 1071`) mappas till säsonger. **Kapitel** läses från filerna. |
 | Användare | Flera konton med egen tittarhistorik, *Fortsätt titta*, *Nästa avsnitt* och sedd/osedd. |
 | **Profiler** | *Vem tittar?* – profiler i hushållet med egen historik och Min lista, valfri **PIN** och **åldersgräns** för barn (svensk åldersgräns från TMDB, med USA/Tyskland som reserv). |
 | **Upptäck** | **Min lista**, **samlingar** (t.ex. alla Bond-filmer), **rekommendationer** utifrån det du sett och *Liknande titlar*. |
@@ -25,7 +25,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Remux** | H.264-, **HEVC**-, **HDR10**- och **Dolby Vision**-filer i MKV eller med fel ljudformat strömmas med **originalbilden kopierad**. Bara ljudet konverteras vid behov, så processorbelastningen blir nästan noll. Segmenten delas exakt på filens nyckelbilder, som indexeras vid skanningen. HEVC strömmas som fMP4-HLS till Apple-enheter. **Surroundljud** (AC-3/E-AC-3) skickas vidare orört när enheten klarar det. |
 | Omkodning | Behövs bara för t.ex. HEVC till enheter utan HEVC-stöd, lägre kvalitet eller inbränning. Kan köras med processor eller GPU (Intel/AMD VAAPI, Quick Sync, NVIDIA NVENC). |
 | **HDR → SDR** | HDR10, HLG och Dolby Vision (bas-lagret) tonmappas automatiskt när skärmen saknar HDR. Det görs med processor (zscale/tonemap) eller Intel/AMD-GPU (tonemap_vaapi). |
-| **Undertexter** | Inbäddade och externa `.srt/.vtt/.ass`. Teckenkodningen för gamla svenska srt-filer identifieras automatiskt. Bildundertexter (Blu-ray PGS och DVD) **bränns in**. Undertexter kan sökas och laddas ner från **OpenSubtitles**, med exakt matchning via filhash. Tidsjustering ±. |
+| **Undertexter** | Inbäddade och externa `.srt/.vtt/.ass`. Teckenkodningen för gamla svenska srt-filer identifieras automatiskt. Bildundertexter (Blu-ray PGS och DVD) **bränns in**. Undertexter kan sökas och laddas ner från **OpenSubtitles**, med exakt matchning via filhash. Tidsjustering ±. **Hämtas automatiskt** vid skanning för valda språk (bara exakta filhash-träffar som standard). **Två undertexter samtidigt** i webben, t.ex. för språkinlärning. |
 | **Hoppa över intro** | Introt hittas automatiskt genom ljudfingeravtryck: avsnitten i en säsong jämförs och den gemensamma ljudsekvensen blir introt. Även **eftertexter** och **"tidigare i serien"** hittas och ger knapparna *Nästa avsnitt* och *Hoppa över sammanfattning*. Tiderna kan justeras manuellt. |
 | **Förhandsbilder vid spolning** | Miniatyrer visas ovanför tidslinjen när du drar i den (skapas vid skanningen). |
 | **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. |
@@ -35,7 +35,16 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Offline** | Ladda ner filmer och avsnitt i iPhone/iPad- och Android-appen och titta utan nät. Servern gör en mobilanpassad MP4 (H.264/AAC) i vald kvalitet. |
 | **Statistik** | *Spelas nu* med möjlighet att stoppa en ström, tittartimmar, populäraste titlar och direkt/remux/omkodning-fördelning. |
 | **Säkerhetskopior** | Databasen kopieras automatiskt kl. 03.00 varje natt (14 sparas) och kan laddas ner från statistiksidan. |
-| Appar | iPhone, iPad, Apple TV och Android Automotive (Polestar 4), med musik i bilen. |
+| **Ljudböcker** | En bok per mapp (`Författare/Bok/`) eller per `.m4b`. Kapitel, position som sparas, hastighet 0,75–2×, ±15/30 s, bokmärken. Även i bilen och i iPhone/Apple TV-appen. |
+| **Poddar** | Prenumerera med RSS-adress. De senaste avsnitten laddas ner automatiskt, position sparas per person. Även i bilen. |
+| **Live-TV och inspelning** | **HDHomeRun** (antenn/kabel) eller **IPTV** (M3U). TV-guide från XMLTV eller HDHomeRuns egen guide. Titta live i webben och apparna, spela in enstaka program eller **hela serier** (bara nya avsnitt), MP4 efteråt som spelas överallt. |
+| **Streamingtjänster** | *Var kan jag se den?* – visar om en titel finns på t.ex. **Prime Video, TV4 Play**, Netflix, SVT Play eller Viaplay och öppnar den i tjänstens app. Bläddra i det som finns på era tjänster. (Innehållet spelas i tjänstens egen app – det är kopieringsskyddat och kan inte läggas in i biblioteket.) |
+| **Sonarr/Radarr** | Webhook gör att nya avsnitt dyker upp direkt efter nedladdning. **Önskningar**: alla i hushållet kan önska filmer/serier, som skickas till Radarr/Sonarr när de godkänts. Visar om titeln redan finns på en av era tjänster. |
+| **Trakt** | Varje person kan koppla sitt Trakt-konto: sett-status synkas åt båda hållen och "tittar nu" visas. |
+| **Notiser** | Larm till mobilen via ntfy, Pushover, Gotify, Discord, Telegram eller webhook: attacker, spärrade konton, certifikat, säkerhetskopior, inspelningar, önskningar och nya versioner. |
+| **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
+| **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
+| Appar | iPhone, iPad, Apple TV, **Google TV/Android TV** och Android Automotive (Polestar 4) – med musik, ljudböcker och poddar i bilen och byte av ljud/undertext samt kapitel i spelaren. |
 
 ## Installation på Unraid
 
@@ -149,9 +158,29 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 5. Valfritt: CrowdSec eller fail2ban kan läsa containerloggen. Misslyckade inloggningar loggas som `[auth] login_fail ip=… user=…`.
 6. Håll containern uppdaterad, och säkerhetskopiera `/mnt/user/appdata/braxhn-tv`.
 
+> **Uppgradering till 0.5:** Inga åtgärder krävs. Lägg till sökvägen `/recordings` i Unraid-mallen om du vill spela in live-TV. Passkeys kräver nu Face ID/fingeravtryck/PIN på enheten.
+
 > **Uppgradering till 0.4:** Inga åtgärder krävs. Databasen uppgraderas automatiskt. Uppdatera apparna för musik, offline och "tidigare i serien".
 
 > **Uppgradering till 0.3:** Alla loggas ut en gång eftersom token nu lagras hashade. Apparna måste också uppdateras till den nya versionen. Logga in igen i webben och i apparna. Befintliga lösenord fungerar, men svaga lösenord ger en uppmaning att byta.
+
+## Live-TV och inspelning
+
+1. **HDHomeRun:** Administration → *Live-TV och inspelning* → ange enhetens IP-adress (eller *Sök efter HDHomeRun*, vilket kräver att containern kör med host-nätverk). Guiden hämtas automatiskt från HDHomeRun.
+2. **IPTV:** ange adressen till M3U-listan och gärna en XMLTV-guide (från leverantören). Kanaler kopplas till guiden via `tvg-id` eller kanalnamn – justera med *Guide-id* om något inte matchar.
+3. Lägg till sökvägen **/recordings** i Unraid-mallen (t.ex. `/mnt/user/media/Inspelningar`). Inspelningar sparas som MP4, och mappen kan även läggas till som ett vanligt bibliotek.
+
+Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i H.264 kopieras utan omkodning. Antalet samtidiga kanaler begränsas av antalet tuners.
+
+## Sonarr, Radarr och önskningar
+
+- **Direkt skanning:** kopiera webhook-adressen under Administration → *Sonarr, Radarr och Trakt* och lägg in den i Sonarr/Radarr under *Settings → Connect → Webhook*. Ser Sonarr filerna under en annan sökväg (t.ex. `/tv`) anger du `/tv=/media/Serier`.
+- **Önskningar:** fyll i adress och API-nyckel till Radarr/Sonarr och välj kvalitetsprofil och rotmapp. Önskningar från andra än administratörer godkänns först (eller automatiskt om du slår på det).
+
+## Säkerhetskopior och återställning
+
+- Lokala kopior görs varje natt i `/config/backups`. Extern, krypterad kopia ställs in under *Statistik → Extern säkerhetskopia*. **Spara lösenfrasen på ett säkert ställe** – utan den går kopian inte att läsa.
+- Återställ från webben (*Återställ* vid en kopia, starta sedan om containern) eller från terminalen: `docker exec -it braxhn-tv node server/restore.js /backup/braxhn-tv-….bxtv` och starta om.
 
 ## Casting
 
@@ -199,6 +228,14 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `ACME_DOMAIN` / `ACME_EMAIL` | – | Domän och e-post för Let's Encrypt (kan även sättas i webbgränssnittet) |
 | `WATCH_FILES` | 1 | 0 = stäng av filbevakning |
 | `TRICKPLAY` | 1 | 0 = skapa inga förhandsbilder för spolning |
+| `DVR_DIR` | /recordings | Var inspelningar sparas |
+| `PODCAST_DIR` | /config/podcasts | Var nedladdade poddavsnitt sparas |
+| `NOTIFY_KIND` / `NOTIFY_URL` / `NOTIFY_TOKEN` / `NOTIFY_USER` | – | Notiser (kan även sättas i webbgränssnittet) |
+| `UPDATE_CHECK` | 1 | 0 = leta inte efter nya versioner |
+| `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |
+| `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | – | Din Trakt-app |
+| `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `BACKUP_PASSPHRASE` | – | Extern säkerhetskopia |
+| `WATCH_REGION` | SE | Land för *var kan jag se den?* |
 | `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
 
 ## Testat och otestat
@@ -219,6 +256,10 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Offline, förhandsbilder, säkerhetskopior, filbevakning | Fungerade. |
 | Passkeys | Registrering och inloggning med en mjukvaru-autentiserare, inklusive avvisning av fel domän, fel nyckel och kopierad nyckel. |
 | Let's Encrypt | CSR och nyckeltumavtryck verifierade (openssl, RFC 7638). |
+| Live-TV | Simulerad IPTV-källa: M3U + XMLTV kopplades, MPEG-2 flätad bild kodades om till H.264 som HLS, tunergränsen fungerade, serieinspelning hoppade över repriser, inspelning blev MP4. |
+| Ljudböcker och poddar | Kapitel från m4b och flera mp3-filer, position över filgränser i webben, RSS-tolkning, nedladdning och spärr mot lokala adresser. |
+| Sonarr/Radarr, Trakt, notiser | Mot simulerade tjänster: webhook och sökvägsmappning, önskan till Radarr, tvåvägssynk med Trakt, ntfy. |
+| Säkerhetskopior | Kryptering fram och tillbaka, fel lösenfras nekas, S3-signering mot AWS testvektor, återställning via omstart. |
 
 **Inte testat här:**
 - inbränning av bildundertexter (ingen testfil fanns)
@@ -226,6 +267,8 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 - OpenSubtitles (API:t var inte nåbart härifrån)
 - Chromecast och AirPlay
 - certifikat från Let's Encrypt på riktigt (kräver en publik domän)
+- en riktig HDHomeRun, riktig IPTV, riktiga Sonarr/Radarr, Trakt och S3-lagring (simulerade här)
+- Google TV-appen på en riktig TV och ljudböcker i bilen
 - passkeys i en riktig webbläsare/telefon
 - offline-nedladdning och musik i en riktig bil
 - CarPlay (kräver ett särskilt tillstånd från Apple och är därför inte byggt)

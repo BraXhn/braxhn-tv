@@ -21,5 +21,7 @@ services:
       - ./config:/config
       - /mnt/user/media:/media:ro
       - /tmp/braxhn-tv-transcode:/transcode
+      - /mnt/user/media/Inspelningar:/recordings   # live-TV-inspelningar (valfritt)
+      # - /mnt/disks/backup/braxhn-tv:/backup      # extern säkerhetskopia (valfritt)
     # devices:
     #   - /dev/dri:/dev/dri   # för HWACCEL=vaapi/qsv
