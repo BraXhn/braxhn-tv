@@ -11,9 +11,9 @@ jobs:
       HAS_KEY: ${{ secrets.BRAXHN_KEYSTORE_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '17' }
-      - uses: android-actions/setup-android@v3
+      # Android SDK finns förinstallerat på ubuntu-latest (ANDROID_HOME)
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
       # Valfritt: egen signeringsnyckel via repo-hemligheter (annars debug-signerad)

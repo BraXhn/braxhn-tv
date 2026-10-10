@@ -1,9 +1,9 @@
 FROM node:22-bookworm-slim
 
 # ffmpeg för analys/omkodning, VAAPI-drivrutiner för Intel/AMD-GPU, tini som init
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg tini ca-certificates \
-      intel-media-va-driver mesa-va-drivers vainfo \
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates mesa-va-drivers vainfo \
+    && if [ "$TARGETARCH" = "amd64" ]; then apt-get install -y --no-install-recommends intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
