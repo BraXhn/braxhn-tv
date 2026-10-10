@@ -1,12 +1,18 @@
-# Håller de låsta versionerna (commit-SHA) av GitHub Actions uppdaterade
+# Håller beroenden uppdaterade. Uppdateringar grupperas i en PR per område; stora versionshopp
+# för Android-verktygen (som kan kräva kodändringar) föreslås inte automatiskt.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    groups: { actions: { patterns: ['*'] } }
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
   - package-ecosystem: gradle
     directory: /apps/automotive
     schedule: { interval: monthly }
+    groups: { android: { patterns: ['*'] } }
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
