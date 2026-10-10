@@ -194,7 +194,9 @@ export function useRecoveryCode(user, code) {
 }
 
 // ---------------- revisionslogg ----------------
+export const auditHooks = [];
 export function audit(event, { user = null, ip = null, detail = null } = {}) {
+  for (const h of auditHooks) { try { h(event, { user, ip, detail }); } catch {} }
   run('INSERT INTO audit(ts,user_id,user_name,ip,event,detail) VALUES(?,?,?,?,?,?)',
     now(), user?.id ?? null, user?.name != null ? clean(user.name, 64) : null, ip ? clean(ip, 64) : null, event, detail ? clean(detail, 300) : null);
   // Rad i loggen som t.ex. CrowdSec/fail2ban kan läsa (kontrolltecken borttagna, användarnamn inom citattecken)

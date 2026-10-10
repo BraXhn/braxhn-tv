@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { get, all, run, now, getSetting, setSetting, IMAGES } from './db.js';
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
 import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
-  clearFails, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
+  clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
 import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks } from './scanner.js';
 import * as st from './stream.js';
 import * as os from './opensubtitles.js';
@@ -17,6 +17,8 @@ import * as party from './party.js';
 import * as offline from './offline.js';
 import * as acme from './acme.js';
 import * as pk from './passkeys.js';
+import * as notifier from './notify.js';
+import * as updates from './updates.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -25,7 +27,7 @@ hooks.music = (lib, status) => music.scanMusic(lib, status);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
-const VERSION = '0.4.0';
+import { VERSION } from './updates.js';
 
 // ---------- formning av objekt ----------
 const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
@@ -105,7 +107,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
-    adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) } : null
+    adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
+    update: c.user.is_admin && updates.info().available ? updates.state.latest : null } : null
 }));
 route('POST', '/api/setup', pub, async (c) => {
   // Förhindra att någon utifrån hinner skapa adminkontot på en nyinstallerad server
@@ -932,6 +935,33 @@ route('PUT', '/api/settings', admin, async (c) => {
   audit('settings_changed', { ...ctx(c), detail: changed.join(', ') });
   send(c.res, 200, { ok: true });
 });
+
+// Notiser och uppdateringar
+auditHooks.push(notifier.onAudit);
+route('GET', '/api/notify', admin, (c) => send(c.res, 200, { kind: getSetting('notify_kind', process.env.NOTIFY_KIND || 'none'), url: getSetting('notify_url', process.env.NOTIFY_URL || ''),
+  user: getSetting('notify_user', process.env.NOTIFY_USER || ''), tokenSet: !!getSetting('notify_token', process.env.NOTIFY_TOKEN || ''),
+  events: getSetting('notify_events', 'security,cert,backup,update,dvr,request').split(',').filter(Boolean), kinds: notifier.KINDS, allEvents: notifier.EVENTS, recent: notifier.sent.slice(-10).reverse() }));
+route('PUT', '/api/notify', admin, async (c) => {
+  const b = await readJson(c.req);
+  if (b.kind != null) { if (!notifier.KINDS.includes(b.kind)) return fail(c.res, 400, 'Okänd typ'); setSetting('notify_kind', b.kind); }
+  if (typeof b.url === 'string') {
+    const u = b.url.trim();
+    if (u && !/^https?:\/\/[^\s]+$/i.test(u)) return fail(c.res, 400, 'Adressen ska börja med https://');
+    setSetting('notify_url', u);
+  }
+  if (typeof b.user === 'string') setSetting('notify_user', b.user.trim().slice(0, 200));
+  if (typeof b.token === 'string' && b.token) setSetting('notify_token', b.token.trim().slice(0, 500));
+  if (Array.isArray(b.events)) setSetting('notify_events', b.events.filter(e => notifier.EVENTS[e]).join(','));
+  audit('settings_changed', { ...ctx(c), detail: 'notiser' });
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/notify/test', admin, async (c) => {
+  try { await notifier.notify('test', 'Testnotis', 'Det fungerar! Så här ser larm från BraXhn TV ut.', { force: true }); send(c.res, 200, { ok: true }); }
+  catch (e) { fail(c.res, 502, 'Kunde inte skicka: ' + e.message); }
+});
+route('GET', '/api/updates', admin, (c) => send(c.res, 200, updates.info()));
+route('POST', '/api/updates/check', admin, async (c) => { await updates.check(); send(c.res, 200, updates.info()); });
+route('PUT', '/api/updates', admin, async (c) => { const b = await readJson(c.req); if (b.enabled != null) setSetting('update_check', b.enabled ? '1' : '0'); send(c.res, 200, updates.info()); });
 
 // Spelas nu, statistik och säkerhetskopior
 route('GET', '/api/activity', admin, (c) => send(c.res, 200, act.listActive()));

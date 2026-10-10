@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CONFIG, getSetting, setSetting } from './db.js';
+import { notify } from './notify.js';
 
 const TLS = path.join(CONFIG, 'tls');
 const DIRS = { prod: 'https://acme-v02.api.letsencrypt.org/directory', staging: 'https://acme-staging-v02.api.letsencrypt.org/directory' };
@@ -126,9 +127,12 @@ export async function obtain(onDone) {
     state.last = Date.now();
     setSetting('acme_last', String(Math.floor(Date.now() / 1000)));
     log(`Klart! Certifikatet gäller till ${new crypto.X509Certificate(cert.split(/(?=-----BEGIN CERTIFICATE-----)/)[0]).validTo}`);
+    notify('cert', 'Certifikat förnyat', `HTTPS-certifikatet för ${domain} är förnyat.`, { priority: 2 });
     onDone?.();
   } catch (e) {
     state.error = e.message; log('Fel: ' + e.message);
+    const ci = certInfo();
+    notify('cert', 'Certifikatet kunde inte hämtas', `${domain}: ${e.message}${ci ? ` – nuvarande certifikat gäller ${ci.daysLeft} dagar till.` : ''}`, { priority: 4, key: 'acmefail', minInterval: 86400 });
     throw e;
   } finally { state.running = false; challenges.clear(); }
 }
@@ -145,8 +149,10 @@ export function certInfo() {
 /** Förnya automatiskt när det är mindre än 30 dagar kvar (kollas två gånger per dygn). */
 export function scheduleRenewal(onDone) {
   const check = () => {
-    if (!getSetting('acme_domain', process.env.ACME_DOMAIN || '') || getSetting('acme_auto', '1') !== '1' || state.running) return;
     const ci = certInfo();
+    // Eget certifikat (utan ACME) som snart går ut
+    if (ci && ci.daysLeft < 14) notify('cert', 'Certifikatet går snart ut', `HTTPS-certifikatet går ut om ${ci.daysLeft} dagar (${ci.validTo}).`, { priority: 4, key: 'certexp', minInterval: 86400 });
+    if (!getSetting('acme_domain', process.env.ACME_DOMAIN || '') || getSetting('acme_auto', '1') !== '1' || state.running) return;
     if (!ci || ci.daysLeft < 30) obtain(onDone).catch(() => {});
   };
   setTimeout(check, 60e3).unref?.();

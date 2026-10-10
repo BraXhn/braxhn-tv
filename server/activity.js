@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
+import { notify } from './notify.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS plays(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, item_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -115,7 +116,7 @@ setInterval(() => {
   const d = new Date(), day = d.toISOString().slice(0, 10);
   if (d.getHours() === 3 && day !== lastBackupDay) {
     lastBackupDay = day;
-    try { console.log('[backup] skapade', backupNow()); } catch (e) { console.warn('[backup] misslyckades:', e.message); }
+    try { console.log('[backup] skapade', backupNow()); } catch (e) { console.warn('[backup] misslyckades:', e.message); notify('backup', 'Säkerhetskopieringen misslyckades', e.message, { priority: 4 }); }
   }
 }, 600e3).unref();
 

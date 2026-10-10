@@ -522,7 +522,7 @@ views.stats = async () => {
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
-  const [L, U, S, SC, AU, AC] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme')]);
+  const [L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
   <div class="panel"><h2>Säkerhetskontroll</h2>
@@ -571,6 +571,21 @@ views.admin = async () => {
     <div class="row"><div style="flex:1"><label>Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
     <div style="flex:1"><label>Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
     <div class="row" style="margin-top:14px"><button class="primary">Spara säkerhetsinställningar</button></div></form>
+  </div>
+  <div class="panel"><h2>Version ${esc(UP.current)} ${UP.available ? `<span class="warn-badge">${esc(UP.latest)} finns</span>` : UP.latest ? '<span class="ok-badge">Senaste</span>' : ''}</h2>
+    ${UP.available ? `<p>Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}` : ''}
+    <p class="muted small">${UP.checked ? 'Senast kontrollerat ' + new Date(UP.checked).toLocaleString('sv-SE') : 'Inte kontrollerat än'}${UP.error ? ' – fel: ' + esc(UP.error) : ''}. Servern hämtar bara versionsnumret från GitHub (${esc(UP.repo)}) och skickar ingenting om dig.</p>
+    <div class="row"><label class="switch" style="margin:0"><input type="checkbox" id="upen" ${UP.enabled ? 'checked' : ''}> Leta efter nya versioner</label><button class="ghost small" id="upchk">Kontrollera nu</button></div>
+  </div>
+  <div class="panel"><h2>Notiser till mobilen</h2>
+    <p class="muted small">Få larm vid t.ex. attacker, spärrade konton, certifikatproblem och misslyckade säkerhetskopior. Enklast är <b>ntfy</b>: installera ntfy-appen, hitta på ett långt hemligt ämnesnamn och ange <code>https://ntfy.sh/ditt-ämne</code> (eller din egen ntfy-server).</p>
+    <form id="noform"><div class="row"><div><label>Tjänst</label><select id="nok">${NO.kinds.map(k => `<option value="${k}" ${k === NO.kind ? 'selected' : ''}>${{ none: 'Av', ntfy: 'ntfy', pushover: 'Pushover', gotify: 'Gotify', discord: 'Discord', telegram: 'Telegram', webhook: 'Webhook (JSON)' }[k]}</option>`).join('')}</select></div>
+      <div style="flex:2;min-width:220px"><label>Adress <span class="muted small">(ntfy/Gotify/Discord/webhook)</span></label><input id="nou" value="${esc(NO.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne"></div></div>
+      <div class="row"><div style="flex:1;min-width:180px"><label>Token/nyckel <span class="muted small">(Pushover app-token, Telegram bot-token, Gotify app-token)</span></label><input id="not" type="password" placeholder="${NO.tokenSet ? '•••••• (sparad)' : ''}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label>Mottagare <span class="muted small">(Pushover user key / Telegram chat-id)</span></label><input id="nous" value="${esc(NO.user)}"></div></div>
+      <label>Skicka notis vid</label>${Object.entries(NO.allEvents).map(([k, v]) => `<label class="switch"><input type="checkbox" data-nev="${k}" ${NO.events.includes(k) ? 'checked' : ''}> ${esc(v)}</label>`).join('')}
+      <div class="row" style="margin-top:12px"><button class="primary">Spara</button><button type="button" class="ghost" id="notest">Skicka testnotis</button></div></form>
+    ${NO.recent.length ? `<details style="margin-top:10px"><summary class="muted small">Senaste notiser</summary><table>${NO.recent.map(n => `<tr><td class="muted small">${new Date(n.at).toLocaleString('sv-SE')}</td><td>${esc(n.title)}</td><td class="muted small">${esc(n.message)}</td></tr>`).join('')}</table></details>` : ''}
   </div>
   <div class="panel"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>
     <p class="muted small">Inbyggt gratis certifikat som förnyas automatiskt. Kräver ett domännamn som pekar på din publika IP (t.ex. via DuckDNS eller din DNS-leverantör) och att port <b>80</b> i routern vidarebefordras till BraXhn TV:s port 8420 under valideringen. HTTPS serveras på port ${AC.httpsPort} – vidarebefordra 443 dit. Använder du redan en omvänd proxy (Nginx Proxy Manager, SWAG) behövs inte detta.</p>
@@ -647,6 +662,12 @@ views.admin = async () => {
     if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
     try { await api('/settings', { method: 'PUT', body }); toast('Sparat'); route(); } catch (er) { toast(er.message); }
   };
+  $('#upen').onchange = async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast('Sparat'); };
+  $('#upchk').onclick = async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? 'Kunde inte kontrollera: ' + u.error : u.available ? `Version ${u.latest} finns` : 'Du har senaste versionen'); route(); };
+  const noSave = () => { const body = { kind: $('#nok').value, url: $('#nou').value, user: $('#nous').value, events: $$('[data-nev]').filter(x => x.checked).map(x => x.dataset.nev) };
+    if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
+  $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
+  $('#notest').onclick = async () => { try { await noSave(); await api('/notify/test', { method: 'POST' }); toast('Testnotis skickad'); } catch (er) { toast(er.message); } };
   const acSave = () => api('/acme', { method: 'PUT', body: { domain: $('#acd').value, email: $('#ace').value, staging: $('#acs').checked, auto: $('#aca').checked } });
   $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
   const acPoll = async () => {
@@ -1274,6 +1295,8 @@ async function loadLibs() {
   libs = await api('/libraries');
   $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/${l.type === 'music' ? 'music' : 'lib'}/${l.id}">${esc(l.name)}</a>`).join('');
 }
+function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function sessionStorageSet(k) { try { sessionStorage.setItem(k, '1'); } catch {} }
 async function boot() {
   const st = await api('/status');
   status = st; me = st.user;
@@ -1282,6 +1305,8 @@ async function boot() {
   $('#userbtn').textContent = (me.kid ? '🧸 ' : '') + me.name + ' ▾';
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
+  $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
+  if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();
   return true;
 }
