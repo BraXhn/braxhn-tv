@@ -196,7 +196,7 @@ views.item = async (id) => {
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
     <a class="btn" href="/api/stream/${it.id}/download" download>Ladda ner</a>
-    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
+    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   main.innerHTML = heroHtml(it, back + actions) + `<div class="tech">
     <span>Fil</span><b>${esc(it.file)}</b><span>Storlek</span><b>${fmtSize(it.size)}</b>
@@ -223,6 +223,7 @@ views.item = async (id) => {
   $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
   if (me.is_admin) {
     $('#refresh').onclick = () => refreshMeta(it);
+    if ($('#match')) $('#match').onclick = () => matchItem(it);
     $('#edit').onclick = () => editItem(it);
   }
 };
@@ -235,7 +236,7 @@ function showView(it) {
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
-    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
+    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
     `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
   const renderEps = () => {
@@ -260,7 +261,7 @@ function showView(it) {
   });
   if (nx) $('#playnext').onclick = () => play(nx.id, nx.position);
   $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
-  if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); }
+  if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
 }
 
 function bindWatchlist(it) {
@@ -321,6 +322,38 @@ async function refreshMeta(it) {
   try { await api(`/items/${it.id}/refresh`, { method: 'POST', body: {} }); toast('Klart'); route(); }
   catch (e) { toast(e.message); }
 }
+function matchItem(it) {
+  const d = document.createElement('dialog');
+  d.className = 'wide';
+  d.innerHTML = `<h2>Välj rätt ${it.kind === 'show' ? 'serie' : 'film'}</h2>
+    <form id="mf" class="row" style="align-items:flex-end"><div style="flex:1;min-width:180px"><label>Sök</label><input id="mq" value="${esc(it.title)}"></div>
+    <div><label>År</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">Sök</button></form>
+    <div id="mres" class="matchgrid"><div class="spin"></div></div>
+    <div class="row" style="margin-top:14px;justify-content:space-between"><span class="muted small" id="mlock"></span><span><button class="ghost" id="munlock" hidden>Lås upp (automatisk matchning)</button> <button class="ghost" id="mclose">Stäng</button></span></div>`;
+  document.body.append(d); d.showModal();
+  const close = () => { d.close(); d.remove(); };
+  $('#mclose', d).onclick = close;
+  const search = async () => {
+    $('#mres', d).innerHTML = '<div class="spin"></div>';
+    try {
+      const r = await api(`/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`);
+      $('#mlock', d).textContent = r.locked ? 'Matchningen är låst och ändras inte vid omskanning.' : '';
+      $('#munlock', d).hidden = !r.locked;
+      $('#mres', d).innerHTML = r.results.map(x => `<button class="mcard${x.id === r.current ? ' on' : ''}" data-tid="${x.id}">
+        ${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+        <div><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}${x.original && x.original !== x.title ? `<div class="muted small">${esc(x.original)}</div>` : ''}
+        <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || '<p class="muted">Inga träffar – prova en annan stavning eller originaltiteln.</p>';
+      $$('[data-tid]', d).forEach(b => b.onclick = async () => {
+        b.disabled = true;
+        try { await api(`/items/${it.id}/match`, { method: 'POST', body: { tmdbId: +b.dataset.tid } }); toast('Matchat'); close(); route(); }
+        catch (e) { toast(e.message); b.disabled = false; }
+      });
+    } catch (e) { $('#mres', d).innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+  $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
+  $('#munlock', d).onclick = async () => { await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true } }); toast('Upplåst – matchas automatiskt vid nästa skanning'); close(); };
+  search();
+}
 function editItem(it) {
   const d = document.createElement('dialog');
   d.innerHTML = `<form method="dialog"><h2>Redigera</h2>
@@ -328,15 +361,12 @@ function editItem(it) {
     <label>År</label><input id="ey" type="number" value="${it.year || ''}">
     <label>Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
     ${it.kind !== 'episode' ? `<label>Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}
-    ${it.kind !== 'episode' ? `<label>Matcha mot TMDB-id (valfritt, kräver TMDB-nyckel)</label><input id="ei" placeholder="t.ex. 603">` : ''}
     <div class="row" style="margin-top:18px;justify-content:flex-end"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></div></form>`;
   document.body.append(d); d.showModal();
   d.onclose = async () => {
     if (d.returnValue === 'ok') {
       try {
-        const tid = $('#ei', d)?.value.trim();
-        if (tid) await api(`/items/${it.id}/refresh`, { method: 'POST', body: { tmdbId: tid } });
-        else await api(`/items/${it.id}`, { method: 'PUT', body: { title: $('#et', d).value, year: $('#ey', d).value, overview: $('#eo', d).value, ...($('#eage', d) ? { age: $('#eage', d).value } : {}) } });
+        await api(`/items/${it.id}`, { method: 'PUT', body: { title: $('#et', d).value, year: $('#ey', d).value, overview: $('#eo', d).value, ...($('#eage', d) ? { age: $('#eage', d).value } : {}) } });
         toast('Sparat'); route();
       } catch (e) { toast(e.message); }
     }
@@ -530,13 +560,14 @@ views.admin = async () => {
   </div>
   <div class="panel"><h2>Bibliotek</h2>
     <table><tr><th>Namn</th><th>Typ</th><th>Mapp</th><th>Titlar</th><th></th></tr>
-    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik' }[l.type]}</td><td class="muted">${esc(l.path)}</td><td>${l.count}</td>
+    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted">${esc(l.path)}</td><td>${l.count}</td>
       <td class="r"><button class="ghost small" data-scan="${l.id}">Skanna</button> <button class="danger small" data-del="${l.id}">Ta bort</button></td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <h3 style="margin:22px 0 4px;font-size:15px">Lägg till bibliotek</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label>Namn</label><input id="ln" placeholder="Filmer" required></div>
-      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option></select></div></div>
+      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option></select></div></div>
+      <label class="switch" id="lanimew" hidden><input type="checkbox" id="lanime"> Anime (absolut avsnittsnumrering som "Serie - 1071" mappas till säsonger)</label>
       <label>Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
@@ -614,6 +645,11 @@ views.admin = async () => {
     <div class="row"><div style="flex:1"><label>Användarnamn (valfritt)</label><input id="osu" value="${esc(S.osUser || '')}" autocomplete="off"></div>
     <div style="flex:1"><label>Lösenord</label><input id="osp" type="password" autocomplete="new-password" placeholder="${S.osPassSet ? '•••••••• (sparat)' : ''}"></div></div>
     <label>Språk att söka (kommaseparerade, t.ex. sv,en)</label><input id="osl" value="${esc(S.subLangs)}">
+    <label class="switch"><input type="checkbox" id="osa" ${S.subAuto ? 'checked' : ''}> Hämta undertexter automatiskt vid skanning när de saknas</label>
+    <div class="row"><div style="flex:1"><label>Språk att hämta automatiskt</label><input id="osal" value="${esc(S.subAutoLangs)}"></div>
+    <div><label>Max per skanning</label><input id="osam" type="number" min="1" max="100" value="${S.subAutoMax}" style="width:110px"></div></div>
+    <label class="switch"><input type="checkbox" id="osah" ${S.subAutoHash ? 'checked' : ''}> Bara exakta träffar (filhash) – rekommenderas, annars kan tiderna vara fel</label>
+    <p class="muted small" style="margin:4px 0 0">Hämtade hittills: ${S.subAutoStats.downloaded}${S.subAutoStats.error ? ' · senaste fel: ' + esc(S.subAutoStats.error) : ''}. Gratiskonton får ett begränsat antal nedladdningar per dygn – resten hämtas vid nästa skanning.</p>
     <h3 style="margin:22px 0 0;font-size:15px">Utanför hemmet</h3>
     <div class="row"><div style="flex:1"><label>Maxkvalitet utanför hemmet (automatisk)</label><select id="rq">
       ${[['orig', 'Original (ingen gräns)'], ['1080', '1080p – 8 Mbit/s'], ['720', '720p – 4 Mbit/s'], ['480', '480p – 1,5 Mbit/s'], ['360', '360p – 0,8 Mbit/s']].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
@@ -635,9 +671,12 @@ views.admin = async () => {
   browse(S.mediaRoot);
   $('#addlib').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
+    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
     catch (er) { toast(er.message); }
   };
+  $('#lt').onchange = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; };
+  $('#lanimew').hidden = $('#lt').value !== 'show';
+  $$('[data-anime]').forEach(b => b.onchange = async () => { await api('/libraries/' + b.dataset.anime, { method: 'PUT', body: { anime: b.checked } }); toast('Sparat – serierna matchas om'); });
   $('#scanall').onclick = async () => { await api('/scan', { method: 'POST' }); toast('Skanning startad'); };
   $$('[data-scan]').forEach(b => b.onclick = async () => { await api(`/libraries/${b.dataset.scan}/scan`, { method: 'POST' }); toast('Skanning startad'); });
   $$('[data-del]').forEach(b => b.onclick = async () => {
@@ -688,7 +727,8 @@ views.admin = async () => {
   $('#settings').onsubmit = async (e) => {
     e.preventDefault();
     const body = { language: $('#lang').value, scanInterval: $('#si').value, osUser: $('#osu').value, subLangs: $('#osl').value,
-      remoteQuality: $('#rq').value, publicUrl: $('#pu').value };
+      remoteQuality: $('#rq').value, publicUrl: $('#pu').value,
+      subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked };
     if ($('#tk').value.trim()) body.tmdbKey = $('#tk').value.trim();
     if ($('#osk').value.trim()) body.osKey = $('#osk').value.trim();
     if ($('#osp').value) body.osPass = $('#osp').value;
@@ -839,7 +879,8 @@ async function play(id, start = 0, opts = {}) {
   const subPref = store.get('sublang', '');
   const textSubs = it.subtitles.filter(s => !s.bitmap);
   const defSub = textSubs.find(s => s.forced) || (subPref && textSubs.find(s => s.lang === subPref));
-  P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
+  const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
+  P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
     party: partyId, es: keepParty, applying: false };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
   el.innerHTML = `<video id="vid" controls autoplay playsinline x-webkit-airplay="allow"></video>
@@ -847,6 +888,8 @@ async function play(id, start = 0, opts = {}) {
       <select id="pq" title="Kvalitet"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select>
       ${audios.length > 1 ? `<select id="pa" title="Ljudspår">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select>` : ''}
       <select id="ps" title="Undertexter"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select>
+      ${textSubs.length > 1 ? `<select id="ps2" title="Andra undertext (visas överst)"><option value="">Ingen andra undertext</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select>` : ''}
+      ${it.chapters?.length ? '<button class="ghost small" id="pchap" title="Kapitel">☰ Kapitel</button>' : ''}
       <span id="poff" class="row" hidden><button class="ghost small" data-off="-0.5" title="Undertext tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Undertext senare">+</button></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
@@ -855,11 +898,11 @@ async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <button class="skip" id="pskip" hidden></button>
+    <button class="skip" id="pskip" hidden></button><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
-      <div class="track" id="track"><i id="tfill"></i></div></div>`;
+      <div class="track" id="track"><i id="tfill"></i>${(it.chapters || []).slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>`;
   el.hidden = false; document.body.style.overflow = 'hidden';
-  $('#pq').value = P.q; if ($('#pa')) $('#pa').value = P.audio; $('#ps').value = P.sub;
+  $('#pq').value = P.q; if ($('#pa')) $('#pa').value = P.audio; $('#ps').value = P.sub; if ($('#ps2')) $('#ps2').value = P.sub2;
   $('#pclose').onclick = () => closePlayer();
   $('#pq').onchange = (e) => { P.q = e.target.value; store.set('quality', P.q); reload(); };
   if ($('#pa')) $('#pa').onchange = (e) => { P.audio = e.target.value; reload(); };
@@ -868,6 +911,16 @@ async function play(id, start = 0, opts = {}) {
     P.sub = e.target.value; store.set('sublang', s?.lang || ''); P.offset = 0;
     // Bildundertexter bränns in av servern => ny ström. Textundertexter byts direkt.
     if (s?.bitmap || prev?.bitmap) reload(); else setSubs();
+  };
+  if ($('#ps2')) $('#ps2').onchange = (e) => { P.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === P.sub2)?.lang || ''); setSubs(); };
+  if ($('#pchap')) $('#pchap').onclick = (e) => {
+    e.stopPropagation();
+    const l = $('#chlist'), v = $('#vid');
+    if (!l.hidden) { l.hidden = true; return; }
+    const cur = it.chapters.filter(c => c.start <= v.currentTime).pop();
+    l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === cur ? 'on' : ''}"><span>${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
+    l.hidden = false;
+    $$('[data-ch]', l).forEach(b => b.onclick = () => { seekTo(it.chapters[+b.dataset.ch].start + 0.05); l.hidden = true; });
   };
   $$('[data-off]').forEach(b => b.onclick = () => { P.offset = Math.round((P.offset + +b.dataset.off) * 10) / 10; setSubs(); });
   if ($('#pcast')) $('#pcast').onclick = () => castItem(it, $('#vid').currentTime);
@@ -899,7 +952,8 @@ async function play(id, start = 0, opts = {}) {
   track.onmousemove = (e) => {
     if (!P) return;
     const t = tAt(e), r = track.getBoundingClientRect();
-    $('#ptime').textContent = fmtTime(t);
+    const ch = (P.it.chapters || []).filter(c => c.start <= t).pop();
+    $('#ptime').textContent = fmtTime(t) + (ch ? ' · ' + ch.title : '');
     const tp = P.tp, img = $('#pimg');
     if (tp) {
       const i = Math.min(tp.count - 1, Math.floor(t / tp.interval)), per = tp.cols * tp.rows, sheet = Math.floor(i / per) + tp.first, k = i % per;
@@ -981,8 +1035,22 @@ function reload() { const v = $('#vid'); load(v.currentTime || 0); }
 function setSubs() {
   const v = $('#vid'); if (!v || !P) return;
   $$('track', v).forEach(t => t.remove());
+  // Andra undertext (t.ex. för språkinlärning): laddas dold och ritas överst i bilden
+  const s2 = P.sub2 && P.sub2 !== P.sub ? P.pb?.subtitles.find(s => s.id === P.sub2) : null;
+  $('#sub2').innerHTML = '';
+  if (s2) {
+    const t2 = document.createElement('track');
+    Object.assign(t2, { kind: 'metadata', src: s2.url, label: 'sub2', srclang: s2.lang || 'und' });
+    v.append(t2);
+    const on = () => { t2.track.mode = 'hidden'; t2.track.oncuechange = () => {
+      const txt = [...(t2.track.activeCues || [])].map(c => c.text.replace(/<[^>]+>/g, '')).join('\n');
+      $('#sub2').innerHTML = txt ? `<span>${esc(txt)}</span>` : '';
+    }; };
+    t2.addEventListener('load', on); setTimeout(on, 50);
+  }
   const sub = P.pb?.subtitles.find(s => s.id === P.sub);
   $('#poff').hidden = !sub;
+  if (!sub && !s2) return;
   $('#poffv').textContent = (P.offset > 0 ? '+' : '') + P.offset.toFixed(1).replace('.', ',') + ' s';
   if (!sub) return;
   const t = document.createElement('track');

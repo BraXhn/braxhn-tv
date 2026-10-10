@@ -6,7 +6,7 @@ import { get, all, run, now, getSetting, setSetting, IMAGES } from './db.js';
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
 import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
-import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks } from './scanner.js';
+import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks, tmdbSearch, autoSubs, readChapters } from './scanner.js';
 import * as st from './stream.js';
 import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
@@ -24,6 +24,7 @@ hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
+hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -35,6 +36,7 @@ const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_update
   (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) AS ep_watched`;
 const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
 
+const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
 function shape(r) {
   const o = {
     id: r.id, kind: r.kind, title: r.title, year: r.year, library: r.library_id,
@@ -327,11 +329,11 @@ route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
   ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) END AS count FROM libraries l ORDER BY l.type='music', l.name`)));
 route('POST', '/api/libraries', admin, async (c) => {
-  const { name, type, path: p } = await readJson(c.req);
+  const { name, type, path: p, anime } = await readJson(c.req);
   const real = insideMedia(String(p || ''));
-  if (!name?.trim() || !['movie', 'show', 'music'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
+  if (!name?.trim() || !['movie', 'show', 'music', 'audiobook'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
   if (!real) return fail(c.res, 400, `Sökvägen måste finnas och ligga under ${MEDIA_ROOT}`);
-  const id = Number(run('INSERT INTO libraries(name,type,path) VALUES(?,?,?)', name.trim(), type, real).lastInsertRowid);
+  const id = Number(run('INSERT INTO libraries(name,type,path,anime) VALUES(?,?,?,?)', name.trim(), type, real, anime && type === 'show' ? 1 : 0).lastInsertRowid);
   audit('library_added', { ...ctx(c), detail: `${name.trim()} (${real})` });
   act.watchLibraries(scan);
   scan(id);
@@ -411,7 +413,7 @@ route('GET', '/api/items/:id', user, (c) => {
   } else {
     Object.assign(out, {
       file: path.basename(it.path), size: it.size, container: it.container, vcodec: it.vcodec, acodec: it.acodec,
-      width: it.width, height: it.height,
+      width: it.width, height: it.height, chapters: chaptersOf(it),
       audio: st.streamsOf(it).filter(s => s.type === 'audio'), subtitles: st.subtitlesOf(it).map(({ file, ...s }) => s)
     });
     if (it.kind === 'episode') {
@@ -456,6 +458,35 @@ route('POST', '/api/items/:id/refresh', admin, async (c) => {
     if (it.kind !== 'show' && it.path) { run('UPDATE items SET thumb=0 WHERE id=?', it.id); await extractThumb(it); }
     send(c.res, 200, { ok: true });
   } catch (e) { fail(c.res, 502, 'Metadata misslyckades: ' + e.message); }
+});
+// Manuell matchning ("fel film?") – sök i TMDB och välj rätt titel. Matchningen låses så att omskanning inte ändrar den.
+route('GET', '/api/items/:id/match', admin, async (c) => {
+  const it = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!it || it.kind === 'episode') return fail(c.res, 404, 'Finns inte');
+  if (!(getSetting('tmdb_key') || process.env.TMDB_API_KEY)) return fail(c.res, 400, 'Ange en TMDB-nyckel under Administration först');
+  const q = String(c.q.get('q') || it.title).slice(0, 200), year = parseInt(c.q.get('year')) || null;
+  try { send(c.res, 200, { current: it.tmdb_id, locked: !!it.match_locked, results: await tmdbSearch(it.kind, q, year) }); }
+  catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+route('POST', '/api/items/:id/match', admin, async (c) => {
+  const it = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!it || it.kind === 'episode') return fail(c.res, 404, 'Finns inte');
+  const { tmdbId, unlock } = await readJson(c.req);
+  if (unlock) { run('UPDATE items SET match_locked=0, meta_done=0 WHERE id=?', it.id); scan(it.library_id); return send(c.res, 200, { ok: true }); }
+  if (!(+tmdbId > 0)) return fail(c.res, 400, 'Välj en titel');
+  try {
+    if (!(await refreshItem(it, +tmdbId))) return fail(c.res, 404, 'Titeln hittades inte i TMDB');
+    run('UPDATE items SET match_locked=1 WHERE id=?', it.id);
+    audit('item_matched', { ...ctx(c), detail: `${it.title} → tmdb ${+tmdbId}` });
+    send(c.res, 200, oneItem(c.user.id, it.id));
+  } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+route('PUT', '/api/libraries/:id', admin, async (c) => {
+  const b = await readJson(c.req);
+  const l = get('SELECT * FROM libraries WHERE id=?', c.p.id); if (!l) return fail(c.res, 404, 'Finns inte');
+  if (typeof b.name === 'string' && b.name.trim()) run('UPDATE libraries SET name=? WHERE id=?', b.name.trim().slice(0, 60), l.id);
+  if (b.anime != null) { run('UPDATE libraries SET anime=? WHERE id=?', b.anime ? 1 : 0, l.id); run("UPDATE items SET meta_done=0 WHERE library_id=? AND kind='show' AND meta_done=1", l.id); scan(l.id); }
+  send(c.res, 200, { ok: true });
 });
 route('PUT', '/api/items/:id', admin, async (c) => {
   const { title, year, overview, age } = await readJson(c.req);
@@ -781,6 +812,8 @@ route('GET', '/api/items/:id/playback', user, (c) => {
     duration: it.duration, subtitles: subs, token, remote, quality: d.q,
     intro: it.intro_end ? { start: it.intro_start || 0, end: it.intro_end } : null, credits: it.credits_start || null,
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
+    chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
+    audioSelected: d.audio ?? null,
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
 });
@@ -880,6 +913,8 @@ route('GET', '/api/settings', admin, (c) => {
     hwaccel: st.hwMode, mediaRoot: MEDIA_ROOT, activeTranscodes: st.activeTranscodes().length, version: VERSION,
     osKeySet: !!(getSetting('os_key') || process.env.OPENSUBTITLES_API_KEY), osUser: getSetting('os_user'), osPassSet: !!getSetting('os_pass'),
     subLangs: getSetting('sub_langs', 'sv,en'),
+    subAuto: getSetting('sub_auto', '0') === '1', subAutoLangs: getSetting('sub_auto_langs', getSetting('sub_langs', 'sv,en')), subAutoHash: getSetting('sub_auto_hash', '1') === '1',
+    subAutoMax: +getSetting('sub_auto_max', '10'), subAutoStats: autoSubs,
     remoteQuality: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''),
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
     adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
@@ -926,6 +961,11 @@ route('PUT', '/api/settings', admin, async (c) => {
   }
   if (b.trickplay != null) setSetting('trickplay', b.trickplay ? '1' : '0');
   if (b.detectRecap != null) setSetting('detect_recap', b.detectRecap ? '1' : '0');
+  if (b.subAuto != null) setSetting('sub_auto', b.subAuto ? '1' : '0');
+  if (typeof b.subAutoLangs === 'string') setSetting('sub_auto_langs', b.subAutoLangs.replace(/[^a-z,-]/gi, '').slice(0, 40));
+  if (b.subAutoHash != null) setSetting('sub_auto_hash', b.subAutoHash ? '1' : '0');
+  if (b.subAutoMax != null) setSetting('sub_auto_max', Math.max(1, Math.min(100, parseInt(b.subAutoMax) || 10)));
+  if (b.subAutoRetry) run('UPDATE items SET sub_auto=0');
   if (b.allowUnrated != null) setSetting('allow_unrated', b.allowUnrated ? '1' : '0');
   if (b.backupEnabled != null) setSetting('backup_enabled', b.backupEnabled ? '1' : '0');
   if (b.backupKeep != null) setSetting('backup_keep', Math.max(1, Math.min(365, parseInt(b.backupKeep) || 14)));
@@ -1026,7 +1066,7 @@ route('GET', '/api/security-check', admin, (c) => {
 // ---------- statiska filer ----------
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK och reserv-CDN för hls.js/QR)
 const CSP = ["default-src 'self'", "script-src 'self' https://www.gstatic.com",
-  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "media-src 'self' blob:", "connect-src 'self'",
+  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https://image.tmdb.org", "media-src 'self' blob:", "connect-src 'self'",
   "font-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "frame-src https://www.gstatic.com"].join('; ');
 function serveStatic(req, res, pathname) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, '');

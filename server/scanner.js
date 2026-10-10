@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db, get, all, run, now, getSetting, IMAGES } from './db.js';
+import * as os from './opensubtitles.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -26,22 +27,27 @@ export function parseMovie(file) {
 
 export function parseEpisode(rel) {
   const parts = rel.split(path.sep);
-  const base = path.basename(rel, path.extname(rel));
-  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,3})/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
-  let season, episode, before = base;
+  // Fansub-grupper och hash-taggar i hakparenteser, t.ex. "[SubsPlease] Show - 12 (1080p) [ABCD1234]"
+  const base = path.basename(rel, path.extname(rel)).replace(/^\s*\[[^\]]*\]\s*/, '').replace(/\s*\[[0-9A-F]{8}\]\s*$/i, '');
+  const sf = parts.slice(0, -1).find(p => /^(season|säsong|s)[\s._-]*\d+$/i.test(p));
+  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,4})/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
+  let season, episode, before = base, absolute = false;
   if (m) { season = +m[1]; episode = +m[2]; before = base.slice(0, m.index); }
   else {
-    const e = base.match(/(?:^|[\s._-])(?:e|ep|episode|avsnitt|del)[\s._-]*(\d{1,3})/i);
-    if (!e) return null;
-    episode = +e[1]; before = base.slice(0, e.index);
-    const sf = parts.find(p => /^(season|säsong|s)[\s._-]*\d+$/i.test(p));
+    // Anime: "Show - 1071" eller "Show - 12v2" (absolut numrering om ingen säsongsmapp finns)
+    const a = base.match(/^(.*?)[\s._]+-[\s._]+(\d{1,4})(?:v\d)?(?=$|[\s._\[(])/);
+    const e = a ? null : base.match(/(?:^|[\s._-])(?:e|ep|episode|avsnitt|del)[\s._-]*(\d{1,4})/i);
+    if (!a && !e) return null;
+    if (a) { episode = +a[2]; before = a[1]; m = { index: a[1].length, 0: base.slice(a[1].length, a.index + a[0].length) }; }
+    else { episode = +e[1]; before = base.slice(0, e.index); }
     season = sf ? +sf.match(/\d+/)[0] : 1;
+    absolute = !sf;
   }
   const show = parts.length > 1 ? parts[0] : clean(before);
   if (!show) return null;
   const y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
   const after = m ? clean(base.slice(m.index + m[0].length).replace(JUNK, '')).replace(/^[-–\s]+/, '') : '';
-  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season, episode, epTitle: after || null };
+  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season, episode, epTitle: after || null, absolute };
 }
 
 async function probe(file) {
@@ -117,12 +123,13 @@ async function scanLibrary(lib) {
       if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
       const showId = showFor(lib, p.show, p.year);
       const title = p.epTitle || `Avsnitt ${p.episode}`;
-      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-        showId, p.season, p.episode, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-      else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, f,
+      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
+        showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+      else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
         st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
-      run(`UPDATE items SET added=? WHERE id=?`, now(), showId);
+      // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
+      run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
       run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
     }
   }
@@ -133,6 +140,8 @@ async function scanLibrary(lib) {
   }
   await metadata(lib);
   await thumbnails(lib);
+  await chapters(lib);
+  await autoSubtitles(lib);
   status.phase = 'Indexerar nyckelbilder (för remux)';
   const kf = all(`SELECT * FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
   status.done = 0; status.total = kf.length;
@@ -192,6 +201,15 @@ async function saveCollection(c) {
   return c.id;
 }
 
+/** Sök i TMDB för manuell matchning */
+export async function tmdbSearch(kind, query, year) {
+  const tv = kind === 'show';
+  const s = await tmdb(tv ? '/search/tv' : '/search/movie', { query, ...(year ? (tv ? { first_air_date_year: year } : { year }) : {}) });
+  return (s.results || []).slice(0, 12).map(r => ({ id: r.id, title: r.title || r.name, original: r.original_title || r.original_name,
+    year: parseInt(r.release_date || r.first_air_date) || null, overview: (r.overview || '').slice(0, 300),
+    poster: r.poster_path ? `https://image.tmdb.org/t/p/w154${r.poster_path}` : null }));
+}
+
 export async function refreshItem(item, tmdbId = null) {
   if (item.kind === 'movie') {
     let id = tmdbId;
@@ -228,6 +246,7 @@ export async function refreshItem(item, tmdbId = null) {
     run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,
       d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
+    remapAbsolute(item, d.seasons || []);
     const seasons = all(`SELECT DISTINCT season FROM items WHERE parent_id=?`, item.id).map(r => r.season);
     for (const sn of seasons) {
       let sd; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch { continue; }
@@ -244,13 +263,90 @@ export async function refreshItem(item, tmdbId = null) {
   return false;
 }
 
+/** Anime: absolut avsnittsnummer → säsong/avsnitt enligt TMDB:s säsongsindelning */
+export function mapAbsolute(n, seasons) {
+  let cum = 0;
+  for (const s of seasons.filter(s => s.season_number > 0).sort((a, b) => a.season_number - b.season_number)) {
+    if (n <= cum + s.episode_count) return { season: s.season_number, episode: n - cum };
+    cum += s.episode_count;
+  }
+  return null;
+}
+function remapAbsolute(show, seasons) {
+  const lib = get('SELECT anime FROM libraries WHERE id=?', show.library_id);
+  const s1 = seasons.find(s => s.season_number === 1)?.episode_count || 0;
+  const eps = all('SELECT id, season, episode, abs_episode FROM items WHERE parent_id=?', show.id);
+  for (const e of eps) {
+    // Absolut numrerade filer, eller i anime-bibliotek "S01E30" när säsong 1 bara har 12 avsnitt
+    const abs = e.abs_episode ?? (lib?.anime && e.season === 1 && e.episode > s1 ? e.episode : null);
+    if (abs == null) continue;
+    const m = mapAbsolute(abs, seasons);
+    if (m && (m.season !== e.season || m.episode !== e.episode)) run('UPDATE items SET season=?, episode=?, abs_episode=? WHERE id=?', m.season, m.episode, abs, e.id);
+  }
+}
+
+// ---------- kapitel ----------
+async function chapters(lib) {
+  const todo = all(`SELECT id,path FROM items WHERE library_id=? AND kind IN('movie','episode') AND chapters IS NULL AND path IS NOT NULL`, lib.id);
+  if (!todo.length) return;
+  status.phase = 'Läser kapitel'; status.done = 0; status.total = todo.length;
+  for (const it of todo) { status.done++; run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
+}
+export async function readChapters(file) {
+  try {
+    const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_chapters', file], { timeout: 30000, maxBuffer: 4 << 20 });
+    const ch = (JSON.parse(stdout).chapters || []).map((c, i) => ({ start: +(+c.start_time).toFixed(3), end: +(+c.end_time).toFixed(3), title: c.tags?.title || `Kapitel ${i + 1}` }));
+    // Ignorera "kapitel" som bara är ett enda block över hela filen
+    return ch.length > 1 ? ch.slice(0, 200) : [];
+  } catch { return []; }
+}
+
+// ---------- automatiska undertexter (OpenSubtitles) ----------
+const L3 = { sv: ['swe', 'sv'], en: ['eng', 'en'], no: ['nor', 'nob', 'no', 'nb'], da: ['dan', 'da'], fi: ['fin', 'fi'], de: ['ger', 'deu', 'de'], fr: ['fre', 'fra', 'fr'],
+  es: ['spa', 'es'], it: ['ita', 'it'], nl: ['dut', 'nld', 'nl'], pl: ['pol', 'pl'], pt: ['por', 'pt'], ja: ['jpn', 'ja'], ko: ['kor', 'ko'], zh: ['chi', 'zho', 'zh'], ar: ['ara', 'ar'] };
+export const langMatches = (code, want) => !!code && (L3[want] || [want]).includes(String(code).toLowerCase().split(/[-_]/)[0]);
+export const autoSubs = { downloaded: 0, last: null, error: null };
+async function autoSubtitles(lib) {
+  if (getSetting('sub_auto', '0') !== '1' || !os.enabled() || !hooks.subtitlesOf) return;
+  const langs = getSetting('sub_auto_langs', getSetting('sub_langs', 'sv,en')).split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  const onlyHash = getSetting('sub_auto_hash', '1') === '1';
+  const maxRun = Math.max(1, +getSetting('sub_auto_max', '10'));
+  // Försök igen efter en vecka för titlar där inget hittades
+  const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','episode') AND path IS NOT NULL AND sub_auto < ? ORDER BY added DESC LIMIT 200`, lib.id, now() - 7 * 86400);
+  if (!todo.length) return;
+  status.phase = 'Hämtar undertexter'; status.done = 0; status.total = todo.length;
+  let n = 0;
+  for (const it of todo) {
+    status.done++;
+    if (n >= maxRun) break;
+    const have = hooks.subtitlesOf(it).filter(s => !s.forced && !s.bitmap);
+    const missing = langs.filter(l => !have.some(s => langMatches(s.lang, l)));
+    if (missing.length) {
+      try {
+        const res = await os.search(it, missing);
+        for (const l of missing) {
+          const best = res.find(r => langMatches(r.lang, l) && (r.hashMatch || !onlyHash) && !r.hi) || res.find(r => langMatches(r.lang, l) && (r.hashMatch || !onlyHash));
+          if (best && n < maxRun) { await os.download(it, best.fileId, l); n++; autoSubs.downloaded++; console.log(`[subs] ${it.title}: ${l}${best.hashMatch ? ' (exakt)' : ''}`); }
+        }
+      } catch (e) {
+        autoSubs.error = e.message;
+        console.warn('[subs]', e.message);
+        if (/quota|limit|406|429|allowed/i.test(e.message)) break; // dygnskvoten slut – fortsätt nästa skanning
+        continue;
+      }
+    }
+    run('UPDATE items SET sub_auto=? WHERE id=?', now(), it.id);
+  }
+  autoSubs.last = now();
+}
+
 async function metadata(lib) {
   if (!tmdbKey()) return;
   const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0`, lib.id);
   status.phase = 'Hämtar metadata'; status.done = 0; status.total = todo.length;
   for (const it of todo) {
     status.done++;
-    try { if (!(await refreshItem(it))) run('UPDATE items SET meta_done=2 WHERE id=?', it.id); }
+    try { if (!(await refreshItem(it, it.match_locked ? it.tmdb_id : null))) run('UPDATE items SET meta_done=2 WHERE id=?', it.id); }
     catch (e) { console.warn('[meta]', it.title, e.message); }
   }
 }

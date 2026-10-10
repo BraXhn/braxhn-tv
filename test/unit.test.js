@@ -93,3 +93,18 @@ test('tolkning av avsnittsnamn', () => {
   e = scanner.parseEpisode(['Show', '2x07.mkv'].join(sep));
   assert.equal(e.season, 2); assert.equal(e.episode, 7);
 });
+
+test('anime: absolut numrering och mappning till säsonger', () => {
+  const sep = path.sep;
+  let e = scanner.parseEpisode('[SubsPlease] Jujutsu Kaisen - 25 (1080p) [A1B2C3D4].mkv');
+  assert.equal(e.show, 'Jujutsu Kaisen'); assert.equal(e.episode, 25); assert.equal(e.season, 1); assert.equal(e.absolute, true);
+  e = scanner.parseEpisode(['One Piece', 'One Piece - 1071v2.mkv'].join(sep));
+  assert.equal(e.show, 'One Piece'); assert.equal(e.episode, 1071); assert.equal(e.absolute, true);
+  e = scanner.parseEpisode(['Frieren', 'Season 2', 'Frieren - 05.mkv'].join(sep));
+  assert.equal(e.season, 2); assert.equal(e.episode, 5); assert.equal(e.absolute, false);
+  const seasons = [{ season_number: 0, episode_count: 5 }, { season_number: 1, episode_count: 24 }, { season_number: 2, episode_count: 23 }];
+  assert.deepEqual(scanner.mapAbsolute(25, seasons), { season: 2, episode: 1 });
+  assert.deepEqual(scanner.mapAbsolute(24, seasons), { season: 1, episode: 24 });
+  assert.equal(scanner.mapAbsolute(99, seasons), null);
+  assert.ok(scanner.langMatches('swe', 'sv') && scanner.langMatches('en', 'en') && !scanner.langMatches('eng', 'sv'));
+});

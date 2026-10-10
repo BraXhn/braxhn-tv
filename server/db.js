@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS track_plays(user_id INTEGER NOT NULL REFERENCES users
 CREATE INDEX IF NOT EXISTS tp_user ON track_plays(user_id, ts);
 CREATE TABLE IF NOT EXISTS favorites(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, PRIMARY KEY(user_id, track_id));`);
+// v0.5: ljudböcker som bibliotekstyp + anime-flagga
+if (!/'audiobook'/.test(db.prepare("SELECT sql FROM sqlite_master WHERE name='libraries'").get().sql)) {
+  db.exec(`PRAGMA foreign_keys=OFF; BEGIN;
+    CREATE TABLE libraries_new(id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN('movie','show','music','audiobook')), path TEXT NOT NULL,
+      anime INTEGER NOT NULL DEFAULT 0);
+    INSERT INTO libraries_new(id,name,type,path) SELECT id,name,type,path FROM libraries; DROP TABLE libraries; ALTER TABLE libraries_new RENAME TO libraries;
+    COMMIT; PRAGMA foreign_keys=ON;`);
+}
+addCol('items', 'match_locked', 'INTEGER NOT NULL DEFAULT 0');
+addCol('items', 'abs_episode', 'INTEGER');
+addCol('items', 'sub_auto', 'INTEGER NOT NULL DEFAULT 0');
+addCol('items', 'chapters', 'TEXT');
 const ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver >= 3 && ver < 4) {
   // v0.4: hämta om metadata för genrer, åldersgräns och samlingar
