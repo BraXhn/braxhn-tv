@@ -267,3 +267,26 @@ dialog.wide{width:min(760px,94vw)}
 .card .prog{height:3px;background:rgba(255,255,255,.15);border-radius:2px;margin-top:6px;overflow:hidden}
 .card .prog i{display:block;height:100%;background:var(--accent)}
 #mspeed{width:auto;padding:4px 6px}
+.chgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.chcard{display:flex;gap:12px;align-items:center;text-align:left;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;color:inherit;cursor:pointer}
+.chcard:hover,.chcard:focus-visible{border-color:var(--accent)}
+.chcard .chinfo{flex:1;min-width:0}.chcard .chinfo b,.chcard .chinfo div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chcard .prog{height:3px;background:rgba(255,255,255,.15);border-radius:2px;margin:4px 0;overflow:hidden}.chcard .prog i{display:block;height:100%;background:var(--accent)}
+.chlogo{position:relative;flex:0 0 64px;height:44px;border-radius:8px;background:#fff1;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;overflow:hidden}
+.chlogo img{position:absolute;inset:4px;width:calc(100% - 8px);height:calc(100% - 8px);object-fit:contain}
+.chlogo img+i{visibility:hidden}.chlogo i{font-style:normal}
+.chlogo.small{flex-basis:44px;height:30px;font-size:11px}
+.guide{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg2)}
+.guide .gch{flex:0 0 170px;border-right:1px solid var(--line)}
+.guide .gtime-pad,.guide .gtimes{height:30px;border-bottom:1px solid var(--line)}
+.guide .grow-h,.guide .grow{height:52px;border-bottom:1px solid var(--line)}
+.guide .grow-h{display:flex;align-items:center;gap:8px;padding:0 8px;font-size:13px;white-space:nowrap;overflow:hidden}
+.guide .gscroll{flex:1;overflow-x:auto}
+.guide .gtimes{position:relative}.guide .gtimes span{position:absolute;top:6px;font-size:12px;color:var(--muted);padding-left:4px;border-left:1px solid var(--line)}
+.guide .grow{position:relative}
+.guide .gp{position:absolute;top:4px;bottom:4px;background:#ffffff0d;border:1px solid transparent;border-radius:6px;color:inherit;text-align:left;padding:4px 6px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;justify-content:center}
+.guide .gp b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.guide .gp span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.guide .gp.on{background:color-mix(in srgb,var(--accent) 18%,transparent)}.guide .gp:hover,.guide .gp:focus-visible{border-color:var(--accent)}
+.guide .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--err,#ff5d6c);z-index:2;pointer-events:none}
+.reclist{display:grid;gap:8px}.rec{display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;flex-wrap:wrap}
+@media (max-width:640px){.guide .gch{flex-basis:110px}.guide .grow-h span{display:none}}

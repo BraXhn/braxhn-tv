@@ -549,3 +549,17 @@ export function stopUserSessions(itemId, userId) {
 }
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
 export const hwMode = HW;
+
+/** Kodare för live-TV och efterbearbetning av inspelningar (avflätning + valfri skalning, hårdvara om möjligt) */
+export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = null } = {}) {
+  const sw = [];
+  if (deinterlace) sw.push('yadif=mode=0:deint=interlaced');
+  if (maxHeight) sw.push(`scale=-2:'min(${maxHeight},ih)'`);
+  const rate = (fallback) => bitrate ? ['-b:v', bitrate + 'k', '-maxrate', bitrate + 'k', '-bufsize', bitrate * 2 + 'k'] : fallback;
+  let post, enc;
+  if (HW === 'vaapi') { post = ['format=nv12', 'hwupload']; enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '23'])]; }
+  else if (HW === 'nvenc') { post = ['format=yuv420p']; enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', ...rate(['-cq', '23'])]; }
+  else if (HW === 'qsv') { post = ['format=nv12']; enc = ['-c:v', 'h264_qsv', ...rate(['-global_quality', '23'])]; }
+  else { post = ['format=yuv420p']; enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || 'veryfast', ...rate(['-crf', '22']), '-profile:v', 'high']; }
+  return { pre: HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [], vf: ['-vf', [...sw, ...post].join(',')], enc };
+}

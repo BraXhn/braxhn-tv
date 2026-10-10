@@ -602,6 +602,130 @@ views.podcast = async (id) => {
   $('#pdel').onclick = async () => { if (confirm('Avsluta prenumerationen och ta bort nedladdade avsnitt?')) { try { await api('/podcasts/' + id, { method: 'DELETE' }); location.hash = '#/podcasts'; } catch (e) { toast(e.message); } } };
 };
 
+// ---------- live-TV ----------
+const hhmm = (t) => new Date(t * 1000).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+const dayName = (t) => { const d = new Date(t * 1000), n = new Date(); const diff = Math.round((new Date(d.toDateString()) - new Date(n.toDateString())) / 864e5);
+  return diff === 0 ? 'Idag' : diff === 1 ? 'Imorgon' : d.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' }); };
+const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
+let LP = null; // live-spelare
+async function playLive(ch) {
+  if (P) closePlayer(false);
+  if (M.audio && !M.audio.paused) M.audio.pause();
+  const el = $('#player');
+  el.innerHTML = `<video id="lvid" controls autoplay playsinline></video>
+    <div class="pbar"><button class="ghost small" id="lclose">← Tillbaka</button><span class="title">${esc(ch.number ? ch.number + ' · ' : '')}${esc(ch.name)}</span>
+      <span class="muted small" id="lnow">${ch.now ? esc(ch.now.title) + ' · ' + hhmm(ch.now.start) + '–' + hhmm(ch.now.stop) : ''}</span>
+      <span class="muted small" id="lstat">Startar kanalen…</span>
+      ${ch.now ? `<button class="ghost small" id="lrec">⏺ Spela in</button>` : ''}</div>`;
+  el.hidden = false; document.body.style.overflow = 'hidden';
+  const v = $('#lvid');
+  LP = { ch, hls: null };
+  const close = () => { if (LP?.hls) LP.hls.destroy(); LP = null; v.pause(); v.removeAttribute('src'); v.load(); el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; if (location.hash.startsWith('#/watch')) history.back(); };
+  $('#lclose').onclick = close;
+  if ($('#lrec')) $('#lrec').onclick = async () => { try { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id } }); toast('Spelar in ' + ch.now.title); $('#lrec').disabled = true; } catch (e) { toast(e.message); } };
+  try {
+    const r = await api(`/live/${ch.id}/play`, { method: 'POST' });
+    if (v.canPlayType('application/vnd.apple.mpegurl') && !window.MediaSource) { v.src = r.url; }
+    else {
+      const Hls = await loadHls();
+      LP.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
+      LP.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { if (d.response?.code === 409 || d.response?.code === 502) { $('#lstat').textContent = d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'; LP.hls.destroy(); } else if (d.type === 'networkError') setTimeout(() => LP?.hls?.startLoad(), 1500); else if (d.type === 'mediaError') LP.hls.recoverMediaError(); } });
+      LP.hls.loadSource(r.url); LP.hls.attachMedia(v);
+    }
+    v.addEventListener('playing', () => { $('#lstat').textContent = 'Live'; }, { once: true });
+    v.play().catch(() => {});
+  } catch (e) { $('#lstat').textContent = e.message; }
+}
+function loadLogos() {}
+views.live = async () => {
+  const D = await api('/live/channels');
+  main.innerHTML = `<div class="toolbar"><h1>Live-TV</h1><a class="btn ghost" href="#/guide">📅 TV-guide</a><a class="btn ghost" href="#/dvr">⏺ Inspelningar</a></div>
+    ${D.channels.length ? `<div class="chgrid">${D.channels.map((c, i) => `<button class="chcard" data-ch="${i}">${chLogo(c)}<div class="chinfo"><b>${esc(c.name)}</b>
+      ${c.now ? `<div class="small">${esc(c.now.title)}</div><div class="prog"><i style="width:${Math.min(100, (Date.now() / 1000 - c.now.start) / (c.now.stop - c.now.start) * 100)}%"></i></div>` : '<div class="small muted">Ingen guide</div>'}
+      ${c.next ? `<div class="small muted">${hhmm(c.next.start)} ${esc(c.next.title)}</div>` : ''}</div></button>`).join('')}</div>`
+    : `<div class="empty"><p>Inga kanaler ännu.${me.adminHere ? ' Lägg till en HDHomeRun eller en IPTV-lista under Administration → Live-TV.' : ''}</p></div>`}`;
+  $$('[data-ch]').forEach(b => b.onclick = () => playLive(D.channels[+b.dataset.ch]));
+  loadLogos();
+};
+views.guide = async (dayOffset) => {
+  const start = Math.floor(Date.now() / 1000 / 1800) * 1800 - 1800 + (+dayOffset || 0) * 86400;
+  const G = await api(`/live/guide?from=${start}&hours=6`);
+  const PX = 4; // px per minut
+  const W = (G.to - G.from) / 60 * PX;
+  const x = (t) => Math.max(0, (t - G.from) / 60 * PX);
+  const nowX = x(Date.now() / 1000);
+  const ticks = []; for (let t = G.from; t < G.to; t += 1800) ticks.push(t);
+  main.innerHTML = `<div class="toolbar"><h1>TV-guide</h1><span class="muted">${dayName(G.from)}</span>
+    <div class="row" style="margin-left:auto"><a class="btn ghost small" href="#/guide/${(+dayOffset || 0) - 0.25}">← Tidigare</a><a class="btn ghost small" href="#/guide">Nu</a><a class="btn ghost small" href="#/guide/${(+dayOffset || 0) + 0.25}">Senare →</a><a class="btn ghost small" href="#/dvr">⏺ Inspelningar</a></div></div>
+    <form id="gsearch" class="row" style="margin-bottom:12px"><input id="gq" placeholder="Sök program…" style="max-width:320px"><button class="ghost">Sök</button></form><div id="gres"></div>
+    <div class="guide"><div class="gch">${'<div class="gtime-pad"></div>' + G.channels.map(c => `<div class="grow-h">${chLogo(c, 'small')}<span>${esc(c.name)}</span></div>`).join('')}</div>
+      <div class="gscroll"><div style="width:${W}px;position:relative">
+        <div class="gtimes">${ticks.map(t => `<span style="left:${x(t)}px">${hhmm(t)}</span>`).join('')}</div>
+        ${nowX > 0 && nowX < W ? `<div class="gnow" style="left:${nowX}px"></div>` : ''}
+        ${G.channels.map(c => `<div class="grow">${c.programs.map(p => { const l = x(p.start), w = Math.max(2, x(p.stop) - l - 2);
+          return `<button class="gp${p.start <= Date.now() / 1000 && p.stop > Date.now() / 1000 ? ' on' : ''}" style="left:${l}px;width:${w}px" data-pid="${p.id}" title="${esc(p.title)}"><b>${esc(p.title)}</b><span>${hhmm(p.start)}${p.subtitle ? ' · ' + esc(p.subtitle) : ''}</span></button>`; }).join('')}</div>`).join('')}
+      </div></div></div>
+    ${G.guide.error ? `<p class="err small">Guiden kunde inte uppdateras: ${esc(G.guide.error)}</p>` : ''}`;
+  $$('[data-pid]').forEach(b => b.onclick = () => programDialog(+b.dataset.pid));
+  if (nowX > 200) $('.gscroll').scrollLeft = nowX - 200;
+  $('#gsearch').onsubmit = async (e) => {
+    e.preventDefault(); const q = $('#gq').value.trim(); if (!q) return;
+    const r = await api('/live/search?q=' + encodeURIComponent(q));
+    $('#gres').innerHTML = `<table>${r.map(p => `<tr data-pid2="${p.id}" style="cursor:pointer"><td>${dayName(p.start)} ${hhmm(p.start)}</td><td><b>${esc(p.title)}</b>${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</td><td class="muted">${esc(p.channel)}</td></tr>`).join('') || '<tr><td class="muted">Inga träffar</td></tr>'}</table>`;
+    $$('[data-pid2]').forEach(r2 => r2.onclick = () => programDialog(+r2.dataset.pid2));
+  };
+  loadLogos();
+};
+async function programDialog(id) {
+  const p = await api('/live/programs/' + id);
+  const nowT = Date.now() / 1000, onNow = p.start <= nowT && p.stop > nowT;
+  const d = document.createElement('dialog');
+  d.innerHTML = `<h2>${esc(p.title)}</h2>
+    <p class="muted">${esc(p.channel_name)} · ${dayName(p.start)} ${hhmm(p.start)}–${hhmm(p.stop)}${p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}${p.is_new ? ' · Nytt' : ''}${p.category ? ' · ' + esc(p.category) : ''}</p>
+    ${p.subtitle ? `<p><b>${esc(p.subtitle)}</b></p>` : ''}${p.description ? `<p>${esc(p.description)}</p>` : ''}
+    ${p.recording ? `<p class="ok-badge" style="display:inline-block">${{ scheduled: 'Inspelning bokad', recording: 'Spelas in nu', processing: 'Bearbetas', done: 'Inspelad' }[p.recording.status]}</p>` : ''}
+    ${p.airings.length ? `<details><summary class="muted small">Fler sändningar (${p.airings.length})</summary><table>${p.airings.map(a => `<tr><td>${dayName(a.start)} ${hhmm(a.start)}</td><td class="muted">${esc(a.channel)}</td></tr>`).join('')}</table></details>` : ''}
+    <div class="row" style="margin-top:16px;justify-content:flex-end;flex-wrap:wrap">
+      ${onNow ? '<button class="primary" id="pdw">▶ Titta</button>' : ''}
+      ${p.recording ? (p.recording.status === 'scheduled' ? '<button class="ghost" id="pdc">Avboka</button>' : '') : '<button class="ghost" id="pdr">⏺ Spela in</button>'}
+      ${p.rule ? '<span class="muted small">Serieinspelning aktiv</span>' : '<button class="ghost" id="pds">⏺⏺ Spela in serien</button>'}
+      <button class="ghost" id="pdx">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  const close = () => { d.close(); d.remove(); };
+  $('#pdx', d).onclick = close;
+  if ($('#pdw', d)) $('#pdw', d).onclick = async () => { close(); const D = await api('/live/channels'); const ch = D.channels.find(c => c.id === p.channel_id); if (ch) playLive(ch); };
+  if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { await api('/dvr/program', { method: 'POST', body: { programId: id } }); toast('Inspelning bokad'); close(); } catch (e) { toast(e.message); } };
+  if ($('#pdc', d)) $('#pdc', d).onclick = async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); close(); };
+  if ($('#pds', d)) $('#pds', d).onclick = async () => {
+    const any = confirm(`Spela in "${p.title}" på alla kanaler? (Avbryt = bara ${p.channel_name})`);
+    try { await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: id, series: true, newOnly: true } }); toast('Serieinspelning skapad – bara nya avsnitt spelas in'); close(); } catch (e) { toast(e.message); }
+  };
+}
+views.dvr = async () => {
+  const D = await api('/dvr');
+  const st = { scheduled: 'Bokad', recording: '⏺ Spelar in', processing: 'Bearbetas…', done: '', failed: 'Misslyckades' };
+  main.innerHTML = `<div class="toolbar"><h1>Inspelningar</h1><a class="btn ghost" href="#/guide">📅 TV-guide</a><a class="btn ghost" href="#/live">Live-TV</a></div>
+    ${D.done.filter(r => r.status === 'done').length ? `<section class="section"><h2>Inspelat</h2><div class="reclist">${D.done.filter(r => r.status === 'done').map(r => `<div class="rec">
+      <div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${dayName(r.start)} ${hhmm(r.start)} · ${fmtDur(r.stop - r.start)}${r.size ? ' · ' + (r.size / 1e9).toFixed(1) + ' GB' : ''}${r.error ? ' · ' + esc(r.error) : ''}</div></div>
+      <div class="row"><button class="primary small" data-rplay="${r.id}">▶ Spela</button><button class="ghost small" data-rdel="${r.id}">Ta bort</button></div></div>`).join('')}</div></section>` : ''}
+    <section class="section"><h2>Kommande</h2>${D.scheduled.length ? `<table>${D.scheduled.map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}–${hhmm(r.stop)}</td><td><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</td><td class="muted">${esc(r.channel_name || '')}</td>
+      <td>${st[r.status]}</td><td class="r">${r.status === 'recording' ? `<button class="ghost small" data-rstop="${r.id}">Stoppa</button>` : `<button class="ghost small" data-rdel="${r.id}">Avboka</button>`}</td></tr>`).join('')}</table>` : '<p class="muted">Inga bokade inspelningar. Välj ett program i TV-guiden.</p>'}</section>
+    ${D.rules.length ? `<section class="section"><h2>Serieinspelningar</h2><table>${D.rules.map(r => `<tr><td><b>${esc(r.title)}</b></td><td class="muted">${esc(r.channel_name || 'Alla kanaler')}${r.new_only ? ' · bara nya' : ''}${r.keep ? ` · sparar ${r.keep}` : ''}</td><td>${r.upcoming} kommande</td><td class="r"><button class="ghost small" data-rule="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
+    ${D.done.filter(r => r.status !== 'done').length ? `<section class="section"><h2>Pågående och misslyckade</h2><table>${D.done.filter(r => r.status !== 'done').map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}</td><td>${esc(r.title)}</td><td>${st[r.status]}</td><td class="muted small">${esc(r.error || '')}</td><td class="r"><button class="ghost small" data-rdel="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
+    ${D.dir ? `<p class="muted small">Inspelningar sparas i <code>${esc(D.dir)}</code>.</p>` : ''}`;
+  $$('[data-rdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort?')) { try { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); } catch (e) { toast(e.message); } } });
+  $$('[data-rstop]').forEach(b => b.onclick = async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); setTimeout(route, 1500); });
+  $$('[data-rule]').forEach(b => b.onclick = async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } });
+  $$('[data-rplay]').forEach(b => b.onclick = async () => {
+    const r = D.done.find(x => x.id === +b.dataset.rplay);
+    const u = await api(`/dvr/recordings/${r.id}/play`, { method: 'POST' });
+    const el = $('#player');
+    el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span></div>`;
+    el.hidden = false; document.body.style.overflow = 'hidden';
+    $('#rclose').onclick = () => { const v = $('#rvid'); v.pause(); v.removeAttribute('src'); v.load(); el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; };
+  });
+};
+
 const REQ_STATUS = { pending: ['Väntar på godkännande', 'warn-badge'], approved: ['Godkänd', 'ok-badge'], sent: ['Laddas ner', 'ok-badge'],
   available: ['Finns att titta på', 'ok-badge'], declined: ['Nekad', 'warn-badge'], failed: ['Misslyckades', 'warn-badge'] };
 views.requests = async () => {
@@ -739,6 +863,7 @@ views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
   const IN = await api('/integrations');
+  const LT = await api('/live/tuners');
   const [L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
@@ -794,6 +919,23 @@ views.admin = async () => {
     ${UP.available ? `<p>Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}` : ''}
     <p class="muted small">${UP.checked ? 'Senast kontrollerat ' + new Date(UP.checked).toLocaleString('sv-SE') : 'Inte kontrollerat än'}${UP.error ? ' – fel: ' + esc(UP.error) : ''}. Servern hämtar bara versionsnumret från GitHub (${esc(UP.repo)}) och skickar ingenting om dig.</p>
     <div class="row"><label class="switch" style="margin:0"><input type="checkbox" id="upen" ${UP.enabled ? 'checked' : ''}> Leta efter nya versioner</label><button class="ghost small" id="upchk">Kontrollera nu</button></div>
+  </div>
+  <div class="panel"><h2>Live-TV och inspelning</h2>
+    <p class="muted small"><b>HDHomeRun</b> (antenn/kabel) eller <b>IPTV</b> med en M3U-lista. TV-guide från en XMLTV-adress (t.ex. från din IPTV-leverantör eller <i>xmltv.se</i>) – HDHomeRun har egen guide om ingen anges. Inspelningar sparas i <code>${esc(LT.settings.dvrDir)}</code> – lägg till sökvägen <code>/recordings</code> i Unraid-mallen.</p>
+    ${LT.tuners.length ? `<table>${LT.tuners.map(t => `<tr><td><b>${esc(t.name)}</b><div class="muted small">${t.kind === 'hdhr' ? 'HDHomeRun' : 'IPTV'} · ${esc(t.url)}${t.epg_url ? ' · guide: ' + esc(t.epg_url) : ''}</div>${t.error ? `<div class="err small">${esc(t.error)}</div>` : ''}</td>
+      <td>${t.channels} kanaler · ${LT.inUse[t.id] || 0}/${t.tuner_count} tuners används</td>
+      <td class="r"><button class="ghost small" data-trf="${t.id}">Uppdatera</button><button class="ghost small" data-tepg="${t.id}">TV-guide…</button><button class="danger small" data-tdel="${t.id}">Ta bort</button></td></tr>`).join('')}</table>` : ''}
+    <form id="ltadd" style="margin-top:12px"><div class="row" style="align-items:flex-end"><div><label>Källa</label><select id="ltk"><option value="hdhr">HDHomeRun</option><option value="m3u">IPTV (M3U)</option></select></div>
+      <div style="flex:2;min-width:220px"><label id="ltul">IP-adress till HDHomeRun</label><input id="ltu" placeholder="192.168.1.50" required></div>
+      <div style="flex:2;min-width:220px"><label>TV-guide, XMLTV (valfri)</label><input id="lte" placeholder="https://…/guide.xml.gz"></div>
+      <div id="ltnw" hidden><label>Samtidiga strömmar</label><input id="ltn" type="number" min="1" max="20" value="2" style="width:80px"></div></div>
+      <div class="row" style="margin-top:10px"><button class="primary">Lägg till</button><button type="button" class="ghost" id="ltdisc">Sök efter HDHomeRun</button><button type="button" class="ghost" id="ltgr">Uppdatera TV-guiden</button></div></form>
+    ${LT.channels.length ? `<details style="margin-top:12px"><summary>Kanaler (${LT.channels.length}) – dölj eller markera favoriter</summary><table>${LT.channels.map(c => `<tr><td>${esc(c.number || '')}</td><td>${esc(c.name)}</td><td class="muted small">${c.now ? esc(c.now.title) : 'ingen guide'}${c.epgId ? '' : ' · <span class="warn-badge">ej kopplad</span>'}</td>
+      <td><label class="small"><input type="checkbox" data-chfav="${c.id}" ${c.favorite ? 'checked' : ''}> favorit</label> <label class="small"><input type="checkbox" data-chhide="${c.id}" ${c.hidden ? 'checked' : ''}> dold</label> <button class="ghost small" data-chepg="${c.id}" data-epgid="${esc(c.epgId || '')}">Guide-id</button></td></tr>`).join('')}</table></details>` : ''}
+    <form id="ltset" class="row" style="margin-top:12px;align-items:flex-end"><div style="flex:1;min-width:160px"><label>Inspelningsmapp</label><input id="lsd" value="${esc(LT.settings.dvrDir)}"></div>
+      <div><label>Starta före (s)</label><input id="lsb" type="number" min="0" value="${LT.settings.padBefore}" style="width:90px"></div><div><label>Sluta efter (s)</label><input id="lsa" type="number" min="0" value="${LT.settings.padAfter}" style="width:90px"></div>
+      <div><label>Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
+      <button class="ghost">Spara</button></form>
   </div>
   <div class="panel"><h2>Sonarr, Radarr och Trakt</h2>
     <p class="muted small"><b>Direkt skanning:</b> lägg till en webhook i Sonarr och Radarr (Settings → Connect → + → Webhook, händelser <i>On Import</i>, <i>On Upgrade</i>, <i>On Rename</i> och <i>On Delete</i>) med adressen nedan. Då dyker nya avsnitt upp direkt efter nedladdning.</p>
@@ -912,6 +1054,21 @@ views.admin = async () => {
     if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
   $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#notest').onclick = async () => { try { await noSave(); await api('/notify/test', { method: 'POST' }); toast('Testnotis skickad'); } catch (er) { toast(er.message); } };
+  $('#ltk').onchange = () => { const h = $('#ltk').value === 'hdhr'; $('#ltul').textContent = h ? 'IP-adress till HDHomeRun' : 'Adress till M3U-listan (eller fil under /config)'; $('#ltu').placeholder = h ? '192.168.1.50' : 'https://…/playlist.m3u'; $('#ltnw').hidden = h; };
+  $('#ltadd').onsubmit = async (e) => {
+    e.preventDefault(); const b = $('#ltadd button'); b.disabled = true; b.textContent = 'Hämtar kanaler…';
+    try { const r = await api('/live/tuners', { method: 'POST', body: { kind: $('#ltk').value, url: $('#ltu').value, epgUrl: $('#lte').value, tuners: $('#ltn').value } }); toast('Tillagd'); await boot(); route(); void r; }
+    catch (er) { toast(er.message); b.disabled = false; b.textContent = 'Lägg till'; }
+  };
+  $('#ltdisc').onclick = async () => { toast('Söker…'); const r = await api('/live/discover', { method: 'POST' }); if (r.found.length) { $('#ltk').value = 'hdhr'; $('#ltk').onchange(); $('#ltu').value = r.found[0]; toast('Hittade ' + r.found.join(', ')); } else toast('Ingen hittades – ange IP-adressen (sökning kräver host-nätverk i Docker)'); };
+  $('#ltgr').onclick = async () => { toast('Uppdaterar guiden…'); try { await api('/live/guide/refresh', { method: 'POST' }); toast('Guiden uppdaterad'); route(); } catch (er) { toast(er.message); } };
+  $$('[data-trf]').forEach(b => b.onclick = async () => { try { const r = await api(`/live/tuners/${b.dataset.trf}/refresh`, { method: 'POST' }); toast(`${r.channels} kanaler`); route(); } catch (er) { toast(er.message); } });
+  $$('[data-tdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort källan och dess kanaler?')) { await api('/live/tuners/' + b.dataset.tdel, { method: 'DELETE' }); await boot(); route(); } });
+  $$('[data-tepg]').forEach(b => b.onclick = async () => { const u = prompt('Adress till XMLTV-guiden (tomt = ingen / HDHomeRuns egen):', LT.tuners.find(t => t.id === +b.dataset.tepg)?.epg_url || ''); if (u === null) return; try { await api('/live/tuners/' + b.dataset.tepg, { method: 'PUT', body: { epgUrl: u } }); await api(`/live/tuners/${b.dataset.tepg}/refresh`, { method: 'POST' }); toast('Sparat'); route(); } catch (er) { toast(er.message); } });
+  $$('[data-chfav]').forEach(b => b.onchange = () => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } }));
+  $$('[data-chhide]').forEach(b => b.onchange = () => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } }));
+  $$('[data-chepg]').forEach(b => b.onclick = async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); });
+  $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value } }); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
   $('#whnew').onclick = async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); };
   for (const k of ['radarr', 'sonarr']) {
@@ -1658,7 +1815,7 @@ function showQueue() {
 async function loadLibs() {
   libs = await api('/libraries');
   $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/${{ music: 'music', audiobook: 'books' }[l.type] || 'lib'}/${l.id}">${esc(l.name)}</a>`).join('')
-    + (!me?.kid ? '<a href="#/podcasts">Poddar</a>' : '');
+    + (me?.liveTv ? '<a href="#/live">Live-TV</a>' : '') + (!me?.kid ? '<a href="#/podcasts">Poddar</a>' : '');
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k) { try { sessionStorage.setItem(k, '1'); } catch {} }
