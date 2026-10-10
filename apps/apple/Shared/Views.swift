@@ -40,12 +40,27 @@ struct RootView: View {
 }
 
 struct MainTabs: View {
+    private var miniPlayerPadding: CGFloat {
+        #if os(tvOS)
+        return 20
+        #else
+        return 56
+        #endif
+    }
     var body: some View {
+        ZStack(alignment: .bottom) {
+            tabs
+            MiniPlayer().padding(.bottom, miniPlayerPadding)
+        }
+    }
+    private var tabs: some View {
         TabView {
             NavigationStack { HomeView().withRoutes() }
                 .tabItem { Label("Hem", systemImage: "house") }
             NavigationStack { SearchView().withRoutes() }
                 .tabItem { Label("Sök", systemImage: "magnifyingglass") }
+            NavigationStack { MusicView() }
+                .tabItem { Label("Musik", systemImage: "music.note") }
             NavigationStack { SettingsView() }
                 .tabItem { Label("Inställningar", systemImage: "gearshape") }
         }
