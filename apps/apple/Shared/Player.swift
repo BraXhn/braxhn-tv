@@ -63,6 +63,22 @@ final class PlayerController: ObservableObject {
     private var subtitle: SubtitleTrack?
     var onFinished: (() -> Void)?
 
+    /// Titeln som spelas just nu (sätts först när uppspelningen faktiskt startat)
+    private var currentId: Int?
+    private var localDuration: Double?
+    private var isLocal = false
+    private var intro: Marker?
+    private var recap: Marker?
+    private var credits: Double?
+    /// Slutposition har inte rapporterats än för `currentId`
+    private var reporting = false
+    /// Servern har en strömningssession för `currentId` (gäller inte nedladdade filer)
+    private var serverSession = false
+    private var closed = false
+    private var loadTask: Task<Void, Never>?
+    /// Ökas för varje ny laddning – långsammare, ersatta laddningar ignoreras
+    private var generation = 0
+
     init(model: AppModel) {
         self.model = model
         player.allowsExternalPlayback = true // AirPlay till Apple TV
@@ -72,73 +88,135 @@ final class PlayerController: ObservableObject {
         #endif
     }
 
-    func start(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) async {
-        stopReporting(final: true)
-        self.audio = audio
+    /// Startar (eller byter till) en titel. En pågående laddning avbryts.
+    func load(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) {
+        guard !closed else { return }
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in
+            await self?.start(itemId: itemId, at: start, audio: audio, subtitle: subtitle)
+        }
+    }
+
+    private func isLive(_ gen: Int) -> Bool { !closed && gen == generation && !Task.isCancelled }
+
+    private func start(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) async {
+        guard !closed else { return }
+        generation += 1
+        let gen = generation
+        AudioFocus.willPlay(.video)
+        let stopping = stopReporting()
         #if os(iOS)
-        // Utan kontakt med servern: spela nedladdad fil direkt
+        // Nedladdad fil spelas direkt – utan att vänta på nätet
         if let local = Downloads.shared.localURL(for: itemId) {
-            let online: ServerStatus? = try? await model.get("/api/status")
-            if online == nil {
-                title = Downloads.shared.records.first { $0.id == itemId }?.title ?? ""
-                status = "Offline"
-                player.replaceCurrentItem(with: AVPlayerItem(url: local))
-                if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
-                player.play()
-                return
+            let rec = Downloads.shared.records.first { $0.id == itemId }
+            resetState()
+            currentId = itemId
+            isLocal = true
+            localDuration = rec?.duration
+            self.audio = nil
+            title = rec?.title ?? ""
+            status = "Offline"
+            player.replaceCurrentItem(with: AVPlayerItem(url: local))
+            reporting = true
+            if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
+            guard isLive(gen) else { return }
+            player.play()
+            installObservers()
+            // Metadata (titel, intro/eftertexter, undertexter) hämtas i bakgrunden om servern nås.
+            // /playback anropas inte – det skulle starta en strömningssession på servern.
+            guard let it: MediaItem = try? await model.get("/api/items/\(itemId)"), isLive(gen) else { return }
+            item = it
+            title = it.isEpisode ? "\(it.showTitle ?? "") · \(it.sxe) · \(it.title)" : it.title
+            intro = it.intro
+            recap = it.recap
+            credits = it.credits
+            let textSubs = (it.subtitles ?? []).filter { $0.bitmap != true }
+            subtitleTracks = textSubs
+            var sub = subtitle
+            if sub == nil {
+                sub = textSubs.first { $0.forced == true }
+                    ?? textSubs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang }
             }
+            self.subtitle = sub
+            selectedSubtitle = sub?.id ?? "none"
+            if let s = sub { await loadCues(for: s, gen: gen) }
+            return
         }
         #endif
         do {
             let it: MediaItem = try await model.get("/api/items/\(itemId)")
-            item = it
-            title = it.isEpisode ? "\(it.showTitle ?? "") · \(it.sxe) · \(it.title)" : it.title
+            guard isLive(gen) else { return }
             // Standardundertext om ingen valts
             var sub = subtitle
             if sub == nil, let subs = it.subtitles {
                 sub = subs.first { $0.forced == true && $0.bitmap != true }
                     ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true }
             }
-            self.subtitle = sub
-            subtitleTracks = it.subtitles ?? []
-            selectedSubtitle = sub?.id ?? "none"
-            #if os(iOS)
-            // Nedladdad fil spelas lokalt (fungerar utan nät)
-            if let local = Downloads.shared.localURL(for: itemId) {
-                status = "Offline"
-                let playerItem = AVPlayerItem(url: local)
-                player.replaceCurrentItem(with: playerItem)
-                if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
-                player.play()
-                pb = try? await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
-                installObservers()
+            // Vänta tills föregående session stoppats så att stoppet inte når servern efter den nya starten
+            await stopping?.value
+            guard isLive(gen) else { return }
+            let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
+            guard isLive(gen) else {
+                // Ersatt eller stängd medan servern förberedde strömmen – stäng sessionen igen
+                Task { [model] in try? await model.post("/api/stream/\(itemId)/stop") }
                 return
             }
-            #endif
-            let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
+            guard let url = model.absolute(p.url) else { throw APIError(message: "Ogiltig ström-URL") }
+            resetState()
+            item = it
             pb = p
+            currentId = itemId
+            intro = p.intro
+            recap = p.recap
+            credits = p.credits
+            self.audio = audio
+            self.subtitle = sub
+            title = it.isEpisode ? "\(it.showTitle ?? "") · \(it.sxe) · \(it.title)" : it.title
+            subtitleTracks = it.subtitles ?? []
+            selectedSubtitle = sub?.id ?? "none"
             audioTracks = p.audio ?? []
             chapters = p.chapters ?? []
             selectedAudio = p.audioSelected.flatMap { Int($0) } ?? audio
             status = [p.mode == "direct" ? "Direkt" : p.mode == "remux" ? "Remux" : "Omkodning",
                       p.tonemap == true ? "HDR→SDR" : nil, p.remote == true ? "utanför hemmet" : nil].compactMap { $0 }.joined(separator: " · ")
-            guard let url = model.absolute(p.url) else { throw APIError(message: "Ogiltig ström-URL") }
-            let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset)
+            let playerItem = AVPlayerItem(asset: AVURLAsset(url: url))
             playerItem.externalMetadata = metadata(it)
             #if os(tvOS)
             playerItem.navigationMarkerGroups = chapterMarkers(p.chapters ?? [])
             #endif
             player.replaceCurrentItem(with: playerItem)
+            reporting = true
+            serverSession = true
             if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
+            guard isLive(gen) else { return }
             player.play()
-            cues = []
-            subtitleText = ""
-            if let s = sub, s.bitmap != true, let ps = p.subtitles.first(where: { $0.id == s.id }) { await loadCues(ps) }
             installObservers()
+            if let s = sub { await loadCues(for: s, gen: gen) }
         } catch {
-            self.error = error.localizedDescription
+            if isLive(gen) { self.error = error.localizedDescription }
         }
+    }
+
+    /// Nollställer allt som hör till föregående titel
+    private func resetState() {
+        item = nil
+        pb = nil
+        isLocal = false
+        localDuration = nil
+        intro = nil
+        recap = nil
+        credits = nil
+        cues = []
+        subtitleText = ""
+        skipTitle = nil
+        error = nil
+        audioTracks = []
+        subtitleTracks = []
+        chapters = []
+        selectedAudio = nil
+        selectedSubtitle = "none"
+        subtitle = nil
+        lastReport = Date()
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -183,12 +261,12 @@ final class PlayerController: ObservableObject {
         let s = subtitleTracks.first { $0.id == id }
         model.subtitleLang = s?.lang ?? ""
         // Bildundertexter bränns in av servern och kräver en ny ström; textundertexter byts direkt
-        if s?.bitmap == true || subtitle?.bitmap == true { restart(audio: audio, subtitle: s); return }
+        if !isLocal, s?.bitmap == true || subtitle?.bitmap == true { restart(audio: audio, subtitle: s); return }
         subtitle = s
         selectedSubtitle = s?.id ?? "none"
         cues = []
         subtitleText = ""
-        if let s, let ps = pb?.subtitles.first(where: { $0.id == s.id }) { Task { await loadCues(ps) } }
+        if let s { let gen = generation; Task { await loadCues(for: s, gen: gen) } }
     }
 
     func seek(to chapter: Chapter) {
@@ -201,16 +279,21 @@ final class PlayerController: ObservableObject {
     }
 
     private func restart(audio: Int?, subtitle: SubtitleTrack?) {
-        guard let it = item else { return }
+        guard let id = currentId else { return }
         let t = player.currentTime().seconds
-        Task { await start(itemId: it.id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle) }
+        load(itemId: id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle)
     }
 
-    private func loadCues(_ s: PlaybackSubtitle) async {
-        guard let url = model.absolute(s.url) else { return }
-        if let res = try? await URLSession.shared.data(from: url), let txt = String(data: res.0, encoding: .utf8) {
-            cues = VTT.parse(txt)
+    private func loadCues(for s: SubtitleTrack, gen: Int) async {
+        guard s.bitmap != true else { return }
+        var data: Data?
+        if let ps = pb?.subtitles.first(where: { $0.id == s.id }), let url = model.absolute(ps.url) {
+            data = try? await URLSession.shared.data(from: url).0
+        } else if isLocal, let id = currentId {
+            data = try? await model.data("/api/stream/\(id)/subs/\(s.id).vtt")
         }
+        guard isLive(gen), subtitle?.id == s.id, let d = data, let txt = String(data: d, encoding: .utf8) else { return }
+        cues = VTT.parse(txt)
     }
 
     private func installObservers() {
@@ -225,51 +308,66 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    private var duration: Double { pb?.duration ?? item?.duration ?? localDuration ?? 0 }
+
     private func tick(_ t: Double) {
-        guard t.isFinite else { return }
+        guard t.isFinite, !closed else { return }
         // Undertexter
         let st = t - subtitleOffset
         if let c = cues.last(where: { $0.start <= st }), st <= c.end { if subtitleText != c.text { subtitleText = c.text } }
         else if !subtitleText.isEmpty { subtitleText = "" }
         // Hoppa över intro / nästa avsnitt
         var skip: String?
-        if let r = pb?.recap, t >= r.start, t < r.end - 1 { skip = "Hoppa över sammanfattning" }
-        else if let i = pb?.intro, t >= i.start, t < i.end - 1 { skip = "Hoppa över intro" }
-        else if let c = pb?.credits, item?.nextId != nil, t >= c, t < c + 60 { skip = "Nästa avsnitt" }
+        if let r = recap, t >= r.start, t < r.end - 1 { skip = "Hoppa över sammanfattning" }
+        else if let i = intro, t >= i.start, t < i.end - 1 { skip = "Hoppa över intro" }
+        else if let c = credits, item?.nextId != nil, t >= c, t < c + 60 { skip = "Nästa avsnitt" }
         if skip != skipTitle { skipTitle = skip }
         // Tittarstatus var 10:e sekund
-        if Date().timeIntervalSince(lastReport) > 10, t > 1, let it = item {
+        if reporting, Date().timeIntervalSince(lastReport) > 10, t > 1, let id = currentId {
             lastReport = Date()
-            model.reportProgress(id: it.id, position: t, duration: pb?.duration ?? it.duration ?? 0)
+            model.reportProgress(id: id, position: t, duration: duration)
         }
     }
 
     func skip() {
         guard let t = skipTitle else { return }
-        if t == "Hoppa över sammanfattning", let r = pb?.recap {
+        if t == "Hoppa över sammanfattning", let r = recap {
             player.seek(to: CMTime(seconds: r.end, preferredTimescale: 600))
-        } else if t == "Hoppa över intro", let i = pb?.intro {
+        } else if t == "Hoppa över intro", let i = intro {
             player.seek(to: CMTime(seconds: i.end, preferredTimescale: 600))
         } else if let next = item?.nextId {
-            Task { await start(itemId: next, at: 0, audio: nil, subtitle: nil) }
+            load(itemId: next, at: 0, audio: nil, subtitle: nil)
         }
     }
 
     private func ended() {
-        stopReporting(final: true)
-        if let next = item?.nextId { Task { await start(itemId: next, at: 0, audio: nil, subtitle: nil) } }
+        guard !closed else { return }
+        stopReporting()
+        if let next = item?.nextId { load(itemId: next, at: 0, audio: nil, subtitle: nil) }
         else { onFinished?() }
     }
 
-    private func stopReporting(final: Bool) {
-        guard let it = item else { return }
+    /// Rapporterar slutposition och stänger serverns session – högst en gång per titel.
+    @discardableResult
+    private func stopReporting() -> Task<Void, Never>? {
+        guard reporting, let id = currentId else { return nil }
+        reporting = false
         let t = player.currentTime().seconds
-        if final, t.isFinite, t > 1 { model.reportProgress(id: it.id, position: t, duration: pb?.duration ?? it.duration ?? 0) }
-        Task { try? await model.post("/api/stream/\(it.id)/stop") }
+        if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration) }
+        guard serverSession else { return nil }
+        serverSession = false
+        return Task { [model] in _ = try? await model.post("/api/stream/\(id)/stop") }
     }
 
+    /// Stänger spelaren. Kan anropas flera gånger (både från Stäng-knappen och onDisappear).
     func close() {
-        stopReporting(final: true)
+        guard !closed else { return }
+        closed = true
+        generation += 1
+        loadTask?.cancel()
+        loadTask = nil
+        onFinished = nil
+        stopReporting()
         player.pause()
         if let o = observer { player.removeTimeObserver(o); observer = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
@@ -335,9 +433,15 @@ struct PlayerScreen: View {
         .task {
             if holder.ctrl == nil {
                 let c = PlayerController(model: model)
-                c.onFinished = { close() }
+                // Svag referens: kontrollern får inte hålla kvar vyn/holdern (retain-cykel)
+                let dismissAction = dismiss
+                let h = holder
+                c.onFinished = { [weak h] in
+                    h?.ctrl?.close()
+                    dismissAction()
+                }
                 holder.ctrl = c
-                await c.start(itemId: request.itemId, at: request.start, audio: request.audio, subtitle: request.subtitle)
+                c.load(itemId: request.itemId, at: request.start, audio: request.audio, subtitle: request.subtitle)
             }
         }
         .onDisappear { holder.ctrl?.close() }

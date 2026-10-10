@@ -76,6 +76,7 @@ struct MediaItem: Decodable, Identifiable, Hashable {
     let episodes: Int?
     let watchedEpisodes: Int?
     let intro: Marker?
+    let recap: Marker?
     let credits: Double?
     // detaljvy
     let children: [MediaItem]?

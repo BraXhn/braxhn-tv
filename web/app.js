@@ -8,22 +8,50 @@ const store = {
   set(k, v) { try { localStorage.setItem('braxhn-tv.' + k, JSON.stringify(v)); } catch {} }
 };
 let me = null, libs = [], status = {};
+// Navigering: varje route() får en ny generation. Anrop och timers från en gammal vy avbryts.
+let routeGen = 0;
+const leaveFns = new Set();
+const onLeave = (fn) => { leaveFns.add(fn); return fn; };
+// setTimeout knuten till vyn: körs bara om man är kvar, rensas när man lämnar. Returnerar en avbrytfunktion.
+function later(fn, ms) {
+  const g = routeGen;
+  const cancel = () => { clearTimeout(t); leaveFns.delete(cancel); };
+  const t = setTimeout(() => {
+    leaveFns.delete(cancel);
+    if (g !== routeGen) return;
+    const r = fn();
+    if (r && r.catch) r.catch(e => { if (!e?.aborted) console.warn(e); });
+  }, ms);
+  leaveFns.add(cancel);
+  return cancel;
+}
+const abortErr = () => Object.assign(new Error(''), { aborted: true });
+window.addEventListener('unhandledrejection', (e) => { if (e.reason?.aborted) e.preventDefault(); });
 // Trasiga bilder tas bort (ersätter inline onerror, som CSP blockerar)
 document.addEventListener('error', (e) => { if (e.target?.tagName === 'IMG' && e.target.dataset.fb) e.target.remove(); }, true);
 
 async function api(path, opts = {}) {
-  const o = { headers: {}, ...opts };
+  // bg: true = anropet hör inte till den aktuella vyn (t.ex. spelaren) och avbryts inte vid navigering
+  const { bg, ...rest } = opts;
+  const gen = routeGen;
+  const o = { headers: {}, ...rest };
   if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
   const r = await fetch('/api' + path, o);
   const data = r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text();
   if (r.status === 401 && !path.startsWith('/login')) { me = null; location.hash = '#/login'; throw new Error('Inte inloggad'); }
+  if (!bg && gen !== routeGen) throw abortErr(); // användaren har gått vidare – resultatet ska inte användas
   if (!r.ok) throw new Error(data?.error || `Fel ${r.status}`);
   return data;
 }
 function toast(msg) {
+  if (!msg) return;
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 3200);
 }
+// Kör en asynkron händelsehanterare och visar fel som toast (avbrutna anrop ignoreras)
+const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (!e?.aborted) toast(e?.message || String(e)); } };
+// Profilfärg: bara #hex, rgb()/hsl() släpps in i style-attributet
+const safeColor = (c) => typeof c === 'string' && (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\([0-9a-z\s.,%/+-]*\)$/i.test(c)) ? c : '';
 const fmtTime = (s) => {
   s = Math.max(0, Math.floor(s || 0));
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
@@ -146,7 +174,7 @@ views.home = async () => {
   if (libs.length && !d.rows.some(r => r.items.length)) {
     const s = await api('/scan');
     html += `<div class="empty"><h2>${s.running ? 'Skannar bibliotek…' : 'Inget innehåll hittades'}</h2><p>${s.running ? esc(s.phase) + ' ' + s.done + '/' + s.total : 'Kontrollera sökvägarna under Administration.'}</p></div>`;
-    if (s.running) setTimeout(() => location.hash === '#/' && route(), 3000);
+    if (s.running) later(route, 3000);
   }
   main.innerHTML = html;
 };
@@ -165,7 +193,7 @@ views.lib = async (id) => {
 
 views.search = async (q) => {
   q = decodeURIComponent(q || '');
-  if ($('#q').value !== q) $('#q').value = q;
+  if ($('#q').value !== q && document.activeElement !== $('#q')) $('#q').value = q;
   const r = q.length >= 1 ? await api('/search?q=' + encodeURIComponent(q)) : [];
   const top = r.filter(i => i.kind !== 'episode'), eps = r.filter(i => i.kind === 'episode');
   main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1></div>
@@ -212,15 +240,15 @@ views.item = async (id) => {
     ${me.is_admin && it.kind === 'episode' ? '<button class="ghost small" id="markers">Justera intro/eftertexter</button>' : ''}</div>`;
   api(`/items/${it.id}/playback?${capsQuery()}`).then(p => {
     const m = { direct: 'Direktuppspelning', remux: 'Remux', transcode: 'Omkodning' }[p.mode];
-    $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
+    if ($('#pbinfo')) $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   bindWatchlist(it);
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
-  $$('[data-play]').forEach(b => b.onclick = () => play(it.id, +b.dataset.play));
-  $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
+  $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play));
+  $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) {
     $('#refresh').onclick = () => refreshMeta(it);
     if ($('#match')) $('#match').onclick = () => matchItem(it);
@@ -248,9 +276,9 @@ function showView(it) {
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}
       <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">▶ Spela</button>
       <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? 'Osedd' : 'Sedd'}</button></div></div></div>`).join('')}</div>`;
-    $$('[data-play]', $('#eps')).forEach(b => b.onclick = () => play(+b.dataset.play, +b.dataset.pos));
-    $$('[data-seen]').forEach(b => b.onclick = async () => { await api(`/items/${b.dataset.seen}/watched`, { method: 'POST', body: { watched: b.dataset.w !== '1' } }); route(); });
-    $('#seasonSeen').onclick = async () => { await api(`/items/${it.id}/watched?season=${cur}`, { method: 'POST', body: { watched: !allSeen } }); route(); };
+    $$('[data-play]', $('#eps')).forEach(b => b.onclick = () => startPlay(b, +b.dataset.play, +b.dataset.pos));
+    $$('[data-seen]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.seen}/watched`, { method: 'POST', body: { watched: b.dataset.w !== '1' } }); route(); }));
+    $('#seasonSeen').onclick = act(async () => { await api(`/items/${it.id}/watched?season=${cur}`, { method: 'POST', body: { watched: !allSeen } }); route(); });
   };
   renderEps();
   bindWatchlist(it);
@@ -259,19 +287,20 @@ function showView(it) {
     cur = +b.dataset.s; store.set('season.' + it.id, cur);
     $$('#tabs button').forEach(x => x.classList.toggle('on', x === b)); renderEps();
   });
-  if (nx) $('#playnext').onclick = () => play(nx.id, nx.position);
-  $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
+  if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
+  $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
 }
 
 function bindWatchlist(it) {
   const b = $('#wl'); if (!b) return;
-  b.onclick = async () => {
-    it.inWatchlist = !it.inWatchlist;
-    await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add: it.inWatchlist } });
+  b.onclick = act(async () => {
+    const add = !it.inWatchlist;
+    await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add } });
+    it.inWatchlist = add;
     b.textContent = it.inWatchlist ? '✓ I Min lista' : '+ Min lista';
     toast(it.inWatchlist ? 'Tillagd i Min lista' : 'Borttagen från Min lista');
-  };
+  });
 }
 
 views.watchlist = async () => {
@@ -286,7 +315,7 @@ views.collection = async (id) => {
     ${c.items.find(i => !i.watched) ? `<button class="primary" id="playfirst">▶ Spela ${esc(c.items.find(i => !i.watched).title)}</button>` : ''}</div></div></div>
     <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;
   const first = c.items.find(i => !i.watched);
-  if (first) $('#playfirst').onclick = () => play(first.id, first.position || 0);
+  if (first) $('#playfirst').onclick = (e) => startPlay(e.currentTarget, first.id, first.position || 0);
 };
 
 // ---------- Profiler: "Vem tittar?" ----------
@@ -296,7 +325,7 @@ views.profiles = async () => {
   main.innerHTML = `<div class="profiles"><h1>Vem tittar?</h1><div class="plist">${d.profiles.map(p => {
     const h = hue(p.name);
     return `<button class="pcard" data-pid="${p.id}" data-pin="${p.hasPin ? 1 : 0}" data-kid="${p.kid ? 1 : 0}">
-      <span class="pav" style="background:${esc(p.color) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+      <span class="pav" style="background:${esc(safeColor(p.color)) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
       <span>${esc(p.name)}</span>${p.kid ? `<small class="muted">Barn · max ${p.maxAge} år</small>` : p.hasPin ? '<small class="muted">🔒 PIN</small>' : ''}</button>`;
   }).join('')}</div>
   <div class="row" style="justify-content:center;margin-top:30px"><button class="ghost" id="pdone">Fortsätt som ${esc(me.name)}</button></div></div>`;
@@ -313,7 +342,7 @@ views.profiles = async () => {
       if (!r.ok) return toast(j.error || 'Kunde inte byta profil');
       await boot(); location.hash = '#/';
     };
-    attempt();
+    act(attempt)();
   });
 };
 
@@ -351,7 +380,7 @@ function matchItem(it) {
     } catch (e) { $('#mres', d).innerHTML = `<p class="err">${esc(e.message)}</p>`; }
   };
   $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
-  $('#munlock', d).onclick = async () => { await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true } }); toast('Upplåst – matchas automatiskt vid nästa skanning'); close(); };
+  $('#munlock', d).onclick = act(async () => { await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true } }); toast('Upplåst – matchas automatiskt vid nästa skanning'); close(); });
   search();
 }
 function editItem(it) {
@@ -446,24 +475,23 @@ views.account = async () => {
     try { await api('/me/password', { method: 'POST', body: { current: $('#c').value, password: $('#n1').value } }); toast('Lösenordet är bytt – andra enheter är utloggade'); route(); }
     catch (er) { toast(er.message); }
   };
-  $$('[data-rev]').forEach(b => b.onclick = async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); });
+  $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });
       $('#trbox').innerHTML = `<p>Gå till <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> och ange koden:</p><p style="font-size:32px;letter-spacing:6px;font-weight:800">${esc(r.userCode)}</p><p class="muted small" id="trst">Väntar…</p>`;
       const tick = async () => {
-        if (location.hash !== '#/account') return;
-        const p = await api('/me/trakt/poll', { method: 'POST' }).catch(() => ({ status: 'pending' }));
+        const p = await api('/me/trakt/poll', { method: 'POST' }).catch(e => { if (e.aborted) throw e; return { status: 'pending' }; });
         if (p.status === 'connected') { toast('Trakt kopplat – synkar'); route(); }
-        else if (p.status === 'pending') setTimeout(tick, (r.interval || 5) * 1000);
-        else $('#trst').textContent = p.status === 'denied' ? 'Nekades på Trakt.' : 'Koden gick ut – försök igen.';
+        else if (p.status === 'pending') later(tick, (r.interval || 5) * 1000);
+        else if ($('#trst')) $('#trst').textContent = p.status === 'denied' ? 'Nekades på Trakt.' : 'Koden gick ut – försök igen.';
       };
-      setTimeout(tick, (r.interval || 5) * 1000);
+      later(tick, (r.interval || 5) * 1000);
     } catch (e) { toast(e.message); }
   };
   if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt`); route(); } catch (e) { toast(e.message); } };
-  if ($('#troff')) $('#troff').onclick = async () => { if (confirm('Koppla från Trakt?')) { await api('/me/trakt', { method: 'DELETE' }); route(); } };
-  $$('[data-pkdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } });
+  if ($('#troff')) $('#troff').onclick = act(async () => { if (confirm('Koppla från Trakt?')) { await api('/me/trakt', { method: 'DELETE' }); route(); } });
+  $$('[data-pkdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } }));
   if ($('#pkadd')) $('#pkadd').onclick = async () => {
     const password = prompt('Ange ditt lösenord för att lägga till en passkey:'); if (!password) return;
     const name = prompt('Namn på passkeyn (t.ex. "iPhone" eller "Jobbdator"):', device(navigator.userAgent)) || 'Passkey';
@@ -480,15 +508,15 @@ views.account = async () => {
       const pin = prompt('Ny PIN (4–8 siffror). Lämna tomt för att ta bort PIN:'); if (pin === null) return;
       try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toast(e.message); }
     });
-    $$('[data-pdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort profilen och dess tittarhistorik?')) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } });
+    $$('[data-pdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort profilen och dess tittarhistorik?')) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } }));
     $('#addprof').onsubmit = async (e) => {
       e.preventDefault();
       try { await api('/profiles', { method: 'POST', body: { name: $('#pn').value, maxAge: $('#pa').value, pin: $('#pp').value } }); toast('Profil skapad'); route(); }
       catch (er) { toast(er.message); }
     };
   }
-  $('#revall').onclick = async () => { if (confirm('Logga ut alla andra enheter, inklusive appar?')) { await api('/me/sessions/revoke-others', { method: 'POST' }); toast('Utloggade'); route(); } };
-  if ($('#on')) $('#on').onclick = async () => {
+  $('#revall').onclick = act(async () => { if (confirm('Logga ut alla andra enheter, inklusive appar?')) { await api('/me/sessions/revoke-others', { method: 'POST' }); toast('Utloggade'); route(); } });
+  if ($('#on')) $('#on').onclick = act(async () => {
     const r = await api('/me/2fa/setup', { method: 'POST' });
     $('#tfasetup').innerHTML = `<ol style="padding-left:18px;line-height:1.7">
       <li>Skanna QR-koden med din autentiseringsapp<div id="qr" style="background:#fff;display:inline-block;padding:10px;border-radius:8px;margin:8px 0"></div></li>
@@ -503,7 +531,7 @@ views.account = async () => {
       try { const res = await api('/me/2fa/enable', { method: 'POST', body: { code: $('#tc').value, password: $('#tpw').value } }); showCodes(res.recoveryCodes); }
       catch (e) { toast(e.message); }
     };
-  };
+  });
   if ($('#off')) $('#off').onclick = async () => {
     const password = prompt('Ange ditt lösenord för att stänga av tvåstegsverifiering:'); if (!password) return;
     const code = prompt('Ange en kod från autentiseringsappen (eller en reservkod):'); if (!code) return;
@@ -551,13 +579,13 @@ views.book = async (id) => {
   if ($('#bstart')) $('#bstart').onclick = () => playSpoken({ ...sp, position: 0 });
   $$('[data-chs]').forEach(r => r.onclick = () => { if (M.spoken?.kind === 'book' && M.spoken.id === b.id) spokenSeek(+r.dataset.chs + 0.01); else playSpoken({ ...sp, position: +r.dataset.chs + 0.01 }); });
   $$('[data-bm]').forEach(x => x.onclick = () => { if (M.spoken?.kind === 'book' && M.spoken.id === b.id) spokenSeek(+x.dataset.bm); else playSpoken({ ...sp, position: +x.dataset.bm }); });
-  $$('[data-bmdel]').forEach(x => x.onclick = async () => { await api('/audiobooks/bookmarks/' + x.dataset.bmdel, { method: 'DELETE' }); route(); });
-  $('#bmark').onclick = async () => {
+  $$('[data-bmdel]').forEach(x => x.onclick = act(async () => { await api('/audiobooks/bookmarks/' + x.dataset.bmdel, { method: 'DELETE' }); route(); }));
+  $('#bmark').onclick = act(async () => {
     const pos = M.spoken?.kind === 'book' && M.spoken.id === b.id ? spokenPos() : b.position;
     const note = prompt(`Bokmärke vid ${fmtTime(pos)} – anteckning (valfri):`); if (note === null) return;
     await api(`/audiobooks/book/${b.id}/bookmarks`, { method: 'POST', body: { position: pos, note } }); route();
-  };
-  if ($('#bdone')) $('#bdone').onclick = async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: b.duration } }); route(); };
+  });
+  if ($('#bdone')) $('#bdone').onclick = act(async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: b.duration } }); route(); });
 };
 
 // ---------- poddar ----------
@@ -569,7 +597,7 @@ function bindEps(eps) {
   const sp = (e) => ({ kind: 'podcast', id: e.id, title: e.title, sub: e.podcastTitle, link: `#/podcast/${e.podcast}`, cover: `/api/podcasts/${e.podcast}/image`,
     duration: e.duration || 0, position: e.played ? 0 : e.position, files: [{ id: e.id, offset: 0, duration: e.duration, url: `/api/podcasts/episodes/${e.id}/stream` }] });
   $$('[data-epplay]').forEach(b => b.onclick = () => playSpoken(sp(eps[+b.dataset.epplay])));
-  $$('[data-epdone]').forEach(b => b.onclick = async () => { const e = eps[+b.dataset.epdone]; await api(`/podcasts/episodes/${e.id}/progress`, { method: 'POST', body: { position: 0, played: !e.played } }); route(); });
+  $$('[data-epdone]').forEach(b => b.onclick = act(async () => { const e = eps[+b.dataset.epdone]; await api(`/podcasts/episodes/${e.id}/progress`, { method: 'POST', body: { position: 0, played: !e.played } }); route(); }));
 }
 views.podcasts = async () => {
   store.set('pods', '1');
@@ -585,7 +613,7 @@ views.podcasts = async () => {
     try { const r = await api('/podcasts', { method: 'POST', body: { url: $('#purl').value } }); location.hash = '#/podcast/' + r.id; }
     catch (er) { toast(er.message); b.disabled = false; b.textContent = 'Lägg till'; }
   };
-  loadLibs();
+  loadLibs().catch(() => {});
 };
 views.podcast = async (id) => {
   const p = await api('/podcasts/' + id);
@@ -599,7 +627,7 @@ views.podcast = async (id) => {
   bindEps(eps);
   if (!p.canEdit) return;
   $('#prf').onclick = async () => { try { await api(`/podcasts/${id}/refresh`, { method: 'POST' }); toast('Uppdaterad'); route(); } catch (e) { toast(e.message); } };
-  $('#pkeep').onchange = async (e) => { await api('/podcasts/' + id, { method: 'PUT', body: { keep: e.target.value } }); toast('Sparat'); };
+  $('#pkeep').onchange = act(async (e) => { await api('/podcasts/' + id, { method: 'PUT', body: { keep: e.target.value } }); toast('Sparat'); });
   $('#pdel').onclick = async () => { if (confirm('Avsluta prenumerationen och ta bort nedladdade avsnitt?')) { try { await api('/podcasts/' + id, { method: 'DELETE' }); location.hash = '#/podcasts'; } catch (e) { toast(e.message); } } };
 };
 
@@ -608,9 +636,22 @@ const hhmm = (t) => new Date(t * 1000).toLocaleTimeString('sv-SE', { hour: '2-di
 const dayName = (t) => { const d = new Date(t * 1000), n = new Date(); const diff = Math.round((new Date(d.toDateString()) - new Date(n.toDateString())) / 864e5);
   return diff === 0 ? 'Idag' : diff === 1 ? 'Imorgon' : d.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' }); };
 const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
-let LP = null; // live-spelare
+let LP = null, RP = null; // live-spelare, inspelningsspelare
+// Gemensamt för helskärmsspelarna i #player
+function overlayOpen(el) { el.hidden = false; document.body.style.overflow = 'hidden'; }
+function overlayClose(el) { el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; }
+function stopVideo(v) { if (!v) return; v.pause(); v.removeAttribute('src'); v.load(); }
+// Stänger öppna spelare (vanlig, live, inspelning)
+function closeOverlays() { closePlayer(false); closeLive(); closeRec(); }
+// Som ovan, men avbryter även en uppspelning som håller på att starta
+function closeAllPlayers() { playSeq++; closeOverlays(); }
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || document.fullscreenElement || document.querySelector('dialog[open]')) return;
+  if (RP) closeRec(); else if (LP) closeLive();
+});
+
 async function playLive(ch) {
-  if (P) closePlayer(false);
+  closeAllPlayers();
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
   el.innerHTML = `<video id="lvid" controls autoplay playsinline></video>
@@ -618,24 +659,61 @@ async function playLive(ch) {
       <span class="muted small" id="lnow">${ch.now ? esc(ch.now.title) + ' · ' + hhmm(ch.now.start) + '–' + hhmm(ch.now.stop) : ''}</span>
       <span class="muted small" id="lstat">Startar kanalen…</span>
       ${ch.now ? `<button class="ghost small" id="lrec">⏺ Spela in</button>` : ''}</div>`;
-  el.hidden = false; document.body.style.overflow = 'hidden';
-  const v = $('#lvid');
-  LP = { ch, hls: null };
-  const close = () => { if (LP?.hls) LP.hls.destroy(); LP = null; v.pause(); v.removeAttribute('src'); v.load(); el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; if (location.hash.startsWith('#/watch')) history.back(); };
-  $('#lclose').onclick = close;
-  if ($('#lrec')) $('#lrec').onclick = async () => { try { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id } }); toast('Spelar in ' + ch.now.title); $('#lrec').disabled = true; } catch (e) { toast(e.message); } };
+  overlayOpen(el);
+  const v = $('#lvid', el), stat = $('#lstat', el);
+  // Lokal referens: om spelaren stängs (eller en annan öppnas) under start avbryter vi utan att röra borttagna element
+  const lp = LP = { ch, hls: null, el, v };
+  const cur = () => LP === lp;
+  const setStat = (t) => { if (cur()) stat.textContent = t; };
+  videoSession(v);
+  $('#lclose', el).onclick = () => closeLive(lp);
+  const rb = $('#lrec', el);
+  if (rb) rb.onclick = act(async () => { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id }, bg: true }); toast('Spelar in ' + ch.now.title); rb.disabled = true; });
   try {
-    const r = await api(`/live/${ch.id}/play`, { method: 'POST' });
+    const r = await api(`/live/${ch.id}/play`, { method: 'POST', bg: true });
+    if (!cur()) return;
     if (v.canPlayType('application/vnd.apple.mpegurl') && !window.MediaSource) { v.src = r.url; }
     else {
       const Hls = await loadHls();
-      LP.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
-      LP.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { if (d.response?.code === 409 || d.response?.code === 502) { $('#lstat').textContent = d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'; LP.hls.destroy(); } else if (d.type === 'networkError') setTimeout(() => LP?.hls?.startLoad(), 1500); else if (d.type === 'mediaError') LP.hls.recoverMediaError(); } });
-      LP.hls.loadSource(r.url); LP.hls.attachMedia(v);
+      if (!cur()) return;
+      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal || !cur() || lp.hls !== hls) return;
+        if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
+        else if (d.type === 'networkError') setTimeout(() => { if (cur() && lp.hls === hls) hls.startLoad(); }, 1500);
+        else if (d.type === 'mediaError') hls.recoverMediaError();
+      });
+      hls.loadSource(r.url); hls.attachMedia(v);
     }
-    v.addEventListener('playing', () => { $('#lstat').textContent = 'Live'; }, { once: true });
+    v.addEventListener('playing', () => setStat('Live'), { once: true });
     v.play().catch(() => {});
-  } catch (e) { $('#lstat').textContent = e.message; }
+  } catch (e) { setStat(e.message); }
+}
+function closeLive(lp = LP) {
+  if (!lp || LP !== lp) return;
+  LP = null;
+  if (lp.hls) { lp.hls.destroy(); lp.hls = null; }
+  stopVideo(lp.v);
+  overlayClose(lp.el);
+  musicSession();
+}
+async function playRec(r) {
+  const u = await api(`/dvr/recordings/${r.id}/play`, { method: 'POST' }); // avbryts om man hunnit lämna sidan
+  closeAllPlayers();
+  if (M.audio && !M.audio.paused) M.audio.pause();
+  const el = $('#player');
+  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span></div>`;
+  overlayOpen(el);
+  const rp = RP = { el, v: $('#rvid', el) };
+  videoSession(rp.v);
+  $('#rclose', el).onclick = () => closeRec(rp);
+}
+function closeRec(rp = RP) {
+  if (!rp || RP !== rp) return;
+  RP = null;
+  stopVideo(rp.v);
+  overlayClose(rp.el);
+  musicSession();
 }
 function loadLogos() {}
 views.live = async () => {
@@ -669,16 +747,18 @@ views.guide = async (dayOffset) => {
     ${G.guide.error ? `<p class="err small">Guiden kunde inte uppdateras: ${esc(G.guide.error)}</p>` : ''}`;
   $$('[data-pid]').forEach(b => b.onclick = () => programDialog(+b.dataset.pid));
   if (nowX > 200) $('.gscroll').scrollLeft = nowX - 200;
-  $('#gsearch').onsubmit = async (e) => {
+  $('#gsearch').onsubmit = act(async (e) => {
     e.preventDefault(); const q = $('#gq').value.trim(); if (!q) return;
     const r = await api('/live/search?q=' + encodeURIComponent(q));
+    if (!$('#gres')) return;
     $('#gres').innerHTML = `<table>${r.map(p => `<tr data-pid2="${p.id}" style="cursor:pointer"><td>${dayName(p.start)} ${hhmm(p.start)}</td><td><b>${esc(p.title)}</b>${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</td><td class="muted">${esc(p.channel)}</td></tr>`).join('') || '<tr><td class="muted">Inga träffar</td></tr>'}</table>`;
     $$('[data-pid2]').forEach(r2 => r2.onclick = () => programDialog(+r2.dataset.pid2));
-  };
+  });
   loadLogos();
 };
 async function programDialog(id) {
-  const p = await api('/live/programs/' + id);
+  let p;
+  try { p = await api('/live/programs/' + id); } catch (e) { toast(e.message); return; }
   const nowT = Date.now() / 1000, onNow = p.start <= nowT && p.stop > nowT;
   const d = document.createElement('dialog');
   d.innerHTML = `<h2>${esc(p.title)}</h2>
@@ -694,9 +774,9 @@ async function programDialog(id) {
   document.body.append(d); d.showModal();
   const close = () => { d.close(); d.remove(); };
   $('#pdx', d).onclick = close;
-  if ($('#pdw', d)) $('#pdw', d).onclick = async () => { close(); const D = await api('/live/channels'); const ch = D.channels.find(c => c.id === p.channel_id); if (ch) playLive(ch); };
-  if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { await api('/dvr/program', { method: 'POST', body: { programId: id } }); toast('Inspelning bokad'); close(); } catch (e) { toast(e.message); } };
-  if ($('#pdc', d)) $('#pdc', d).onclick = async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); close(); };
+  if ($('#pdw', d)) $('#pdw', d).onclick = act(async () => { close(); const D = await api('/live/channels'); const ch = D.channels.find(c => c.id === p.channel_id); if (ch) playLive(ch); });
+  if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { const r = await api('/dvr/program', { method: 'POST', body: { programId: id } }); toast(r.conflict ? 'Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.' : 'Inspelning bokad'); close(); } catch (e) { toast(e.message); } };
+  if ($('#pdc', d)) $('#pdc', d).onclick = act(async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); close(); });
   if ($('#pds', d)) $('#pds', d).onclick = async () => {
     const any = confirm(`Spela in "${p.title}" på alla kanaler? (Avbryt = bara ${p.channel_name})`);
     try { await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: id, series: true, newOnly: true } }); toast('Serieinspelning skapad – bara nya avsnitt spelas in'); close(); } catch (e) { toast(e.message); }
@@ -715,16 +795,13 @@ views.dvr = async () => {
     ${D.done.filter(r => r.status !== 'done').length ? `<section class="section"><h2>Pågående och misslyckade</h2><table>${D.done.filter(r => r.status !== 'done').map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}</td><td>${esc(r.title)}</td><td>${st[r.status]}</td><td class="muted small">${esc(r.error || '')}</td><td class="r"><button class="ghost small" data-rdel="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
     ${D.dir ? `<p class="muted small">Inspelningar sparas i <code>${esc(D.dir)}</code>.</p>` : ''}`;
   $$('[data-rdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort?')) { try { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); } catch (e) { toast(e.message); } } });
-  $$('[data-rstop]').forEach(b => b.onclick = async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); setTimeout(route, 1500); });
-  $$('[data-rule]').forEach(b => b.onclick = async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } });
-  $$('[data-rplay]').forEach(b => b.onclick = async () => {
-    const r = D.done.find(x => x.id === +b.dataset.rplay);
-    const u = await api(`/dvr/recordings/${r.id}/play`, { method: 'POST' });
-    const el = $('#player');
-    el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span></div>`;
-    el.hidden = false; document.body.style.overflow = 'hidden';
-    $('#rclose').onclick = () => { const v = $('#rvid'); v.pause(); v.removeAttribute('src'); v.load(); el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; };
-  });
+  $$('[data-rstop]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); later(route, 1500); }));
+  $$('[data-rule]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } }));
+  $$('[data-rplay]').forEach(b => b.onclick = act(async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    try { await playRec(D.done.find(x => x.id === +b.dataset.rplay)); } finally { b.disabled = false; }
+  }));
 };
 
 // ---------- streamingtjänster ----------
@@ -744,7 +821,7 @@ async function fillWatch() {
 }
 views.streaming = async () => {
   if (me.kid) { location.hash = '#/'; return; }
-  const P_ = await api('/streaming/providers').catch(e => ({ error: e.message }));
+  const P_ = await api('/streaming/providers').catch(e => { if (e.aborted) throw e; return { error: e.message }; });
   if (P_.error) { main.innerHTML = `<div class="empty"><p>${esc(P_.error)}</p></div>`; return; }
   const kind = store.get('stkind', 'movie');
   const sel = (store.get('stprov', '') || P_.mine.join(',')).split(',').map(Number).filter(Boolean);
@@ -763,20 +840,30 @@ views.streaming = async () => {
       <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="pc">Avbryt</button><button class="primary" id="ps">Spara</button></div>`;
     document.body.append(d); d.showModal();
     $('#pc', d).onclick = () => { d.close(); d.remove(); };
-    $('#ps', d).onclick = async () => { const ids = $$('input:checked', d).map(i => +i.value); await api('/streaming/mine', { method: 'PUT', body: { ids } }); store.set('stprov', ''); d.close(); d.remove(); route(); };
+    $('#ps', d).onclick = act(async () => { const ids = $$('input:checked', d).map(i => +i.value); await api('/streaming/mine', { method: 'PUT', body: { ids } }); store.set('stprov', ''); d.close(); d.remove(); route(); });
   };
   if (!P_.mine.length) return;
   $$('[data-pv]').forEach(b => b.onclick = () => { const id = +b.dataset.pv; const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); store.set('stprov', [...s].join(',') || P_.mine.join(',')); route(); });
   let page = 1, results = [];
+  const stCard = (x, i) => `<a class="card" href="#" data-st="${i}"><div class="art">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : `<div class="ph">${esc(x.title)}</div>`}${x.inLibrary ? '<span class="badge">Hemma</span>' : ''}</div><div class="t">${esc(x.title)}</div><div class="s">${x.year || ''}</div></a>`;
   const load = async () => {
     const r = await api(`/streaming/discover?kind=${kind}&providers=${sel.join(',')}&page=${page}`);
+    const grid = $('#stgrid'), more = $('#stmore');
+    if (!grid || !more) return;
+    const from = results.length;
     results = results.concat(r.results);
-    $('#stgrid').innerHTML = results.map((x, i) => `<a class="card" href="#" data-st="${i}"><div class="art">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : `<div class="ph">${esc(x.title)}</div>`}${x.inLibrary ? '<span class="badge">Hemma</span>' : ''}</div><div class="t">${esc(x.title)}</div><div class="s">${x.year || ''}</div></a>`).join('') || '<p class="muted">Inget hittades.</p>';
-    $('#stmore').hidden = page >= r.pages;
-    $$('[data-st]').forEach(a => a.onclick = (e) => { e.preventDefault(); streamDialog(results[+a.dataset.st]); });
+    const html = r.results.map((x, j) => stCard(x, from + j)).join('');
+    if (from === 0) grid.innerHTML = html || '<p class="muted">Inget hittades.</p>';
+    else grid.insertAdjacentHTML('beforeend', html);
+    more.hidden = page >= r.pages;
+    $$('[data-st]', grid).slice(from).forEach(a => a.onclick = (e) => { e.preventDefault(); streamDialog(results[+a.dataset.st]); });
   };
-  $('#stmore').onclick = () => { page++; load(); };
-  load().catch(e => { $('#stgrid').innerHTML = `<p class="err">${esc(e.message)}</p>`; });
+  $('#stmore').onclick = act(async () => {
+    const b = $('#stmore'); if (!b || b.disabled) return;
+    b.disabled = true; page++;
+    try { await load(); } catch (e) { page--; throw e; } finally { b.disabled = false; }
+  });
+  load().catch(e => { if (!e.aborted && $('#stgrid')) $('#stgrid').innerHTML = `<p class="err">${esc(e.message)}</p>`; });
 };
 async function streamDialog(x) {
   const d = document.createElement('dialog');
@@ -809,8 +896,8 @@ views.requests = async () => {
         ${me.adminHere && r.status === 'pending' ? `<button class="ghost small" data-rqno="${r.id}">Neka</button>` : ''}
         ${me.adminHere || (r.userId === me.id && r.status === 'pending') ? `<button class="ghost small" data-rqdel="${r.id}">Ta bort</button>` : ''}</td></tr>`).join('') || '<tr><td class="muted">Inga önskemål ännu.</td></tr>'}</table></div>`;
   $$('[data-rqok]').forEach(b => b.onclick = async () => { try { await api(`/requests/${b.dataset.rqok}/approve`, { method: 'POST' }); toast('Skickad'); } catch (e) { toast(e.message); } route(); });
-  $$('[data-rqno]').forEach(b => b.onclick = async () => { const note = prompt('Anledning (valfritt):'); if (note === null) return; await api(`/requests/${b.dataset.rqno}/decline`, { method: 'POST', body: { note } }); route(); });
-  $$('[data-rqdel]').forEach(b => b.onclick = async () => { await api(`/requests/${b.dataset.rqdel}`, { method: 'DELETE' }); route(); });
+  $$('[data-rqno]').forEach(b => b.onclick = act(async () => { const note = prompt('Anledning (valfritt):'); if (note === null) return; await api(`/requests/${b.dataset.rqno}/decline`, { method: 'POST', body: { note } }); route(); }));
+  $$('[data-rqdel]').forEach(b => b.onclick = act(async () => { await api(`/requests/${b.dataset.rqdel}`, { method: 'DELETE' }); route(); }));
   if (!$('#rqf')) return;
   $('#rqk').value = kind;
   $('#rqk').onchange = () => store.set('reqkind', $('#rqk').value);
@@ -902,26 +989,30 @@ views.stats = async () => {
     try { await api('/restore', { method: 'POST', body }); toast('Klart – starta om containern i Unraid'); route(); } catch (e) { toast(e.message); }
   };
   $$('[data-rlocal]').forEach(b => b.onclick = () => restore({ local: b.dataset.rlocal }, b.dataset.rlocal));
-  if ($('#rcancel')) $('#rcancel').onclick = async () => { await api('/restore', { method: 'DELETE' }); route(); };
+  if ($('#rcancel')) $('#rcancel').onclick = act(async () => { await api('/restore', { method: 'DELETE' }); route(); });
   if (OF.kind !== 'none') api('/offsite/list').then(list => {
     if (!$('#oflist')) return;
     $('#oflist').innerHTML = list.length ? `<table>${list.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><button class="ghost small" data-rremote="${esc(f.name)}">Återställ</button></td></tr>`).join('')}</table>` : '<p class="muted small">Inga externa kopior ännu.</p>';
     $$('[data-rremote]').forEach(b => b.onclick = () => restore({ remote: b.dataset.rremote }, b.dataset.rremote));
-  }).catch(e => { if ($('#oflist')) $('#oflist').innerHTML = `<p class="err small">${esc(e.message)}</p>`; });
+  }).catch(e => { if (!e.aborted && $('#oflist')) $('#oflist').innerHTML = `<p class="err small">${esc(e.message)}</p>`; });
   $('#bknow').onclick = async () => { try { const r = await api('/backups', { method: 'POST' }); toast('Skapade ' + r.name); route(); } catch (e) { toast(e.message); } };
-  $('#bksave').onclick = async () => { await api('/settings', { method: 'PUT', body: { backupEnabled: $('#bken').checked, backupKeep: $('#bkkeep').value } }); toast('Sparat'); };
+  $('#bksave').onclick = act(async () => { await api('/settings', { method: 'PUT', body: { backupEnabled: $('#bken').checked, backupKeep: $('#bkkeep').value } }); toast('Sparat'); });
+  // En enda uppdateringsslinga: nytt anrop avbryter den schemalagda och gamla svar ignoreras
+  let nowSeq = 0, cancelNow = null;
   const loadNow = async () => {
-    if (location.hash !== '#/stats') return;
+    const seq = ++nowSeq;
+    if (cancelNow) { cancelNow(); cancelNow = null; }
     try {
       const A = await api('/activity');
+      if (seq !== nowSeq || !$('#now')) return;
       $('#nowcount').textContent = A.length ? `(${A.length})` : '';
       $('#now').innerHTML = A.length ? `<table>${A.map(a => `<tr><td><b>${esc(a.user)}</b><div class="muted small">${esc(a.device)} · ${esc(a.ip)}${a.remote ? ' · utifrån' : ''}</div></td>
         <td>${esc(a.title)}<div class="prog" style="max-width:260px"><i style="width:${a.duration ? Math.min(100, a.position / a.duration * 100) : 0}%"></i></div></td>
         <td class="muted small">${esc(modeName[a.mode] || a.mode)}${a.quality && a.quality !== 'orig' ? ' · ' + esc(a.quality) + 'p' : ''}${a.paused ? ' · pausad' : ''}<div>${esc((a.reasons || []).join(', '))}</div></td>
         <td class="r"><button class="danger small" data-stop="${esc(a.key)}">Stoppa</button></td></tr>`).join('')}</table>` : '<p class="muted">Ingen tittar just nu.</p>';
-      $$('[data-stop]').forEach(b => b.onclick = async () => { if (confirm('Stoppa uppspelningen?')) { await api(`/activity/${b.dataset.stop}/stop`, { method: 'POST' }); loadNow(); } });
-    } catch {}
-    setTimeout(loadNow, 5000);
+      $$('[data-stop]').forEach(b => b.onclick = act(async () => { if (confirm('Stoppa uppspelningen?')) { await api(`/activity/${b.dataset.stop}/stop`, { method: 'POST' }); loadNow(); } }));
+    } catch (e) { if (e?.aborted) return; }
+    if (seq === nowSeq) cancelNow = later(loadNow, 5000);
   };
   loadNow();
 };
@@ -1090,22 +1181,22 @@ views.admin = async () => {
   };
   $('#lt').onchange = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; };
   $('#lanimew').hidden = $('#lt').value !== 'show';
-  $$('[data-anime]').forEach(b => b.onchange = async () => { await api('/libraries/' + b.dataset.anime, { method: 'PUT', body: { anime: b.checked } }); toast('Sparat – serierna matchas om'); });
-  $('#scanall').onclick = async () => { await api('/scan', { method: 'POST' }); toast('Skanning startad'); };
-  $$('[data-scan]').forEach(b => b.onclick = async () => { await api(`/libraries/${b.dataset.scan}/scan`, { method: 'POST' }); toast('Skanning startad'); });
-  $$('[data-del]').forEach(b => b.onclick = async () => {
+  $$('[data-anime]').forEach(b => b.onchange = act(async () => { await api('/libraries/' + b.dataset.anime, { method: 'PUT', body: { anime: b.checked } }); toast('Sparat – serierna matchas om'); }));
+  $('#scanall').onclick = act(async () => { await api('/scan', { method: 'POST' }); toast('Skanning startad'); poll(); });
+  $$('[data-scan]').forEach(b => b.onclick = act(async () => { await api(`/libraries/${b.dataset.scan}/scan`, { method: 'POST' }); toast('Skanning startad'); poll(); }));
+  $$('[data-del]').forEach(b => b.onclick = act(async () => {
     if (!confirm('Ta bort biblioteket? Filerna på disken påverkas inte.')) return;
     await api('/libraries/' + b.dataset.del, { method: 'DELETE' }); await loadLibs(); route();
-  });
+  }));
   $('#adduser').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/users', { method: 'POST', body: { name: $('#un').value, password: $('#up').value, isAdmin: $('#ua').checked, remoteAllowed: $('#ur').checked } }); toast('Användare skapad'); route(); }
     catch (er) { toast(er.message); }
   };
-  $$('[data-udel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort användaren?')) { await api('/users/' + b.dataset.udel, { method: 'DELETE' }); route(); } });
-  $$('[data-remote]').forEach(b => b.onchange = async () => { await api('/users/' + b.dataset.remote, { method: 'PUT', body: { remoteAllowed: b.checked } }); toast('Sparat'); });
-  $$('[data-r2fa]').forEach(b => b.onclick = async () => { if (confirm('Återställ tvåstegsverifiering för användaren?')) { await api('/users/' + b.dataset.r2fa, { method: 'PUT', body: { reset2fa: true } }); route(); } });
-  $$('[data-lout]').forEach(b => b.onclick = async () => { if (confirm('Logga ut användaren från alla enheter?')) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } });
+  $$('[data-udel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort användaren?')) { await api('/users/' + b.dataset.udel, { method: 'DELETE' }); route(); } }));
+  $$('[data-remote]').forEach(b => b.onchange = act(async () => { await api('/users/' + b.dataset.remote, { method: 'PUT', body: { remoteAllowed: b.checked } }); toast('Sparat'); }));
+  $$('[data-r2fa]').forEach(b => b.onclick = act(async () => { if (confirm('Återställ tvåstegsverifiering för användaren?')) { await api('/users/' + b.dataset.r2fa, { method: 'PUT', body: { reset2fa: true } }); route(); } }));
+  $$('[data-lout]').forEach(b => b.onclick = act(async () => { if (confirm('Logga ut användaren från alla enheter?')) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } }));
   $('#secform').onsubmit = async (e) => {
     e.preventDefault();
     const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
@@ -1115,8 +1206,8 @@ views.admin = async () => {
     if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
     try { await api('/settings', { method: 'PUT', body }); toast('Sparat'); route(); } catch (er) { toast(er.message); }
   };
-  $('#upen').onchange = async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast('Sparat'); };
-  $('#upchk').onclick = async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? 'Kunde inte kontrollera: ' + u.error : u.available ? `Version ${u.latest} finns` : 'Du har senaste versionen'); route(); };
+  $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast('Sparat'); });
+  $('#upchk').onclick = act(async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? 'Kunde inte kontrollera: ' + u.error : u.available ? `Version ${u.latest} finns` : 'Du har senaste versionen'); route(); });
   const noSave = () => { const body = { kind: $('#nok').value, url: $('#nou').value, user: $('#nous').value, events: $$('[data-nev]').filter(x => x.checked).map(x => x.dataset.nev) };
     if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
   $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
@@ -1127,17 +1218,17 @@ views.admin = async () => {
     try { const r = await api('/live/tuners', { method: 'POST', body: { kind: $('#ltk').value, url: $('#ltu').value, epgUrl: $('#lte').value, tuners: $('#ltn').value } }); toast('Tillagd'); await boot(); route(); void r; }
     catch (er) { toast(er.message); b.disabled = false; b.textContent = 'Lägg till'; }
   };
-  $('#ltdisc').onclick = async () => { toast('Söker…'); const r = await api('/live/discover', { method: 'POST' }); if (r.found.length) { $('#ltk').value = 'hdhr'; $('#ltk').onchange(); $('#ltu').value = r.found[0]; toast('Hittade ' + r.found.join(', ')); } else toast('Ingen hittades – ange IP-adressen (sökning kräver host-nätverk i Docker)'); };
+  $('#ltdisc').onclick = act(async () => { toast('Söker…'); const r = await api('/live/discover', { method: 'POST' }); if (r.found.length) { $('#ltk').value = 'hdhr'; $('#ltk').onchange(); $('#ltu').value = r.found[0]; toast('Hittade ' + r.found.join(', ')); } else toast('Ingen hittades – ange IP-adressen (sökning kräver host-nätverk i Docker)'); });
   $('#ltgr').onclick = async () => { toast('Uppdaterar guiden…'); try { await api('/live/guide/refresh', { method: 'POST' }); toast('Guiden uppdaterad'); route(); } catch (er) { toast(er.message); } };
   $$('[data-trf]').forEach(b => b.onclick = async () => { try { const r = await api(`/live/tuners/${b.dataset.trf}/refresh`, { method: 'POST' }); toast(`${r.channels} kanaler`); route(); } catch (er) { toast(er.message); } });
-  $$('[data-tdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort källan och dess kanaler?')) { await api('/live/tuners/' + b.dataset.tdel, { method: 'DELETE' }); await boot(); route(); } });
+  $$('[data-tdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort källan och dess kanaler?')) { await api('/live/tuners/' + b.dataset.tdel, { method: 'DELETE' }); await boot(); route(); } }));
   $$('[data-tepg]').forEach(b => b.onclick = async () => { const u = prompt('Adress till XMLTV-guiden (tomt = ingen / HDHomeRuns egen):', LT.tuners.find(t => t.id === +b.dataset.tepg)?.epg_url || ''); if (u === null) return; try { await api('/live/tuners/' + b.dataset.tepg, { method: 'PUT', body: { epgUrl: u } }); await api(`/live/tuners/${b.dataset.tepg}/refresh`, { method: 'POST' }); toast('Sparat'); route(); } catch (er) { toast(er.message); } });
-  $$('[data-chfav]').forEach(b => b.onchange = () => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } }));
-  $$('[data-chhide]').forEach(b => b.onchange = () => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } }));
-  $$('[data-chepg]').forEach(b => b.onclick = async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); });
+  $$('[data-chfav]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } })));
+  $$('[data-chhide]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } })));
+  $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
   $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value } }); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
-  $('#whnew').onclick = async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); };
+  $('#whnew').onclick = act(async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
   for (const k of ['radarr', 'sonarr']) {
     const prof = IN[k + 'Profile'], root = IN[k + 'Root'];
     if (prof) $('#' + k + 'p').innerHTML += `<option value="${prof}" selected>Profil ${prof}</option>`;
@@ -1162,22 +1253,24 @@ views.admin = async () => {
   };
   const acSave = () => api('/acme', { method: 'PUT', body: { domain: $('#acd').value, email: $('#ace').value, staging: $('#acs').checked, auto: $('#aca').checked } });
   $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
+  let cancelAc = null;
   const acPoll = async () => {
-    if (location.hash !== '#/admin' || !$('#aclog')) return;
-    const a = await api('/acme').catch(() => null); if (!a) return;
+    cancelAc = null;
+    if (!$('#aclog')) return;
+    const a = await api('/acme').catch(e => { if (e.aborted) throw e; return null; }); if (!a || !$('#aclog')) return;
     $('#aclog').style.display = ''; $('#aclog').textContent = a.log.join('\n');
-    if (a.running) setTimeout(acPoll, 1500);
-    else { $('#acgo').disabled = false; toast(a.error ? 'Certifikatet kunde inte hämtas: ' + a.error : 'Certifikatet är klart – HTTPS är igång'); if (!a.error) setTimeout(route, 1500); }
+    if (a.running) cancelAc = later(acPoll, 1500);
+    else { $('#acgo').disabled = false; toast(a.error ? 'Certifikatet kunde inte hämtas: ' + a.error : 'Certifikatet är klart – HTTPS är igång'); if (!a.error) later(route, 1500); }
   };
   $('#acgo').onclick = async () => {
-    try { await acSave(); await api('/acme/obtain', { method: 'POST' }); $('#acgo').disabled = true; setTimeout(acPoll, 800); } catch (er) { toast(er.message); }
+    try { await acSave(); await api('/acme/obtain', { method: 'POST' }); $('#acgo').disabled = true; if (cancelAc) cancelAc(); cancelAc = later(acPoll, 800); } catch (er) { toast(er.message); }
   };
-  $$('[data-adm]').forEach(b => b.onclick = async () => { await api('/users/' + b.dataset.adm, { method: 'PUT', body: { isAdmin: b.dataset.v === '1' } }); route(); });
+  $$('[data-adm]').forEach(b => b.onclick = act(async () => { await api('/users/' + b.dataset.adm, { method: 'PUT', body: { isAdmin: b.dataset.v === '1' } }); route(); }));
   $$('[data-pw]').forEach(b => b.onclick = async () => {
     const pw = prompt('Nytt lösenord (minst 10 tecken). Användaren loggas ut från alla enheter:'); if (!pw) return;
     try { await api('/users/' + b.dataset.pw, { method: 'PUT', body: { password: pw } }); toast('Lösenord ändrat'); } catch (er) { toast(er.message); }
   });
-  $('#settings').onsubmit = async (e) => {
+  $('#settings').onsubmit = act(async (e) => {
     e.preventDefault();
     const body = { language: $('#lang').value, scanInterval: $('#si').value, osUser: $('#osu').value, subLangs: $('#osl').value,
       remoteQuality: $('#rq').value, publicUrl: $('#pu').value,
@@ -1186,21 +1279,23 @@ views.admin = async () => {
     if ($('#osk').value.trim()) body.osKey = $('#osk').value.trim();
     if ($('#osp').value) body.osPass = $('#osp').value;
     await api('/settings', { method: 'PUT', body }); toast('Sparat'); route();
-  };
-  $('#remark').onclick = async () => { await api('/settings', { method: 'PUT', body: { resetMarkers: true } }); await api('/scan', { method: 'POST' }); toast('Analyserar intro/eftertexter i bakgrunden'); };
-  $('#remeta').onclick = async () => { await api('/settings', { method: 'PUT', body: { resetMeta: true } }); await api('/scan', { method: 'POST' }); toast('Hämtar om metadata i bakgrunden'); };
+  });
+  $('#remark').onclick = act(async () => { await api('/settings', { method: 'PUT', body: { resetMarkers: true } }); await api('/scan', { method: 'POST' }); toast('Analyserar intro/eftertexter i bakgrunden'); });
+  $('#remeta').onclick = act(async () => { await api('/settings', { method: 'PUT', body: { resetMeta: true } }); await api('/scan', { method: 'POST' }); toast('Hämtar om metadata i bakgrunden'); });
 
-  // Skanningsstatus
-  const poll = async () => {
-    if (location.hash !== '#/admin') return;
+  // Skanningsstatus – en enda slinga per vy (knuten till navigeringen via later())
+  let pollSeq = 0, cancelPoll = null;
+  async function poll() {
+    const seq = ++pollSeq;
+    if (cancelPoll) { cancelPoll(); cancelPoll = null; }
     try {
       const s = await api('/scan');
-      const el = $('#scanst'); if (!el) return;
+      const el = $('#scanst'); if (!el || seq !== pollSeq) return;
       el.innerHTML = s.running ? `Skannar <b>${esc(s.library)}</b>: ${esc(s.phase)} ${s.done}/${s.total}<div class="prog"><i style="width:${s.total ? s.done / s.total * 100 : 0}%"></i></div>`
         : s.last ? `Senaste skanning: ${new Date(s.last * 1000).toLocaleString('sv-SE')}` : '';
-      setTimeout(poll, s.running ? 1500 : 6000);
+      cancelPoll = later(poll, s.running ? 1500 : 6000);
     } catch {}
-  };
+  }
   poll();
 };
 
@@ -1233,7 +1328,10 @@ async function subSearch(it) {
   d.innerHTML = `<h2>Sök undertexter</h2><p class="muted" id="ssm">Söker på OpenSubtitles…</p><div id="ssr" style="max-height:50vh;overflow:auto"></div>
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="ssc">Stäng</button></div>`;
   document.body.append(d); d.showModal();
-  $('#ssc', d).onclick = () => { d.close(); d.remove(); };
+  let got = false;
+  // Stängs dialogen: ladda bara om sidan om något faktiskt hämtades
+  d.addEventListener('close', () => { d.remove(); if (got && !P && !LP && !RP) route(); });
+  $('#ssc', d).onclick = () => d.close();
   try {
     const r = await api(`/items/${it.id}/subsearch`);
     $('#ssm', d).textContent = r.length ? `${r.length} träffar – ✓ = exakt matchning mot din fil` : 'Inga träffar.';
@@ -1241,11 +1339,10 @@ async function subSearch(it) {
       <td class="muted">${esc(x.downloads)}</td><td class="r"><button class="primary small" data-i="${i}">Hämta</button></td></tr>`).join('')}</table>`;
     $$('[data-i]', d).forEach(b => b.onclick = async () => {
       const x = r[+b.dataset.i]; b.disabled = true; b.textContent = '…';
-      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang } }); b.textContent = '✓'; toast(`Undertext sparad${res.remaining != null ? ` – ${res.remaining} nedladdningar kvar idag` : ''}`); }
+      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang } }); b.textContent = '✓'; got = true; toast(`Undertext sparad${res.remaining != null ? ` – ${res.remaining} nedladdningar kvar idag` : ''}`); }
       catch (e) { b.textContent = 'Fel'; toast(e.message); }
     });
-  } catch (e) { $('#ssm', d).textContent = e.message; }
-  d.addEventListener('close', () => { d.remove(); if (!P) route(); });
+  } catch (e) { if ($('#ssm', d)) $('#ssm', d).textContent = e.message; }
 }
 
 function editMarkers(it) {
@@ -1258,14 +1355,15 @@ function editMarkers(it) {
     <span class="row"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></span></div></form>`;
   document.body.append(d); d.showModal();
   const sec = (v) => { v = v.trim(); if (!v) return null; return v.split(':').reduce((a, x) => a * 60 + (+x || 0), 0); };
-  $('#redo', d).onclick = async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST' }); toast('Analyserar i bakgrunden'); d.close(); };
-  d.onclose = async () => {
+  $('#redo', d).onclick = act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST' }); toast('Analyserar i bakgrunden'); d.close(); });
+  d.onclose = act(async () => {
+    const vals = { introStart: sec($('#is', d).value), introEnd: sec($('#ie', d).value), creditsStart: sec($('#cs', d).value) };
+    d.remove();
     if (d.returnValue === 'ok') {
-      await api(`/items/${it.id}/markers`, { method: 'PUT', body: { introStart: sec($('#is', d).value), introEnd: sec($('#ie', d).value), creditsStart: sec($('#cs', d).value) } });
+      await api(`/items/${it.id}/markers`, { method: 'PUT', body: vals });
       toast('Sparat'); route();
     }
-    d.remove();
-  };
+  });
 }
 
 // ---------- Chromecast ----------
@@ -1291,7 +1389,7 @@ async function castItem(it, position) {
   try { await ctx.requestSession(); } catch { return; }
   const sess = ctx.getCurrentSession(); if (!sess) return;
   // Default Media Receiver: H.264/VP8/VP9 + AAC/MP3/Opus i MP4/WebM eller HLS
-  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || '') }));
+  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || '') }), { bg: true });
   const origin = status.publicUrl || location.origin;
   const mi = new chrome.cast.media.MediaInfo(origin + p.url, p.mime);
   mi.streamType = chrome.cast.media.StreamType.BUFFERED;
@@ -1314,27 +1412,39 @@ async function castItem(it, position) {
 
 // ---------- spelare ----------
 let P = null;
+let playSeq = 0; // ökas för varje play() och när alla spelare stängs – äldre anrop avbryter sig själva
 function loadHls() {
   if (window.Hls) return Promise.resolve(window.Hls);
   const add = (src) => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window.Hls); s.onerror = no; document.head.append(s); });
   return add('/vendor/hls.min.js');
 }
+// Startknapp: inaktiveras medan spelaren startar (dubbelklick ger inte två spelare)
+function startPlay(b, ...args) {
+  if (b) { if (b.disabled) return; b.disabled = true; }
+  return play(...args).catch(e => toast(e?.message)).finally(() => { if (b) b.disabled = false; });
+}
 
 async function play(id, start = 0, opts = {}) {
+  const seq = ++playSeq;
+  let it;
+  try { it = await api('/items/' + id, { bg: true }); }
+  catch (e) { if (seq === playSeq) toast(e.message); return; }
+  if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
   const partyId = opts.party || (P && P.party) || null;
+  // Behåll anslutningen till rummet vid byte av avsnitt – tas över först nu när hämtningen lyckats
   const keepParty = P && P.party && P.party === partyId ? P.es : null;
-  if (keepParty) P.es = null; // behåll anslutningen till rummet vid byte av avsnitt
-  const it = await api('/items/' + id);
+  if (keepParty) P.es = null;
   if (M.audio && !M.audio.paused) M.audio.pause();
-  if (P) closePlayer(false);
+  closeOverlays();
   const el = $('#player');
+  const q = (s) => $(s, el);
   const audios = it.audio, defAudio = audios.find(a => a.default) || audios[0];
   const subPref = store.get('sublang', '');
   const textSubs = it.subtitles.filter(s => !s.bitmap);
   const defSub = textSubs.find(s => s.forced) || (subPref && textSubs.find(s => s.lang === subPref));
   const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
-  P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
-    party: partyId, es: keepParty, applying: false };
+  const cur = P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
+    party: partyId, es: keepParty, applying: false, tok: null, lmd: null };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
   el.innerHTML = `<video id="vid" controls autoplay playsinline x-webkit-airplay="allow"></video>
     <div class="pbar"><button class="ghost small" id="pclose">← Tillbaka</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
@@ -1354,83 +1464,95 @@ async function play(id, start = 0, opts = {}) {
     <button class="skip" id="pskip" hidden></button><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
       <div class="track" id="track"><i id="tfill"></i>${(it.chapters || []).slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>`;
-  el.hidden = false; document.body.style.overflow = 'hidden';
-  $('#pq').value = P.q; if ($('#pa')) $('#pa').value = P.audio; $('#ps').value = P.sub; if ($('#ps2')) $('#ps2').value = P.sub2;
-  $('#pclose').onclick = () => closePlayer();
-  $('#pq').onchange = (e) => { P.q = e.target.value; store.set('quality', P.q); reload(); };
-  if ($('#pa')) $('#pa').onchange = (e) => { P.audio = e.target.value; reload(); };
-  $('#ps').onchange = (e) => {
-    const prev = it.subtitles.find(x => x.id === P.sub), s = it.subtitles.find(x => x.id === e.target.value);
-    P.sub = e.target.value; store.set('sublang', s?.lang || ''); P.offset = 0;
+  overlayOpen(el);
+  const v = q('#vid');
+  q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
+  q('#pclose').onclick = () => closePlayer();
+  q('#pq').onchange = (e) => { cur.q = e.target.value; store.set('quality', cur.q); reload(); };
+  if (q('#pa')) q('#pa').onchange = (e) => { cur.audio = e.target.value; reload(); };
+  q('#ps').onchange = (e) => {
+    const prev = it.subtitles.find(x => x.id === cur.sub), s = it.subtitles.find(x => x.id === e.target.value);
+    cur.sub = e.target.value; store.set('sublang', s?.lang || ''); cur.offset = 0;
     // Bildundertexter bränns in av servern => ny ström. Textundertexter byts direkt.
     if (s?.bitmap || prev?.bitmap) reload(); else setSubs();
   };
-  if ($('#ps2')) $('#ps2').onchange = (e) => { P.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === P.sub2)?.lang || ''); setSubs(); };
-  if ($('#pchap')) $('#pchap').onclick = (e) => {
+  if (q('#ps2')) q('#ps2').onchange = (e) => { cur.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === cur.sub2)?.lang || ''); setSubs(); };
+  if (q('#pchap')) q('#pchap').onclick = (e) => {
     e.stopPropagation();
-    const l = $('#chlist'), v = $('#vid');
+    const l = q('#chlist');
     if (!l.hidden) { l.hidden = true; return; }
-    const cur = it.chapters.filter(c => c.start <= v.currentTime).pop();
-    l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === cur ? 'on' : ''}"><span>${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
+    const c0 = it.chapters.filter(c => c.start <= v.currentTime).pop();
+    l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === c0 ? 'on' : ''}"><span>${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
     l.hidden = false;
-    $$('[data-ch]', l).forEach(b => b.onclick = () => { $('#vid').currentTime = it.chapters[+b.dataset.ch].start + 0.05; l.hidden = true; });
+    $$('[data-ch]', l).forEach(b => b.onclick = () => { v.currentTime = it.chapters[+b.dataset.ch].start + 0.05; l.hidden = true; });
   };
-  $$('[data-off]').forEach(b => b.onclick = () => { P.offset = Math.round((P.offset + +b.dataset.off) * 10) / 10; setSubs(); });
-  if ($('#pcast')) $('#pcast').onclick = () => castItem(it, $('#vid').currentTime);
-  if ($('#pair')) $('#pair').onclick = () => $('#vid').webkitShowPlaybackTargetPicker();
-  if ($('#pnext')) $('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
-  $('#pparty').onclick = async () => {
-    if (!P.party) {
-      try { const r = await api('/party', { method: 'POST', body: { itemId: it.id } }); P.party = r.id; pushState(); joinParty(); toast('Rum skapat – dela länken'); }
+  $$('[data-off]', el).forEach(b => b.onclick = () => { cur.offset = Math.round((cur.offset + +b.dataset.off) * 10) / 10; setSubs(); });
+  if (q('#pcast')) q('#pcast').onclick = () => castItem(it, v.currentTime);
+  if (q('#pair')) q('#pair').onclick = () => v.webkitShowPlaybackTargetPicker();
+  if (q('#pnext')) q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
+  q('#pparty').onclick = async () => {
+    if (!cur.party) {
+      try { const r = await api('/party', { method: 'POST', body: { itemId: it.id }, bg: true }); if (P !== cur) return; cur.party = r.id; pushState(); joinParty(); toast('Rum skapat – dela länken'); }
       catch (e) { return toast(e.message); }
     }
-    $('#partybox').hidden = !$('#partybox').hidden;
+    q('#partybox').hidden = !q('#partybox').hidden;
   };
-  $('#pbclose').onclick = () => { $('#partybox').hidden = true; };
-  $('#pcopy').onclick = () => { navigator.clipboard?.writeText($('#plink').value).then(() => toast('Länken kopierad')); };
-  $('#pmsg').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) { api(`/party/${P.party}/chat`, { method: 'POST', body: { text: e.target.value } }).catch(() => {}); e.target.value = ''; } };
+  q('#pbclose').onclick = () => { q('#partybox').hidden = true; };
+  q('#pcopy').onclick = () => { navigator.clipboard?.writeText(q('#plink').value).then(() => toast('Länken kopierad')); };
+  q('#pmsg').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim() && cur.party) { api(`/party/${cur.party}/chat`, { method: 'POST', body: { text: e.target.value }, bg: true }).catch(() => {}); e.target.value = ''; } };
   // Lokala händelser skickas till rummet (men inte de som kommer från rummet självt)
-  const pushState = () => { if (P?.party && !P.applying) api(`/party/${P.party}/state`, { method: 'POST', body: { playing: !$('#vid').paused, position: $('#vid').currentTime } }).catch(() => {}); };
-  ['play', 'pause', 'seeked'].forEach(ev => $('#vid').addEventListener(ev, pushState));
-  if (P.party) joinParty();
-  const v = $('#vid');
+  const pushState = () => { if (P === cur && cur.party && !cur.applying) api(`/party/${cur.party}/state`, { method: 'POST', body: { playing: !v.paused, position: v.currentTime }, bg: true }).catch(() => {}); };
+  ['play', 'pause', 'seeked'].forEach(ev => v.addEventListener(ev, pushState));
+  if (cur.party) joinParty();
   v.addEventListener('timeupdate', () => {
-    if (!P) return; if (Date.now() - P.lastSent > 10000) sendProgress(); markers();
-    const d = P.it.duration || v.duration; if (d) $('#tfill').style.width = Math.min(100, v.currentTime / d * 100) + '%';
+    if (P !== cur) return; if (Date.now() - cur.lastSent > 10000) sendProgress(); markers();
+    const d = cur.it.duration || v.duration; if (d) q('#tfill').style.width = Math.min(100, v.currentTime / d * 100) + '%';
   });
-  // Spolningslist med förhandsbilder
-  api(`/items/${it.id}/trickplay`).then(tp => { if (P && P.it.id === it.id) P.tp = tp; }).catch(() => {});
-  const track = $('#track'), prev = $('#prev');
-  const tAt = (e) => { const r = track.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (P.it.duration || v.duration || 0); };
-  track.onmousemove = (e) => {
-    if (!P) return;
-    const t = tAt(e), r = track.getBoundingClientRect();
-    const ch = (P.it.chapters || []).filter(c => c.start <= t).pop();
-    $('#ptime').textContent = fmtTime(t) + (ch ? ' · ' + ch.title : '');
-    const tp = P.tp, img = $('#pimg');
+  // Spolningslist med förhandsbilder (bredd cachas, ritas högst en gång per bildruta)
+  api(`/items/${it.id}/trickplay`, { bg: true }).then(tp => { if (P === cur) cur.tp = tp; }).catch(() => {});
+  const track = q('#track'), prev = q('#prev'), ptime = q('#ptime'), img = q('#pimg');
+  let rect = null, raf = 0, mx = 0;
+  const tAt = (x, r) => Math.max(0, Math.min(1, (x - r.left) / r.width)) * (cur.it.duration || v.duration || 0);
+  const drawPrev = () => {
+    raf = 0;
+    if (P !== cur || !rect) return;
+    const t = tAt(mx, rect);
+    const ch = (cur.it.chapters || []).filter(c => c.start <= t).pop();
+    ptime.textContent = fmtTime(t) + (ch ? ' · ' + ch.title : '');
+    const tp = cur.tp;
     if (tp) {
       const i = Math.min(tp.count - 1, Math.floor(t / tp.interval)), per = tp.cols * tp.rows, sheet = Math.floor(i / per) + tp.first, k = i % per;
-      Object.assign(img.style, { width: tp.w + 'px', height: tp.h + 'px', backgroundImage: `url(/api/items/${P.it.id}/trickplay/${sheet})`,
+      Object.assign(img.style, { width: tp.w + 'px', height: tp.h + 'px', backgroundImage: `url(/api/items/${cur.it.id}/trickplay/${sheet})`,
         backgroundPosition: `-${(k % tp.cols) * tp.w}px -${Math.floor(k / tp.cols) * tp.h}px`, display: 'block' });
     } else img.style.display = 'none';
     prev.hidden = false;
-    prev.style.left = Math.max(0, Math.min(r.width - prev.offsetWidth, e.clientX - r.left - prev.offsetWidth / 2)) + 'px';
+    const pw = prev.offsetWidth;
+    prev.style.left = Math.max(0, Math.min(rect.width - pw, mx - rect.left - pw / 2)) + 'px';
   };
-  track.onmouseleave = () => { prev.hidden = true; };
-  track.onclick = (e) => { v.currentTime = tAt(e); };
-  v.addEventListener('pause', () => P && sendProgress());
-  v.addEventListener('ended', () => P && onEnded());
+  track.onmouseenter = () => { rect = track.getBoundingClientRect(); };
+  track.onmousemove = (e) => {
+    if (P !== cur) return;
+    if (!rect) rect = track.getBoundingClientRect();
+    mx = e.clientX;
+    if (!raf) raf = requestAnimationFrame(drawPrev);
+  };
+  track.onmouseleave = () => { prev.hidden = true; rect = null; if (raf) { cancelAnimationFrame(raf); raf = 0; } };
+  track.onclick = (e) => { v.currentTime = tAt(e.clientX, track.getBoundingClientRect()); };
+  v.addEventListener('pause', () => P === cur && sendProgress());
+  v.addEventListener('ended', () => P === cur && onEnded());
   v.addEventListener('error', () => {
-    if (P && P.pb?.mode === 'direct' && !P.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); P.forceHls = true; reload(); }
+    if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(); }
   });
-  let idle; const wake = () => { el.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => P && !v.paused && el.classList.add('idle'), 3000); };
+  let idle; const wake = () => { el.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => P === cur && !v.paused && el.classList.add('idle'), 3000); };
   el.onmousemove = wake; el.ontouchstart = wake; wake();
+  videoSession(v);
   document.addEventListener('keydown', keys);
   await load(start);
 }
 
 function markers() {
-  const v = $('#vid'), b = $('#pskip'), pb = P.pb; if (!v || !b || !pb) return;
+  if (!P) return;
+  const v = $('#vid', P.el), b = $('#pskip', P.el), pb = P.pb; if (!v || !b || !pb) return;
   const t = v.currentTime;
   if (pb.recap && t >= pb.recap.start && t < pb.recap.end - 1) {
     if (b.dataset.k !== 'recap') { b.dataset.k = 'recap'; b.textContent = 'Hoppa över sammanfattning ⏭'; b.onclick = () => { v.currentTime = pb.recap.end; b.hidden = true; }; }
@@ -1439,72 +1561,91 @@ function markers() {
     if (b.dataset.k !== 'intro') { b.dataset.k = 'intro'; b.textContent = 'Hoppa över intro ⏭'; b.onclick = () => { v.currentTime = pb.intro.end; b.hidden = true; }; }
     b.hidden = false;
   } else if (pb.credits && P.it.nextId && t >= pb.credits && t < pb.credits + 60) {
-    if (b.dataset.k !== 'credits') { b.dataset.k = 'credits'; b.textContent = 'Nästa avsnitt ⏭'; b.onclick = () => { sendProgress(true); play(P.it.nextId, 0); }; }
+    if (b.dataset.k !== 'credits') { b.dataset.k = 'credits'; b.textContent = 'Nästa avsnitt ⏭'; b.onclick = () => { if (!P) return; sendProgress(true); goNext(P.it.nextId); }; }
     b.hidden = false;
   } else { b.hidden = true; b.dataset.k = ''; }
 }
 
 function keys(e) {
-  if (!P || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
-  const v = $('#vid');
+  if (!P || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
+  const v = $('#vid', P.el); if (!v) return;
   if (e.key === 'Escape' && !document.fullscreenElement) closePlayer();
-  else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+  else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
   else if (e.key === 'ArrowRight') v.currentTime += 10;
   else if (e.key === 'ArrowLeft') v.currentTime -= 10;
-  else if (e.key === 's' && !$('#pskip').hidden) $('#pskip').click();
-  else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : $('#player').requestFullscreen?.();
+  else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
+  else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
 }
 
 async function load(start) {
-  const { it } = P, v = $('#vid');
-  if (P.hls) { P.hls.destroy(); P.hls = null; }
-  const sub = it.subtitles.find(s => s.id === P.sub);
-  const extra = { q: P.q === 'auto' ? '' : P.q, audio: P.audio, sub: sub?.bitmap ? sub.id : '' };
-  if (P.forceHls) extra.force = 'hls';
+  const cur = P; if (!cur) return;
+  const { it, el } = cur, v = $('#vid', el);
+  if (!v || !v.isConnected) return;
+  // Varje anrop får en egen token – ett senare load() (kvalitets-/ljudbyte) eller stängning gör detta inaktuellt
+  const tok = cur.tok = Symbol();
+  const live = () => P === cur && cur.tok === tok && v.isConnected;
+  if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
+  if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
+  const sub = it.subtitles.find(s => s.id === cur.sub);
+  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap ? sub.id : '' };
+  if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   let pb;
-  try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`); } catch (e) { toast(e.message); return; }
-  if (!P) return;
-  P.pb = pb;
+  try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); } catch (e) { if (live()) toast(e.message); return; }
+  if (!live()) return;
+  cur.pb = pb;
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
-  $('#pmode').textContent = `${label}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
-  $('#pmode').title = pb.reasons.join(', ');
+  const pm = $('#pmode', el);
+  pm.textContent = `${label}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
+  pm.title = pb.reasons.join(', ');
   if (pb.mode === 'direct' || v.canPlayType('application/vnd.apple.mpegurl')) {
     v.src = pb.url;
   } else {
-    try {
-      const Hls = await loadHls();
-      if (!Hls.isSupported()) throw new Error();
-      P.hls = new Hls({ startPosition: start, maxBufferLength: 40, xhrSetup: (x) => { x.withCredentials = true; } });
-      P.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { if (d.type === 'networkError') P.hls.startLoad(); else if (d.type === 'mediaError') P.hls.recoverMediaError(); else toast('Uppspelningsfel: ' + d.details); } });
-      P.hls.loadSource(pb.url); P.hls.attachMedia(v);
-    } catch { toast('Kunde inte ladda HLS-spelaren'); return; }
+    let Hls;
+    try { Hls = await loadHls(); if (!Hls.isSupported()) throw new Error(); }
+    catch { if (live()) toast('Kunde inte ladda HLS-spelaren'); return; }
+    if (!live()) return;
+    if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
+    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, xhrSetup: (x) => { x.withCredentials = true; } });
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || cur.hls !== hls || !live()) return;
+      if (d.type === 'networkError') hls.startLoad(); else if (d.type === 'mediaError') hls.recoverMediaError(); else toast('Uppspelningsfel: ' + d.details);
+    });
+    hls.loadSource(pb.url); hls.attachMedia(v);
   }
-  v.addEventListener('loadedmetadata', () => { if (start > 0 && Math.abs(v.currentTime - start) > 2) v.currentTime = start; setSubs(); }, { once: true });
+  const lmd = cur.lmd = () => {
+    if (cur.lmd === lmd) cur.lmd = null;
+    if (!live()) return;
+    if (start > 0 && Math.abs(v.currentTime - start) > 2) v.currentTime = start;
+    setSubs();
+  };
+  v.addEventListener('loadedmetadata', lmd, { once: true });
   v.play().catch(() => {});
 }
-function reload() { const v = $('#vid'); load(v.currentTime || 0); }
+function reload() { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0); }
 
 function setSubs() {
-  const v = $('#vid'); if (!v || !P) return;
+  if (!P) return;
+  const el = P.el, v = $('#vid', el); if (!v) return;
   $$('track', v).forEach(t => t.remove());
   // Andra undertext (t.ex. för språkinlärning): laddas dold och ritas överst i bilden
   const s2 = P.sub2 && P.sub2 !== P.sub ? P.pb?.subtitles.find(s => s.id === P.sub2) : null;
-  $('#sub2').innerHTML = '';
+  const box2 = $('#sub2', el);
+  box2.innerHTML = '';
   if (s2) {
     const t2 = document.createElement('track');
     Object.assign(t2, { kind: 'metadata', src: s2.url, label: 'sub2', srclang: s2.lang || 'und' });
     v.append(t2);
     const on = () => { t2.track.mode = 'hidden'; t2.track.oncuechange = () => {
       const txt = [...(t2.track.activeCues || [])].map(c => c.text.replace(/<[^>]+>/g, '')).join('\n');
-      $('#sub2').innerHTML = txt ? `<span>${esc(txt)}</span>` : '';
+      box2.innerHTML = txt ? `<span>${esc(txt)}</span>` : '';
     }; };
     t2.addEventListener('load', on); setTimeout(on, 50);
   }
   const sub = P.pb?.subtitles.find(s => s.id === P.sub);
-  $('#poff').hidden = !sub;
+  $('#poff', el).hidden = !sub;
   if (!sub && !s2) return;
-  $('#poffv').textContent = (P.offset > 0 ? '+' : '') + P.offset.toFixed(1).replace('.', ',') + ' s';
+  $('#poffv', el).textContent = (P.offset > 0 ? '+' : '') + P.offset.toFixed(1).replace('.', ',') + ' s';
   if (!sub) return;
   const t = document.createElement('track');
   const url = sub.url + (sub.url.includes('?') ? '&' : '?') + (P.offset ? 'offset=' + P.offset : '');
@@ -1516,56 +1657,64 @@ function setSubs() {
 
 function sendProgress(final = false) {
   if (!P) return;
-  const v = $('#vid'); if (!v || !v.duration || v.currentTime < 1) return;
-  P.lastSent = Date.now();
-  const body = JSON.stringify({ position: v.currentTime, duration: P.it.duration || v.duration });
-  if (final && navigator.sendBeacon) navigator.sendBeacon(`/api/items/${P.it.id}/progress`, new Blob([body], { type: 'application/json' }));
-  else fetch(`/api/items/${P.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-    .then(r => r.json()).then(d => { if (d.stop && P) { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }).catch(() => {});
+  const cur = P, v = $('#vid', cur.el); if (!v || !v.duration || v.currentTime < 1) return;
+  cur.lastSent = Date.now();
+  const body = JSON.stringify({ position: v.currentTime, duration: cur.it.duration || v.duration });
+  if (final && navigator.sendBeacon) navigator.sendBeacon(`/api/items/${cur.it.id}/progress`, new Blob([body], { type: 'application/json' }));
+  else fetch(`/api/items/${cur.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+    .then(r => r.json()).then(d => { if (d.stop && P === cur) { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }).catch(() => {});
 }
 
 function onEnded() {
   sendProgress(true);
-  const { it } = P;
+  const cur = P, { it } = cur;
   if (!it.nextId) return closePlayer();
   const box = document.createElement('div'); box.className = 'next';
   let n = 8;
-  box.innerHTML = `<b>Nästa avsnitt om <span id="cd">${n}</span> s</b><div class="row"><button class="primary small" id="go">Spela nu</button><button class="ghost small" id="stay">Avbryt</button></div>`;
-  P.el.append(box);
-  P.nextTimer = setInterval(() => { n--; const cd = $('#cd'); if (cd) cd.textContent = n; if (n <= 0) { clearInterval(P.nextTimer); goNext(it.nextId); } }, 1000);
-  $('#go').onclick = () => { clearInterval(P.nextTimer); goNext(it.nextId); };
-  $('#stay').onclick = () => { clearInterval(P.nextTimer); box.remove(); };
+  box.innerHTML = `<b>Nästa avsnitt om <span class="cd">${n}</span> s</b><div class="row"><button class="primary small" data-go>Spela nu</button><button class="ghost small" data-stay>Avbryt</button></div>`;
+  cur.el.append(box);
+  clearInterval(cur.nextTimer);
+  const t = cur.nextTimer = setInterval(() => {
+    if (P !== cur) return clearInterval(t);
+    n--; $('.cd', box).textContent = n;
+    if (n <= 0) { clearInterval(t); goNext(it.nextId); }
+  }, 1000);
+  $('[data-go]', box).onclick = () => { clearInterval(t); goNext(it.nextId); };
+  $('[data-stay]', box).onclick = () => { clearInterval(t); box.remove(); };
 }
 
 async function goNext(nextId) {
   const party = P?.party;
   await play(nextId, 0);
   // I ett rum byter alla till nästa avsnitt
-  if (party) api(`/party/${party}/state`, { method: 'POST', body: { itemId: nextId, playing: true, position: 0 } }).catch(() => {});
+  if (party) api(`/party/${party}/state`, { method: 'POST', body: { itemId: nextId, playing: true, position: 0 }, bg: true }).catch(() => {});
 }
 function joinParty() {
-  const rid = P.party;
-  $('#plink').value = `${status.publicUrl || location.origin}/#/party/${rid}`;
-  $('#pparty').textContent = '👥 Rummet';
+  if (!P) return;
+  const rid = P.party, el = P.el;
+  $('#plink', el).value = `${status.publicUrl || location.origin}/#/party/${rid}`;
+  $('#pparty', el).textContent = '👥 Rummet';
   if (P.es) return;
   const es = P.es = new EventSource(`/api/party/${rid}/events`);
   const apply = (st) => {
-    const v = $('#vid'); if (!v || !P) return;
+    const v = P && $('#vid', P.el); if (!v) return;
     const target = st.position + (st.playing ? (Date.now() - st.at) / 1000 : 0);
-    P.applying = true;
+    const cur = P;
+    cur.applying = true;
     if (Math.abs(v.currentTime - target) > 1.5) v.currentTime = target;
     if (st.playing && v.paused) v.play().catch(() => {});
     if (!st.playing && !v.paused) v.pause();
-    setTimeout(() => { if (P) P.applying = false; }, 600);
+    setTimeout(() => { cur.applying = false; }, 600);
   };
-  const members = (m) => { const el = $('#pmembers'); if (el) el.textContent = 'Här nu: ' + m.map(x => x.name).join(', '); };
-  const addChat = (c) => { const el = $('#pchat'); if (!el) return; el.insertAdjacentHTML('beforeend', `<div><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`); el.scrollTop = 1e9; };
-  es.addEventListener('hello', (e) => { const d = JSON.parse(e.data); members(d.members); d.chat.forEach(addChat); if (d.state.by !== me.name || d.state.position > 0) apply(d.state); });
+  const members = (m) => { const x = $('#pmembers', el); if (x) x.textContent = 'Här nu: ' + m.map(y => y.name).join(', '); };
+  const addChat = (c) => { const x = $('#pchat', el); if (!x) return; x.insertAdjacentHTML('beforeend', `<div><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`); x.scrollTop = 1e9; };
+  // hello skickas vid varje (åter)anslutning med hela historiken – töm chatten först så inget dubbleras
+  es.addEventListener('hello', (e) => { const d = JSON.parse(e.data); const x = $('#pchat', el); if (x) x.innerHTML = ''; members(d.members); d.chat.forEach(addChat); if (d.state.by !== me.name || d.state.position > 0) apply(d.state); });
   es.addEventListener('state', (e) => { const st = JSON.parse(e.data); if (st.by !== me.name) apply(st); });
   es.addEventListener('members', (e) => members(JSON.parse(e.data)));
-  es.addEventListener('chat', (e) => { const c = JSON.parse(e.data); addChat(c); if (c.name !== me.name && $('#partybox').hidden) toast(`${c.name}: ${c.text}`); });
+  es.addEventListener('chat', (e) => { const c = JSON.parse(e.data); addChat(c); const pb = $('#partybox', el); if (c.name !== me.name && (!pb || pb.hidden)) toast(`${c.name}: ${c.text}`); });
   es.addEventListener('item', (e) => { const d = JSON.parse(e.data); if (P && P.it.id !== d.itemId) { toast(`${d.by} bytte till nästa avsnitt`); play(d.itemId, 0); } });
-  es.addEventListener('closed', () => { toast('Rummet stängdes'); es.close(); if (P) { P.party = null; P.es = null; } });
+  es.addEventListener('closed', () => { toast('Rummet stängdes'); es.close(); if (P && P.es === es) { P.party = null; P.es = null; } });
 }
 views.party = async (rid) => {
   try {
@@ -1573,7 +1722,7 @@ views.party = async (rid) => {
     const pos = r.state.position + (r.state.playing ? (Date.now() - r.state.at) / 1000 : 0);
     location.hash = '#/item/' + r.itemId;
     setTimeout(() => play(r.itemId, pos, { party: rid }), 50);
-  } catch (e) { main.innerHTML = `<div class="empty"><h2>Rummet finns inte längre</h2><p>${esc(e.message)}</p></div>`; }
+  } catch (e) { if (e.aborted) throw e; main.innerHTML = `<div class="empty"><h2>Rummet finns inte längre</h2><p>${esc(e.message)}</p></div>`; }
 };
 
 function closePlayer(refresh = true) {
@@ -1581,15 +1730,17 @@ function closePlayer(refresh = true) {
   if (P.es) { P.es.close(); P.es = null; }
   sendProgress(true);
   clearInterval(P.nextTimer);
-  if (P.hls) P.hls.destroy();
-  const v = $('#vid'); const id = P.it.id;
-  const el = P.el;
+  if (P.hls) { P.hls.destroy(); P.hls = null; }
+  const el = P.el, v = $('#vid', el), id = P.it.id;
+  if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
+  P.tok = null; P.lmd = null;
   P = null;
-  if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
+  stopVideo(v);
   fetch(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
   document.removeEventListener('keydown', keys);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  el.hidden = true; el.innerHTML = ''; document.body.style.overflow = '';
+  overlayClose(el);
+  musicSession();
   if (refresh) route();
 }
 window.addEventListener('pagehide', () => sendProgress(true));
@@ -1614,7 +1765,7 @@ const cover = (albumId, has, cls = '') => {
 };
 const albumCard = (a) => `<a class="card mcard" href="#/album/${a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</div></a>`;
 function trackRows(tracks, opts = {}) {
-  return `<table class="tracks">${tracks.map((t, i) => `<tr data-ti="${i}" class="${M.cur && M.cur.id === t.id ? 'playing' : ''}">
+  return `<table class="tracks">${tracks.map((t, i) => `<tr data-ti="${i}" data-tid="${t.id}" class="${M.cur && M.cur.id === t.id ? 'playing' : ''}">
     <td class="muted num">${opts.showCover ? cover(t.albumId, t.cover, 'tiny') : (t.track || i + 1)}</td>
     <td><b>${esc(t.title)}</b>${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
     <td class="r muted">${fmtTime(t.duration)}</td>
@@ -1623,22 +1774,23 @@ function trackRows(tracks, opts = {}) {
 }
 function bindTracks(tracks, root = main) {
   $$('[data-ti]', root).forEach(r => r.ondblclick = r.onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
-  $$('[data-fav]', root).forEach(b => b.onclick = async () => {
+  $$('[data-fav]', root).forEach(b => b.onclick = act(async () => {
     const on = b.textContent !== '♥'; b.textContent = on ? '♥' : '♡';
-    await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on } });
-  });
-  $$('[data-addpl]', root).forEach(b => b.onclick = () => addToPlaylist([+b.dataset.addpl]));
+    try { await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on }, bg: true }); }
+    catch (e) { b.textContent = on ? '♡' : '♥'; throw e; }
+  }));
+  $$('[data-addpl]', root).forEach(b => b.onclick = act(() => addToPlaylist([+b.dataset.addpl])));
 }
 async function addToPlaylist(ids) {
-  const pls = await api('/music/playlists');
+  const pls = await api('/music/playlists', { bg: true });
   const d = document.createElement('dialog');
   d.innerHTML = `<h2>Lägg till i spellista</h2><div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
     <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…"><button class="primary" id="mkpl">Skapa</button></div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
   document.body.append(d); d.showModal();
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
-  $$('[data-pl]', d).forEach(b => b.onclick = async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids } }); toast('Tillagd'); d.close(); d.remove(); });
-  $('#mkpl', d).onclick = async () => { const n = $('#newpl', d).value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids } }); toast('Spellista skapad'); d.close(); d.remove(); };
+  $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast('Tillagd'); d.close(); d.remove(); }));
+  $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast('Spellista skapad'); d.close(); d.remove(); });
 }
 
 views.music = async (lid, tab) => {
@@ -1675,25 +1827,30 @@ views.music = async (lid, tab) => {
       <table>${p.map(x => `<tr><td><a href="#/playlist/${x.id}"><b>${esc(x.name)}</b></a></td><td class="muted">${x.tracks} låtar · ${fmtDur(x.duration || 0)}</td></tr>`).join('') || '<tr><td class="muted">Inga spellistor ännu.</td></tr>'}</table>`;
   }
   main.innerHTML = musicHeader(lid, tabs, tab) + body;
-  if ($('#mknpl')) $('#mknpl').onclick = async () => { const n = $('#npl').value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n } }); route(); };
+  if ($('#mknpl')) $('#mknpl').onclick = act(async () => { const n = $('#npl').value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n } }); route(); });
 };
 function musicHeader(lid, tabs, tab) {
   const lib = libs.find(l => l.id === +lid);
   return `<div class="toolbar"><h1>${esc(lib?.name || 'Musik')}</h1><input id="msearch" placeholder="Sök artist, album, låt (Enter)" style="max-width:280px"></div>
     <div class="tabs">${tabs.map(([k, n]) => `<a class="tabbtn ${k === tab ? 'on' : ''}" href="#/music/${lid}/${k}">${n}</a>`).join('')}</div>`;
 }
-document.addEventListener('keydown', async (e) => {
+let msearchSeq = 0;
+document.addEventListener('keydown', act(async (e) => {
   if (e.target.id !== 'msearch' || e.key !== 'Enter') return;
   const lid = location.hash.split('/')[2], q = e.target.value.trim(); if (!q) return;
+  const gen = routeGen, seq = ++msearchSeq;
   const r = await api(`/music/${lid}/search?q=${encodeURIComponent(q)}`);
+  // Användaren kan ha bytt sida (eller sökt igen) medan vi väntade
+  const tabs = $('.tabs');
+  if (gen !== routeGen || seq !== msearchSeq || !tabs || !$('#msearch')) return;
   const box = document.createElement('div');
   box.innerHTML = `<section class="section"><h2>Sökresultat för ”${esc(q)}”</h2>
     ${r.artists.length ? `<div class="row" style="margin-bottom:10px">${r.artists.map(a => `<a class="btn small" href="#/artist/${a.id}">${esc(a.name)}</a>`).join('')}</div>` : ''}
     ${r.albums.length ? `<div class="shelf" style="margin-bottom:14px">${r.albums.map(albumCard).join('')}</div>` : ''}
     ${r.tracks.length ? trackRows(r.tracks, { showCover: true }) : ''}${!r.artists.length && !r.albums.length && !r.tracks.length ? '<p class="muted">Inga träffar.</p>' : ''}</section>`;
   $$('.msearchres').forEach(x => x.remove()); box.className = 'msearchres';
-  $('.tabs').after(box); bindTracks(r.tracks, box);
-});
+  tabs.after(box); bindTracks(r.tracks, box);
+}));
 
 views.album = async (id) => {
   const a = await api('/music/albums/' + id);
@@ -1704,7 +1861,7 @@ views.album = async (id) => {
   bindTracks(a.trackList);
   $('#pa').onclick = () => playQueue(a.trackList, 0);
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
-  $('#aa').onclick = () => addToPlaylist(a.trackList.map(t => t.id));
+  $('#aa').onclick = act(() => addToPlaylist(a.trackList.map(t => t.id)));
 };
 views.artist = async (id) => {
   const a = await api('/music/artists/' + id);
@@ -1724,12 +1881,12 @@ views.playlist = async (id) => {
   bindTracks(p.trackList);
   // Ta bort enskilda låtar
   $$('#pltracks tr').forEach((r, i) => { const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '✕'; b.title = 'Ta bort ur listan';
-    b.onclick = async () => { const ids = p.trackList.map(t => t.id); ids.splice(i, 1); await api('/music/playlists/' + id, { method: 'PUT', body: { trackIds: ids } }); route(); };
+    b.onclick = act(async () => { const ids = p.trackList.map(t => t.id); ids.splice(i, 1); await api('/music/playlists/' + id, { method: 'PUT', body: { trackIds: ids } }); route(); });
     r.lastElementChild.append(b); });
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
-  $('#rn').onclick = async () => { const n = prompt('Nytt namn:', p.name); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } };
-  $('#dl').onclick = async () => { if (confirm('Ta bort spellistan?')) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } };
+  $('#rn').onclick = act(async () => { const n = prompt('Nytt namn:', p.name); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } });
+  $('#dl').onclick = act(async () => { if (confirm('Ta bort spellistan?')) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } });
 };
 const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -1763,15 +1920,26 @@ function ensureBar() {
   $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
   $('#mx').onclick = () => { if (M.spoken) spokenSave(); M.spoken = null; a.pause(); a.removeAttribute('src'); bar.hidden = true; document.body.classList.remove('hasbar'); M.cur = null; };
   $('#mq').onclick = showQueue;
-  if (navigator.mediaSession) {
-    navigator.mediaSession.setActionHandler('play', () => a.play());
-    navigator.mediaSession.setActionHandler('pause', () => a.pause());
-    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
-    navigator.mediaSession.setActionHandler('previoustrack', () => $('#mprev').click());
-    try { navigator.mediaSession.setActionHandler('seekto', (d) => seekTo(d.seekTime)); } catch {}
-    try { navigator.mediaSession.setActionHandler('seekbackward', () => M.spoken ? spokenSeek(spokenPos() - 15) : (a.currentTime -= 10)); } catch {}
-    try { navigator.mediaSession.setActionHandler('seekforward', () => M.spoken ? spokenSeek(spokenPos() + 30) : (a.currentTime += 10)); } catch {}
-  }
+  if (!P && !LP && !RP) musicSession();
+}
+// Mediatangenter (tangentbord, hörlurar, låsskärm) styr den spelare som är aktiv
+const MS_ACTIONS = ['play', 'pause', 'nexttrack', 'previoustrack', 'seekto', 'seekbackward', 'seekforward', 'stop'];
+function setSession(h) {
+  if (!navigator.mediaSession) return;
+  for (const k of MS_ACTIONS) { try { navigator.mediaSession.setActionHandler(k, h[k] || null); } catch {} }
+}
+function videoSession(v) {
+  setSession({ play: () => v.play().catch(() => {}), pause: () => v.pause(),
+    seekto: (d) => { v.currentTime = d.seekTime; }, seekbackward: () => { v.currentTime -= 10; }, seekforward: () => { v.currentTime += 10; } });
+  if (navigator.mediaSession) navigator.mediaSession.metadata = null;
+}
+function musicSession() {
+  const a = M.audio;
+  if (!a) return setSession({});
+  setSession({ play: () => a.play().catch(() => {}), pause: () => a.pause(), nexttrack: () => nextTrack(false), previoustrack: () => $('#mprev')?.click(),
+    seekto: (d) => seekTo(d.seekTime),
+    seekbackward: () => M.spoken ? spokenSeek(spokenPos() - 15) : (a.currentTime -= 10),
+    seekforward: () => M.spoken ? spokenSeek(spokenPos() + 30) : (a.currentTime += 10) });
 }
 // ---------- tal: ljudböcker och poddar (flera filer, global position, hastighet, sparad position) ----------
 function setBarMode(spoken) {
@@ -1781,7 +1949,7 @@ function setBarMode(spoken) {
 }
 function playSpoken(s) {
   ensureBar();
-  if (P) closePlayer(false);
+  closeAllPlayers();
   if (M.spoken) spokenSave();
   M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title };
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
@@ -1844,7 +2012,7 @@ function playQueue(tracks, i) {
   ensureBar();
   if (M.spoken) { spokenSave(); M.spoken = null; }
   setBarMode(false);
-  if (P) closePlayer(false);
+  closeAllPlayers();
   M.queue = tracks; loadTrack(i);
 }
 async function loadTrack(i) {
@@ -1859,7 +2027,7 @@ async function loadTrack(i) {
   $('#mcov').innerHTML = cover(t.albumId, t.cover, 'small');
   $('#mtitle').textContent = t.title;
   $('#martist').textContent = t.artist || ''; $('#martist').href = t.artistId ? `#/artist/${t.artistId}` : '#';
-  $$('tr[data-ti]').forEach(r => r.classList.remove('playing'));
+  $$('tr[data-ti]').forEach(r => r.classList.toggle('playing', r.dataset.tid === String(t.id)));
   if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || '', album: t.album || '',
     artwork: t.cover ? [{ src: `/api/music/cover/${t.albumId}`, sizes: '600x600', type: 'image/jpeg' }] : [] });
   fetch(`/api/music/tracks/${t.id}/played`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
@@ -1901,16 +2069,20 @@ async function boot() {
   return true;
 }
 async function route() {
+  const gen = ++routeGen;
+  // Stoppa timers/slingor från föregående vy
+  for (const f of [...leaveFns]) { try { f(); } catch {} }
+  leaveFns.clear();
   const h = location.hash.slice(2) || '';
   const [name, arg, arg2] = h.split('/');
   if (!me && name !== 'login') { location.hash = '#/login'; return; }
-  if (P && name !== 'play') closePlayer(false);
+  closeAllPlayers();
   $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
   main.innerHTML = '<div class="spin"></div>';
-  try { await v(arg, arg2); window.scrollTo(0, 0); fillWatch(); }
-  catch (e) { if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
+  try { await v(arg, arg2); if (gen !== routeGen) return; window.scrollTo(0, 0); fillWatch(); }
+  catch (e) { if (gen !== routeGen || e?.aborted) return; if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
 }
 window.addEventListener('hashchange', route);
 

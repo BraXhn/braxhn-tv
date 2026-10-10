@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { get, all, run, now, getSetting, setSetting, IMAGES, RESTORE_FILE } from './db.js';
+import { pipeline } from 'node:stream';
+import { get, all, run, tx, now, getSetting, setSetting, IMAGES, RESTORE_FILE } from './db.js';
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
 import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
@@ -28,7 +29,8 @@ import * as live from './livetv.js';
 import * as dvr from './dvr.js';
 import * as streaming from './streaming.js';
 
-hooks.keyframes = (it) => st.computeKeyframes(it);
+// Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
+hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
@@ -41,9 +43,14 @@ const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
 import { VERSION } from './updates.js';
 
 // ---------- formning av objekt ----------
+// Avsnittsräkning behövs bara för serier (CASE gör att underfrågorna inte körs för filmer/avsnitt)
 const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
-  (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id) AS ep_total,
-  (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) AS ep_watched`;
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id) END AS ep_total,
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) END AS ep_watched`;
+// Kolumner som shape() använder – inte tunga fält som streams/chapters (och overview i listvyer)
+const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop, i.thumb, i.duration, i.rating, i.added, i.hdr,
+  i.genres, i.cert, i.age, i.collection_id, i.season, i.episode, i.parent_id, i.height,
+  i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay`;
 const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
 
 const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
@@ -51,7 +58,7 @@ function shape(r) {
   const o = {
     id: r.id, kind: r.kind, title: r.title, year: r.year, library: r.library_id,
     poster: !!r.poster, backdrop: !!r.backdrop, thumb: !!r.thumb,
-    duration: r.duration, rating: r.rating, overview: r.overview, added: r.added, hdr: r.hdr || null,
+    duration: r.duration, rating: r.rating, overview: r.overview ?? undefined, added: r.added, hdr: r.hdr || null,
     genres: (() => { try { return JSON.parse(r.genres || '[]'); } catch { return []; } })(), cert: r.cert || null, age: r.age ?? null,
     collection: r.collection_id || null
   };
@@ -73,12 +80,16 @@ function allowedFor(uid, it) {
   if (age == null && it.parent_id) age = get('SELECT age FROM items WHERE id=?', it.parent_id)?.age;
   return age == null ? allowUnrated() : age <= max;
 }
-const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0) => {
+/** Åldersfilter för SQL (alias i = titeln, s = ev. serie) */
+function ageFilter(uid) {
   const max = maxAgeOf(uid);
-  const ageSql = max == null ? '' : ` AND COALESCE(i.age, s.age, ?) <= ?`;
-  const ageParams = max == null ? [] : [allowUnrated() ? max : 999, max];
-  return all(`SELECT i.*, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${ageSql} ORDER BY ${order} LIMIT ? OFFSET ?`,
-    uid, ...params, ...ageParams, limit, offset).map(shape);
+  return max == null ? { sql: '', params: [] } : { sql: ` AND COALESCE(i.age, s.age, ?) <= ?`, params: [allowUnrated() ? max : 999, max] };
+}
+/** slim: utan beskrivning (för stora listor där den inte visas) */
+const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false } = {}) => {
+  const age = ageFilter(uid);
+  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+    uid, ...params, ...age.params, limit, offset).map(shape);
 };
 const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1)[0];
 
@@ -378,7 +389,8 @@ route('GET', '/api/fs', admin, (c) => {
 // Bläddra
 route('GET', '/api/home', user, (c) => {
   const uid = c.user.id;
-  const cont = listItems(uid, `i.kind IN('movie','episode') AND p.position > 0 AND p.watched=0`, [], 'p.updated DESC', 20);
+  // Även sedda titlar som man börjat se om (position > 0) räknas
+  const cont = listItems(uid, `i.kind IN('movie','episode') AND p.position > 0`, [], 'p.updated DESC', 20);
   // "Nästa avsnitt" för serier man håller på med
   const shows = all(`SELECT e.parent_id AS sid, MAX(p.updated) AS t FROM progress p JOIN items e ON e.id=p.item_id
     WHERE p.user_id=? AND e.kind='episode' GROUP BY e.parent_id ORDER BY t DESC LIMIT 20`, uid);
@@ -406,7 +418,15 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
   const filter = c.q.get('filter');
   if (filter === 'unwatched') where.push(lib.type === 'show' ? 'ep_watched < ep_total' : 'COALESCE(p.watched,0)=0');
   if (filter === 'watched') where.push(lib.type === 'show' ? 'ep_watched = ep_total' : 'p.watched=1');
-  send(c.res, 200, { library: lib, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, 5000) });
+  // Valfri sidindelning (?limit=&offset=); utan den skickas hela biblioteket (upp till 5000) som tidigare
+  const limit = Math.min(10000, Math.max(1, parseInt(c.q.get('limit')) || 5000)), offset = Math.max(0, parseInt(c.q.get('offset')) || 0);
+  const out = { library: lib, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
+  if (c.q.has('limit') || c.q.has('offset')) {
+    const age = ageFilter(c.user.id);
+    out.total = get(`SELECT COUNT(*) AS n FROM (SELECT ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where.join(' AND ')})${age.sql})`, c.user.id, ...params, ...age.params).n;
+    out.offset = offset; out.limit = limit;
+  }
+  send(c.res, 200, out);
 });
 route('GET', '/api/search', user, (c) => {
   const q = `%${(c.q.get('q') || '').trim()}%`;
@@ -444,17 +464,25 @@ route('GET', '/api/items/:id', user, (c) => {
 });
 route('POST', '/api/items/:id/progress', user, async (c) => {
   const { position, duration } = await readJson(c.req);
-  const it = get('SELECT * FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
+  const it = get('SELECT id, kind, parent_id, age, duration, title, tmdb_id, season, episode FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
-  const dur = it.duration || +duration || 0, pos = Math.max(0, +position || 0);
-  const wasWatched = !!get('SELECT watched FROM progress WHERE user_id=? AND item_id=?', c.user.id, it.id)?.watched;
+  if (!allowedFor(c.user.id, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
+  const dur = it.duration || +duration || 0;
+  const rawPos = Math.max(0, +position || 0);
+  let pos = rawPos;
+  const prev = get('SELECT watched, position FROM progress WHERE user_id=? AND item_id=?', c.user.id, it.id);
+  const wasWatched = !!prev?.watched;
   const watched = dur && (pos / dur > 0.92 || dur - pos < 120 && pos > 60) ? 1 : 0;
+  // Omtittning av en sedd titel: sedd-markeringen behålls men positionen sparas (syns i "Fortsätt titta")
+  // när man kommit en bit in – att bara öppna titeln en kort stund lägger inte till den.
+  if (wasWatched && !watched && pos < 60) pos = 0;
   run(`INSERT INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(?,?,?,?,?,?)
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=excluded.position, duration=excluded.duration,
     watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, now());
-  if (watched) run('UPDATE progress SET position=0 WHERE user_id=? AND item_id=?', c.user.id, it.id);
-  if (watched && !wasWatched) trakt.scrobble(c.user.id, it, 'stop', 100).catch(() => {});
-  act.touch(c.user.id, it.id, pos);
+  if (watched && !wasWatched) trakt.scrobble(c.user.id, get('SELECT * FROM items WHERE id=?', it.id), 'stop', 100).catch(() => {});
+  // Smakprofilen påverkas bara när titeln blir sedd eller passerar 5 minuter
+  if ((watched && !wasWatched) || (pos > 300 && !((prev?.position || 0) > 300))) invalidateProfile(c.user.id);
+  act.touch(c.user.id, it.id, rawPos);
   send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) });
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
@@ -465,8 +493,9 @@ route('POST', '/api/items/:id/watched', user, async (c) => {
   const season = c.q.get('season');
   const targets = season != null && it.kind === 'show'
     ? all('SELECT id FROM items WHERE parent_id=? AND season=?', it.id, +season).map(r => r.id) : ids;
-  for (const id of targets) run(`INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,?,?)
-    ON CONFLICT(user_id,item_id) DO UPDATE SET position=0, watched=excluded.watched, updated=excluded.updated`, c.user.id, id, watched ? 1 : 0, now());
+  tx(() => { for (const id of targets) run(`INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,?,?)
+    ON CONFLICT(user_id,item_id) DO UPDATE SET position=0, watched=excluded.watched, updated=excluded.updated`, c.user.id, id, watched ? 1 : 0, now()); });
+  invalidateProfile(c.user.id);
   if (watched) trakt.markWatched(c.user.id, targets.map(id => get('SELECT * FROM items WHERE id=?', id)).filter(Boolean)).catch(() => {});
   send(c.res, 200, { ok: true });
 });
@@ -559,8 +588,11 @@ route('POST', '/api/music/playlists', user, async (c) => {
   const nm = String(name || '').trim().slice(0, 100);
   if (!nm) return fail(c.res, 400, 'Namn krävs');
   if (all('SELECT id FROM playlists WHERE user_id=?', c.user.id).length >= 200) return fail(c.res, 400, 'För många spellistor');
-  const id = Number(run('INSERT INTO playlists(user_id,name,created) VALUES(?,?,?)', c.user.id, nm, now()).lastInsertRowid);
-  (Array.isArray(trackIds) ? trackIds.slice(0, 5000) : []).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', id, +t, i); });
+  const id = tx(() => {
+    const id = Number(run('INSERT INTO playlists(user_id,name,created) VALUES(?,?,?)', c.user.id, nm, now()).lastInsertRowid);
+    (Array.isArray(trackIds) ? trackIds.slice(0, 5000) : []).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', id, +t, i); });
+    return id;
+  });
   send(c.res, 200, { id });
 });
 route('GET', '/api/music/playlists/:pid', user, (c) => { const p = music.playlist(+c.p.pid, c.user.id); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
@@ -570,8 +602,10 @@ route('PUT', '/api/music/playlists/:pid', user, async (c) => {
   const { name, trackIds } = await readJson(c.req);
   if (name) run('UPDATE playlists SET name=? WHERE id=?', String(name).trim().slice(0, 100), p.id);
   if (Array.isArray(trackIds)) { // ny ordning / nytt innehåll
-    run('DELETE FROM playlist_items WHERE playlist_id=?', p.id);
-    trackIds.slice(0, 5000).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, i); });
+    tx(() => {
+      run('DELETE FROM playlist_items WHERE playlist_id=?', p.id);
+      trackIds.slice(0, 5000).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, i); });
+    });
   }
   send(c.res, 200, { ok: true });
 });
@@ -580,7 +614,7 @@ route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
   if (!p) return fail(c.res, 404, 'Finns inte');
   const { trackIds } = await readJson(c.req);
   let pos = (get('SELECT MAX(pos) AS m FROM playlist_items WHERE playlist_id=?', p.id).m ?? -1) + 1;
-  for (const t of (Array.isArray(trackIds) ? trackIds : []).slice(0, 2000)) if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, pos++);
+  tx(() => { for (const t of (Array.isArray(trackIds) ? trackIds : []).slice(0, 2000)) if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, pos++); });
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
@@ -646,6 +680,7 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
   const id = it.kind === 'episode' ? it.parent_id : it.id; // avsnitt → hela serien
   if (add === false) run('DELETE FROM watchlist WHERE user_id=? AND item_id=?', c.user.id, id);
   else run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now());
+  invalidateProfile(c.user.id);
   send(c.res, 200, { ok: true });
 });
 
@@ -653,9 +688,12 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
 route('GET', '/api/collections', user, (c) => {
   const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie'
     GROUP BY c.id HAVING n >= 2 ORDER BY c.name`);
-  // dölj samlingar där profilen inte får se något
-  send(c.res, 200, cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop, count: col.n, years: [col.y0, col.y1],
-    visible: listItems(c.user.id, 'i.collection_id=?', [col.id], 'i.year', 1).length > 0 })).filter(x => x.visible));
+  // dölj samlingar där profilen inte får se något (en fråga för alla samlingar)
+  const age = ageFilter(c.user.id);
+  const visible = new Set(all(`SELECT DISTINCT i.collection_id AS id FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    WHERE i.collection_id IS NOT NULL${age.sql}`, ...age.params).map(r => r.id));
+  send(c.res, 200, cols.filter(col => visible.has(col.id)).map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
+    count: col.n, years: [col.y0, col.y1], visible: true })));
 });
 route('GET', '/api/collections/:cid', user, (c) => {
   const col = get('SELECT * FROM collections WHERE id=?', +c.p.cid);
@@ -739,32 +777,58 @@ route('POST', '/api/profiles/switch', user, async (c) => {
 });
 
 // ---------- Rekommendationer (lokalt, utan molntjänst) ----------
+// Smakprofilen (genrevikter) cachas en stund per användare och räknas om när något relevant ändras
+const profiles = new Map(); // uid -> { w, t }
+const PROFILE_TTL = 5 * 60e3;
+function invalidateProfile(uid) { profiles.delete(uid); }
+const parseGenres = (g) => { try { const a = JSON.parse(g || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 function genreProfile(uid) {
+  const c = profiles.get(uid);
+  if (c && Date.now() - c.t < PROFILE_TTL) return c.w;
   const rows = all(`SELECT COALESCE(s.genres, i.genres) AS g, COUNT(*) AS n FROM progress p JOIN items i ON i.id=p.item_id LEFT JOIN items s ON s.id=i.parent_id
     WHERE p.user_id=? AND (p.watched=1 OR p.position > 300) GROUP BY COALESCE(s.id, i.id)`, uid);
   const w = {};
-  for (const r of rows) { let g = []; try { g = JSON.parse(r.g || '[]'); } catch {} for (const x of g) w[x] = (w[x] || 0) + 1; }
+  for (const r of rows) for (const x of parseGenres(r.g)) w[x] = (w[x] || 0) + 1;
   for (const r of all(`SELECT i.genres FROM watchlist l JOIN items i ON i.id=l.item_id WHERE l.user_id=?`, uid)) {
-    let g = []; try { g = JSON.parse(r.genres || '[]'); } catch {} for (const x of g) w[x] = (w[x] || 0) + 0.5;
+    for (const x of parseGenres(r.genres)) w[x] = (w[x] || 0) + 0.5;
   }
+  profiles.set(uid, { w, t: Date.now() });
+  if (profiles.size > 1000) profiles.delete(profiles.keys().next().value);
   return w;
 }
+/** Hämtar fullständiga rader för id:n i given ordning */
+function itemsByIds(uid, ids) {
+  if (!ids.length) return [];
+  const rows = listItems(uid, `i.id IN (${ids.map(() => '?').join(',')})`, ids, 'i.id', ids.length);
+  const byId = new Map(rows.map(r => [r.id, r]));
+  return ids.map(id => byId.get(id)).filter(Boolean);
+}
+// Poängsättning sker på lätta kolumner; bara de bästa hämtas sedan i sin helhet
 function recommend(uid, limit) {
   const w = genreProfile(uid);
   if (!Object.keys(w).length) return [];
-  const cands = listItems(uid, `i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'
-    AND NOT EXISTS (SELECT 1 FROM progress q JOIN items e ON e.id=q.item_id WHERE q.user_id=p_uid.uid AND (e.id=i.id OR e.parent_id=i.id) AND (q.watched=1 OR q.position > 0))
-    AND NOT EXISTS (SELECT 1 FROM watchlist l WHERE l.user_id=p_uid.uid AND l.item_id=i.id)`, [], 'i.added DESC', 3000);
+  const age = ageFilter(uid);
+  // Titlar man redan börjat på/sett (serier räknas via sina avsnitt) och titlar i Min lista hoppas över
+  const seen = new Set(all(`SELECT DISTINCT COALESCE(e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
+    WHERE q.user_id=? AND (q.watched=1 OR q.position > 0)`, uid).map(r => r.id));
+  for (const r of all('SELECT item_id FROM watchlist WHERE user_id=?', uid)) seen.add(r.item_id);
+  const cands = all(`SELECT i.id, i.genres, i.rating FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    WHERE i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'${age.sql} ORDER BY i.added DESC`, ...age.params)
+    .filter(r => !seen.has(r.id)).slice(0, 3000);
   const total = Object.values(w).reduce((a, b) => a + b, 0);
-  return cands.map(it => ({ it, score: it.genres.reduce((a, g) => a + (w[g] || 0) / total, 0) / Math.sqrt(it.genres.length || 1) + (it.rating || 6) / 50 }))
-    .filter(x => x.score > 0.2).sort((a, b) => b.score - a.score).slice(0, limit).map(x => x.it);
+  const top = cands.map(r => { const g = parseGenres(r.genres); return { id: r.id, score: g.reduce((a, x) => a + (w[x] || 0) / total, 0) / Math.sqrt(g.length || 1) + (r.rating || 6) / 50 }; })
+    .filter(x => x.score > 0.2).sort((a, b) => b.score - a.score).slice(0, limit).map(x => x.id);
+  return itemsByIds(uid, top);
 }
 function similarTo(uid, it, limit) {
-  let g = []; try { g = JSON.parse(it.genres || '[]'); } catch {}
+  const g = parseGenres(it.genres);
   if (!g.length) return [];
-  const cands = listItems(uid, `i.kind=? AND i.id != ? AND i.genres IS NOT NULL`, [it.kind, it.id], 'i.rating DESC', 2000);
-  return cands.map(x => ({ x, s: x.genres.filter(y => g.includes(y)).length / Math.max(g.length, x.genres.length) + (x.collection && x.collection === it.collection_id ? 1 : 0) }))
-    .filter(o => o.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, limit).map(o => o.x);
+  const age = ageFilter(uid);
+  const cands = all(`SELECT i.id, i.genres, i.collection_id FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    WHERE i.kind=? AND i.id != ? AND i.genres IS NOT NULL${age.sql} ORDER BY i.rating DESC LIMIT 2000`, it.kind, it.id, ...age.params);
+  const top = cands.map(x => { const xg = parseGenres(x.genres); return { id: x.id, s: xg.filter(y => g.includes(y)).length / Math.max(g.length, xg.length) + (x.collection_id && x.collection_id === it.collection_id ? 1 : 0) }; })
+    .filter(o => o.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, limit).map(o => o.id);
+  return itemsByIds(uid, top);
 }
 
 // Förhandsbilder vid spolning
@@ -1017,7 +1081,7 @@ route('DELETE', '/api/audiobooks/bookmarks/:mid', user, (c) => { run('DELETE FRO
 route('GET', '/api/audiobooks/cover/:bid', img, (c) => {
   const f = books.coverPath(+c.p.bid);
   if (!f) return fail(c.res, 404, 'Inget omslag');
-  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); fs.createReadStream(f).pipe(c.res);
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(f), c.res, () => {});
 });
 const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
 // Strömmar för ljudböcker/poddar: kortlivad token (24 h) som bara gäller den boken/det avsnittet – för appar och AirPlay
@@ -1070,7 +1134,7 @@ route('DELETE', '/api/podcasts/:pid', user, (c) => {
 });
 route('GET', '/api/podcasts/:pid/image', img, (c) => {
   const f = pods.imagePath(+c.p.pid); if (!f) return fail(c.res, 404, 'Ingen bild');
-  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); fs.createReadStream(f).pipe(c.res);
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(f), c.res, () => {});
 });
 route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const { position, played } = await readJson(c.req);
@@ -1182,13 +1246,19 @@ route('POST', '/api/dvr/program', user, async (c) => {
       audit('dvr_rule', { ...ctx(c), detail: p.title });
       return send(c.res, 200, { rule: id });
     }
-    send(c.res, 200, { id: dvr.scheduleProgram(+programId, c.user) });
+    const p = live.program(+programId);
+    // Varna om fler inspelningar än det finns tuners överlappar
+    const conflict = p ? dvr.conflicts(p.start, p.stop, { channelId: p.channel_id }).find(x => x.conflict) || null : null;
+    send(c.res, 200, { id: dvr.scheduleProgram(+programId, c.user), conflict });
   } catch (e) { fail(c.res, 400, e.message); }
 });
 route('POST', '/api/dvr/manual', user, async (c) => {
   if (!liveOk(c)) return;
   const b = await readJson(c.req);
-  try { send(c.res, 200, { id: dvr.scheduleManual({ channelId: +b.channelId, start: +b.start, stop: +b.stop, title: b.title }, c.user) }); } catch (e) { fail(c.res, 400, e.message); }
+  try {
+    const conflict = dvr.conflicts(+b.start, +b.stop, { channelId: +b.channelId }).find(x => x.conflict) || null;
+    send(c.res, 200, { id: dvr.scheduleManual({ channelId: +b.channelId, start: +b.start, stop: +b.stop, title: b.title }, c.user), conflict });
+  } catch (e) { fail(c.res, 400, e.message); }
 });
 route('DELETE', '/api/dvr/rules/:id', user, (c) => {
   const r = get('SELECT * FROM dvr_rules WHERE id=?', +c.p.id); if (!r) return fail(c.res, 404, 'Finns inte');
@@ -1412,7 +1482,7 @@ route('GET', '/api/backups/:name', admin, (c) => {
   if (!f) return fail(c.res, 404, 'Finns inte');
   audit('backup_downloaded', { ...ctx(c), detail: f.name });
   c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${f.name}"`, 'Content-Length': f.size });
-  fs.createReadStream(path.join(act.BACKUP_DIR, f.name)).pipe(c.res);
+  pipeline(fs.createReadStream(path.join(act.BACKUP_DIR, f.name)), c.res, () => {});
 });
 
 // Extern säkerhetskopiering och återställning

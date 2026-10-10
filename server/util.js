@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream';
 import net from 'node:net';
 export function send(res, code, body, headers = {}) {
   if (res.headersSent) return;
@@ -83,4 +86,73 @@ export function inCidr(ip, cidr) {
   const bits = bitsStr === undefined ? 32 : Math.max(0, Math.min(32, parseInt(bitsStr)));
   const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
   return ((a & mask) >>> 0) === ((n & mask) >>> 0);
+}
+
+// ---- filsökning för skannrar ----
+/**
+ * Går igenom en mapp utan att blockera händelseloopen. accept(namn) väljer filer, skip(namn) hoppar över mappar.
+ * Returnerar { files, rootOk, failed } där failed är mappar som inte gick att läsa (t.ex. avmonterad NAS-delning).
+ */
+export async function listFiles(root, accept, skip = () => false) {
+  const files = [], failed = [];
+  let rootOk = true, n = 0;
+  async function visit(dir, isRoot) {
+    let d;
+    try { d = await fs.promises.opendir(dir); }
+    catch (e) { if (isRoot) rootOk = false; else failed.push(dir); return; }
+    const subdirs = [];
+    try {
+      for await (const e of d) {
+        if (++n % 200 === 0) await new Promise(setImmediate);
+        if (e.name.startsWith('.') || skip(e.name)) continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) subdirs.push(p);
+        else if (e.isFile() && accept(e.name)) files.push(p);
+      }
+    } catch { if (isRoot) rootOk = false; else failed.push(dir); return; }
+    for (const s of subdirs) await visit(s, false);
+  }
+  await visit(root, true);
+  if (rootOk && !files.length) {
+    // En tom rotmapp kan vara en avmonterad monteringspunkt – kontrollera att den går att läsa alls
+    try { await fs.promises.access(root, fs.constants.R_OK); } catch { rootOk = false; }
+  }
+  return { files, rootOk, failed };
+}
+
+/**
+ * Får skannern ta bort försvunna filer ur databasen? Skydd mot att ett helt bibliotek töms när
+ * t.ex. en NAS inte är monterad. missing = sökvägar som finns i databasen men inte hittades.
+ * Returnerar null om det är OK, annars ett meddelande.
+ */
+export function deletionBlocked({ name, rootOk, files, known, missing, allowMass = false }) {
+  if (!rootOk) return `${name}: biblioteksmappen går inte att läsa – inget tas bort (är disken/NAS:en monterad?)`;
+  if (!missing) return null;
+  if (files === 0 && known > 0) return `${name}: inga filer hittades men ${known} finns i biblioteket – inget tas bort (är disken/NAS:en monterad?)`;
+  if (!allowMass && known >= 20 && missing > known * 0.5) return `${name}: ${missing} av ${known} filer saknas – inget tas bort för säkerhets skull (tillåt i inställningarna om det är avsiktligt)`;
+  return null;
+}
+/** Ligger filen under någon av mapparna som inte gick att läsa? */
+export const underFailed = (file, failed) => failed.some(d => file.startsWith(d + path.sep));
+
+// ---- filströmning med Range-stöd ----
+/**
+ * Skickar en fil (ev. del av den enligt Range). pipeline stänger filen även om klienten avbryter,
+ * och läsfel kraschar inte servern. Tomma filer ger 200 med tom kropp.
+ */
+export function streamFile(req, res, file, size, headers = {}, { ranges = true } = {}) {
+  let start = 0, end = size - 1, code = 200;
+  const m = ranges && size > 0 ? /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim()) : null;
+  if (m && (m[1] !== '' || m[2] !== '')) {
+    if (m[1] === '') start = Math.max(0, size - +m[2]);
+    else { start = +m[1]; if (m[2] !== '') end = Math.min(+m[2], size - 1); }
+    if (start > end || start >= size) return send(res, 416, '', { 'Content-Range': `bytes */${size}` });
+    code = 206;
+  }
+  const h = { ...headers, 'Content-Length': size > 0 ? end - start + 1 : 0 };
+  if (ranges) h['Accept-Ranges'] = 'bytes';
+  if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
+  res.writeHead(code, h);
+  if (req.method === 'HEAD' || size <= 0) return res.end();
+  pipeline(fs.createReadStream(file, { start, end }), res, () => {});
 }

@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { get, all, run, now, IMAGES } from './db.js';
-import { send, fail } from './util.js';
+import { pipeline } from 'node:stream';
+import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { send, fail, listFiles, deletionBlocked, underFailed, streamFile } from './util.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -86,15 +87,19 @@ export async function makeCover(out, dir, file, hasPic) {
   return false;
 }
 
+const scanWarn = (status, msg) => { console.warn('[music]', msg); if (Array.isArray(status.warnings)) status.warnings.push(msg); };
 export async function scanMusic(lib, status) {
   status.phase = 'Söker musikfiler'; status.done = 0;
-  const files = [...walk(lib.path)];
+  const { files, rootOk, failed } = await listFiles(lib.path, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
+  // Saknad/oläsbar mapp (t.ex. omonterad NAS): rör ingenting
+  if (!rootOk) return scanWarn(status, deletionBlocked({ name: lib.name, rootOk }));
+  for (const d of failed) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length; status.phase = 'Läser taggar';
   const known = new Map(all('SELECT id, path, size, mtime FROM tracks WHERE library_id=?', lib.id).map(r => [r.path, r]));
   const seen = new Set();
   for (const f of files) {
     status.done++; seen.add(f);
-    let st; try { st = fs.statSync(f); } catch { continue; }
+    let st; try { st = await fs.promises.stat(f); } catch { continue; }
     const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
     if (k && k.size === st.size && k.mtime === mtime) continue;
     let info;
@@ -115,12 +120,20 @@ export async function scanMusic(lib, status) {
     const al = get('SELECT cover FROM albums WHERE id=?', alId);
     if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
   }
-  for (const [p, r] of known) if (!seen.has(p)) run('DELETE FROM tracks WHERE id=?', r.id);
-  for (const a of all('SELECT id FROM albums WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id=albums.id)', lib.id)) {
-    run('DELETE FROM albums WHERE id=?', a.id); fs.rmSync(coverFile(a.id), { force: true });
-  }
-  run(`DELETE FROM artists WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=artists.id)
-    AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id=artists.id)`, lib.id);
+  const missing = [...known.values()].filter(r => !seen.has(r.path) && !underFailed(r.path, failed));
+  const blocked = deletionBlocked({ name: lib.name, rootOk, files: files.length, known: known.size, missing: missing.length,
+    allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
+  if (blocked) return scanWarn(status, blocked);
+  const gone = [];
+  tx(() => {
+    for (const r of missing) run('DELETE FROM tracks WHERE id=?', r.id);
+    for (const a of all('SELECT id FROM albums WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id=albums.id)', lib.id)) {
+      run('DELETE FROM albums WHERE id=?', a.id); gone.push(a.id);
+    }
+    run(`DELETE FROM artists WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=artists.id)
+      AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id=artists.id)`, lib.id);
+  });
+  for (const id of gone) fs.rmSync(coverFile(id), { force: true });
 }
 
 // ---------------- API-hjälpare ----------------
@@ -196,24 +209,21 @@ export function streamTrack(req, res, t, query) {
   const maxKbps = parseInt(query.get('br')) || 0; // t.ex. 192 i bilen på mobilnät
   if (direct && !(maxKbps && t.bitrate && t.bitrate / 1000 > maxKbps * 1.5)) {
     let st; try { st = fs.statSync(t.path); } catch { return fail(res, 404, 'Filen saknas'); }
-    const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
-    let start = 0, end = st.size - 1, code = 200;
-    if (m) { start = m[1] === '' ? Math.max(0, st.size - +m[2]) : +m[1]; if (m[2] !== '' && m[1] !== '') end = Math.min(+m[2], end); code = 206; }
-    if (start > end) return send(res, 416, '', { 'Content-Range': `bytes */${st.size}` });
-    const h = { 'Content-Type': EXT_MIME[ext], 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'private, max-age=3600' };
-    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
-    res.writeHead(code, h);
-    if (req.method === 'HEAD') return res.end();
-    return fs.createReadStream(t.path, { start, end }).pipe(res);
+    return streamFile(req, res, t.path, st.size, { 'Content-Type': EXT_MIME[ext], 'Cache-Control': 'private, max-age=3600' });
   }
   const ss = Math.max(0, parseFloat(query.get('ss')) || 0);
   const kbps = Math.min(320, maxKbps || 256);
   const useMp3 = !caps.has('aac');
+  if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' }); return res.end(); }
   const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', ...(ss ? ['-ss', String(ss)] : []), '-i', t.path,
     '-map', '0:a:0', '-vn', ...(useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
     { stdio: ['ignore', 'pipe', 'ignore'] });
+  p.on('error', (e) => {
+    console.warn('[music] kunde inte starta ffmpeg:', e.message);
+    if (!res.headersSent) fail(res, 500, 'Omkodningen kunde inte startas'); else res.destroy();
+  });
   res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' });
-  p.stdout.pipe(res);
+  pipeline(p.stdout, res, () => p.kill('SIGKILL'));
   req.on('close', () => p.kill('SIGKILL'));
 }
 export const coverPath = (albumIdNum) => { const f = coverFile(albumIdNum); return fs.existsSync(f) ? f : null; };

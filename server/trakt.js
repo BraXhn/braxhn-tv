@@ -10,14 +10,27 @@ const app = () => ({ id: getSetting('trakt_client_id', process.env.TRAKT_CLIENT_
 export const enabled = () => { const a = app(); return !!(a.id && a.secret); };
 const pending = new Map(); // userId → { device_code, interval, expires }
 
+// Trakt tillåter ungefär ett skrivanrop (POST/PUT/DELETE) per sekund och konto – skrivanropen köas med minst 1 s mellanrum
+let writeGate = Promise.resolve();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function gate() {
+  const turn = writeGate.then(() => {});
+  writeGate = turn.then(() => sleep(1000));
+  return turn;
+}
 async function call(p, { method = 'GET', body, token } = {}) {
-  const r = await fetch(API + p, {
-    method, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
-    headers: { 'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': app().id, 'User-Agent': 'BraXhnTV', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
-  });
-  const t = await r.text();
-  let j = null; try { j = t ? JSON.parse(t) : null; } catch {}
-  return { status: r.status, ok: r.ok, body: j };
+  for (let attempt = 0; ; attempt++) {
+    if (method !== 'GET') await gate();
+    const r = await fetch(API + p, {
+      method, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
+      headers: { 'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': app().id, 'User-Agent': 'BraXhnTV', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+    });
+    const t = await r.text();
+    // För många anrop: vänta så länge Trakt säger (Retry-After) och försök igen
+    if (r.status === 429 && attempt < 3) { await sleep(Math.min(60, Math.max(1, +r.headers.get('retry-after') || 2)) * 1000); continue; }
+    let j = null; try { j = t ? JSON.parse(t) : null; } catch {}
+    return { status: r.status, ok: r.ok, body: j };
+  }
 }
 
 // ---------- koppling ----------
@@ -64,35 +77,43 @@ async function tokenFor(userId) {
 }
 
 // ---------- objekt → Trakt-format ----------
-function traktObj(it) {
-  if (it.kind === 'movie') return it.tmdb_id ? { movies: [{ ids: { tmdb: it.tmdb_id }, title: it.title, year: it.year }] } : null;
-  if (it.kind === 'episode') {
-    const show = get('SELECT tmdb_id, title, year FROM items WHERE id=?', it.parent_id);
-    if (!show?.tmdb_id) return null;
-    return { shows: [{ ids: { tmdb: show.tmdb_id }, title: show.title, year: show.year, seasons: [{ number: it.season, episodes: [{ number: it.episode }] }] }] };
-  }
-  return null;
+const iso = (t) => new Date((t && t > 0 ? t * 1000 : Date.now())).toISOString();
+/** Seriens tmdb-id: från raden om den redan finns (show_tmdb från synkens JOIN), annars slås den upp */
+function showOf(it) {
+  if (it.show_tmdb !== undefined) return it.show_tmdb ? { tmdb_id: it.show_tmdb, title: it.show_title, year: it.show_year } : null;
+  return get('SELECT tmdb_id, title, year FROM items WHERE id=?', it.parent_id);
 }
 function scrobbleObj(it) {
   if (it.kind === 'movie' && it.tmdb_id) return { movie: { ids: { tmdb: it.tmdb_id } } };
   if (it.kind === 'episode') {
-    const show = get('SELECT tmdb_id FROM items WHERE id=?', it.parent_id);
+    const show = showOf(it);
     if (show?.tmdb_id) return { show: { ids: { tmdb: show.tmdb_id } }, episode: { season: it.season, number: it.episode } };
   }
   return null;
 }
 
-/** Sett lokalt → lägg till i Trakts historik */
+/** Sett lokalt → lägg till i Trakts historik. watched_at = när det markerades som sett (progress.updated) om det är känt.
+ *  Returnerar antalet poster Trakt faktiskt lade till. */
 export async function markWatched(userId, items) {
-  const tok = await tokenFor(userId); if (!tok) return;
-  const body = { movies: [], shows: [] };
+  const tok = await tokenFor(userId); if (!tok) return 0;
+  const movies = [], shows = new Map();
   for (const it of items) {
-    const o = traktObj(it); if (!o) continue;
-    if (o.movies) body.movies.push(...o.movies.map(m => ({ ...m, watched_at: new Date().toISOString() })));
-    else body.shows.push(...o.shows);
+    const at = iso(it.watched_updated);
+    if (it.kind === 'movie' && it.tmdb_id) movies.push({ ids: { tmdb: it.tmdb_id }, title: it.title, year: it.year, watched_at: at });
+    else if (it.kind === 'episode') {
+      const show = showOf(it); if (!show?.tmdb_id) continue;
+      if (!shows.has(show.tmdb_id)) shows.set(show.tmdb_id, { ids: { tmdb: show.tmdb_id }, title: show.title, year: show.year, seasons: new Map() });
+      const ss = shows.get(show.tmdb_id).seasons;
+      if (!ss.has(it.season)) ss.set(it.season, []);
+      ss.get(it.season).push({ number: it.episode, watched_at: at });
+    }
   }
-  if (!body.movies.length && !body.shows.length) return;
-  await call('/sync/history', { method: 'POST', body, token: tok });
+  if (!movies.length && !shows.size) return 0;
+  const body = { movies, shows: [...shows.values()].map(s => ({ ...s, seasons: [...s.seasons].map(([number, episodes]) => ({ number, episodes })) })) };
+  const r = await call('/sync/history', { method: 'POST', body, token: tok });
+  if (!r.ok) throw new Error(`Trakt svarade ${r.status}`);
+  const a = r.body?.added || {};
+  return (+a.movies || 0) + (+a.episodes || 0);
 }
 /** "Tittar nu" på Trakt (start/pause/stop med procent) */
 export async function scrobble(userId, it, action, progress) {
@@ -111,21 +132,29 @@ export async function sync(userId) {
     const remoteEps = new Set();
     for (const x of s.body || []) for (const se of x.seasons || []) for (const ep of se.episodes || []) remoteEps.add(`${x.show?.ids?.tmdb}:${se.number}:${ep.number}`);
     let imported = 0;
-    const mark = run.bind(null, `INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,1,?)
-      ON CONFLICT(user_id,item_id) DO UPDATE SET watched=1, position=0, updated=excluded.updated WHERE watched=0`);
-    const local = all(`SELECT i.*, s.tmdb_id AS show_tmdb, COALESCE(p.watched,0) AS w FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    const local = all(`SELECT i.id, i.kind, i.tmdb_id, i.title, i.year, i.season, i.episode, i.parent_id, s.tmdb_id AS show_tmdb, s.title AS show_title, s.year AS show_year,
+      COALESCE(p.watched,0) AS w, p.updated AS watched_updated FROM items i LEFT JOIN items s ON s.id=i.parent_id
       LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.kind IN ('movie','episode')`, userId);
-    const toExport = [];
+    const toExport = [], toImport = [];
     for (const it of local) {
       const key = it.kind === 'movie' ? it.tmdb_id : it.show_tmdb ? `${it.show_tmdb}:${it.season}:${it.episode}` : null;
       if (!key) continue;
       const remote = it.kind === 'movie' ? remoteMovies.has(key) : remoteEps.has(key);
-      if (remote && !it.w) { if (mark(userId, it.id, now()).changes) imported++; }
+      if (remote && !it.w) toImport.push(it.id);
       else if (!remote && it.w) toExport.push(it);
     }
-    for (let i = 0; i < toExport.length; i += 200) await markWatched(userId, toExport.slice(i, i + 200));
+    if (toImport.length) {
+      const mark = db.prepare(`INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,1,?)
+        ON CONFLICT(user_id,item_id) DO UPDATE SET watched=1, position=0, updated=excluded.updated WHERE watched=0`);
+      const t = now();
+      db.exec('BEGIN');
+      try { for (const id of toImport) if (mark.run(userId, id, t).changes) imported++; db.exec('COMMIT'); }
+      catch (e) { db.exec('ROLLBACK'); throw e; }
+    }
+    let exported = 0;
+    for (let i = 0; i < toExport.length; i += 200) exported += await markWatched(userId, toExport.slice(i, i + 200));
     run('UPDATE trakt SET last_sync=?, sync_error=NULL WHERE user_id=?', now(), userId);
-    return { imported, exported: toExport.length };
+    return { imported, exported };
   } catch (e) {
     run('UPDATE trakt SET sync_error=? WHERE user_id=?', e.message, userId);
     throw e;

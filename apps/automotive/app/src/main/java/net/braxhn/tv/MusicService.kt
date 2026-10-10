@@ -8,7 +8,9 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
@@ -27,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentHashMap
 
 // ---- musikmodeller (matchar /api/music) ----
 @Serializable data class MAlbum(val id: Int, val title: String, val year: Int? = null, val cover: Boolean = false, val artist: String? = null, val artistId: Int? = null, val tracks: Int? = null)
@@ -59,44 +62,70 @@ import kotlinx.serialization.Serializable
 class MusicService : MediaLibraryService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var session: MediaLibrarySession? = null
-    private var libId: Int? = null
-    private var bookLibId: Int? = null
-    private var libsLoaded = false
+    @Volatile private var libId: Int? = null
+    @Volatile private var bookLibId: Int? = null
+    @Volatile private var libsLoaded = false
+    @Volatile private var libsAt = 0L
     /** Ljudbok som spelas: filernas startpositioner (för att räkna global position och spara den) */
-    private var currentBook: BBook? = null
+    @Volatile private var currentBook: BBook? = null
+
+    /** Bläddringsträdet cachas en kort stund – bilens mediaspelare frågar ofta efter samma sida */
+    private class Cached(val at: Long, val items: List<MediaItem>)
+    private val childCache = ConcurrentHashMap<String, Cached>()
 
     override fun onCreate() {
         super.onCreate()
         val http = DefaultHttpDataSource.Factory().setUserAgent("BraXhnTV-Android").setAllowCrossProtocolRedirects(true)
-        // Kontots token skickas som header (inte i URL:en)
-        Api.token.value?.let { http.setDefaultRequestProperties(mapOf("Authorization" to "Bearer $it")) }
+        // Kontots token skickas som header (inte i URL:en) och läses vid varje anrop – den kan bytas medan tjänsten lever
+        val authed = ResolvingDataSource.Factory(http) { spec ->
+            val t = Api.token.value
+            if (t != null) spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer $t")) else spec
+        }
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(http))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(authed))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
         session = MediaLibrarySession.Builder(this, player, Callback()).build()
         // Spara position för ljudböcker och poddar var 15:e sekund och vid paus
-        player.addListener(object : androidx.media3.common.Player.Listener {
+        player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) saveSpoken(player) }
+            // Byte av fil/avsnitt: spara slutpositionen för det föregående
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) return
+                val prev = oldPosition.mediaItem?.mediaId ?: return
+                saveSpoken(prev, oldPosition.positionMs / 1000.0)
+            }
         })
         scope.launch(Dispatchers.Main) { while (true) { delay(15000); if (player.isPlaying) saveSpoken(player) } }
+        // Ny inloggning: läs om bibliotek och bläddringsträd
+        scope.launch { Api.token.collect { libsLoaded = false; childCache.clear() } }
     }
 
-    private fun saveSpoken(player: ExoPlayer) {
+    private fun saveSpoken(player: Player) {
         val id = player.currentMediaItem?.mediaId ?: return
-        val pos = player.currentPosition / 1000.0
-        val p = id.split(":")
+        saveSpoken(id, player.currentPosition / 1000.0)
+    }
+
+    private fun saveSpoken(mediaId: String, pos: Double) {
+        val p = mediaId.split(":")
         when (p[0]) {
-            "bf" -> { val b = currentBook ?: return; val f = b.files.getOrNull(p[2].toInt()) ?: return
-                Api.appScope.launch { runCatching { Api.post("/api/audiobooks/book/${b.id}/progress", buildJsonObject { put("position", f.offset + pos) }) } } }
-            "pe" -> Api.appScope.launch { runCatching { Api.post("/api/podcasts/episodes/${p[1]}/progress", buildJsonObject { put("position", pos) }) } }
+            "bf" -> {
+                // bf:<bok>:<fil> – kontrollera att det är samma bok som currentBook (kan ha bytts)
+                val bookId = p.getOrNull(1)?.toIntOrNull() ?: return
+                val b = currentBook?.takeIf { it.id == bookId } ?: return
+                val f = b.files.getOrNull(p.getOrNull(2)?.toIntOrNull() ?: return) ?: return
+                Api.appScope.launch { runCatching { Api.post("/api/audiobooks/book/$bookId/progress", buildJsonObject { put("position", f.offset + pos) }) } }
+            }
+            "pe" -> { val epId = p.getOrNull(1) ?: return
+                Api.appScope.launch { runCatching { Api.post("/api/podcasts/episodes/$epId/progress", buildJsonObject { put("position", pos) }) } } }
         }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
     override fun onDestroy() {
+        session?.let { saveSpoken(it.player) }
         session?.run { player.release(); release() }
         session = null
         scope.cancel()
@@ -124,11 +153,13 @@ class MusicService : MediaLibraryService() {
     private fun album(a: MAlbum) = folder("al:${a.id}", a.title, listOfNotNull(a.artist, a.year?.toString()).joinToString(" · "), coverUri(a.id, a.cover), MediaMetadata.MEDIA_TYPE_ALBUM)
 
     private suspend fun loadLibs() {
-        if (libsLoaded) return
+        // Bildtokenen förnyas av Api när den är äldre än ett dygn (gäller 7 dygn)
         Api.refreshImageToken()
+        if (libsLoaded && System.currentTimeMillis() - libsAt < LIBS_TTL) return
         val l: List<Library> = Api.get("/api/libraries")
         libId = l.firstOrNull { it.type == "music" }?.id
         bookLibId = l.firstOrNull { it.type == "audiobook" }?.id
+        libsAt = System.currentTimeMillis()
         libsLoaded = true
     }
     private suspend fun lib(): Int? { loadLibs(); return libId }
@@ -168,6 +199,15 @@ class MusicService : MediaLibraryService() {
             "fav" -> lib()?.let { Api.get<MHome>("/api/music/$it/home").favorites } ?: emptyList()
             else -> emptyList()
         }
+    }
+
+    private suspend fun cachedChildren(parent: String): List<MediaItem> {
+        val now = System.currentTimeMillis()
+        val hit = childCache[parent]
+        if (hit != null && now - hit.at < CACHE_TTL) return hit.items
+        val items = children(parent)
+        childCache[parent] = Cached(now, items)
+        return items
     }
 
     private suspend fun children(parent: String): List<MediaItem> {
@@ -219,14 +259,18 @@ class MusicService : MediaLibraryService() {
                 ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             if (Api.token.value == null) return@future LibraryResult.ofError(LibraryResult.RESULT_ERROR_SESSION_AUTHENTICATION_EXPIRED)
             try {
-                val all = children(parentId)
-                val from = (page * pageSize).coerceAtMost(all.size)
-                LibraryResult.ofItemList(ImmutableList.copyOf(all.subList(from, (from + pageSize).coerceAtMost(all.size))), params)
+                val all = cachedChildren(parentId)
+                // Räkna i Long – page * pageSize kan slå runt för stora värden (t.ex. pageSize = Int.MAX_VALUE)
+                val size = all.size.toLong()
+                val ps = pageSize.toLong().coerceAtLeast(0L)
+                val from = (page.toLong().coerceAtLeast(0L) * ps).coerceIn(0L, size)
+                val to = (from + ps).coerceIn(from, size)
+                LibraryResult.ofItemList(ImmutableList.copyOf(all.subList(from.toInt(), to.toInt())), params)
             } catch (e: Exception) { LibraryResult.ofError(LibraryResult.RESULT_ERROR_IO) }
         }
 
         override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(LibraryResult.ofItem(folder(mediaId, mediaId), null))
+            scope.future { LibraryResult.ofItem(itemFor(mediaId), null) }
 
         override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?): ListenableFuture<LibraryResult<Void>> {
             scope.future {
@@ -264,6 +308,33 @@ class MusicService : MediaLibraryService() {
             Futures.immediateFuture(resolve(mediaItems).toMutableList())
     }
 
+    /** Ett enskilt objekt: från cachen om det nyss visats, annars från servern; spelbara id:n blir aldrig mappar. */
+    private suspend fun itemFor(mediaId: String): MediaItem {
+        if (mediaId == ROOT) return folder(ROOT, "BraXhn TV")
+        childCache.values.firstNotNullOfOrNull { c -> c.items.firstOrNull { it.mediaId == mediaId } }?.let { return it }
+        val p = mediaId.split(":")
+        val real = runCatching {
+            when (p[0]) {
+                "b" -> bookItem(Api.get<BBook>("/api/audiobooks/book/${p[1]}"))
+                "pe" -> epItem(Api.get<PEp>("/api/podcasts/episodes/${p[1]}"))
+                "al" -> album(Api.get<MAlbumDetail>("/api/music/albums/${p[1]}").let { d -> MAlbum(d.id, d.title, artist = d.artist, cover = d.cover) })
+                else -> null
+            }
+        }.getOrNull()
+        if (real != null) return real
+        return when (p[0]) {
+            "t" -> {
+                val tid = p.getOrNull(1)?.toIntOrNull()
+                val stub = playable(mediaId, "Låt", null, null, MediaMetadata.MEDIA_TYPE_MUSIC)
+                if (tid != null) stub.buildUpon().setUri(trackUri(tid)).build() else stub
+            }
+            "b" -> playable(mediaId, "Ljudbok", null, null, MediaMetadata.MEDIA_TYPE_AUDIO_BOOK)
+            "bf" -> playable(mediaId, "Ljudbok", null, null, MediaMetadata.MEDIA_TYPE_AUDIO_BOOK_CHAPTER)
+            "pe" -> playable(mediaId, "Avsnitt", null, null, MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+            else -> folder(mediaId, mediaId)
+        }
+    }
+
     private fun resolve(items: List<MediaItem>): List<MediaItem> = items.map { mi ->
         val parts = mi.mediaId.split(":")
         if (parts.size >= 2 && parts[0] == "t" && mi.localConfiguration == null) mi.buildUpon().setUri(trackUri(parts[1].toInt())).build() else mi
@@ -275,7 +346,11 @@ class MusicService : MediaLibraryService() {
         return r.albums.map(::album) + r.tracks.map { track(it, "al-${it.albumId}") }
     }
 
-    companion object { const val ROOT = "root" }
+    companion object {
+        const val ROOT = "root"
+        private const val CACHE_TTL = 60_000L
+        private const val LIBS_TTL = 12 * 60 * 60 * 1000L
+    }
 }
 
 @Serializable data class MSearch(val albums: List<MAlbum> = emptyList(), val tracks: List<MTrack> = emptyList())

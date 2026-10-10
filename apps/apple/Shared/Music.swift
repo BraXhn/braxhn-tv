@@ -42,6 +42,29 @@ struct MHome: Decodable {
 
 struct PlayURL: Decodable { let url: String }
 
+// MARK: - Ljudfokus: bara en ljudkälla åt gången
+
+/// Samordnar video, musik och tal så att bara en sak spelas åt gången.
+@MainActor
+enum AudioFocus {
+    enum Who { case video, music, spoken }
+    /// Senast startade ljudkälla (musik eller tal) – styr låsskärmens knappar
+    private(set) static var last: Who?
+
+    static func willPlay(_ who: Who) {
+        if who != .music { MusicPlayer.shared.yieldFocus() }
+        if who != .spoken { SpokenPlayer.shared.yieldFocus() }
+        if who != .video { last = who }
+        if who == .music { SpokenPlayer.setSkipCommands(false) }
+    }
+
+    /// Ska låsskärmens/hörlurarnas knappar styra ljudbok/podd?
+    static var spokenHasControls: Bool {
+        guard SpokenPlayer.shared.track != nil else { return false }
+        return last != .music || MusicPlayer.shared.current == nil
+    }
+}
+
 // MARK: - Spelare (bakgrundsljud, låsskärm, Kontrollcenter)
 
 @MainActor
@@ -50,27 +73,23 @@ final class MusicPlayer: ObservableObject {
     @Published private(set) var queue: [MTrack] = []
     @Published private(set) var index = 0
     @Published private(set) var playing = false
-    @Published var position: Double = 0
 
     var current: MTrack? { queue.indices.contains(index) ? queue[index] : nil }
     private let player = AVPlayer()
     private weak var model: AppModel?
     private var endObserver: NSObjectProtocol?
-    private var timeObserver: Any?
+    /// Ökas för varje laddning – en långsam laddning får inte vinna över en senare (snabba "nästa")
+    private var loadGen = 0
 
     private init() {
         player.allowsExternalPlayback = true
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] t in
-            let s = t.seconds
-            Task { @MainActor [weak self] in self?.position = s.isFinite ? s : 0 }
-        }
         let cc = MPRemoteCommandCenter.shared()
         // Spelas en ljudbok/podd styr knapparna den i stället
-        cc.playCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.resume() } else { self?.resume() } }; return .success }
-        cc.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.pause() } else { self?.pause() } }; return .success }
-        cc.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.toggle() } else { self?.toggle() } }; return .success }
-        cc.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.next() }; return .success }
-        cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.previous() }; return .success }
+        cc.playCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.resume() } else { self?.resume() } }; return .success }
+        cc.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.pause() } else { self?.pause() } }; return .success }
+        cc.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.toggle() } else { self?.toggle() } }; return .success }
+        cc.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(30) } else { self?.next() } }; return .success }
+        cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(-15) } else { self?.previous() } }; return .success }
     }
 
     func play(_ tracks: [MTrack], at i: Int, model: AppModel) {
@@ -82,16 +101,20 @@ final class MusicPlayer: ObservableObject {
 
     private func load(_ i: Int) async {
         guard let model = model, queue.indices.contains(i) else { return }
+        loadGen += 1
+        let gen = loadGen
         index = i
         let t = queue[i]
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
         do {
             let p: PlayURL = try await model.get("/api/music/tracks/\(t.id)/play")
+            guard gen == loadGen else { return }
             // Lägg till vilka format enheten spelar själv
             guard let url = model.absolute(p.url + "&a=mp3,aac,flac,alac") else { return }
+            #if os(iOS)
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            #endif
+            AudioFocus.willPlay(.music)
             let item = AVPlayerItem(url: url)
             if let e = endObserver { NotificationCenter.default.removeObserver(e) }
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
@@ -103,19 +126,30 @@ final class MusicPlayer: ObservableObject {
             updateNowPlaying()
             try? await model.post("/api/music/tracks/\(t.id)/played")
         } catch {
-            playing = false
+            if gen == loadGen { playing = false }
         }
+    }
+
+    /// Pausar utan att ta över låsskärmen (när video eller tal startar)
+    func yieldFocus() {
+        guard playing else { return }
+        player.pause()
+        playing = false
     }
 
     func toggle() { playing ? pause() : resume() }
     func pause() { player.pause(); playing = false; updateNowPlaying() }
-    func resume() { player.play(); playing = true; updateNowPlaying() }
+    func resume() {
+        guard current != nil else { return }
+        AudioFocus.willPlay(.music)
+        player.play(); playing = true; updateNowPlaying()
+    }
     func next() { if index + 1 < queue.count { Task { await load(index + 1) } } else { pause() } }
     func previous() {
         if player.currentTime().seconds > 3 { player.seek(to: .zero) }
         else if index > 0 { Task { await load(index - 1) } }
     }
-    func stop() { player.pause(); player.replaceCurrentItem(with: nil); queue = []; playing = false; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
+    func stop() { loadGen += 1; player.pause(); player.replaceCurrentItem(with: nil); queue = []; playing = false; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
 
     private func updateNowPlaying() {
         guard let t = current else { return }

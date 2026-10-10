@@ -27,6 +27,9 @@ export const cfg = () => ({
 export { encryptFile, decryptFile } from './backupcrypt.js';
 import { encryptFile, decryptFile } from './backupcrypt.js';
 
+// Namnen innehåller tidsstämpel (braxhn-tv-ÅÅÅÅ-MM-DD...): sortera på namn, nyast först – mtime ändras vid kopiering/synk och är opålitlig
+const byNameDesc = (a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0);
+
 // ---------- S3 (AWS Signature V4) ----------
 const sha256 = (d) => crypto.createHash('sha256').update(d).digest('hex');
 const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest();
@@ -77,7 +80,7 @@ async function s3List(c) {
     }
     token = /<IsTruncated>true<\/IsTruncated>/.test(x) ? /<NextContinuationToken>([^<]*)/.exec(x)?.[1] : null;
   } while (token);
-  return out.sort((a, b) => b.mtime - a.mtime);
+  return out.sort(byNameDesc);
 }
 
 // ---------- mål ----------
@@ -85,7 +88,7 @@ function dirList(c) {
   try {
     return fs.readdirSync(c.dir).filter(f => /^braxhn-tv-[\w-]+\.bxtv$/.test(f))
       .map(f => { const st = fs.statSync(path.join(c.dir, f)); return { name: f, size: st.size, mtime: Math.floor(st.mtimeMs / 1000) }; })
-      .sort((a, b) => b.mtime - a.mtime);
+      .sort(byNameDesc);
   } catch { return []; }
 }
 export async function list() {
@@ -119,14 +122,17 @@ export async function upload(localDb) {
     await encryptFile(localDb, tmp, c.passphrase);
     if (c.kind === 'folder') { fs.copyFileSync(tmp, path.join(c.dir, name + '.part')); fs.renameSync(path.join(c.dir, name + '.part'), path.join(c.dir, name)); }
     else await s3Upload(c, tmp, name);
-    // Gallra gamla kopior
-    const all = await list();
-    for (const f of all.slice(c.keep)) {
-      if (c.kind === 'folder') fs.rmSync(path.join(c.dir, f.name), { force: true });
-      else await s3(c, 'DELETE', c.prefix + f.name, { payloadHash: sha256('') }).catch(() => {});
-    }
     state.last = Date.now(); state.lastName = name;
     console.log('[offsite] skickade', name);
+    // Gallra gamla kopior – ett fel här betyder inte att säkerhetskopieringen misslyckades
+    try {
+      const all = await list();
+      for (const f of all.slice(c.keep)) {
+        if (f.name === name) continue;
+        if (c.kind === 'folder') fs.rmSync(path.join(c.dir, f.name), { force: true });
+        else await s3(c, 'DELETE', c.prefix + f.name, { payloadHash: sha256('') }).catch(() => {});
+      }
+    } catch (e) { console.warn('[offsite] kunde inte gallra gamla kopior:', e.message); }
     return name;
   } catch (e) {
     state.error = e.message;

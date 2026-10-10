@@ -17,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +54,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
     var menu by remember { mutableStateOf<String?>(null) } // "tracks" | "chapters"
+    val tv = remember { isTv(context) }
+    val skipFocus = remember { FocusRequester() }
 
     val player = remember {
         val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
@@ -179,7 +183,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player; setShowSubtitleButton(true); keepScreenOn = true } },
             modifier = Modifier.fillMaxSize())
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { report(final = true); onClose() }, modifier = Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
+            IconButton(onClick = { report(final = true); onClose() }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
                 Icon(Icons.Filled.Close, "Stäng", tint = Color.White, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.width(12.dp))
@@ -188,13 +192,13 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             val p = pb
             if (p != null && (p.audio.size > 1 || p.subtitles.isNotEmpty() || (item?.subtitles?.isNotEmpty() == true))) {
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = { menu = "tracks" }, modifier = Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
+                IconButton(onClick = { menu = "tracks" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
                     Icon(Icons.Filled.Subtitles, "Ljud och undertexter", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
             if (p != null && p.chapters.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = { menu = "chapters" }, modifier = Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
+                IconButton(onClick = { menu = "chapters" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
                     Icon(Icons.Filled.List, "Kapitel", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
@@ -235,11 +239,14 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 if (label == "Hoppa över sammanfattning" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
                 else if (label == "Hoppa över intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
                 else item?.nextId?.let { next -> report(final = true); onPlay(Screen.Play(next, 0.0, null, null)) }
-            }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp),
+            }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
+                .focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
                 Icon(Icons.Filled.SkipNext, null); Text(" $label", fontSize = 18.sp)
             }
         }
+        // Google TV: flytta fokus till knappen när den dyker upp så att den kan väljas direkt med fjärrkontrollen
+        LaunchedEffect(skip) { if (tv && skip != null) runCatching { skipFocus.requestFocus() } }
         error?.let { e ->
             Column(Modifier.align(Alignment.Center).background(Surface2, RoundedCornerShape(14.dp)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Kunde inte spela", fontWeight = FontWeight.Bold, color = Color.White)

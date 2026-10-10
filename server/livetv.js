@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { TRANSCODE, liveEncoder } from './stream.js';
 import { send, fail } from './util.js';
@@ -22,10 +24,14 @@ CREATE INDEX IF NOT EXISTS programs_ch ON programs(channel_id, start);
 CREATE INDEX IF NOT EXISTS programs_title ON programs(title COLLATE NOCASE, start);`);
 
 // ---------- hjälp ----------
+function localPath(url) {
+  const p = url.replace(/^file:\/\//, '');
+  if (!path.resolve(p).startsWith(path.resolve(CONFIG))) throw new Error('Lokala filer måste ligga i /config');
+  return p;
+}
 async function fetchText(url, { timeout = 60000, max = 200 << 20 } = {}) {
   if (/^file:/.test(url) || url.startsWith('/')) {
-    const p = url.replace(/^file:\/\//, '');
-    if (!path.resolve(p).startsWith(path.resolve(CONFIG))) throw new Error('Lokala filer måste ligga i /config');
+    const p = localPath(url);
     const b = fs.readFileSync(p);
     return (/\.gz$/.test(p) ? zlib.gunzipSync(b, { maxOutputLength: 400 << 20 }) : b).toString('utf8');
   }
@@ -37,8 +43,38 @@ async function fetchText(url, { timeout = 60000, max = 200 << 20 } = {}) {
   if (b[0] === 0x1f && b[1] === 0x8b) b = zlib.gunzipSync(b, { maxOutputLength: 400 << 20 });
   return b.toString('utf8');
 }
+/** Strömmande hämtning som text (för stora TV-guider): hela filen hålls aldrig i minnet. Packar upp gzip automatiskt. */
+async function* fetchTextStream(url, { timeout = 180000, max = 200 << 20, maxOut = 1024 << 20 } = {}) {
+  let src;
+  if (/^file:/.test(url) || url.startsWith('/')) src = fs.createReadStream(localPath(url), { highWaterMark: 256 << 10 });
+  else {
+    const r = await fetch(url, { signal: AbortSignal.timeout(timeout), headers: { 'User-Agent': 'BraXhnTV/1.0' } });
+    if (!r.ok) { r.body?.cancel().catch(() => {}); throw new Error(`${new URL(url).host} svarade ${r.status}`); }
+    src = Readable.fromWeb(r.body);
+  }
+  const it = src[Symbol.asyncIterator]();
+  try {
+    let first = await it.next();
+    if (first.done) return;
+    const dec = new TextDecoder('utf-8');
+    let n = 0, out = 0;
+    const raw = async function* () { let c = first; while (!c.done) { n += c.value.length; if (n > max) throw new Error('Filen är för stor'); yield c.value; c = await it.next(); } };
+    if (first.value[0] === 0x1f && first.value[1] === 0x8b) {
+      const gz = zlib.createGunzip();
+      const feeder = Readable.from(raw());
+      feeder.on('error', (e) => gz.destroy(e));
+      feeder.pipe(gz);
+      try {
+        for await (const c of gz) { out += c.length; if (out > maxOut) throw new Error('Filen är för stor'); yield dec.decode(c, { stream: true }); }
+      } finally { feeder.destroy(); gz.destroy(); }
+    } else for await (const c of raw()) yield dec.decode(c, { stream: true });
+    const tail = dec.decode();
+    if (tail) yield tail;
+  } finally { src.destroy?.(); it.return?.().catch?.(() => {}); }
+}
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-const dec = (s) => String(s ?? '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : ENT[e] ?? m).trim();
+const dec = (s) => { s = String(s ?? ''); return s.includes('&') || s.includes('<![') ? decFull(s) : s.trim(); };
+const decFull = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => { try { return e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : ENT[e] ?? m; } catch { return m; } }).trim();
 const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/\b(hd|sd|fhd|uhd|4k|se|sverige)\b/g, '').replace(/[^a-z0-9]/g, '');
 
 // ---------- M3U ----------
@@ -68,27 +104,53 @@ export function xmltvTime(s) {
   const tz = m[7] ? (m[7][0] === '-' ? -1 : 1) * (+m[7].slice(1, 3) * 60 + +m[7].slice(3)) : 0;
   return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) / 1000) - tz * 60;
 }
+function parseChannel(a, b) {
+  const id = /\bid="([^"]+)"/.exec(a)?.[1];
+  if (!id) return null;
+  return { id: dec(id), names: [...b.matchAll(/<display-name[^>]*>([\s\S]*?)<\/display-name>/g)].map(x => dec(x[1])), icon: /<icon\s+src="([^"]+)"/.exec(b)?.[1] || null };
+}
+function parseProgramme(a, b) {
+  const start = xmltvTime(/start="([^"]+)"/.exec(a)?.[1]), stop = xmltvTime(/stop="([^"]+)"/.exec(a)?.[1]);
+  const ch = dec(/channel="([^"]+)"/.exec(a)?.[1]);
+  if (!start || !ch) return null;
+  const ns = /<episode-num[^>]*system="xmltv_ns"[^>]*>([^<]*)</.exec(b)?.[1];
+  let season = null, episode = null;
+  if (ns) { const [s, e] = ns.split('.'); season = s?.trim() ? parseInt(s) + 1 : null; episode = e?.trim() ? parseInt(e) + 1 : null; }
+  const onscreen = /<episode-num[^>]*system="onscreen"[^>]*>\s*S(\d+)\s*E(\d+)/i.exec(b);
+  if (onscreen) { season = +onscreen[1]; episode = +onscreen[2]; }
+  return { channel: ch, start, stop: stop || start + 1800, title: dec(/<title[^>]*>([\s\S]*?)<\/title>/.exec(b)?.[1]) || 'Program',
+    subtitle: dec(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/.exec(b)?.[1]) || null, description: dec(/<desc[^>]*>([\s\S]*?)<\/desc>/.exec(b)?.[1]) || null,
+    category: dec(/<category[^>]*>([\s\S]*?)<\/category>/.exec(b)?.[1]) || null, season: Number.isFinite(season) ? season : null, episode: Number.isFinite(episode) ? episode : null,
+    icon: /<icon\s+src="([^"]+)"/.exec(b)?.[1] || null, isNew: /<new\s*\/>/.test(b) || /<premiere/.test(b) };
+}
+/** Stegvis XMLTV-tolk: matas med textbitar och anropar onChannel/onProgram för varje komplett element (linjär tid, litet minne). */
+export class XmltvParser {
+  constructor({ onChannel, onProgram }) { this.onChannel = onChannel; this.onProgram = onProgram; this.buf = ''; }
+  feed(s) {
+    const b = this.buf ? this.buf + s : s;
+    const re = /<(channel|programme)[\s>]/g;
+    let pos = 0, m;
+    while ((m = re.exec(b))) {
+      const isCh = m[1] === 'channel';
+      const close = b.indexOf(isCh ? '</channel>' : '</programme>', m.index);
+      if (close < 0) { pos = m.index; break; } // ofullständigt element: vänta på mer data
+      const gt = b.indexOf('>', m.index);
+      if (gt > 0 && gt < close) {
+        const attrs = b.slice(m.index + m[0].length - 1, gt), body = b.slice(gt + 1, close);
+        if (isCh) { const c = parseChannel(attrs, body); if (c) this.onChannel(c); }
+        else { const p = parseProgramme(attrs, body); if (p) this.onProgram(p); }
+      }
+      pos = close + (isCh ? 10 : 12);
+      re.lastIndex = pos;
+    }
+    if (!m) { const lt = b.lastIndexOf('<'); pos = Math.max(pos, lt >= pos ? lt : b.length); }
+    this.buf = b.slice(pos);
+    if (this.buf.length > 64 << 20) throw new Error('Ogiltig XMLTV (för stort element)');
+  }
+}
 export function parseXMLTV(xml) {
-  const channels = [];
-  for (const m of xml.matchAll(/<channel\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/channel>/g)) {
-    channels.push({ id: dec(m[1]), names: [...m[2].matchAll(/<display-name[^>]*>([\s\S]*?)<\/display-name>/g)].map(x => dec(x[1])), icon: /<icon\s+src="([^"]+)"/.exec(m[2])?.[1] || null });
-  }
-  const programs = [];
-  for (const m of xml.matchAll(/<programme\s([^>]*)>([\s\S]*?)<\/programme>/g)) {
-    const a = m[1], b = m[2];
-    const start = xmltvTime(/start="([^"]+)"/.exec(a)?.[1]), stop = xmltvTime(/stop="([^"]+)"/.exec(a)?.[1]);
-    const ch = dec(/channel="([^"]+)"/.exec(a)?.[1]);
-    if (!start || !ch) continue;
-    const ns = /<episode-num[^>]*system="xmltv_ns"[^>]*>([^<]*)</.exec(b)?.[1];
-    let season = null, episode = null;
-    if (ns) { const [s, e] = ns.split('.'); season = s?.trim() ? parseInt(s) + 1 : null; episode = e?.trim() ? parseInt(e) + 1 : null; }
-    const onscreen = /<episode-num[^>]*system="onscreen"[^>]*>\s*S(\d+)\s*E(\d+)/i.exec(b);
-    if (onscreen) { season = +onscreen[1]; episode = +onscreen[2]; }
-    programs.push({ channel: ch, start, stop: stop || start + 1800, title: dec(/<title[^>]*>([\s\S]*?)<\/title>/.exec(b)?.[1]) || 'Program',
-      subtitle: dec(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/.exec(b)?.[1]) || null, description: dec(/<desc[^>]*>([\s\S]*?)<\/desc>/.exec(b)?.[1]) || null,
-      category: dec(/<category[^>]*>([\s\S]*?)<\/category>/.exec(b)?.[1]) || null, season, episode,
-      icon: /<icon\s+src="([^"]+)"/.exec(b)?.[1] || null, isNew: /<new\s*\/>/.test(b) || /<premiere/.test(b) });
-  }
+  const channels = [], programs = [];
+  new XmltvParser({ onChannel: c => channels.push(c), onProgram: p => programs.push(p) }).feed(xml);
   return { channels, programs };
 }
 
@@ -141,7 +203,46 @@ export async function addTuner({ kind, url, name, epgUrl, tuners }) {
   throw new Error('Okänd källa');
 }
 
-export async function refreshTuner(id) {
+/** Kanalerna matchas mot befintliga rader i första hand på adress, sedan namn+nummer och sist tvg-id. IPTV-leverantörer byter ofta
+ *  token i adresserna – då uppdateras adressen på samma rad så att favoriter, dolda kanaler, guidekoppling och serieinspelningar finns kvar. */
+function syncChannels(tunerId, list) {
+  const existing = all('SELECT id, number, name, stream_url, epg_id FROM channels WHERE tuner_id=?', tunerId);
+  const byUrl = new Map(existing.map(c => [c.stream_url, c]));
+  const nameKey = (name, number) => `${norm(name)}|${number ?? ''}`;
+  const byName = new Map(), byEpg = new Map();
+  for (const c of existing) {
+    const k = nameKey(c.name, c.number); if (!byName.has(k)) byName.set(k, c);
+    if (c.epg_id && !byEpg.has(c.epg_id)) byEpg.set(c.epg_id, c);
+  }
+  const claimed = new Set(), seenUrl = new Set();
+  const rows = [];
+  list.slice(0, 5000).forEach((c, i) => { if (!seenUrl.has(c.url)) { seenUrl.add(c.url); rows.push({ c, i, match: null }); } });
+  const take = (r, ex) => { if (ex && !claimed.has(ex.id)) { claimed.add(ex.id); r.match = ex; } };
+  const keyOf = (c) => nameKey(String(c.name).slice(0, 120), c.number || null);
+  // 1) samma adress och samma kanal, 2) samma namn+nummer (adressen har bytts), 3) samma adress (kanalen har bytt namn), 4) samma tvg-id
+  for (const r of rows) { const ex = byUrl.get(r.c.url); if (ex && (nameKey(ex.name, ex.number) === keyOf(r.c) || (r.c.epg && ex.epg_id === r.c.epg))) take(r, ex); }
+  for (const r of rows) if (!r.match) take(r, byName.get(keyOf(r.c)));
+  for (const r of rows) if (!r.match) take(r, byUrl.get(r.c.url));
+  for (const r of rows) if (!r.match && r.c.epg) take(r, byEpg.get(r.c.epg));
+  const upd = db.prepare(`UPDATE channels SET number=?, name=?, logo=COALESCE(?, logo), stream_url=?, epg_id=COALESCE(epg_id, ?), group_name=?, hd=?, sort=? WHERE id=?`);
+  const tmpUrl = db.prepare('UPDATE channels SET stream_url=? WHERE id=?');
+  const ins = db.prepare('INSERT INTO channels(tuner_id,number,name,logo,stream_url,epg_id,group_name,hd,sort) VALUES(?,?,?,?,?,?,?,?,?)');
+  const del = db.prepare('DELETE FROM channels WHERE id=?');
+  db.exec('BEGIN');
+  try {
+    // Borttagna kanaler först (deras adresser kan återanvändas), sedan tillfälliga adresser så att byten mellan kanaler inte krockar med UNIQUE-indexet
+    for (const c of existing) if (!claimed.has(c.id)) del.run(c.id);
+    for (const r of rows) if (r.match && r.match.stream_url !== r.c.url) tmpUrl.run(`\u0000byts:${r.match.id}`, r.match.id);
+    for (const { c, i, match } of rows) {
+      const v = [c.number || null, String(c.name).slice(0, 120), c.logo || null, c.url];
+      if (match) upd.run(...v, c.epg || null, c.group || null, c.hd || 0, parseFloat(c.number) || i + 1, match.id);
+      else ins.run(tunerId, v[0], v[1], v[2], v[3], c.epg || null, c.group || null, c.hd || 0, parseFloat(c.number) || i + 1);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+export async function refreshTuner(id, { guide = true } = {}) {
   const t = get('SELECT * FROM tuners WHERE id=?', id); if (!t) return;
   try {
     let list;
@@ -151,82 +252,172 @@ export async function refreshTuner(id) {
       list = info.channels.map(c => ({ ...c, epg: null, logo: null, group: c.hd ? 'HD' : null }));
     } else list = parseM3U(await fetchText(t.url));
     if (!list.length) throw new Error('Inga kanaler hittades');
-    const keep = new Set();
-    list.slice(0, 5000).forEach((c, i) => {
-      run(`INSERT INTO channels(tuner_id,number,name,logo,stream_url,epg_id,group_name,hd,sort) VALUES(?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(tuner_id,stream_url) DO UPDATE SET number=excluded.number, name=excluded.name, logo=COALESCE(excluded.logo,logo),
-        epg_id=COALESCE(epg_id, excluded.epg_id), group_name=excluded.group_name, hd=excluded.hd, sort=excluded.sort`,
-        id, c.number || null, String(c.name).slice(0, 120), c.logo || null, c.url, c.epg || null, c.group || null, c.hd || 0, parseFloat(c.number) || i + 1);
-      keep.add(c.url);
-    });
-    for (const c of all('SELECT id, stream_url FROM channels WHERE tuner_id=?', id)) if (!keep.has(c.stream_url)) run('DELETE FROM channels WHERE id=?', c.id);
+    syncChannels(id, list);
     run('UPDATE tuners SET last_refresh=?, error=NULL WHERE id=?', now(), id);
-    await refreshGuide(id).catch(e => console.warn('[livetv] guide:', e.message));
+    if (guide) await refreshGuide(id).catch(e => console.warn('[livetv] guide:', e.message));
     return { channels: list.length };
   } catch (e) { run('UPDATE tuners SET error=? WHERE id=?', e.message, id); throw e; }
 }
 
 // ---------- TV-guide ----------
 export const guideState = { running: false, last: null, error: null };
-export async function refreshGuide(tunerId = null) {
-  const tuners = tunerId ? all('SELECT * FROM tuners WHERE id=? AND enabled=1', tunerId) : all('SELECT * FROM tuners WHERE enabled=1');
-  guideState.running = true;
-  try {
-    for (const t of tuners) {
-      const chans = all('SELECT * FROM channels WHERE tuner_id=?', t.id);
-      const ins = (chId, p) => run('INSERT INTO programs(channel_id,start,stop,title,subtitle,description,category,season,episode,icon,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-        chId, p.start, p.stop, String(p.title).slice(0, 300), p.subtitle?.slice(0, 300) || null, p.description?.slice(0, 3000) || null, p.category?.slice(0, 80) || null,
-        p.season ?? null, p.episode ?? null, p.icon || null, p.isNew ? 1 : 0);
-      if (t.epg_url) {
-        const { channels, programs } = parseXMLTV(await fetchText(t.epg_url));
-        // Koppla kanaler: tvg-id, annars namn/nummer
-        const byName = new Map();
-        for (const c of channels) for (const n of c.names) byName.set(norm(n), c.id);
-        for (const ch of chans) {
-          if (ch.epg_id && channels.some(c => c.id === ch.epg_id)) continue;
+const KEEP_BACK = 3 * 3600; // så här långt bakåt behålls/ersätts program (pågående långa program räknas med)
+const CHUNK = 5000;
+let insertStmt = null;
+const insertProgram = () => insertStmt ||= db.prepare('INSERT INTO programs(channel_id,start,stop,title,subtitle,description,category,season,episode,icon,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+const insRow = (chId, p) => insertProgram().run(chId, p.start, p.stop, String(p.title).slice(0, 300), p.subtitle?.slice(0, 300) || null, p.description?.slice(0, 3000) || null,
+  p.category?.slice(0, 80) || null, p.season ?? null, p.episode ?? null, p.icon || null, p.isNew ? 1 : 0);
+const yieldLoop = () => new Promise(setImmediate);
+function inTx(fn) {
+  db.exec('BEGIN');
+  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+/** XMLTV för en källa: tolkas strömmande och skrivs i omgångar. Oförändrade program behålls (samma id), nya läggs in och
+ *  gamla tas bort först när allt lyckats – avbryts hämtningen finns den gamla guiden kvar. */
+const progSig = (p) => crypto.createHash('sha1').update(JSON.stringify([p.stop, String(p.title).slice(0, 300), p.subtitle?.slice(0, 300) || null, p.description?.slice(0, 3000) || null,
+  p.category?.slice(0, 80) || null, p.season ?? null, p.episode ?? null, p.icon || null, p.isNew ? 1 : 0])).digest('base64');
+async function guideFromXmltv(t) {
+  const chans = all('SELECT id, name, number, logo, epg_id FROM channels WHERE tuner_id=?', t.id);
+  const channels = new Map(); // xmltv-id → kanal
+  const byName = new Map();
+  let map = null; // xmltv-id → [kanal-id]
+  const mapChannels = () => {
+    const setEpg = db.prepare('UPDATE channels SET epg_id=? WHERE id=?'), setLogo = db.prepare('UPDATE channels SET logo=? WHERE id=?');
+    inTx(() => {
+      for (const ch of chans) {
+        if (!(ch.epg_id && channels.has(ch.epg_id))) {
+          // Koppla kanaler: tvg-id, annars namn/nummer
           const id = byName.get(norm(ch.name)) || (ch.number && byName.get(norm(ch.number))) || null;
-          if (id) { run('UPDATE channels SET epg_id=? WHERE id=?', id, ch.id); ch.epg_id = id; }
-          const icon = channels.find(c => c.id === (ch.epg_id || id))?.icon;
-          if (icon && !ch.logo) run('UPDATE channels SET logo=? WHERE id=?', icon, ch.id);
+          if (id && id !== ch.epg_id) { setEpg.run(id, ch.id); ch.epg_id = id; }
         }
-        const map = new Map(all('SELECT id, epg_id FROM channels WHERE tuner_id=? AND epg_id IS NOT NULL', t.id).map(r => [r.epg_id, r.id]));
-        const horizon = now() + 14 * 86400;
-        db.exec('BEGIN');
-        try {
-          for (const chId of map.values()) run('DELETE FROM programs WHERE channel_id=? AND start >= ?', chId, now() - 3 * 3600);
-          for (const p of programs) { const chId = map.get(p.channel); if (chId && p.stop > now() - 3 * 3600 && p.start < horizon) ins(chId, p); }
-          db.exec('COMMIT');
-        } catch (e) { db.exec('ROLLBACK'); throw e; }
-      } else if (t.kind === 'hdhr' && t.device_auth) {
-        // HDHomeRuns egen guide (gratis för enhetens ägare, ca 24 h framåt per anrop)
-        const byNum = new Map(chans.map(c => [String(c.number), c.id]));
-        const seen = new Set();
-        for (let off = 0; off < 3; off++) {
-          const start = now() + off * 86400;
-          let data;
-          try { data = JSON.parse(await fetchText(`https://api.hdhomerun.com/api/guide.php?DeviceAuth=${encodeURIComponent(t.device_auth)}&Start=${start}`)); } catch { break; }
-          db.exec('BEGIN');
-          try {
-            for (const ch of data || []) {
-              const chId = byNum.get(String(ch.GuideNumber)); if (!chId) continue;
-              if (ch.ImageURL) run('UPDATE channels SET logo=COALESCE(logo, ?) WHERE id=?', ch.ImageURL, chId);
-              if (!seen.has(chId)) { run('DELETE FROM programs WHERE channel_id=? AND start >= ?', chId, now() - 3 * 3600); seen.add(chId); }
-              for (const g of ch.Guide || []) {
-                const se = /S(\d+)E(\d+)/i.exec(g.EpisodeNumber || '');
-                if (get('SELECT 1 FROM programs WHERE channel_id=? AND start=?', chId, g.StartTime)) continue;
-                ins(chId, { start: g.StartTime, stop: g.EndTime, title: g.Title, subtitle: g.EpisodeTitle, description: g.Synopsis, category: (g.Filter || [])[0],
-                  season: se ? +se[1] : null, episode: se ? +se[2] : null, icon: g.ImageURL, isNew: !!g.First });
-              }
-            }
-            db.exec('COMMIT');
-          } catch (e) { db.exec('ROLLBACK'); throw e; }
+        const icon = channels.get(ch.epg_id)?.icon;
+        if (icon && !ch.logo) setLogo.run(icon, ch.id);
+      }
+    });
+    map = new Map();
+    for (const ch of chans) if (ch.epg_id) { if (!map.has(ch.epg_id)) map.set(ch.epg_id, []); map.get(ch.epg_id).push(ch.id); }
+  };
+  const boundary = get('SELECT COALESCE(MAX(id), 0) AS m FROM programs').m;
+  const cutoff = now() - KEEP_BACK, horizon = now() + 14 * 86400;
+  // Befintliga program per kanal (laddas när kanalen dyker upp): start → [{ id, sig, kept }]
+  const oldStmt = db.prepare('SELECT id, start, stop, title, subtitle, description, category, season, episode, icon, is_new FROM programs WHERE channel_id=? AND stop > ? AND id <= ?');
+  const old = new Map();
+  const oldOf = (chId) => {
+    let m = old.get(chId);
+    if (!m) {
+      m = new Map();
+      for (const r of oldStmt.all(chId, cutoff, boundary)) {
+        const e = { id: r.id, sig: progSig({ ...r, isNew: r.is_new }), kept: false };
+        const l = m.get(r.start); l ? l.push(e) : m.set(r.start, [e]);
+      }
+      old.set(chId, m);
+    }
+    return m;
+  };
+  let batch = [], total = 0, inserted = 0;
+  const flush = () => { if (!batch.length) return; const b = batch; batch = []; inTx(() => { for (const [chId, p] of b) insRow(chId, p); }); inserted += b.length; };
+  const parser = new XmltvParser({
+    onChannel: (c) => { if (map) return; channels.set(c.id, c); for (const n of c.names) byName.set(norm(n), c.id); },
+    onProgram: (p) => {
+      if (!map) mapChannels();
+      if (!(p.stop > cutoff && p.start < horizon)) return;
+      const ids = map.get(p.channel); if (!ids) return;
+      let sig = null;
+      for (const chId of ids) {
+        total++;
+        const same = oldOf(chId).get(p.start);
+        if (same) {
+          sig ||= progSig(p);
+          const hit = same.find(e => !e.kept && e.sig === sig);
+          if (hit) { hit.kept = true; continue; }
         }
+        batch.push([chId, p]);
       }
     }
-    run('DELETE FROM programs WHERE stop < ?', now() - 86400);
-    guideState.last = now(); guideState.error = null;
-  } catch (e) { guideState.error = e.message; throw e; }
-  finally { guideState.running = false; }
+  });
+  const chIds = () => [...new Set([...(map?.values() || [])].flat())];
+  try {
+    for await (const text of fetchTextStream(t.epg_url)) {
+      parser.feed(text);
+      if (batch.length >= CHUNK) { flush(); await yieldLoop(); }
+    }
+    if (!map) mapChannels();
+    flush();
+  } catch (e) {
+    // Ta bort det som hann läggas in – den gamla guiden gäller
+    const ids = chIds(), st = db.prepare('DELETE FROM programs WHERE channel_id=? AND id > ?');
+    for (let i = 0; i < ids.length; i += 200) inTx(() => { for (const id of ids.slice(i, i + 200)) st.run(id, boundary); });
+    throw e;
+  }
+  // Ta bort ersatta program. Samma villkor som vid inläggningen (stop > cutoff), annars dubbletter av långa program.
+  const delId = db.prepare('DELETE FROM programs WHERE id=?');
+  const delCh = db.prepare('DELETE FROM programs WHERE channel_id=? AND id <= ? AND stop > ?');
+  const gone = [];
+  for (const chId of chIds()) {
+    const m = old.get(chId);
+    if (!m) gone.push(() => delCh.run(chId, boundary, cutoff)); // kanalen saknar program i den nya guiden
+    else for (const l of m.values()) for (const e of l) if (!e.kept) gone.push(() => delId.run(e.id));
+  }
+  for (let i = 0; i < gone.length; i += CHUNK) { inTx(() => { for (const f of gone.slice(i, i + CHUNK)) f(); }); await yieldLoop(); }
+  return { total, inserted, removed: gone.length };
+}
+
+async function guideFromHdhr(t) {
+  // HDHomeRuns egen guide (gratis för enhetens ägare, ca 24 h framåt per anrop)
+  const chans = all('SELECT id, number FROM channels WHERE tuner_id=?', t.id);
+  const byNum = new Map(chans.map(c => [String(c.number), c.id]));
+  const seen = new Set();
+  const cutoff = now() - KEEP_BACK;
+  const del = db.prepare('DELETE FROM programs WHERE channel_id=? AND stop > ?');
+  const exists = db.prepare('SELECT 1 FROM programs WHERE channel_id=? AND start=?');
+  const logo = db.prepare('UPDATE channels SET logo=COALESCE(logo, ?) WHERE id=?');
+  for (let off = 0; off < 3; off++) {
+    const start = now() + off * 86400;
+    let data;
+    try { data = JSON.parse(await fetchText(`https://api.hdhomerun.com/api/guide.php?DeviceAuth=${encodeURIComponent(t.device_auth)}&Start=${start}`)); } catch { break; }
+    inTx(() => {
+      for (const ch of data || []) {
+        const chId = byNum.get(String(ch.GuideNumber)); if (!chId) continue;
+        if (ch.ImageURL) logo.run(ch.ImageURL, chId);
+        if (!seen.has(chId)) { del.run(chId, cutoff); seen.add(chId); }
+        for (const g of ch.Guide || []) {
+          if (!(g.EndTime > cutoff) || exists.get(chId, g.StartTime)) continue;
+          const se = /S(\d+)E(\d+)/i.exec(g.EpisodeNumber || '');
+          insRow(chId, { start: g.StartTime, stop: g.EndTime, title: g.Title || 'Program', subtitle: g.EpisodeTitle, description: g.Synopsis, category: (g.Filter || [])[0],
+            season: se ? +se[1] : null, episode: se ? +se[2] : null, icon: g.ImageURL, isNew: !!g.First });
+        }
+      }
+    });
+    await yieldLoop();
+  }
+}
+
+let guideRun = null; // { tunerId, promise } – bara en uppdatering åt gången
+export function refreshGuide(tunerId = null) {
+  if (guideRun) {
+    if (guideRun.tunerId == null || guideRun.tunerId === tunerId) return guideRun.promise;
+    return guideRun.promise.catch(() => {}).then(() => refreshGuide(tunerId));
+  }
+  const promise = (async () => {
+    const tuners = tunerId ? all('SELECT * FROM tuners WHERE id=? AND enabled=1', tunerId) : all('SELECT * FROM tuners WHERE enabled=1');
+    guideState.running = true;
+    const errors = [];
+    try {
+      for (const t of tuners) {
+        // En källa som inte svarar ska inte stoppa de andra
+        try {
+          if (t.epg_url) await guideFromXmltv(t);
+          else if (t.kind === 'hdhr' && t.device_auth) await guideFromHdhr(t);
+        } catch (e) { errors.push(`${t.name}: ${e.message}`); console.warn('[livetv] guide', t.name, e.message); }
+      }
+      run('DELETE FROM programs WHERE stop < ?', now() - 86400);
+      guideState.last = now(); guideState.error = errors.length ? errors.join('; ') : null;
+      if (errors.length && errors.length === tuners.length) throw new Error(guideState.error);
+    } finally { guideState.running = false; }
+  })().finally(() => { guideRun = null; });
+  guideRun = { tunerId, promise };
+  return promise;
 }
 
 // ---------- API-hjälp ----------
@@ -271,28 +462,34 @@ export const httpOpts = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-recon
 export const SAFE_LIVE = ['-protocol_whitelist', 'http,https,tcp,tls,udp,rtp,crypto,hls,httpproxy'];
 
 function startLive(ch) {
-  const key = `live-${ch.id}`;
+  // Unik nyckel och mapp per session: en gammal session som stängs (asynkront) får aldrig röra en ny för samma kanal
+  const started = Date.now();
+  const key = `live-${ch.id}-${started}`;
   if (!acquireTuner(ch.tuner_id, key)) throw Object.assign(new Error('Alla tuners används just nu (live-TV eller inspelningar)'), { status: 409 });
-  const dir = path.join(LIVE, String(ch.id));
-  fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
-  const transcode = getSetting('live_transcode', 'auto'); // auto | always
-  const enc = liveEncoder({ deinterlace: true, maxHeight: +getSetting('live_max_height', '1080') || null });
-  // auto: försök kopiera H.264, annars koda om (MPEG-2 från antenn kräver omkodning för webbläsare)
-  const copyV = transcode !== 'always' && /h264|avc/i.test(ch.codec || '');
-  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
-    ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0', '-map', '0:a:0?',
-    ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
-    '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '8', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
-    '-hls_segment_filename', path.join(dir, 'seg-%05d.ts'), path.join(dir, 'live.m3u8')];
-  const s = { proc: null, dir, last: Date.now(), tunerId: ch.tuner_id, key, started: Date.now(), error: null };
-  const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-  let err = '';
-  proc.stderr.on('data', d => { err = (err + d).slice(-800); });
-  proc.on('close', (code) => {
-    releaseTuner(ch.tuner_id, key);
-    if (sessions.get(ch.id) === s) { s.error = code ? (err.trim().split('\n').pop() || 'Strömmen avbröts') : null; s.proc = null; }
-  });
-  s.proc = proc;
+  const s = { proc: null, dir: path.join(LIVE, `${ch.id}-${started}`), last: started, tunerId: ch.tuner_id, key, started, error: null };
+  try {
+    fs.rmSync(s.dir, { recursive: true, force: true }); fs.mkdirSync(s.dir, { recursive: true });
+    const transcode = getSetting('live_transcode', 'auto'); // auto | always
+    const enc = liveEncoder({ deinterlace: true, maxHeight: +getSetting('live_max_height', '1080') || null });
+    // auto: försök kopiera H.264, annars koda om (MPEG-2 från antenn kräver omkodning för webbläsare)
+    const copyV = transcode !== 'always' && /h264|avc/i.test(ch.codec || '');
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
+      ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0', '-map', '0:a:0?',
+      ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
+      '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '8', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
+      '-hls_segment_filename', path.join(s.dir, 'seg-%05d.ts'), path.join(s.dir, 'live.m3u8')];
+    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '', ended = false;
+    proc.stderr.on('data', d => { err = (err + d).slice(-800); });
+    const end = (code, msg) => {
+      if (ended) return; ended = true;
+      releaseTuner(ch.tuner_id, key); // nyckeln är unik för sessionen
+      if (sessions.get(ch.id) === s) { s.error = msg || (code ? (err.trim().split('\n').pop() || 'Strömmen avbröts') : null); s.proc = null; }
+    };
+    proc.on('error', (e) => end(1, 'ffmpeg kunde inte startas: ' + e.message));
+    proc.on('close', (code) => end(code));
+    s.proc = proc;
+  } catch (e) { releaseTuner(ch.tuner_id, key); fs.rm(s.dir, { recursive: true, force: true }, () => {}); throw e; }
   sessions.set(ch.id, s);
   return s;
 }
@@ -304,18 +501,28 @@ function stopLive(chId) {
   fs.rm(s.dir, { recursive: true, force: true }, () => {});
 }
 setInterval(() => { for (const [id, s] of sessions) if (Date.now() - s.last > 45000) stopLive(id); }, 10000).unref();
+// Rester från tidigare körningar
+try { fs.rmSync(LIVE, { recursive: true, force: true }); } catch {}
 
-/** Probar kanalens codec en gång (för att kunna kopiera H.264 utan omkodning) */
+/** Stäng alla live-strömmar (vid avstängning av servern) */
+export function shutdown() {
+  for (const [id, s] of [...sessions]) { stopLive(id); try { fs.rmSync(s.dir, { recursive: true, force: true }); } catch {} }
+}
+
+/** Probar kanalens codec (för att kunna kopiera H.264 utan omkodning). Misslyckade prober cachas inte. */
 const codecCache = new Map();
 async function probeCodec(ch) {
   if (codecCache.has(ch.id)) return codecCache.get(ch.id);
   const c = await new Promise((resolve) => {
-    const p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let p;
+    try { p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch { return resolve(null); }
     let out = ''; p.stdout.on('data', d => out += d);
     const t = setTimeout(() => p.kill('SIGKILL'), 8000);
+    p.on('error', () => { clearTimeout(t); resolve(null); });
     p.on('close', () => { clearTimeout(t); resolve(out.trim() || null); });
   });
-  codecCache.set(ch.id, c);
+  if (c) { codecCache.set(ch.id, c); if (codecCache.size > 5000) codecCache.delete(codecCache.keys().next().value); }
   return c;
 }
 
@@ -357,6 +564,17 @@ export function serveSegment(req, res, chId, name) {
 export const activeLive = () => [...sessions.entries()].map(([id, s]) => ({ channelId: id, since: s.started, error: s.error }));
 export const stopChannel = stopLive;
 
-// Uppdatera guiden var 12:e timme och kanallistor en gång per dygn
+// Uppdatera guiden var 12:e timme och kanallistor en gång per dygn (en källa i taget, guiden en gång efteråt)
 setInterval(() => { refreshGuide().catch(() => {}); }, 12 * 3600e3).unref();
-setInterval(() => { for (const t of all('SELECT id FROM tuners WHERE enabled=1 AND (last_refresh IS NULL OR last_refresh < ?)', now() - 86400)) refreshTuner(t.id).catch(() => {}); }, 3600e3).unref();
+let dailyRunning = false;
+async function dailyRefresh() {
+  if (dailyRunning) return;
+  dailyRunning = true;
+  try {
+    const due = all('SELECT id FROM tuners WHERE enabled=1 AND (last_refresh IS NULL OR last_refresh < ?)', now() - 86400);
+    if (!due.length) return;
+    for (const t of due) await refreshTuner(t.id, { guide: false }).catch(e => console.warn('[livetv] kanallista:', e.message));
+    await refreshGuide().catch(() => {});
+  } finally { dailyRunning = false; }
+}
+setInterval(() => { dailyRefresh().catch(() => {}); }, 3600e3).unref();

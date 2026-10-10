@@ -32,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem as M3Item
 import androidx.media3.common.MimeTypes
@@ -80,6 +83,8 @@ fun LiveScreen(onPlay: (Screen.LivePlay) -> Unit, push: (Screen) -> Unit) {
             OutlinedButton(onClick = { push(Screen.Recordings) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp))) { Text("Inspelningar") }
         }
         if (d.channels.isEmpty()) { ErrorText("Inga kanaler – lägg till en källa under Administration i webben."); return }
+        // Läses en gång för hela rutnätet (inte per kanal)
+        val tok = Api.imageToken.collectAsState().value
         LazyVerticalGrid(GridCells.Adaptive(300.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp)) {
             items(d.channels, key = { it.id }) { ch ->
@@ -87,7 +92,6 @@ fun LiveScreen(onPlay: (Screen.LivePlay) -> Unit, push: (Screen) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(72.dp, 48.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
                         Text(ch.number ?: ch.name.take(3), fontWeight = FontWeight.Bold)
-                        val tok = Api.imageToken.collectAsState().value
                         if (ch.logo != null && tok != null) AsyncImage(Api.url("/api/live/logo/${ch.id}", mapOf("t" to tok)), null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(4.dp))
                     }
                     Spacer(Modifier.width(12.dp))
@@ -164,6 +168,13 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit) {
         }
         player.addListener(l)
         onDispose { player.removeListener(l); player.release() }
+    }
+    // Krav i bilen (och Google TV:s hemknapp): pausa när aktiviteten pausas
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, ev -> if (ev == Lifecycle.Event.ON_PAUSE) player.pause() }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { PlayerView(it).apply { this.player = player; keepScreenOn = true } }, modifier = Modifier.fillMaxSize())

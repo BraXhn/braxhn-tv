@@ -86,6 +86,11 @@ final class AppModel: ObservableObject {
         try JSONDecoder().decode(T.self, from: try await request(path, query: query))
     }
 
+    /// Rå data från ett autentiserat anrop (t.ex. undertexter för nedladdade filer)
+    func data(_ path: String) async throws -> Data {
+        try await request(path)
+    }
+
     @discardableResult
     func post(_ path: String, _ body: [String: Any] = [:]) async throws -> Data {
         try await request(path, method: "POST", body: body)

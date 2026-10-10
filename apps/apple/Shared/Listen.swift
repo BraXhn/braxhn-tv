@@ -68,11 +68,13 @@ final class SpokenPlayer: ObservableObject {
     static let shared = SpokenPlayer()
 
     enum Kind { case book, podcast }
-    struct Track { let kind: Kind; let id: Int; let title: String; let subtitle: String; let artPath: String?; let duration: Double; let files: [BookFile]; let chapters: [Chapter] }
+    struct Track { let kind: Kind; let id: Int; let title: String; let subtitle: String; let artPath: String?; let duration: Double; var files: [BookFile]; let chapters: [Chapter] }
 
     @Published private(set) var track: Track?
     @Published private(set) var playing = false
-    @Published private(set) var position: Double = 0
+    /// Publiceras bara när kapitlet byts – positionen i sig publiceras inte (annars ritas kapitellistan om varje sekund)
+    @Published private(set) var chapterIndex: Int?
+    private(set) var position: Double = 0
     @Published var speed: Float = Float(UserDefaults.standard.double(forKey: "speed") == 0 ? 1 : UserDefaults.standard.double(forKey: "speed")) {
         didSet { UserDefaults.standard.set(Double(speed), forKey: "speed"); if playing { player.rate = speed } }
     }
@@ -82,7 +84,15 @@ final class SpokenPlayer: ObservableObject {
     private var fileIndex = 0
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var failObserver: NSObjectProtocol?
+    private var statusObservation: NSKeyValueObservation?
     private var lastSave = Date.distantPast
+    /// Ström-URL:erna har en mediatoken som gäller 24 h – förnyas efter 20 h
+    private var urlsFetched = Date()
+    private var refreshing = false
+    private var retried = false
+    /// Ökas när ett nytt spår startas eller spelaren stoppas
+    private var trackGen = 0
 
     private init() {
         player.allowsExternalPlayback = true
@@ -97,8 +107,6 @@ final class SpokenPlayer: ObservableObject {
         let cc = MPRemoteCommandCenter.shared()
         cc.skipBackwardCommand.preferredIntervals = [15]
         cc.skipForwardCommand.preferredIntervals = [30]
-        cc.skipBackwardCommand.isEnabled = true
-        cc.skipForwardCommand.isEnabled = true
         cc.skipBackwardCommand.removeTarget(nil)
         cc.skipForwardCommand.removeTarget(nil)
         cc.changePlaybackPositionCommand.removeTarget(nil)
@@ -108,6 +116,15 @@ final class SpokenPlayer: ObservableObject {
             if let e = e as? MPChangePlaybackPositionCommandEvent { let t = e.positionTime; Task { @MainActor in self?.seek(t) } }
             return .success
         }
+        Self.setSkipCommands(true)
+    }
+
+    /// Hopp ±15/30 s visas bara på låsskärmen när tal spelas (annars syns inte musikens nästa/föregående)
+    static func setSkipCommands(_ on: Bool) {
+        let cc = MPRemoteCommandCenter.shared()
+        cc.skipBackwardCommand.isEnabled = on
+        cc.skipForwardCommand.isEnabled = on
+        cc.changePlaybackPositionCommand.isEnabled = on
     }
 
     func play(book id: Int, model: AppModel, from start: Double? = nil) async {
@@ -123,8 +140,7 @@ final class SpokenPlayer: ObservableObject {
 
     func play(episode e: Episode, model: AppModel) async {
         self.model = model
-        struct U: Decodable { let url: String }
-        guard let u: U = try? await model.get("/api/podcasts/episodes/\(e.id)/play") else { return }
+        guard let u: PlayURL = try? await model.get("/api/podcasts/episodes/\(e.id)/play") else { return }
         let t = Track(kind: .podcast, id: e.id, title: e.title, subtitle: e.podcastTitle ?? "", artPath: "/api/podcasts/\(e.podcast)/image",
                       duration: e.duration ?? 0, files: [BookFile(id: e.id, idx: 0, offset: 0, duration: e.duration, url: u.url)], chapters: [])
         begin(t, at: e.played ? 0 : e.position)
@@ -132,13 +148,17 @@ final class SpokenPlayer: ObservableObject {
 
     private func begin(_ t: Track, at start: Double) {
         save()
-        MusicPlayer.shared.pause()
+        AudioFocus.willPlay(.spoken)
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
         try? AVAudioSession.sharedInstance().setActive(true)
         #endif
         installCommands()
+        trackGen += 1
         track = t
+        urlsFetched = Date()
+        retried = false
+        chapterIndex = nil
         fileIndex = -1
         seek(start)
         updateNowPlaying(artwork: true)
@@ -149,7 +169,15 @@ final class SpokenPlayer: ObservableObject {
         return max(0, tr.files.lastIndex { $0.offset <= t } ?? 0)
     }
 
+    private var urlsStale: Bool { Date().timeIntervalSince(urlsFetched) > 20 * 3600 }
+
     func seek(_ t: Double) {
+        guard track != nil else { return }
+        if urlsStale && !refreshing { refreshThenSeek(t); return }
+        load(t)
+    }
+
+    private func load(_ t: Double) {
         guard let tr = track, !tr.files.isEmpty else { return }
         let target = max(0, min(t, tr.duration > 0 ? tr.duration - 0.5 : t))
         let i = fileFor(target)
@@ -159,26 +187,110 @@ final class SpokenPlayer: ObservableObject {
             guard let path = tr.files[i].url, let url = model?.absolute(path) else { return }
             let item = AVPlayerItem(url: url)
             item.audioTimePitchAlgorithm = .timeDomain // naturlig röst vid högre hastighet
-            if let e = endObserver { NotificationCenter.default.removeObserver(e) }
-            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.fileEnded() }
-            }
+            observe(item)
             player.replaceCurrentItem(with: item)
         }
+        position = target
         player.seek(to: CMTime(seconds: local, preferredTimescale: 600))
-        resume()
+        startPlayback()
+    }
+
+    private func observe(_ item: AVPlayerItem) {
+        let nc = NotificationCenter.default
+        if let e = endObserver { nc.removeObserver(e) }
+        if let f = failObserver { nc.removeObserver(f) }
+        endObserver = nc.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.fileEnded() }
+        }
+        failObserver = nc.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] n in
+            let failed = n.object as? AVPlayerItem
+            Task { @MainActor [weak self] in self?.itemFailed(failed) }
+        }
+        statusObservation = item.observe(\.status, options: [.new]) { [weak self] it, _ in
+            guard it.status == .failed else { return }
+            Task { @MainActor [weak self] in self?.itemFailed(it) }
+        }
+    }
+
+    /// Strömmen gick inte att spela (troligen utgången token) – hämta nya URL:er och försök en gång till
+    private func itemFailed(_ item: AVPlayerItem?) {
+        guard let item, item === player.currentItem, track != nil else { return }
+        if retried || refreshing {
+            if !refreshing { playing = false; updateNowPlaying() }
+            return
+        }
+        retried = true
+        refreshThenSeek(position)
+    }
+
+    /// Hämtar nya ström-URL:er och laddar om aktuell fil på önskad position
+    private func refreshThenSeek(_ t: Double) {
+        guard let tr = track, let model else { load(t); return }
+        refreshing = true
+        let gen = trackGen
+        Task {
+            var files: [BookFile]?
+            switch tr.kind {
+            case .book:
+                let b: Book? = try? await model.get("/api/audiobooks/book/\(tr.id)/play", [URLQueryItem(name: "a", value: "mp3,aac,flac,alac")])
+                files = b?.files
+            case .podcast:
+                let u: PlayURL? = try? await model.get("/api/podcasts/episodes/\(tr.id)/play")
+                files = u.map { [BookFile(id: tr.id, idx: 0, offset: 0, duration: tr.duration > 0 ? tr.duration : nil, url: $0.url)] }
+            }
+            refreshing = false
+            // Annat spår startat eller spelaren stoppad under tiden
+            guard gen == trackGen, track != nil else { return }
+            if let f = files, !f.isEmpty {
+                track?.files = f
+                urlsFetched = Date()
+                fileIndex = -1 // tvinga ny AVPlayerItem med de nya URL:erna
+            }
+            load(t)
+        }
     }
 
     func skip(_ d: Double) { seek(position + d) }
     func toggle() { playing ? pause() : resume() }
-    func resume() { player.playImmediately(atRate: speed); playing = true; updateNowPlaying() }
+    func resume() {
+        guard track != nil else { return }
+        if urlsStale && !refreshing { refreshThenSeek(position); return }
+        startPlayback()
+    }
+    private func startPlayback() {
+        AudioFocus.willPlay(.spoken)
+        Self.setSkipCommands(true)
+        player.playImmediately(atRate: speed); playing = true; updateNowPlaying()
+    }
     func pause() { player.pause(); playing = false; save(); updateNowPlaying() }
-    func stop() { save(); player.pause(); player.replaceCurrentItem(with: nil); track = nil; playing = false; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
+    /// Pausar utan att ta över låsskärmen (när musik eller video startar)
+    func yieldFocus() {
+        guard playing else { return }
+        player.pause()
+        playing = false
+        save()
+    }
+    func stop() {
+        save()
+        trackGen += 1
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        statusObservation = nil
+        track = nil
+        chapterIndex = nil
+        playing = false
+        Self.setSkipCommands(false)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
 
-    var chapter: Chapter? { track?.chapters.last { $0.start <= position } }
+    var chapter: Chapter? {
+        guard let i = chapterIndex, let ch = track?.chapters, ch.indices.contains(i) else { return nil }
+        return ch[i]
+    }
 
     private func fileEnded() {
         guard let tr = track else { return }
+        retried = false
         if fileIndex + 1 < tr.files.count { seek(tr.files[fileIndex + 1].offset + 0.01) }
         else { position = tr.duration; save(final: true); playing = false; updateNowPlaying() }
     }
@@ -186,6 +298,11 @@ final class SpokenPlayer: ObservableObject {
     private func tick(_ local: Double) {
         guard let tr = track, local.isFinite, tr.files.indices.contains(fileIndex) else { return }
         position = tr.files[fileIndex].offset + local
+        let ci = tr.chapters.lastIndex { $0.start <= position }
+        if ci != chapterIndex {
+            chapterIndex = ci
+            updateNowPlaying()
+        }
         if playing, Date().timeIntervalSince(lastSave) > 15 { save() }
     }
 

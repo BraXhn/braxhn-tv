@@ -16,7 +16,15 @@ const cfg = () => ({
 });
 export const enabled = (event) => { const c = cfg(); return c.kind !== 'none' && c.events.has(event); };
 
-const last = new Map(); // nyckel → tid (begränsning)
+const last = new Map(); // nyckel → tid då nästa notis tidigast får skickas (begränsning)
+const LAST_MAX = 1000;
+function pruneLast() {
+  if (last.size <= LAST_MAX) return;
+  const t = Date.now();
+  for (const [k, until] of last) if (until <= t) last.delete(k);
+  // Fortfarande för många (t.ex. en attack från tusentals adresser): släpp de äldsta
+  for (const k of last.keys()) { if (last.size <= LAST_MAX) break; last.delete(k); }
+}
 export const sent = []; // senaste notiser (för test och visning)
 
 /** Skicka en notis. key + minIntervalSec begränsar upprepningar. */
@@ -24,9 +32,10 @@ export async function notify(event, title, message, { priority = 3, key = null, 
   const c = cfg();
   if (!force && (c.kind === 'none' || !c.events.has(event))) return false;
   if (key && minInterval) {
-    const t = last.get(key) || 0;
-    if (Date.now() - t < minInterval * 1000) return false;
-    last.set(key, Date.now());
+    if ((last.get(key) || 0) > Date.now()) return false;
+    last.delete(key); // nyast sist (Map behåller insättningsordning)
+    last.set(key, Date.now() + minInterval * 1000);
+    pruneLast();
   }
   const t = `BraXhn TV: ${title}`;
   sent.push({ event, title: t, message, at: Date.now() }); if (sent.length > 50) sent.shift();

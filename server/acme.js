@@ -122,8 +122,7 @@ export async function obtain(onDone) {
     const done = await c.poll(orderUrl, ['valid'], ['invalid']);
     const cert = (await c.post(done.certificate, null)).body;
     if (!String(cert).includes('BEGIN CERTIFICATE')) throw new Error('Inget certifikat i svaret');
-    fs.writeFileSync(path.join(TLS, 'key.pem'), privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-    fs.writeFileSync(path.join(TLS, 'cert.pem'), cert);
+    writePair(privateKey.export({ type: 'pkcs8', format: 'pem' }), cert);
     state.last = Date.now();
     setSetting('acme_last', String(Math.floor(Date.now() / 1000)));
     log(`Klart! Certifikatet gäller till ${new crypto.X509Certificate(cert.split(/(?=-----BEGIN CERTIFICATE-----)/)[0]).validTo}`);
@@ -135,6 +134,29 @@ export async function obtain(onDone) {
     notify('cert', 'Certifikatet kunde inte hämtas', `${domain}: ${e.message}${ci ? ` – nuvarande certifikat gäller ${ci.daysLeft} dagar till.` : ''}`, { priority: 4, key: 'acmefail', minInterval: 86400 });
     throw e;
   } finally { state.running = false; challenges.clear(); }
+}
+
+/** Skriv nyckel och certifikat atomiskt: båda till temporära filer först, sedan byts de in (rename) – ett avbrott mitt i
+ *  lämnar aldrig en halv fil eller en nyckel som inte hör till certifikatet kvar längre än mellan två rename. */
+function writePair(keyPem, certPem) {
+  const kf = path.join(TLS, 'key.pem'), cf = path.join(TLS, 'cert.pem');
+  const kt = kf + '.tmp', ct = cf + '.tmp';
+  try {
+    fs.writeFileSync(kt, keyPem, { mode: 0o600 });
+    fs.writeFileSync(ct, certPem);
+    fs.renameSync(kt, kf);
+    fs.renameSync(ct, cf);
+  } finally { fs.rmSync(kt, { force: true }); fs.rmSync(ct, { force: true }); }
+}
+
+/** Täcker certifikatets subjectAltName domänen? (exakt namn eller *.jokertecken på samma nivå) */
+export function sanCovers(san, domain) {
+  domain = String(domain || '').toLowerCase();
+  return String(san || '').split(/,\s*/).some(e => {
+    const m = /^DNS:(.+)$/i.exec(e.trim()); if (!m) return false;
+    const n = m[1].toLowerCase();
+    return n === domain || (n.startsWith('*.') && domain.endsWith(n.slice(1)) && !domain.slice(0, -n.length + 1).includes('.'));
+  });
 }
 
 export function certInfo() {
@@ -153,7 +175,9 @@ export function scheduleRenewal(onDone) {
     // Eget certifikat (utan ACME) som snart går ut
     if (ci && ci.daysLeft < 14) notify('cert', 'Certifikatet går snart ut', `HTTPS-certifikatet går ut om ${ci.daysLeft} dagar (${ci.validTo}).`, { priority: 4, key: 'certexp', minInterval: 86400 });
     if (!getSetting('acme_domain', process.env.ACME_DOMAIN || '') || getSetting('acme_auto', '1') !== '1' || state.running) return;
-    if (!ci || ci.daysLeft < 30) obtain(onDone).catch(() => {});
+    // Förnya också om domänen har ändrats sedan certifikatet hämtades
+    const domain = getSetting('acme_domain', process.env.ACME_DOMAIN || '').trim().toLowerCase();
+    if (!ci || ci.daysLeft < 30 || !sanCovers(ci.san, domain)) obtain(onDone).catch(() => {});
   };
   setTimeout(check, 60e3).unref?.();
   setInterval(check, 12 * 3600e3).unref();

@@ -206,8 +206,15 @@ object Api {
     }
 
     /** Vilka format den här enheten avkodar själv (resten remuxas/omkodas av servern). */
+    /** Enhetens avkodare ändras inte under körning – räkna upp dem en gång (MediaCodecList är långsam). */
+    private val decoderTypes: Set<String> by lazy {
+        runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.flatMap { it.supportedTypes.toList() }.map { it.lowercase() }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
     fun capabilities(audio: Int?, sub: SubtitleTrack?): Map<String, String?> {
-        val types = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.flatMap { it.supportedTypes.toList() }.map { it.lowercase() }.toSet()
+        val types = decoderTypes
         val v = mutableListOf("h264")
         if ("video/hevc" in types) v += "hevc"
         if ("video/x-vnd.on2.vp9" in types) v += "vp9"

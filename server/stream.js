@@ -3,7 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { send, fail, MIME } from './util.js';
+import { pipeline } from 'node:stream';
+import { send, fail, MIME, streamFile } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 
 const pexec = promisify(execFile);
@@ -32,6 +33,18 @@ const videoOf = (it) => streamsOf(it).find(s => s.type === 'video');
 const is10bit = (v) => /10|12/.test(v?.pix || '');
 
 // ---------------- undertexter ----------------
+// Mapplistningar cachas per mapp och läses om bara när mappens ändringstid ändras (ny/borttagen fil)
+const dirCache = new Map();
+function listDir(dir) {
+  const mtime = fs.statSync(dir).mtimeMs; // kastar om mappen saknas
+  const c = dirCache.get(dir);
+  if (c && c.mtime === mtime) return c.files;
+  const files = fs.readdirSync(dir);
+  dirCache.delete(dir);
+  dirCache.set(dir, { mtime, files });
+  if (dirCache.size > 2000) dirCache.delete(dirCache.keys().next().value);
+  return files;
+}
 export function subtitlesOf(it) {
   const out = [];
   for (const s of streamsOf(it)) {
@@ -45,14 +58,14 @@ export function subtitlesOf(it) {
   }
   const dir = path.dirname(it.path), base = path.basename(it.path, path.extname(it.path));
   try {
-    fs.readdirSync(dir).filter(f => f.startsWith(base) && /\.(srt|vtt|ass|ssa)$/i.test(f)).sort().forEach((f, i) => {
+    listDir(dir).filter(f => f.startsWith(base) && /\.(srt|vtt|ass|ssa)$/i.test(f)).sort().forEach((f, i) => {
       const tag = f.slice(base.length).replace(/\.(srt|vtt|ass|ssa)$/i, '').replace(/^[._-]+/, '');
       out.push({ id: 'x' + i, file: path.join(dir, f), lang: tag.split(/[._-]/)[0] || null, label: (tag || 'Extern') + ' (fil)', forced: /forced/i.test(tag), bitmap: false, source: 'external' });
     });
   } catch {}
   try {
     const d = path.join(SUBS_DIR, String(it.id));
-    fs.readdirSync(d).filter(f => /\.(srt|vtt|ass)$/i.test(f)).sort().forEach((f, i) => {
+    listDir(d).filter(f => /\.(srt|vtt|ass)$/i.test(f)).sort().forEach((f, i) => {
       const lang = f.split('.')[0];
       out.push({ id: 'd' + i, file: path.join(d, f), lang, label: `${lang} (nedladdad)`, forced: false, bitmap: false, source: 'downloaded' });
     });
@@ -71,7 +84,7 @@ const subRunning = new Map();
 function extractVtt(it, sub) {
   const key = `${it.id}-${it.mtime}-${sub.id}${sub.file ? '-' + (fs.statSync(sub.file).mtimeMs | 0) : ''}`;
   const file = path.join(CACHE, 'subs', key + '.vtt');
-  if (fs.existsSync(file)) return Promise.resolve(fs.readFileSync(file, 'utf8'));
+  if (fs.existsSync(file)) return fs.promises.readFile(file, 'utf8');
   if (subRunning.has(key)) return subRunning.get(key);
   const pr = subSlot(() => new Promise((ok, no) => {
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN];
@@ -84,6 +97,7 @@ function extractVtt(it, sub) {
     const chunks = []; let size = 0;
     p.stdout.on('data', c => { size += c.length; if (size > 20 << 20) p.kill('SIGKILL'); else chunks.push(c); });
     const timer = setTimeout(() => p.kill('SIGKILL'), 10 * 60e3);
+    p.on('error', (e) => { clearTimeout(timer); no(new Error('Kunde inte starta ffmpeg: ' + e.message)); });
     p.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0 && !chunks.length) return no(new Error('Kunde inte läsa undertexten'));
@@ -115,8 +129,13 @@ export async function serveSubtitle(req, res, it, sid, query) {
 // Äldre svenska .srt-filer är ofta Windows-1252 – kolla om innehållet är giltig UTF-8
 function guessCharenc(file) {
   try {
-    const b = fs.readFileSync(file).subarray(0, 65536);
-    new TextDecoder('utf-8', { fatal: true }).decode(b);
+    // Läs bara början av filen (räcker för att avgöra teckenkodningen)
+    const b = Buffer.alloc(65536), fd = fs.openSync(file, 'r');
+    let n; try { n = fs.readSync(fd, b, 0, b.length, 0); } finally { fs.closeSync(fd); }
+    let sub = b.subarray(0, n);
+    // Klipp inte mitt i ett flerbytestecken
+    if (n === b.length) { let k = n; while (k > n - 4 && (sub[k - 1] & 0xc0) === 0x80) k--; if (k > 0 && sub[k - 1] >= 0xc0) k--; sub = sub.subarray(0, k); }
+    new TextDecoder('utf-8', { fatal: true }).decode(sub);
     return 'UTF-8';
   } catch { return 'CP1252'; }
 }
@@ -125,39 +144,37 @@ function guessCharenc(file) {
 export function serveDirect(req, res, it) {
   let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
   const type = MIME[path.extname(it.path).toLowerCase()] || 'application/octet-stream';
-  const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
-  let start = 0, end = st.size - 1, code = 200;
-  if (range) {
-    if (range[1] === '' && range[2] !== '') { start = Math.max(0, st.size - +range[2]); }
-    else { start = +range[1] || 0; if (range[2] !== '') end = Math.min(+range[2], end); }
-    if (start > end || start >= st.size) return send(res, 416, '', { 'Content-Range': `bytes */${st.size}` });
-    code = 206;
-  }
-  const h = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store' };
-  if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
-  res.writeHead(code, h);
-  if (req.method === 'HEAD') return res.end();
-  fs.createReadStream(it.path, { start, end }).pipe(res);
+  streamFile(req, res, it.path, st.size, { 'Content-Type': type, 'Cache-Control': 'no-store' });
 }
 
 export function serveDownload(req, res, it) {
   let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
-  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': st.size,
-    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(it.path))}` });
-  fs.createReadStream(it.path).pipe(res);
+  streamFile(req, res, it.path, st.size, { 'Content-Type': 'application/octet-stream',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(it.path))}` }, { ranges: false });
 }
 
 // ---------------- nyckelbilder (för remux) ----------------
+// Liten LRU-cache i minnet (nyckelbildslistor kan vara stora); resten läses från disk vid behov
 const kfMem = new Map();
+const KF_MAX = 64;
+function kfRemember(id, mtime, kf) {
+  kfMem.delete(id);
+  kfMem.set(id, { mtime, kf });
+  if (kfMem.size > KF_MAX) kfMem.delete(kfMem.keys().next().value);
+}
 const kfFile = (it) => path.join(CACHE, 'keyframes', `${it.id}-${it.mtime}.json`);
 export function keyframesReady(it) {
-  if (kfMem.has(it.id) && kfMem.get(it.id).mtime === it.mtime) return kfMem.get(it.id).kf;
+  const m = kfMem.get(it.id);
+  if (m && m.mtime === it.mtime) { kfMem.delete(it.id); kfMem.set(it.id, m); return m.kf; }
   try {
     const kf = JSON.parse(fs.readFileSync(kfFile(it), 'utf8'));
-    kfMem.set(it.id, { mtime: it.mtime, kf });
+    kfRemember(it.id, it.mtime, kf);
     return kf;
   } catch { return null; }
 }
+/** Finns nyckelbilderna redan indexerade? (utan att läsa in dem) */
+export const keyframesCached = (it) => kfMem.get(it.id)?.mtime === it.mtime || fs.existsSync(kfFile(it));
+export const kfCacheSize = () => kfMem.size;
 const kfRunning = new Map();
 let kfActive = 0; const kfWait = [];
 export function computeKeyframes(it) {
@@ -178,7 +195,7 @@ export function computeKeyframes(it) {
       kf.sort((a, b) => a - b);
       for (const f of fs.readdirSync(path.join(CACHE, 'keyframes'))) if (f.startsWith(it.id + '-')) fs.rmSync(path.join(CACHE, 'keyframes', f), { force: true });
       fs.writeFileSync(kfFile(it), JSON.stringify(kf));
-      kfMem.set(it.id, { mtime: it.mtime, kf });
+      kfRemember(it.id, it.mtime, kf);
       return kf;
     } catch (e) { console.warn('[keyframes]', it.path, e.message); return null; }
     finally { kfRunning.delete(it.id); kfActive--; kfWait.shift()?.(); }
@@ -432,7 +449,12 @@ function startFfmpeg(s, it, n) {
   }
   const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
-  p.stderr.on('data', c => { err = (err + c).slice(-3000); });
+  p.on('error', (e) => {
+    // ffmpeg saknas eller kunde inte startas – väntande förfrågningar ser !s.proc och svarar med fel
+    console.warn(`[hls:${d.mode}] kunde inte starta ffmpeg:`, e.message);
+    if (s.proc === p) { s.proc = null; s.done = false; }
+  });
+  p.stderr?.on('data', c => { err = (err + c).slice(-3000); });
   p.on('exit', (code, sig) => {
     if (s.proc === p) {
       if (code !== 0 && d.mode === 'remux' && d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
@@ -449,7 +471,15 @@ function stopProc(s) {
   // segment-muxern skriver direkt till slutligt filnamn – radera det senaste (ev. halvfärdiga) segmentet
   if (s.d.mode === 'remux' && s.d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
 }
-function highestFile(s) { let k = s.start; while (k >= 0 && fs.existsSync(segFile(s, k))) k++; return k - 1; }
+// Högsta sammanhängande segmentet från s.start. Senaste kända värdet sparas så att varje anrop
+// bara behöver kontrollera några få filer i stället för alla segment sedan start.
+function highestFile(s) {
+  let k = s.start;
+  if (s.hi != null && s.hi >= s.start && fs.existsSync(segFile(s, s.hi))) k = s.hi;
+  while (k >= 0 && fs.existsSync(segFile(s, k))) k++;
+  s.hi = k - 1 >= s.start ? k - 1 : null;
+  return k - 1;
+}
 // Ett segment är klart när filen finns och (remux) ffmpeg gått vidare till nästa fil eller slutat.
 // Halvfärdiga filer raderas alltid när en remux-process stoppas eller kraschar.
 function complete(s, n) {
@@ -504,7 +534,7 @@ export async function serveInit(req, res, it, query, userId) {
     if (Date.now() - t0 > 30000 || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
     await new Promise(r => setTimeout(r, 100));
   }
-  send(res, 200, fs.readFileSync(initFile(s)), { 'Content-Type': 'video/mp4' });
+  sendSegment(req, res, initFile(s), 'video/mp4');
 }
 
 export async function serveSegment(req, res, it, n, query, userId) {
@@ -532,7 +562,13 @@ export async function serveSegment(req, res, it, n, query, userId) {
       await new Promise(r => setTimeout(r, 120));
     }
   }
-  send(res, 200, fs.readFileSync(segFile(s, n)), { 'Content-Type': d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t' });
+  sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
+}
+function sendSegment(req, res, file, type) {
+  let st; try { st = fs.statSync(file); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
+  res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Cache-Control': 'no-store' });
+  if (req.method === 'HEAD' || !st.size) return res.end();
+  pipeline(fs.createReadStream(file), res, () => {});
 }
 
 // Städa: döda inaktiva ffmpeg efter 60 s, radera cache efter 15 min

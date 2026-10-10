@@ -21,6 +21,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS pe_guid ON podcast_episodes(podcast_id, guid);
 CREATE INDEX IF NOT EXISTS pe_pub ON podcast_episodes(podcast_id, published DESC);
 CREATE TABLE IF NOT EXISTS podcast_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, episode_id INTEGER NOT NULL REFERENCES podcast_episodes(id) ON DELETE CASCADE,
   position REAL NOT NULL DEFAULT 0, played INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, PRIMARY KEY(user_id, episode_id));`);
+// Nedladdningar som avbröts av en omstart: nollställ flaggan (annars laddas avsnittet aldrig ner) och ta bort halvfärdiga filer
+run('UPDATE podcast_episodes SET downloading=0 WHERE downloading!=0');
+try { for (const f of fs.readdirSync(DIR)) if (f.endsWith('.part')) fs.rmSync(path.join(DIR, f), { force: true }); } catch {}
 
 // ---------- säker hämtning ----------
 // Adressen kontrolleras i samma uppslag som anslutningen görs (skydd mot DNS-rebinding), och alla
@@ -39,27 +42,29 @@ function checkedLookup(host, opts, cb) {
     if (opts?.all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family);
   }, cb);
 }
-function request(url, headers, timeout) {
+function request(url, headers, timeout, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason || new Error('Tidsgränsen överskreds'));
     const u = new URL(url);
     if (!['http:', 'https:'].includes(u.protocol)) return reject(new Error('Bara http/https stöds'));
     if (u.username || u.password) return reject(new Error('Adresser med inloggning stöds inte'));
     const host = u.hostname.replace(/^\[|\]$/g, '');
     if (net.isIP(host) && blockedIp(host) && !allowPrivate()) return reject(new Error('Adressen pekar på ett lokalt nätverk och tillåts inte'));
     const mod = u.protocol === 'https:' ? https : http;
-    const req = mod.request(u, { method: 'GET', headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: checkedLookup, timeout }, (res) => {
+    const req = mod.request(u, { method: 'GET', headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: checkedLookup, timeout, signal }, (res) => {
       resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return Array.isArray(v) ? v[0] : v ?? null; } }, body: res });
     });
     req.on('timeout', () => req.destroy(new Error('Tidsgränsen överskreds')));
-    req.on('error', (e) => reject(e.code === 'EBLOCKED' ? new Error(e.message) : e));
+    req.on('error', (e) => reject(e.code === 'EBLOCKED' ? new Error(e.message) : e.name === 'AbortError' ? new Error('Tidsgränsen överskreds') : e));
     req.end();
   });
 }
 /** Hämtning som följer omdirigeringar själv och kontrollerar varje steg. Svaret har status/ok/headers.get/body (ström). */
-export async function safeFetch(u, { headers = {}, timeout = 30000 } = {}) {
+/** timeout gäller tystnad på anslutningen; signal (t.ex. AbortSignal.timeout) avbryter hela hämtningen inklusive läsningen av svaret. */
+export async function safeFetch(u, { headers = {}, timeout = 30000, signal } = {}) {
   let url = String(u);
   for (let i = 0; i < 6; i++) {
-    const r = await request(url, headers, timeout);
+    const r = await request(url, headers, timeout, signal);
     if ([301, 302, 303, 307, 308].includes(r.status) && r.headers.get('location')) { r.body.resume(); url = new URL(r.headers.get('location'), url).href; continue; }
     return { r, url };
   }
@@ -67,7 +72,9 @@ export async function safeFetch(u, { headers = {}, timeout = 30000 } = {}) {
 }
 export async function readLimited(r, max) {
   const chunks = []; let n = 0;
-  for await (const c of r.body) { n += c.length; if (n > max) { r.body.destroy(); throw new Error('Svaret är för stort'); } chunks.push(c); }
+  try {
+    for await (const c of r.body) { n += c.length; if (n > max) { r.body.destroy(); throw new Error('Svaret är för stort'); } chunks.push(c); }
+  } catch (e) { throw e.name === 'AbortError' ? new Error('Tidsgränsen överskreds') : e; }
   return Buffer.concat(chunks);
 }
 
@@ -144,11 +151,14 @@ export async function subscribe(url, user) {
   return id;
 }
 
+const FEED_DEADLINE = 60e3; // hela flödet (anslutning + nedladdning) måste vara klart inom en minut
+let upsertStmt = null, sameStmt = null;
 export async function refresh(id, first = false) {
   const p = get('SELECT * FROM podcasts WHERE id=?', id); if (!p) return;
   try {
-    const { r } = await safeFetch(p.url);
-    if (!r.ok) throw new Error(`Flödet svarade ${r.status}`);
+    const signal = AbortSignal.timeout(FEED_DEADLINE);
+    const { r } = await safeFetch(p.url, { signal });
+    if (!r.ok) { r.body.resume(); throw new Error(`Flödet svarade ${r.status}`); }
     const xml = (await readLimited(r, MAX_FEED)).toString('utf8');
     if (!/<rss|<feed|<channel/i.test(xml)) throw new Error('Adressen är inte ett RSS-flöde');
     const { feed, items } = parseFeed(xml);
@@ -156,15 +166,24 @@ export async function refresh(id, first = false) {
       (feed.title || p.url).slice(0, 300), feed.author?.slice(0, 200) || null, feed.description || null, feed.link?.slice(0, 500) || null, now(), id);
     if (feed.image && (!p.image || first)) {
       try {
-        const { r: ir } = await safeFetch(feed.image, { timeout: 20000 });
+        const { r: ir } = await safeFetch(feed.image, { timeout: 20000, signal: AbortSignal.timeout(30000) });
         if (ir.ok && /^image\//.test(ir.headers.get('content-type') || 'image/')) { fs.writeFileSync(imgFile(id), await readLimited(ir, 5 << 20)); run('UPDATE podcasts SET image=1 WHERE id=?', id); }
+        else ir.body.resume();
       } catch {}
     }
-    for (const it of items.slice(0, 1000)) {
-      run(`INSERT INTO podcast_episodes(podcast_id,guid,title,description,published,duration,url,mime,size,added) VALUES(?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(podcast_id,guid) DO UPDATE SET title=excluded.title, description=excluded.description, duration=COALESCE(excluded.duration,duration), url=excluded.url`,
-        id, String(it.guid).slice(0, 500), it.title.slice(0, 300), it.description, it.published, it.duration, it.url, it.mime, it.size, now());
-    }
+    // En transaktion per flöde; oförändrade avsnitt skrivs inte om
+    upsertStmt ||= db.prepare(`INSERT INTO podcast_episodes(podcast_id,guid,title,description,published,duration,url,mime,size,added) VALUES(?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(podcast_id,guid) DO UPDATE SET title=excluded.title, description=excluded.description, duration=COALESCE(excluded.duration,duration), url=excluded.url`);
+    sameStmt ||= db.prepare(`SELECT 1 FROM podcast_episodes WHERE podcast_id=? AND guid=? AND title IS ? AND description IS ? AND url=? AND (duration IS ? OR ? IS NULL)`);
+    db.exec('BEGIN');
+    try {
+      for (const it of items.slice(0, 1000)) {
+        const guid = String(it.guid).slice(0, 500), title = it.title.slice(0, 300);
+        if (sameStmt.get(id, guid, title, it.description, it.url, it.duration, it.duration)) continue;
+        upsertStmt.run(id, guid, title, it.description, it.published, it.duration, it.url, it.mime, it.size, now());
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
     autoDownload(id);
     return { episodes: items.length };
   } catch (e) {
@@ -274,8 +293,16 @@ export function saveProgress(uid, epId, position, played) {
 }
 export const episodeRow = (id) => get('SELECT * FROM podcast_episodes WHERE id=?', id);
 
-// Uppdatera alla flöden varje timme och städa nedladdningar
-setInterval(async () => {
-  for (const p of all('SELECT id FROM podcasts WHERE last_fetch IS NULL OR last_fetch < ?', now() - 3600)) await refresh(p.id).catch(() => {});
-  cleanup();
-}, 15 * 60e3).unref();
+// Uppdatera alla flöden varje timme och städa nedladdningar (en körning åt gången, högst 4 flöden samtidigt)
+let refreshing = false;
+export async function refreshAll(concurrency = 4) {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const due = all('SELECT id FROM podcasts WHERE last_fetch IS NULL OR last_fetch < ?', now() - 3600).map(p => p.id);
+    const worker = async () => { while (due.length) { const id = due.shift(); try { await refresh(id); } catch (e) { void e; } } };
+    await Promise.all(Array.from({ length: Math.min(concurrency, due.length) }, worker));
+    try { cleanup(); } catch (e) { console.warn('[podd] städning:', e.message); }
+  } finally { refreshing = false; }
+}
+setInterval(() => { refreshAll().catch(e => console.warn('[podd] uppdatering:', e.message)); }, 15 * 60e3).unref();

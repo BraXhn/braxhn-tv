@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { all, run, CACHE, getSetting } from './db.js';
+import { all, run, tx, CACHE, getSetting } from './db.js';
 
 const SR = 5512, FRAME = 2048, HOP = 256;
 const FPS = SR / HOP;                       // fingeravtryck per sekund (~21,5)
@@ -37,12 +37,17 @@ function fft(re, im) {
 // 34 logaritmiskt fördelade bandgränser mellan 300 och 2000 Hz
 const edges = Array.from({ length: 34 }, (_, i) => Math.round(300 * Math.pow(2000 / 300, i / 33) / (SR / N)));
 
-export function fingerprint(pcm) {
+// Fingeravtrycket beräknas i bitar (FP_CHUNK bildrutor åt gången) så att den asynkrona varianten
+// kan släppa fram andra förfrågningar mellan bitarna – ett avsnitt tar flera sekunder CPU-tid.
+const FP_CHUNK = 64;
+function fpState(pcm) {
   const frames = Math.max(0, Math.floor((pcm.length - N) / HOP) + 1);
-  const hashes = new Uint32Array(frames), silent = new Uint8Array(frames);
-  const re = new Float64Array(N), im = new Float64Array(N);
-  const E = new Float64Array(33), P = new Float64Array(33);
-  for (let f = 0; f < frames; f++) {
+  return { pcm, frames, hashes: new Uint32Array(frames), silent: new Uint8Array(frames),
+    re: new Float64Array(N), im: new Float64Array(N), E: new Float64Array(33), P: new Float64Array(33) };
+}
+function fpRange(st, f0, f1) {
+  const { pcm, hashes, silent, re, im, E, P } = st;
+  for (let f = f0; f < f1; f++) {
     const o = f * HOP;
     let energy = 0;
     for (let i = 0; i < N; i++) { const x = pcm[o + i] / 32768; energy += x * x; re[i] = x * win[i]; im[i] = 0; }
@@ -58,20 +63,38 @@ export function fingerprint(pcm) {
     silent[f] = energy / N < 1e-6 ? 1 : 0; // ca −60 dBFS
     P.set(E);
   }
-  return { hashes, silent };
+}
+export function fingerprint(pcm) {
+  const st = fpState(pcm);
+  fpRange(st, 0, st.frames);
+  return { hashes: st.hashes, silent: st.silent };
+}
+/** Samma som fingerprint() men blockerar aldrig händelseloopen mer än några millisekunder åt gången */
+export async function fingerprintAsync(pcm) {
+  const st = fpState(pcm);
+  for (let f = 0; f < st.frames; f += FP_CHUNK) {
+    fpRange(st, f, Math.min(st.frames, f + FP_CHUNK));
+    await new Promise(setImmediate);
+  }
+  return { hashes: st.hashes, silent: st.silent };
 }
 
+const PCM_TIMEOUT = 10 * 60e3;
 function readPcm(file, start, dur) {
   return new Promise((resolve, reject) => {
     const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-ss', String(Math.max(0, start)), '-t', String(dur),
       '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const chunks = []; let err = '';
+    const chunks = []; let err = '', timedOut = false, settled = false;
+    const done = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); fn(v); };
+    const timer = setTimeout(() => { timedOut = true; p.kill('SIGKILL'); }, PCM_TIMEOUT);
+    p.on('error', (e) => done(reject, new Error('Kunde inte starta ffmpeg: ' + e.message)));
     p.stdout.on('data', c => chunks.push(c));
-    p.stderr.on('data', c => { err += c; });
+    p.stderr.on('data', c => { err = (err + c).slice(-4000); });
     p.on('close', code => {
-      if (code !== 0) return reject(new Error(err.trim() || 'ffmpeg ' + code));
+      if (timedOut) return done(reject, new Error('ffmpeg tog för lång tid (över 10 min)'));
+      if (code !== 0) return done(reject, new Error(err.trim() || 'ffmpeg ' + code));
       const b = Buffer.concat(chunks);
-      resolve(new Int16Array(b.buffer, b.byteOffset, Math.floor(b.length / 2)));
+      done(resolve, new Int16Array(b.buffer, b.byteOffset, Math.floor(b.length / 2)));
     });
   });
 }
@@ -88,7 +111,7 @@ async function fpFor(it, part) {
   // i = början, e = slutet, f = hela avsnittet (för att hitta "tidigare i serien")
   const len = part === 'i' ? Math.min(INTRO_WIN, dur * 0.45) : part === 'f' ? dur : Math.min(END_WIN, dur * 0.35);
   const offset = part === 'e' ? Math.max(0, dur - len) : 0;
-  const fp = fingerprint(await readPcm(it.path, offset, len));
+  const fp = await fingerprintAsync(await readPcm(it.path, offset, len));
   const n = fp.hashes.length, out = Buffer.alloc(4 + n * 5 + 8);
   out.writeUInt32LE(n, 0);
   Buffer.from(fp.hashes.buffer).copy(out, 4);
@@ -168,6 +191,7 @@ async function season(eps, status) {
       const A = await load(a, part), B = await load(b, part);
       if (!A || !B) continue;
       const r = compare(A, B);
+      await new Promise(setImmediate); // släpp fram andra förfrågningar mellan jämförelserna
       if (!r) continue;
       for (const [e, fp, f0, f1] of [[a, A, r.a0, r.a1], [b, B, r.b0, r.b1]]) {
         const s = toSec(fp, f0), t = toSec(fp, f1), cur = res.get(e.id);
@@ -183,12 +207,14 @@ async function season(eps, status) {
     const r = res.get(eps[k].id);
     if ((!r.intro || !r.credits) && eps[k + 2]) await tryPair(eps[k], eps[k + 2]);
   }
-  for (const e of eps) {
-    const r = res.get(e.id);
-    const is = r.intro ? Math.max(0, r.intro.s < 3 ? 0 : r.intro.s) : null;
-    run('UPDATE items SET intro_start=?, intro_end=?, credits_start=?, markers_done=1 WHERE id=?',
-      is, r.intro ? r.intro.t : null, r.credits ? r.credits.s : null, e.id);
-  }
+  tx(() => {
+    for (const e of eps) {
+      const r = res.get(e.id);
+      const is = r.intro ? Math.max(0, r.intro.s < 3 ? 0 : r.intro.s) : null;
+      run('UPDATE items SET intro_start=?, intro_end=?, credits_start=?, markers_done=1 WHERE id=?',
+        is, r.intro ? r.intro.t : null, r.credits ? r.credits.s : null, e.id);
+    }
+  });
   // "Tidigare i serien": klipp i början av avsnitt N som finns någonstans i avsnitt N-1
   if (getSetting('detect_recap', '1') === '1') {
     for (let k = 1; k < eps.length; k++) {
@@ -197,6 +223,7 @@ async function season(eps, status) {
         if (!A || !P) continue;
         const r = res.get(eps[k].id);
         const rc = findRecap(A, P, r.intro ? [r.intro.s, r.intro.t] : null);
+        await new Promise(setImmediate);
         run('UPDATE items SET recap_start=?, recap_end=? WHERE id=?', rc ? rc[0] : null, rc ? rc[1] : null, eps[k].id);
       } catch (er) { console.warn('[recap]', eps[k].path, er.message); }
     }

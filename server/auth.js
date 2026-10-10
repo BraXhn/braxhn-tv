@@ -7,11 +7,15 @@ const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 // Lösenordshashning körs utanför händelseloopen och högst 4 samtidigt – så att en
 // inloggningsstorm inte fryser strömmar för andra användare.
 let active = 0; const waiting = [];
+// När en hashning blir klar lämnas platsen direkt över till nästa i kön (active ändras inte),
+// så att ingen ny förfrågan hinner emellan och fler än 4 körs samtidigt.
 async function slot(fn) {
   if (active >= 4) await new Promise(r => waiting.push(r));
-  active++;
-  try { return await fn(); } finally { active--; waiting.shift()?.(); }
+  else active++;
+  try { return await fn(); }
+  finally { const next = waiting.shift(); if (next) next(); else active--; }
 }
+export const scryptActive = () => active;
 const scryptAsync = (pw, salt, opts) => slot(() => new Promise((ok, no) => scrypt(pw, salt, 64, opts, (e, k) => e ? no(e) : ok(k))));
 
 export async function hashPw(pw) {
@@ -52,11 +56,13 @@ export function weakPassword(pw, name = '') {
 const TTL = { web: 30 * 86400, app: 365 * 86400, media: 24 * 3600, img: 7 * 86400 };
 export const sha = (t) => createHash('sha256').update(String(t)).digest('hex');
 
+let lastCleanup = 0;
 export function createSession(userId, kind = 'web', { item = null, ua = null, ip = null } = {}) {
   const token = randomBytes(32).toString('hex');
   run(`INSERT INTO sessions(token,user_id,created,kind,expires,scope_item,ua,ip,last_seen) VALUES(?,?,?,?,?,?,?,?,?)`,
     sha(token), userId, now(), kind, now() + TTL[kind], item, ua ? String(ua).slice(0, 200) : null, ip, now());
-  run('DELETE FROM sessions WHERE expires < ?', now());
+  // Rensa utgångna sessioner högst en gång per minut (inte vid varje ny session)
+  if (now() - lastCleanup >= 60) { lastCleanup = now(); run('DELETE FROM sessions WHERE expires < ?', now()); }
   return token;
 }
 // Över HTTPS används __Host--prefixet (kan inte sättas av andra underdomäner)

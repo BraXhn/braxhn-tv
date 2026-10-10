@@ -1,3 +1,12 @@
+// Loggning av oväntade fel. Ett avvisat löfte som ingen fångar loggas och servern fortsätter.
+// Ett ofångat undantag kan ha lämnat servern i ett okänt tillstånd: logga och avsluta så att
+// Docker/Unraid startar om containern (restart: unless-stopped).
+process.on('unhandledRejection', (e) => { console.error('[fel] ohanterat avvisat löfte:', e?.stack || e); });
+process.on('uncaughtException', (e, origin) => {
+  console.error(`[fel] ofångat undantag (${origin}):`, e?.stack || e);
+  process.exitCode = 1;
+  setTimeout(() => process.exit(1), 200).unref();
+});
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
@@ -6,6 +15,8 @@ import { handle } from './app.js';
 import { scan } from './scanner.js';
 import { CONFIG } from './db.js';
 import { scheduleRenewal } from './acme.js';
+import { shutdown as liveShutdown } from './livetv.js';
+import { shutdown as dvrShutdown } from './dvr.js';
 
 const PORT = +process.env.PORT || 8420;
 const app = (req, res) => handle(req, res).catch(e => { console.error(e); try { res.writeHead(500); res.end(); } catch {} });
@@ -48,4 +59,11 @@ globalThis.__braxhnReloadTls = loadTls;
 // Let's Encrypt: förnya automatiskt när en domän är inställd
 scheduleRenewal(loadTls);
 
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { server.close(); tlsServer?.close(); process.exit(0); });
+// Avsluta snyggt: stoppa live-TV och låt pågående inspelningar skriva klart sina filer
+let stopping = false;
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => {
+  if (stopping) return; stopping = true;
+  server.close(); tlsServer?.close();
+  try { liveShutdown(); await dvrShutdown(5000); } catch {}
+  process.exit(0);
+});

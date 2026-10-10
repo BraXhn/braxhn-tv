@@ -17,7 +17,8 @@ CREATE INDEX IF NOT EXISTS book_files_book ON book_files(book_id, idx);
 CREATE TABLE IF NOT EXISTS book_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
   position REAL NOT NULL DEFAULT 0, finished INTEGER NOT NULL DEFAULT 0, speed REAL, updated INTEGER NOT NULL, PRIMARY KEY(user_id, book_id));
 CREATE TABLE IF NOT EXISTS bookmarks(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, position REAL NOT NULL, note TEXT, created INTEGER NOT NULL);`);
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, position REAL NOT NULL, note TEXT, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS book_probe_fail(path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER);`);
 
 const coverFile = (id) => path.join(IMAGES, `b${id}-cover.jpg`);
 export const coverPath = (id) => { const f = coverFile(id); return fs.existsSync(f) ? f : null; };
@@ -50,22 +51,42 @@ async function chaptersOf(file) {
   } catch { return []; }
 }
 
+/** Får borttagna böcker tas bort? Nej om biblioteksmappen inte går att läsa (t.ex. en NAS som inte är monterad), om inga filer
+ *  hittades fast böcker finns, eller om mer än hälften skulle försvinna – annars raderas position och bokmärken för alla. */
+function deletionBlocked(lib, knownCount, foundCount, removeCount) {
+  try { if (!fs.statSync(lib.path).isDirectory()) return 'biblioteksmappen är inte en mapp'; fs.readdirSync(lib.path); }
+  catch (e) { return `biblioteksmappen går inte att läsa (${e.code || e.message})`; }
+  if (knownCount > 0 && foundCount === 0) return 'inga ljudböcker hittades';
+  if (removeCount > 2 && removeCount > knownCount / 2) return `${removeCount} av ${knownCount} böcker skulle tas bort`;
+  return null;
+}
+
 export async function scanBooks(lib, status) {
   status.phase = 'Söker ljudböcker'; status.done = 0;
   const groups = groupBooks([...walk(lib.path)]);
   status.total = groups.length; status.phase = 'Läser ljudböcker';
   const known = new Map(all('SELECT id, key FROM books WHERE library_id=?', lib.id).map(r => [r.key, r.id]));
-  const seen = new Set();
+  const seen = new Set(), seenFiles = new Set();
+  // Filer som ffprobe inte klarade kommer vi ihåg (med storlek/ändringstid) så att boken inte läses om vid varje skanning
+  const failGet = db.prepare('SELECT size, mtime FROM book_probe_fail WHERE path=?');
+  const failSet = db.prepare('INSERT INTO book_probe_fail(path,size,mtime) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size, mtime=excluded.mtime');
+  const failDel = db.prepare('DELETE FROM book_probe_fail WHERE path=?');
   for (const g of groups) {
     status.done++; seen.add(g.key);
     const stats = g.files.map(f => { try { const s = fs.statSync(f); return { f, size: s.size, mtime: Math.floor(s.mtimeMs / 1000) }; } catch { return null; } }).filter(Boolean);
+    for (const x of stats) seenFiles.add(x.f);
     const bid = known.get(g.key);
-    if (bid) {
-      const prev = all('SELECT path, size, mtime FROM book_files WHERE book_id=? ORDER BY idx', bid);
-      if (prev.length === stats.length && prev.every((p, i) => p.path === stats[i].f && p.size === stats[i].size && p.mtime === stats[i].mtime)) continue;
-    }
+    const prev = bid ? all('SELECT path, size, mtime FROM book_files WHERE book_id=? ORDER BY idx', bid) : [];
+    const prevMap = new Map(prev.map(p => [p.path, p]));
+    const statPaths = new Set(stats.map(x => x.f));
+    const unchanged = stats.every(x => { const p = prevMap.get(x.f) || failGet.get(x.f); return p && p.size === x.size && p.mtime === x.mtime; })
+      && prev.every(p => statPaths.has(p.path));
+    if (unchanged) continue;
     const infos = [];
-    for (const s of stats) { try { infos.push({ ...s, info: await probe(s.f) }); } catch (e) { console.warn('[böcker] ffprobe', s.f, e.message); } }
+    for (const s of stats) {
+      try { infos.push({ ...s, info: await probe(s.f) }); failDel.run(s.f); }
+      catch (e) { console.warn('[böcker] ffprobe', s.f, e.message); failSet.run(s.f, s.size, s.mtime); }
+    }
     if (!infos.length) continue;
     const t = infos[0].info.tags;
     const rel = path.relative(lib.path, g.key).split(path.sep);
@@ -89,7 +110,16 @@ export async function scanBooks(lib, status) {
       id, x.f, x.idx, x.info.tags.title || null, x.info.duration, x.offset, x.size, x.mtime, x.info.codec, x.info.bitrate);
     if (!coverPath(id) && await makeCover(coverFile(id), g.dir, files[0].f, files.some(x => x.info.hasPic))) run('UPDATE books SET cover=1 WHERE id=?', id);
   }
-  for (const [k, id] of known) if (!seen.has(k)) { run('DELETE FROM books WHERE id=?', id); fs.rm(coverFile(id), { force: true }, () => {}); }
+  const gone = [...known].filter(([k]) => !seen.has(k));
+  const blocked = gone.length ? deletionBlocked(lib, known.size, groups.length, gone.length) : (groups.length ? null : 'inga filer hittades');
+  if (blocked) {
+    if (gone.length) { console.warn(`[böcker] ${lib.name || lib.path}: inga böcker tas bort – ${blocked}`); status.warning = `Inga ljudböcker togs bort: ${blocked}`; }
+    return;
+  }
+  for (const [, id] of gone) { run('DELETE FROM books WHERE id=?', id); fs.rm(coverFile(id), { force: true }, () => {}); }
+  // Glöm misslyckade prober för filer som inte längre finns
+  const root = path.resolve(lib.path) + path.sep;
+  for (const r of all('SELECT path FROM book_probe_fail WHERE substr(path, 1, ?) = ?', root.length, root)) if (!seenFiles.has(r.path)) failDel.run(r.path);
 }
 
 // ---------- API-hjälp ----------

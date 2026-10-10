@@ -161,9 +161,11 @@ fun LoginScreen() {
 // ---------------- kort ----------------
 
 @Composable
-fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (landscape) 280 else 160, onClick: () -> Unit) {
+fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (landscape) 280 else 160, onClick: (() -> Unit)?) {
     val h = if (landscape) width * 9 / 16 else width * 3 / 2
-    Column(Modifier.width(width.dp).clip(RoundedCornerShape(10.dp)).focusRing().clickable(onClick = onClick)) {
+    // onClick = null: kortet är bara en bild (t.ex. inuti en rad som själv är klickbar) och tar inte fokus
+    val click = if (onClick != null) Modifier.focusRing().clickable(onClick = onClick) else Modifier
+    Column(Modifier.width(width.dp).clip(RoundedCornerShape(10.dp)).then(click)) {
         Box(Modifier.size(width.dp, h.dp).clip(RoundedCornerShape(10.dp)).background(
             Brush.linearGradient(listOf(Color.hsv(hue(item.title), 0.5f, 0.4f), Color.hsv(hue(item.title), 0.6f, 0.18f))))) {
             Text(item.showTitle ?: item.title, Modifier.align(Alignment.Center).padding(8.dp), fontWeight = FontWeight.Bold)
@@ -326,7 +328,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                PosterCard(it.copy(position = null), width = 200) {}
+                PosterCard(it.copy(position = null), width = 200, onClick = null)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (it.isEpisode) Text("${it.showTitle ?: ""} · ${it.sxe}", color = Color.Gray)
                     Text(it.title, fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -379,9 +381,9 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                 }
             }
             items(eps.filter { e -> e.season == season }, key = { e -> e.id }) { e ->
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { push(Screen.Play(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0, null, null)) }.padding(8.dp),
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().clickable { push(Screen.Play(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0, null, null)) }.padding(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    PosterCard(e, landscape = true, width = 240) { push(Screen.Play(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0, null, null)) }
+                    PosterCard(e, landscape = true, width = 240, onClick = null)
                     Column(Modifier.weight(1f)) {
                         Text("${e.episode}. ${e.title}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                         Text(formatDuration(e.duration) + if (e.watched == true) " · Sedd" else "", color = Color.Gray)
@@ -395,10 +397,10 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
 
 @Composable
 fun DownloadRow(item: MediaItem) {
-    val scope = rememberCoroutineScope()
     val records by Downloads.records.collectAsState()
     val active by Downloads.active.collectAsState()
-    var error by remember { mutableStateOf<String?>(null) }
+    val errors by Downloads.errors.collectAsState()
+    val error = errors[item.id]
     val done = records.any { it.id == item.id }
     val p = active[item.id]
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -406,7 +408,8 @@ fun DownloadRow(item: MediaItem) {
             done -> OutlinedButton(onClick = { Downloads.remove(item.id) }) { Text("Ta bort nedladdning") }
             p != null -> { LinearProgressIndicator(progress = { p }, modifier = Modifier.width(200.dp)); Text(if (p < 0.5f) "Förbereder…" else "Laddar ner…", color = Color.Gray) }
             else -> listOf("1080" to "Ladda ner HD", "480" to "Ladda ner (liten)").forEach { (q, label) ->
-                OutlinedButton(onClick = { error = null; scope.launch { runCatching { Downloads.download(item, q) }.onFailure { e -> error = e.message } } }) { Text(label) }
+                // Körs i appens scope – avbryts inte när man lämnar sidan
+                OutlinedButton(onClick = { Downloads.start(item, q) }) { Text(label) }
             }
         }
         error?.let { Text(it, color = Color(0xFFFF5D6C), fontSize = 13.sp) }

@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { db, get, all, run, now, getSetting, IMAGES } from './db.js';
+import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
 
 const pexec = promisify(execFile);
@@ -10,7 +11,9 @@ const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '
   '.wmv', '.mpg', '.mpeg', '.flv', '.ogv']);
 const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|webrip|web-dl|webdl|web|hdtv|dvdrip|dvd|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|eac3|dts|remux|proper|repack|extended|unrated|hdr|10bit|multi|swesub|nordic)\b.*$/i;
 
-export const status = { running: false, library: null, phase: '', done: 0, total: 0, last: null };
+export const status = { running: false, library: null, phase: '', done: 0, total: 0, last: null, warnings: [] };
+/** Varning från skanningen (t.ex. omonterad NAS) – syns i skanningsstatus och loggen */
+export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.push(msg); if (status.warnings.length > 20) status.warnings.shift(); }
 
 const clean = (s) => s.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
 const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
@@ -78,74 +81,114 @@ async function probe(file) {
   }
 }
 
-function* walk(dir) {
-  let ents;
-  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of ents) {
-    if (e.name.startsWith('.') || /^(sample|extras|featurettes|@eaDir)$/i.test(e.name)) continue;
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p);
-    else if (e.isFile() && VIDEO.has(path.extname(e.name).toLowerCase()) && !/\bsample\b/i.test(e.name)) yield p;
-  }
-}
+const SKIP_DIR = /^(sample|extras|featurettes|@eaDir)$/i;
+const isVideo = (name) => VIDEO.has(path.extname(name).toLowerCase()) && !/\bsample\b/i.test(name);
 
+// Serien matchas på namnet från mappen/filen (src_name) – TMDB kan ha bytt titeln.
+// Äldre rader utan src_name matchas på titeln och får src_name ifyllt.
 function showFor(lib, name, year) {
-  const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND title=? COLLATE NOCASE`, lib.id, name);
+  const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, name);
   if (r) return r.id;
-  return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,added) VALUES(?,?,?,?,?,?)`,
-    lib.id, 'show', name, sortTitle(name), year, now()).lastInsertRowid);
+  const t = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IS NULL AND title=? COLLATE NOCASE`, lib.id, name);
+  if (t) { run('UPDATE items SET src_name=? WHERE id=?', name, t.id); return t.id; }
+  return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,src_name,added) VALUES(?,?,?,?,?,?,?)`,
+    lib.id, 'show', name, sortTitle(name), year, name, now()).lastInsertRowid);
+}
+/** Fyll i src_name för serier från tidigare versioner (utifrån ett av seriens avsnitt) */
+function backfillSrcNames(lib) {
+  const rows = all(`SELECT s.id, (SELECT e.path FROM items e WHERE e.parent_id=s.id AND e.path IS NOT NULL LIMIT 1) AS ep
+    FROM items s WHERE s.library_id=? AND s.kind='show' AND s.src_name IS NULL`, lib.id);
+  if (!rows.length) return;
+  tx(() => {
+    for (const r of rows) {
+      const p = r.ep && parseEpisode(path.relative(lib.path, r.ep));
+      if (p?.show) run('UPDATE items SET src_name=? WHERE id=?', p.show, r.id);
+    }
+  });
 }
 
 async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
-  const files = [...walk(lib.path)];
+  const { files, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
+  if (!rootOk) {
+    // Mappen saknas/går inte att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
+    scanWarning(deletionBlocked({ name: lib.name, rootOk }));
+    return;
+  }
+  for (const d of failed) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
+  if (lib.type === 'show') backfillSrcNames(lib);
   const seen = new Set();
+  // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
+  // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.
+  const pending = []; let flushed = Date.now();
+  const flush = () => {
+    if (!pending.length) return;
+    const ops = pending.splice(0);
+    tx(() => { for (const op of ops) { try { op(); } catch (e) { console.warn('[scan] kunde inte spara:', e.message); } } });
+    flushed = Date.now();
+  };
   status.phase = 'Analyserar filer';
-  for (const f of files) {
-    status.done++;
-    seen.add(f);
-    let st; try { st = fs.statSync(f); } catch { continue; }
-    const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
-    if (k && k.size === st.size && k.mtime === mtime) continue;
-    const info = await probe(f);
-    if (lib.type === 'movie') {
-      const p = parseMovie(f);
-      if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-        st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-      else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, mtime,
-        info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
-      run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
-    } else {
-      const p = parseEpisode(path.relative(lib.path, f));
-      if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
-      const showId = showFor(lib, p.show, p.year);
-      const title = p.epTitle || `Avsnitt ${p.episode}`;
-      if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-        showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-      else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
-        st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
-      // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
-      run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
-      run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
+  try {
+    for (const f of files) {
+      status.done++;
+      seen.add(f);
+      if (pending.length >= 200 || Date.now() - flushed > 2000) flush();
+      let st; try { st = await fs.promises.stat(f); } catch { continue; }
+      const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
+      if (k && k.size === st.size && k.mtime === mtime) continue;
+      const info = await probe(f);
+      if (lib.type === 'movie') {
+        const p = parseMovie(f);
+        pending.push(() => {
+          if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
+            st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+          else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, mtime,
+            info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+          run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
+        });
+      } else {
+        const p = parseEpisode(path.relative(lib.path, f));
+        if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
+        const showId = showFor(lib, p.show, p.year);
+        const title = p.epTitle || `Avsnitt ${p.episode}`;
+        pending.push(() => {
+          if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
+            showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+          else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
+            st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+          // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
+          run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
+          run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
+        });
+      }
     }
-  }
-  // Ta bort försvunna filer och tomma serier
-  for (const [p, r] of known) if (!seen.has(p)) { run('DELETE FROM items WHERE id=?', r.id); removeImages(r.id); }
-  for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
-    run('DELETE FROM items WHERE id=?', s.id); removeImages(s.id);
+  } finally { flush(); }
+  // Ta bort försvunna filer och tomma serier – men aldrig om det ser ut som att disken saknas
+  const missing = [...known.values()].filter(r => !seen.has(r.path) && !underFailed(r.path, failed));
+  const blocked = deletionBlocked({ name: lib.name, rootOk, files: files.length, known: known.size, missing: missing.length,
+    allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
+  if (blocked) scanWarning(blocked);
+  else if (missing.length) {
+    tx(() => {
+      for (const r of missing) run('DELETE FROM items WHERE id=?', r.id);
+      for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
+        run('DELETE FROM items WHERE id=?', s.id); missing.push(s);
+      }
+    });
+    for (const r of missing) removeImages(r.id);
   }
   await metadata(lib);
   await thumbnails(lib);
   await chapters(lib);
   await autoSubtitles(lib);
   status.phase = 'Indexerar nyckelbilder (för remux)';
-  const kf = all(`SELECT * FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
+  const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
   status.done = 0; status.total = kf.length;
-  for (const it of kf) { status.done++; await hooks.keyframes?.(it); }
+  for (const it of kf) { status.done++; await hooks.keyframes?.(it); if (status.done % 200 === 0) await new Promise(setImmediate); }
   if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }
   if (hooks.trickplay) await hooks.trickplay(lib, status);
 }
@@ -280,13 +323,13 @@ function remapAbsolute(show, seasons) {
   const lib = get('SELECT anime FROM libraries WHERE id=?', show.library_id);
   const s1 = seasons.find(s => s.season_number === 1)?.episode_count || 0;
   const eps = all('SELECT id, season, episode, abs_episode FROM items WHERE parent_id=?', show.id);
-  for (const e of eps) {
+  tx(() => { for (const e of eps) {
     // Absolut numrerade filer, eller i anime-bibliotek "S01E30" när säsong 1 bara har 12 avsnitt
     const abs = e.abs_episode ?? (lib?.anime && e.season === 1 && e.episode > s1 ? e.episode : null);
     if (abs == null) continue;
     const m = mapAbsolute(abs, seasons);
     if (m && (m.season !== e.season || m.episode !== e.episode)) run('UPDATE items SET season=?, episode=?, abs_episode=? WHERE id=?', m.season, m.episode, abs, e.id);
-  }
+  } });
 }
 
 // ---------- kapitel ----------
@@ -381,7 +424,7 @@ let queue = Promise.resolve();
 export function scan(libId = null) {
   queue = queue.then(async () => {
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
-    status.running = true;
+    status.running = true; status.warnings = [];
     try { for (const l of libs) { if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); } else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); } else await scanLibrary(l); } }
     catch (e) { console.error('[scan] fel:', e); }
     finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }

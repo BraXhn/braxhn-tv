@@ -18,6 +18,7 @@ export const RESTORE_FILE = RESTORE;
 export const db = new DatabaseSync(DBFILE);
 db.exec(`
 PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, name TEXT UNIQUE COLLATE NOCASE NOT NULL,
@@ -132,33 +133,98 @@ addCol('items', 'match_locked', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'abs_episode', 'INTEGER');
 addCol('items', 'sub_auto', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'chapters', 'TEXT');
-const ver = db.prepare('PRAGMA user_version').get().user_version;
-if (ver >= 3 && ver < 4) {
-  // v0.4: hämta om metadata för genrer, åldersgräns och samlingar
-  db.exec("UPDATE items SET meta_done=0 WHERE kind IN ('movie','show') AND tmdb_id IS NOT NULL; PRAGMA user_version=4;");
+addCol('items', 'src_name', 'TEXT'); // seriens namn enligt mappen/filen (TMDB kan byta titel)
+// Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
+db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
+CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
+CREATE INDEX IF NOT EXISTS items_parent_se ON items(parent_id, season, episode);
+DROP INDEX IF EXISTS items_parent;
+CREATE INDEX IF NOT EXISTS items_tmdb ON items(tmdb_id);
+CREATE INDEX IF NOT EXISTS items_kind_added ON items(kind, added);
+CREATE INDEX IF NOT EXISTS items_src ON items(library_id, kind, src_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS progress_item ON progress(item_id);
+CREATE INDEX IF NOT EXISTS watchlist_item ON watchlist(item_id);
+CREATE INDEX IF NOT EXISTS tp_track ON track_plays(track_id);
+CREATE INDEX IF NOT EXISTS fav_track ON favorites(track_id);
+CREATE INDEX IF NOT EXISTS pli_track ON playlist_items(track_id);
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);`);
+
+// Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
+const LATEST = 5;
+let ver = db.prepare('PRAGMA user_version').get().user_version;
+if (ver < 2) {
+  // v0.2: analysera om alla filer (HDR-info, bildundertexter)
+  db.exec('UPDATE items SET mtime=0 WHERE path IS NOT NULL');
+  ver = 2;
 }
 if (ver < 3) {
   // v0.3: token lagras hashade – gamla sessioner gäller inte längre (alla loggas ut en gång)
-  db.exec("DELETE FROM sessions; UPDATE sessions SET expires = 0 WHERE expires IS NULL;");
-  if (ver >= 2) db.exec("PRAGMA user_version=4; UPDATE items SET meta_done=0 WHERE kind IN ('movie','show') AND tmdb_id IS NOT NULL;");
+  db.exec('DELETE FROM sessions');
+  ver = 3;
 }
-if (ver < 2) {
-  // v0.2: analysera om alla filer (HDR-info, bildundertexter)
-  db.exec("UPDATE items SET mtime=0 WHERE path IS NOT NULL; PRAGMA user_version=4;");
+if (ver < 4) {
+  // v0.4: hämta om metadata för genrer, åldersgräns och samlingar
+  db.exec("UPDATE items SET meta_done=0 WHERE kind IN ('movie','show') AND tmdb_id IS NOT NULL");
+  ver = 4;
 }
+if (ver < 5) {
+  // v0.5: items.src_name (fylls i av skannern) och nya index – inget att göra här
+  ver = 5;
+}
+if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
+
+// Låt SQLite uppdatera statistik för frågeplaneraren (billigt; körs vid start och var 12:e timme)
+const optimize = () => { try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[db] optimize:', e.message); } };
+optimize();
+setInterval(optimize, 12 * 3600e3).unref();
 export const CACHE = path.join(CONFIG, 'cache');
 export const SUBS_DIR = path.join(CONFIG, 'subtitles');
 for (const d of [CACHE, SUBS_DIR, path.join(CACHE, 'keyframes'), path.join(CACHE, 'fingerprints')]) fs.mkdirSync(d, { recursive: true });
 
-export const get = (sql, ...p) => db.prepare(sql).get(...p);
-export const all = (sql, ...p) => db.prepare(sql).all(...p);
-export const run = (sql, ...p) => db.prepare(sql).run(...p);
+// Förberedda satser återanvänds (att kompilera SQL kostar mer än att köra enkla frågor)
+const stmts = new Map();
+const STMT_MAX = 500;
+export function stmt(sql) {
+  let st = stmts.get(sql);
+  if (st) { stmts.delete(sql); stmts.set(sql, st); return st; } // LRU: senast använd sist
+  st = db.prepare(sql);
+  stmts.set(sql, st);
+  if (stmts.size > STMT_MAX) stmts.delete(stmts.keys().next().value);
+  return st;
+}
+export const get = (sql, ...p) => stmt(sql).get(...p);
+export const all = (sql, ...p) => stmt(sql).all(...p);
+export const run = (sql, ...p) => stmt(sql).run(...p);
 
+/**
+ * Kör fn i en transaktion (BEGIN IMMEDIATE/COMMIT, ROLLBACK vid fel). Kapslade anrop – eller anrop
+ * medan någon annan transaktion pågår – använder SAVEPOINT. fn måste vara synkron.
+ */
+let txDepth = 0;
+export function tx(fn) {
+  if (txDepth > 0 || db.isTransaction) {
+    const sp = `sp${++txDepth}`;
+    db.exec(`SAVEPOINT ${sp}`);
+    try { const r = fn(); db.exec(`RELEASE ${sp}`); return r; }
+    catch (e) { try { db.exec(`ROLLBACK TO ${sp}; RELEASE ${sp}`); } catch {} throw e; }
+    finally { txDepth--; }
+  }
+  db.exec('BEGIN IMMEDIATE');
+  txDepth++;
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  finally { txDepth--; }
+}
+
+const settingsCache = new Map();
 export function getSetting(k, def = '') {
+  if (settingsCache.has(k)) { const v = settingsCache.get(k); return v === null ? def : v; }
   const r = get('SELECT v FROM settings WHERE k=?', k);
+  settingsCache.set(k, r ? r.v : null);
   return r ? r.v : def;
 }
 export function setSetting(k, v) {
   run('INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, String(v));
+  settingsCache.delete(k); // läses om från databasen nästa gång (rätt även om en transaktion rullas tillbaka)
 }
 export const now = () => Math.floor(Date.now() / 1000);

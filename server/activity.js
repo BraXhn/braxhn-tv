@@ -45,6 +45,8 @@ export function stopPlay(key) {
   active.delete(key);
   return s;
 }
+// Stopp-markeringar behövs bara i två minuter – rensa gamla så att kartan inte växer
+setInterval(() => { for (const [k, t] of stopped) if (now() - t > 86400) stopped.delete(k); }, 3600e3).unref();
 export function listActive() {
   const out = [];
   for (const [k, s] of active) {
@@ -91,10 +93,12 @@ export function stats() {
 
 // ---------------- säkerhetskopiering ----------------
 export const BACKUP_DIR = process.env.BACKUP_DIR || path.join(CONFIG, 'backups');
+const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export function backupNow() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const d = new Date();
-  const name = `braxhn-tv-${d.toISOString().slice(0, 10)}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.db`;
+  // Lokalt datum och lokal tid (tidigare blandades UTC-datum med lokal tid)
+  const name = `braxhn-tv-${localDay(d)}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.db`;
   const file = path.join(BACKUP_DIR, name);
   fs.rmSync(file, { force: true });
   db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
@@ -114,7 +118,7 @@ export function listBackups() {
 let lastBackupDay = '';
 setInterval(() => {
   if (getSetting('backup_enabled', '1') !== '1') return;
-  const d = new Date(), day = d.toISOString().slice(0, 10);
+  const d = new Date(), day = localDay(d);
   if (d.getHours() === 3 && day !== lastBackupDay) {
     lastBackupDay = day;
     try { const name = backupNow(); console.log('[backup] skapade', name); offsite.upload(path.join(BACKUP_DIR, name)).catch(() => {}); } catch (e) { console.warn('[backup] misslyckades:', e.message); notify('backup', 'Säkerhetskopieringen misslyckades', e.message, { priority: 4 }); }

@@ -8,6 +8,10 @@ struct BraXhnTVApp: App {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
+                #if os(iOS)
+                // Återanslut till nedladdningarnas bakgrundssession direkt vid start
+                .onAppear { _ = Downloads.shared }
+                #endif
         }
     }
 }
