@@ -56,7 +56,8 @@ async function probe(file) {
       default: !!s.disposition?.default, forced: !!s.disposition?.forced,
       hi: !!s.disposition?.hearing_impaired,
       pix: s.pix_fmt || null, transfer: s.color_transfer || null, primaries: s.color_primaries || null,
-      dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))
+      dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || '')),
+      dvProfile: (s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))?.dv_profile ?? null
     })).filter(s => ['video', 'audio', 'subtitle'].includes(s.type) && !(s.type === 'video' && ['mjpeg', 'png'].includes(s.codec)));
     const v = streams.find(s => s.type === 'video'), a = streams.find(s => s.type === 'audio');
     const hdr = !v ? null : v.transfer === 'smpte2084' ? (v.dovi ? 'dovi' : 'hdr10') : v.transfer === 'arib-std-b67' ? 'hlg' : v.dovi ? 'dovi' : null;
@@ -133,7 +134,7 @@ async function scanLibrary(lib) {
   await metadata(lib);
   await thumbnails(lib);
   status.phase = 'Indexerar nyckelbilder (för remux)';
-  const kf = all(`SELECT * FROM items WHERE library_id=? AND vcodec='h264' AND path IS NOT NULL`, lib.id);
+  const kf = all(`SELECT * FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
   status.done = 0; status.total = kf.length;
   for (const it of kf) { status.done++; await hooks.keyframes?.(it); }
   if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }

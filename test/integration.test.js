@@ -36,6 +36,9 @@ before(async () => {
   ff('-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '60',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-x264-params', 'keyint=72:min-keyint=10', '-pix_fmt', 'yuv420p', '-c:a', 'ac3', path.join(MEDIA, 'Filmer', 'Remux Film (2020).mkv'));
   fs.writeFileSync(path.join(MEDIA, 'Filmer', 'Remux Film (2020).sv.srt'), '1\n00:00:01,000 --> 00:00:04,000\nHej\n');
+  // Film: HEVC 8-bit i MKV med E-AC-3 5.1 (→ fMP4-remux för Apple, passthrough)
+  ff('-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=200', '-t', '40',
+    '-c:v', 'libx265', '-preset', 'ultrafast', '-x265-params', 'keyint=96:min-keyint=24:log-level=error', '-pix_fmt', 'yuv420p', '-c:a', 'eac3', '-ac', '6', path.join(MEDIA, 'Filmer', 'Hevc Film (2022).mkv'));
   // Film: MP4 (direkt)
   ff('-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=500', '-t', '10', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(MEDIA, 'Filmer', 'Direkt (2021).mp4'));
   // Serie med gemensamt intro
@@ -72,7 +75,7 @@ t('skapa admin och bibliotek, skanna', async () => {
   assert.equal((await req('/api/libraries', { method: 'POST', body: { name: 'Serier', type: 'show', path: path.join(MEDIA, 'Serier') } })).status, 200);
   await waitScan();
   const libs = (await req('/api/libraries')).data;
-  assert.equal(libs.find(l => l.type === 'movie').count, 2);
+  assert.equal(libs.find(l => l.type === 'movie').count, 3);
   assert.equal(libs.find(l => l.type === 'show').count, 1);
 });
 
@@ -150,4 +153,27 @@ t('intro hittas automatiskt', async () => {
     await sleep(1000);
   }
   assert.fail('intro hittades inte');
+});
+
+t('HEVC: fMP4-remux med orört E-AC-3 för Apple-enheter, absolut tidsstämpel efter spolning', async () => {
+  const items = (await req('/api/libraries/1/items')).data.items;
+  const it = items.find(i => i.title === 'Hevc Film');
+  const apple = 'c=mp4&v=h264,hevc&a=aac,ac3,eac3&hdr=1';
+  const pb = (await req(`/api/items/${it.id}/playback?${apple}`)).data;
+  assert.equal(pb.mode, 'remux'); assert.match(pb.url, /fmt=fmp4/); assert.match(pb.url, /am=copy/);
+  const web = (await req(`/api/items/${it.id}/playback`)).data;
+  assert.equal(web.mode, 'transcode', 'webbläsare utan HEVC ska få omkodning');
+  const q = pb.url.split('?')[1];
+  const pl = (await req(`/api/stream/${it.id}/hls/index.m3u8?${q}`)).data.toString();
+  assert.match(pl, /#EXT-X-MAP:URI="init\.mp4/);
+  const durs = [...pl.matchAll(/#EXTINF:([\d.]+)/g)].map(m => +m[1]);
+  const n = durs.length - 2, expected = durs.slice(0, n).reduce((a, b) => a + b, 0);
+  const seg = (await req(`/api/stream/${it.id}/hls/seg-${n}.m4s?${q}`)).data;   // startar mitt i filen
+  const init = (await req(`/api/stream/${it.id}/hls/init.mp4?${q}`)).data;
+  assert.ok(init.length > 500 && seg.length > 1000);
+  const f = path.join(ROOT, 'hevc.mp4'); fs.writeFileSync(f, Buffer.concat([init, seg]));
+  const info = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,codec_tag_string,start_time', '-of', 'csv=p=0', f]).toString();
+  assert.match(info, /hevc,hvc1/); assert.match(info, /eac3/);
+  const vstart = +info.split('\n').find(l => l.startsWith('hevc')).split(',')[2];
+  assert.ok(Math.abs(vstart - expected) < 0.4, `start ${vstart} ≠ ${expected}`);
 });

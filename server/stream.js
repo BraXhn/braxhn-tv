@@ -161,7 +161,7 @@ export function keyframesReady(it) {
 const kfRunning = new Map();
 let kfActive = 0; const kfWait = [];
 export function computeKeyframes(it) {
-  if (it.vcodec !== 'h264') return Promise.resolve(null); // remux används bara för H.264
+  if (!['h264', 'hevc'].includes(it.vcodec)) return Promise.resolve(null); // remux: H.264 (TS) och HEVC (fMP4)
   if (keyframesReady(it)) return Promise.resolve(keyframesReady(it));
   if (kfRunning.has(it.id)) return kfRunning.get(it.id);
   const p = (async () => {
@@ -187,9 +187,12 @@ export function computeKeyframes(it) {
   return p;
 }
 // Segmentgränser: första nyckelbild ≥ föregående gräns + SEG
-function remuxBounds(it) {
+// ts (H.264): egna gränser ≈ SEG s via segment-muxern. fmp4 (HEVC): ett segment per GOP – ffmpegs
+// HLS-muxer med mycket kort hls_time delar på varje nyckelbild, vilket blir deterministiskt vid omstart.
+function remuxBounds(it, fmt = 'ts') {
   const kf = keyframesReady(it);
   if (!kf || kf.length < 2) return null;
+  if (fmt === 'fmp4') return [0, ...kf.filter(t => t > 0.05 && t < it.duration - 0.5)];
   const b = [0];
   let last = 0;
   for (const t of kf) if (t >= last + SEG - 0.001 && t < it.duration - 0.5) { b.push(t); last = t; }
@@ -202,7 +205,7 @@ export function parseCaps(q, ua = '') {
   const list = (k, def) => new Set((q.get(k) || def).split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   return {
     containers: list('c', 'mp4,webm'), vcodecs: list('v', 'h264,vp8,vp9'), acodecs: list('a', 'aac,mp3,opus,vorbis,flac'),
-    hdr: q.get('hdr') === '1', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
+    hdr: q.get('hdr') === '1', dv: q.get('dv') === '1', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', sub: String(q.get('sub') || '').slice(0, 10),
     hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || ''
   };
@@ -225,27 +228,42 @@ export function decide(it, o) {
   if (burn) reasons.push('bildundertext bränns in');
   if (scale) reasons.push(`sänkt kvalitet till ${o.q}p`);
   if (tonemap) reasons.push(`${it.hdr.toUpperCase()} tonmappas till SDR`);
-  const vOk = v && o.vcodecs.has(v.codec) && !(v.codec === 'h264' && is10bit(v));
+  // Dolby Vision profil 5 saknar HDR10-baslager – kräver en enhet med Dolby Vision
+  const dv5 = v?.dovi && v?.dvProfile === 5;
+  const vOk = v && o.vcodecs.has(v.codec) && !(v.codec === 'h264' && is10bit(v)) && !(dv5 && !o.dv);
   const aOk = !aSel || o.acodecs.has(aSel.codec);
   const audioDefault = !aSel || aSel === defAudio;
-  let mode;
+  let mode, fmt = 'ts', tag = '';
+  const am = audioPlan(aSel, o);
   if (!burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
-  else if (!burn && !scale && !tonemap && v?.codec === 'h264' && !is10bit(v) && remuxBounds(it) && o.force !== 'transcode') mode = 'remux';
-  else mode = 'transcode';
-  if (mode === 'remux') reasons.push('bilden kopieras utan omkodning' + (aSel && !copyAudio(aSel, o) ? ', ljudet konverteras till AAC' : ''));
+  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && remuxBounds(it, 'ts')) mode = 'remux';
+  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && remuxBounds(it, 'fmp4')) {
+    mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
+  } else mode = 'transcode';
+  if (mode === 'remux') reasons.push((fmt === 'fmp4' ? `${it.hdr ? it.hdr.toUpperCase() + '-' : ''}HEVC kopieras utan omkodning` : 'bilden kopieras utan omkodning') +
+    (am === 'aac' ? ', ljudet konverteras till AAC' : am === 'eac3' ? ', surroundljud konverteras till Dolby Digital Plus 5.1' : ''));
+  if (mode !== 'direct' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) reasons.push(`${aSel.codec === 'eac3' ? 'Dolby Digital Plus/Atmos' : 'Dolby Digital'} skickas orört`);
   if (mode === 'transcode' && !reasons.length) {
     if (!vOk) reasons.push(`videoformatet ${v?.codec || '?'} stöds inte av enheten`);
-    else if (v?.codec === 'h264' && !remuxBounds(it)) reasons.push('nyckelbilder ej indexerade än');
+    else if (['h264', 'hevc'].includes(v?.codec) && !keyframesReady(it)) reasons.push('nyckelbilder ej indexerade än');
     else reasons.push('formatet stöds inte direkt');
   }
   if (mode === 'remux' || mode === 'transcode') computeKeyframes(it).catch(() => {});
-  return { mode, reasons, audio: aSel ? String(aSel.index) : '', copyAudio: !!(aSel && copyAudio(aSel, o)), burn, tonemap, q: o.q };
+  return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
+// Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo
+function audioPlan(a, o) {
+  if (!a) return 'aac';
+  if (copyAudio(a, o)) return 'copy';
+  if ((a.channels || 2) > 2 && o.acodecs.has('eac3')) return 'eac3';
+  return 'aac';
+}
 
 // Parametrar som identifierar en HLS-session (och följer med i alla segment-URL:er)
 export function hlsParams(d, o, token) {
-  const p = new URLSearchParams({ mode: d.mode, q: d.q, audio: d.audio, ca: d.copyAudio ? '1' : '0', burn: d.burn, tm: d.tonemap ? '1' : '0' });
+  const p = new URLSearchParams({ mode: d.mode, q: d.q, audio: d.audio, am: d.audioMode, burn: d.burn, tm: d.tonemap ? '1' : '0', fmt: d.fmt, tag: d.tag || '' });
+  if (d.hdr) p.set('vr', d.hdr === 'hlg' ? 'HLG' : 'PQ');
   if (o.hlsSubs) p.set('hlssubs', '1');
   if (token) p.set('t', token);
   return p;
@@ -253,14 +271,18 @@ export function hlsParams(d, o, token) {
 function readParams(q) {
   return {
     mode: q.get('mode') === 'remux' ? 'remux' : 'transcode', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
-    audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', copyAudio: q.get('ca') === '1',
-    burn: /^e\d+$/.test(q.get('burn') || '') ? q.get('burn') : '', tonemap: q.get('tm') === '1', hlsSubs: q.get('hlssubs') === '1'
+    audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '',
+    audioMode: ['copy', 'eac3', 'aac'].includes(q.get('am')) ? q.get('am') : 'aac',
+    fmt: q.get('fmt') === 'fmp4' ? 'fmp4' : 'ts', tag: ['hvc1', 'dvh1'].includes(q.get('tag')) ? q.get('tag') : '',
+    burn: /^e\d+$/.test(q.get('burn') || '') ? q.get('burn') : '', tonemap: q.get('tm') === '1', hlsSubs: q.get('hlssubs') === '1',
+    vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : ''
   };
 }
+const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
 const withT = (p, q) => { const t = q.get('t'); if (t) p.set('t', t); return p; };
 
 export function serveMaster(res, it, query) {
-  const d = readParams(query);
+  const d = normParams(readParams(query));
   const v = videoOf(it);
   const Q = QUALITIES[d.q];
   const h = Q.h && v?.height > Q.h ? Q.h : v?.height || 720;
@@ -277,7 +299,9 @@ export function serveMaster(res, it, query) {
     }
     if (subs.length) subsAttr = ',SUBTITLES="subs"';
   }
-  m += `#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${w}x${h}${subsAttr}\nindex.m3u8?${params}\n`;
+  // VIDEO-RANGE talar om för Apple-enheter att strömmen är HDR (krävs för att HDR-läget ska slås på)
+  const vr = d.mode === 'remux' && d.vr ? `,VIDEO-RANGE=${d.vr}` : '';
+  m += `#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${w}x${h}${vr}${subsAttr}\nindex.m3u8?${params}\n`;
   send(res, 200, m, { 'Content-Type': 'application/vnd.apple.mpegurl' });
 }
 
@@ -290,7 +314,7 @@ export function serveSubPlaylist(res, it, sid, query) {
 
 function segmentsOf(it, d) {
   if (d.mode === 'remux') {
-    const b = remuxBounds(it);
+    const b = remuxBounds(it, d.fmt);
     if (b) return b.map((t, i) => ({ start: t, dur: (b[i + 1] ?? it.duration) - t }));
   }
   const n = Math.ceil(it.duration / SEG);
@@ -299,13 +323,15 @@ function segmentsOf(it, d) {
 
 export function servePlaylist(res, it, query) {
   if (!it.duration) return fail(res, 422, 'Okänd längd – kan inte strömma');
-  const d = readParams(query);
-  if (d.mode === 'remux' && !remuxBounds(it)) d.mode = 'transcode';
+  const d = normParams(readParams(query));
+  if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
   const segs = segmentsOf(it, d);
-  const qs = new URLSearchParams(query); qs.set('mode', d.mode); qs.delete('hlssubs');
+  const qs = new URLSearchParams(query); qs.set('mode', d.mode); qs.set('fmt', d.fmt); qs.delete('hlssubs');
   const target = Math.ceil(Math.max(...segs.map(s => s.dur)));
-  let m = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:${target}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n`;
-  segs.forEach((s, i) => { m += `#EXTINF:${s.dur.toFixed(6)},\nseg-${i}.ts?${qs}\n`; });
+  const fm = d.fmt === 'fmp4';
+  let m = `#EXTM3U\n#EXT-X-VERSION:${fm ? 7 : 3}\n#EXT-X-TARGETDURATION:${target}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n`;
+  if (fm) m += `#EXT-X-MAP:URI="init.mp4?${qs}"\n`;
+  segs.forEach((s, i) => { m += `#EXTINF:${s.dur.toFixed(6)},\nseg-${i}.${fm ? 'm4s' : 'ts'}?${qs}\n`; });
   m += '#EXT-X-ENDLIST\n';
   send(res, 200, m, { 'Content-Type': 'application/vnd.apple.mpegurl' });
 }
@@ -350,12 +376,16 @@ function videoArgs(it, d) {
 
 function audioArgs(d) {
   const map = d.audio !== '' ? ['-map', `0:${parseInt(d.audio)}`] : ['-map', '0:a:0?'];
-  return [...map, ...(d.copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2'])];
+  if (d.audioMode === 'copy') return [...map, '-c:a', 'copy'];
+  if (d.audioMode === 'eac3') return [...map, '-c:a', 'eac3', '-b:a', '640k', '-ac', '6'];
+  return [...map, '-c:a', 'aac', '-b:a', '192k', '-ac', '2'];
 }
 
 // ---------------- HLS-sessioner ----------------
 const sessions = new Map();
-const segFile = (dir, n) => path.join(dir, `seg_${String(n).padStart(5, '0')}.ts`);
+const segExt = (s) => s.d.fmt === 'fmp4' ? 'm4s' : 'ts';
+const segFile = (s, n) => path.join(s.dir, `seg_${String(n).padStart(5, '0')}.${segExt(s)}`);
+const initFile = (s) => { try { const f = fs.readdirSync(s.dir).find(x => /^init_\d+\.mp4$/.test(x)); return f ? path.join(s.dir, f) : null; } catch { return null; } };
 
 function startFfmpeg(s, it, n) {
   stopProc(s);
@@ -363,7 +393,19 @@ function startFfmpeg(s, it, n) {
   const segs = segmentsOf(it, d);
   const t = segs[n].start;
   let args;
-  if (d.mode === 'remux') {
+  if (d.mode === 'remux' && d.fmt === 'fmp4') {
+    // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
+    const next = segs[n + 1]?.start ?? it.duration;
+    const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6)] : []), '-i', it.path,
+      '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
+      '-output_ts_offset', ss.toFixed(6),
+      '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
+      '-start_number', String(n), '-hls_flags', 'temp_file+independent_segments',
+      // frag_discont: tfdt blir absolut tid även när ffmpeg startas mitt i filen (spolning)
+      '-hls_segment_options', 'movflags=+frag_discont',
+      '-hls_segment_filename', path.join(s.dir, 'seg_%05d.m4s'), path.join(s.dir, `ff_${n}.m3u8`)];
+  } else if (d.mode === 'remux') {
     // Kopiera videoströmmen; dela exakt på förindexerade nyckelbilder
     // Sökning med kopierad video landar på nyckelbilden vars DTS ≤ ss. DTS ligger före PTS (B-bilder),
     // så sök en bit in i segmentet – men före nästa nyckelbild – för att landa exakt på rätt nyckelbild.
@@ -384,7 +426,7 @@ function startFfmpeg(s, it, n) {
       '-start_number', String(n), '-hls_flags', 'temp_file',
       '-hls_segment_filename', path.join(s.dir, 'seg_%05d.ts'), path.join(s.dir, `ff_${n}.m3u8`)];
   }
-  if (d.mode === 'remux') {
+  if (d.mode === 'remux' && d.fmt === 'ts') {
     // gamla filer framåt kan komma från en annan körning – skapa om dem för entydig klarsignal
     for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.ts$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
   }
@@ -393,7 +435,7 @@ function startFfmpeg(s, it, n) {
   p.stderr.on('data', c => { err = (err + c).slice(-3000); });
   p.on('exit', (code, sig) => {
     if (s.proc === p) {
-      if (code !== 0 && d.mode === 'remux') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s.dir, hi), { force: true }); }
+      if (code !== 0 && d.mode === 'remux' && d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
       s.proc = null; s.done = code === 0;
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
@@ -405,14 +447,15 @@ function stopProc(s) {
   if (!s.proc) return;
   s.proc.kill('SIGKILL'); s.proc = null;
   // segment-muxern skriver direkt till slutligt filnamn – radera det senaste (ev. halvfärdiga) segmentet
-  if (s.d.mode === 'remux') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s.dir, hi), { force: true }); }
+  if (s.d.mode === 'remux' && s.d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
 }
-function highestFile(s) { let k = s.start; while (k >= 0 && fs.existsSync(segFile(s.dir, k))) k++; return k - 1; }
+function highestFile(s) { let k = s.start; while (k >= 0 && fs.existsSync(segFile(s, k))) k++; return k - 1; }
 // Ett segment är klart när filen finns och (remux) ffmpeg gått vidare till nästa fil eller slutat.
 // Halvfärdiga filer raderas alltid när en remux-process stoppas eller kraschar.
 function complete(s, n) {
-  if (!fs.existsSync(segFile(s.dir, n))) return false;
-  return s.d.mode !== 'remux' || !s.proc || n < s.start || fs.existsSync(segFile(s.dir, n + 1));
+  if (!fs.existsSync(segFile(s, n))) return false;
+  // HLS-muxern (omkodning och fMP4) skriver till temporärt namn och byter namn när segmentet är klart
+  return s.d.mode !== 'remux' || s.d.fmt === 'fmp4' || !s.proc || n < s.start || fs.existsSync(segFile(s, n + 1));
 }
 
 // Gränser för samtidiga omkodningar (skydd mot överbelastning)
@@ -435,10 +478,10 @@ function ensureCapacity(s, userId) {
   return [...sessions.values()].filter(x => x !== s && x.proc && x.d.mode === 'transcode').length < lim.global;
 }
 
-export async function serveSegment(req, res, it, n, query, userId) {
-  const d = readParams(query);
-  if (d.mode === 'remux' && !remuxBounds(it)) d.mode = 'transcode';
-  const key = `${userId}-${it.id}-${d.mode}-${d.q}-${d.audio}-${d.copyAudio ? 1 : 0}-${d.burn}-${d.tonemap ? 1 : 0}`;
+function sessionFor(it, query, userId) {
+  const d = normParams(readParams(query));
+  if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}`;
   let s = sessions.get(key);
   if (!s) {
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now() };
@@ -446,6 +489,27 @@ export async function serveSegment(req, res, it, n, query, userId) {
     sessions.set(key, s);
   }
   s.last = Date.now();
+  return s;
+}
+
+// fMP4-initsegment (moov). Identiskt för alla körningar i samma session.
+export async function serveInit(req, res, it, query, userId) {
+  const s = sessionFor(it, query, userId);
+  if (s.d.fmt !== 'fmp4') return fail(res, 404, 'Inget initsegment');
+  const t0 = Date.now();
+  // Initfilen är färdigskriven när första mediasegmentet finns
+  const ready = () => { const f = initFile(s); return f && fs.statSync(f).size > 0 && fs.readdirSync(s.dir).some(x => /^seg_\d+\.m4s$/.test(x)); };
+  while (!ready()) {
+    if (!s.proc) { if (!ensureCapacity(s, userId)) return fail(res, 503, 'För många samtidiga strömmar'); startFfmpeg(s, it, 0); }
+    if (Date.now() - t0 > 30000 || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
+    await new Promise(r => setTimeout(r, 100));
+  }
+  send(res, 200, fs.readFileSync(initFile(s)), { 'Content-Type': 'video/mp4' });
+}
+
+export async function serveSegment(req, res, it, n, query, userId) {
+  const s = sessionFor(it, query, userId);
+  const d = s.d;
   const total = segmentsOf(it, d).length;
   s.total = total;
   if (!(n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
@@ -468,7 +532,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
       await new Promise(r => setTimeout(r, 120));
     }
   }
-  send(res, 200, fs.readFileSync(segFile(s.dir, n)), { 'Content-Type': 'video/mp2t' });
+  send(res, 200, fs.readFileSync(segFile(s, n)), { 'Content-Type': d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t' });
 }
 
 // Städa: döda inaktiva ffmpeg efter 60 s, radera cache efter 15 min

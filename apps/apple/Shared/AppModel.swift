@@ -146,7 +146,9 @@ final class AppModel: ObservableObject {
             .init(name: "c", value: "mp4"),
             .init(name: "v", value: "h264,hevc"),
             .init(name: "a", value: "aac,ac3,eac3,mp3,flac,alac"),
-            .init(name: "hdr", value: AVPlayer.eligibleForHDRPlayback ? "1" : "0")
+            .init(name: "hdr", value: AVPlayer.eligibleForHDRPlayback ? "1" : "0"),
+            // Dolby Vision (t.ex. Apple TV 4K kopplad till en Dolby Vision-TV) – då kan även profil 5 spelas orört
+            .init(name: "dv", value: AVPlayer.availableHDRModes.contains(.dolbyVision) ? "1" : "0")
         ]
         if quality != "auto" { q.append(.init(name: "q", value: quality)) }
         if let a = audio { q.append(.init(name: "audio", value: String(a))) }
