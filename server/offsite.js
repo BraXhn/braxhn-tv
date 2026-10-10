@@ -41,7 +41,7 @@ export function signS3(c, method, key, { query = {}, headers = {}, payloadHash =
   const h = { ...Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v).trim()])), host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': amzDate };
   const names = Object.keys(h).sort();
   const qs = Object.keys(query).sort().map(k => `${enc(k)}=${enc(String(query[k]))}`).join('&');
-  const canonical = [method, pathPart.replace(/\/+$/, '') || '/', qs, names.map(n => `${n}:${h[n]}\n`).join(''), names.join(';'), payloadHash].join('\n');
+  const canonical = [method, pathPart, qs, names.map(n => `${n}:${h[n]}\n`).join(''), names.join(';'), payloadHash].join('\n');
   const scope = `${day}/${c.region}/s3/aws4_request`;
   const toSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256(canonical)].join('\n');
   const kDate = hmac('AWS4' + c.secretKey, day), kRegion = hmac(kDate, c.region), kService = hmac(kRegion, 's3'), kSigning = hmac(kService, 'aws4_request');

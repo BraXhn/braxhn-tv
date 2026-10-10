@@ -101,3 +101,12 @@ test('poddar: lokala adresser nekas, prenumeration och nedladdning fungerar', as
     assert.equal(fs.readdirSync(pods.DIR).length, 0);
   } finally { delete process.env.PODCAST_ALLOW_PRIVATE; srv.close(); }
 });
+
+test('poddar: spärrade adresser och skadliga flöden', () => {
+  for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '100.64.1.1', '::1', '::ffff:7f00:1', '::ffff:a9fe:a9fe', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1', '64:ff9b::a00:1', '2002:a00:1::'])
+    assert.ok(pods.blockedIp(ip), ip);
+  for (const ip of ['8.8.8.8', '2001:4860:4860::8888', '1.1.1.1']) assert.ok(!pods.blockedIp(ip), ip);
+  // Tidigare kvadratisk regex: 1 MB skräp ska tolkas på under en sekund
+  const evil = '<rss><channel><item>' + '<enclosure '.repeat(100000) + '</item>' + '<item><enclosure url="x"'.repeat(20000);
+  const t0 = Date.now(); pods.parseFeed(evil); assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0} ms`);
+});

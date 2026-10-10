@@ -10,6 +10,12 @@ CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id);`);
 const b64u = (b) => Buffer.from(b).toString('base64url');
 const fromB64u = (s) => Buffer.from(String(s || ''), 'base64url');
 const challenges = new Map(); // challenge → { userId|null, type, exp }
+const MAX_CHALLENGES = 2000;
+function addChallenge(ch, v) {
+  // Begränsa minnet: äldsta utmaningarna tas bort först (Map behåller insättningsordning)
+  while (challenges.size >= MAX_CHALLENGES) challenges.delete(challenges.keys().next().value);
+  challenges.set(ch, v);
+}
 setInterval(() => { for (const [k, v] of challenges) if (v.exp < Date.now()) challenges.delete(k); }, 60e3).unref();
 
 // ---------- minimal CBOR-avkodare (RFC 8949) ----------
@@ -93,13 +99,13 @@ export const hasPasskey = (userId) => !!get('SELECT 1 FROM passkeys WHERE user_i
 
 export function registrationOptions(user, rp) {
   const challenge = b64u(crypto.randomBytes(32));
-  challenges.set(challenge, { userId: user.id, type: 'webauthn.create', exp: Date.now() + 300e3 });
+  addChallenge(challenge, { userId: user.id, type: 'webauthn.create', exp: Date.now() + 300e3 });
   return {
     challenge, rp: { id: rp.rpId, name: 'BraXhn TV' },
     user: { id: b64u(Buffer.from(String(user.id))), name: user.name, displayName: user.name },
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -8 }, { type: 'public-key', alg: -257 }],
     timeout: 300000, attestation: 'none',
-    authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
+    authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
     excludeCredentials: all('SELECT id FROM passkeys WHERE user_id=?', user.id).map(p => ({ type: 'public-key', id: p.id }))
   };
 }
@@ -111,6 +117,8 @@ export function verifyRegistration(user, body, rp) {
   const ad = parseAuthData(att.get('authData'));
   if (!ad.rpIdHash.equals(crypto.createHash('sha256').update(rp.rpId).digest())) throw new Error('Fel domän (rpId)');
   if (!ad.up) throw new Error('Användaren bekräftade inte');
+  // Passkeyn räknas som tvåstegsverifiering – kräver biometri/PIN på enheten (user verification)
+  if (!ad.uv) throw new Error('Enheten verifierade inte användaren (Face ID, fingeravtryck eller PIN krävs)');
   if (!ad.credId || !ad.cose) throw new Error('Ingen nyckel i svaret');
   const { alg, key } = coseToKey(ad.cose);
   const id = b64u(ad.credId);
@@ -123,8 +131,8 @@ export function verifyRegistration(user, body, rp) {
 
 export function loginOptions(rp) {
   const challenge = b64u(crypto.randomBytes(32));
-  challenges.set(challenge, { userId: null, type: 'webauthn.get', exp: Date.now() + 300e3 });
-  return { challenge, rpId: rp.rpId, timeout: 300000, userVerification: 'preferred', allowCredentials: [] };
+  addChallenge(challenge, { userId: null, type: 'webauthn.get', exp: Date.now() + 300e3 });
+  return { challenge, rpId: rp.rpId, timeout: 300000, userVerification: 'required', allowCredentials: [] };
 }
 
 /** Returnerar användar-id om inloggningen är giltig, annars kastas fel. */
@@ -137,6 +145,7 @@ export function verifyLogin(body, rp) {
   const ad = parseAuthData(authData);
   if (!ad.rpIdHash.equals(crypto.createHash('sha256').update(rp.rpId).digest())) throw new Error('Fel domän (rpId)');
   if (!ad.up) throw new Error('Användaren bekräftade inte');
+  if (!ad.uv) throw new Error('Enheten verifierade inte användaren (Face ID, fingeravtryck eller PIN krävs)');
   const data = Buffer.concat([authData, crypto.createHash('sha256').update(raw).digest()]);
   const key = crypto.createPublicKey(pk.public_key);
   const sig = fromB64u(body.response?.signature);

@@ -27,13 +27,14 @@ async function fetchText(url, { timeout = 60000, max = 200 << 20 } = {}) {
     const p = url.replace(/^file:\/\//, '');
     if (!path.resolve(p).startsWith(path.resolve(CONFIG))) throw new Error('Lokala filer måste ligga i /config');
     const b = fs.readFileSync(p);
-    return (/\.gz$/.test(p) ? zlib.gunzipSync(b) : b).toString('utf8');
+    return (/\.gz$/.test(p) ? zlib.gunzipSync(b, { maxOutputLength: 400 << 20 }) : b).toString('utf8');
   }
   const r = await fetch(url, { signal: AbortSignal.timeout(timeout), headers: { 'User-Agent': 'BraXhnTV/1.0' } });
   if (!r.ok) throw new Error(`${new URL(url).host} svarade ${r.status}`);
-  let b = Buffer.from(await r.arrayBuffer());
-  if (b.length > max) throw new Error('Filen är för stor');
-  if (b[0] === 0x1f && b[1] === 0x8b) b = zlib.gunzipSync(b);
+  const chunks = []; let n = 0;
+  for await (const c of r.body) { n += c.length; if (n > max) throw new Error('Filen är för stor'); chunks.push(c); }
+  let b = Buffer.concat(chunks);
+  if (b[0] === 0x1f && b[1] === 0x8b) b = zlib.gunzipSync(b, { maxOutputLength: 400 << 20 });
   return b.toString('utf8');
 }
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -264,6 +265,7 @@ export const tunersInUse = () => Object.fromEntries([...inUse].map(([k, v]) => [
 
 // ---------- live-HLS ----------
 const LIVE = path.join(TRANSCODE, 'live');
+const starting = new Map(); // channelId → Promise (pågående start)
 const sessions = new Map(); // channelId → { proc, dir, last, viewers:Set, tunerId, started, error }
 export const httpOpts = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'] : [];
 export const SAFE_LIVE = ['-protocol_whitelist', 'http,https,tcp,tls,udp,rtp,crypto,hls,httpproxy'];
@@ -323,10 +325,14 @@ export async function servePlaylist(res, chId, token = null) {
   let s = sessions.get(ch.id);
   if (s && !s.proc) { stopLive(ch.id); s = null; }
   if (!s) {
-    // HDHomeRun: probe tar en tuner en kort stund – kopiera bara för IPTV, koda om antenn-TV (oftast MPEG-2/flätad)
-    const t = get('SELECT kind FROM tuners WHERE id=?', ch.tuner_id);
-    ch.codec = t?.kind === 'm3u' ? await probeCodec(ch) : null;
-    try { s = startLive(ch); } catch (e) { return fail(res, e.status || 500, e.message); }
+    // Flera samtidiga förfrågningar väntar på samma start (annars startas ffmpeg två gånger)
+    if (!starting.has(ch.id)) starting.set(ch.id, (async () => {
+      // HDHomeRun: probe tar en tuner en kort stund – kopiera bara för IPTV, koda om antenn-TV (oftast MPEG-2/flätad)
+      const t = get('SELECT kind FROM tuners WHERE id=?', ch.tuner_id);
+      ch.codec = t?.kind === 'm3u' ? await probeCodec(ch) : null;
+      return startLive(ch);
+    })().finally(() => starting.delete(ch.id)));
+    try { s = await starting.get(ch.id); } catch (e) { return fail(res, e.status || 500, e.message); }
   }
   s.last = Date.now();
   const f = path.join(s.dir, 'live.m3u8');

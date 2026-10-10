@@ -591,12 +591,13 @@ views.podcast = async (id) => {
   const p = await api('/podcasts/' + id);
   const eps = p.episodes.map(e => ({ ...e, podcastTitle: p.title }));
   main.innerHTML = `<div class="mhero">${podCover(p, 'big')}<div><div class="muted small">PODD</div><h1>${esc(p.title || '')}</h1>
-    <div class="meta"><span>${esc(p.author || '')}</span><span>${p.episodes.length} avsnitt</span>${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener noreferrer">Webbplats</a>` : ''}</div>
+    <div class="meta"><span>${esc(p.author || '')}</span><span>${p.episodes.length} avsnitt</span>${/^https?:\/\//i.test(p.link || '') ? `<a href="${esc(p.link)}" target="_blank" rel="noopener noreferrer">Webbplats</a>` : ''}</div>
     ${p.error ? `<p class="err small">Senaste uppdateringen misslyckades: ${esc(p.error)}</p>` : ''}
-    <div class="row"><button class="ghost" id="prf">Uppdatera</button><label class="small muted">Ladda ner de senaste <input id="pkeep" type="number" min="0" max="50" value="${p.keep}" style="width:64px"> avsnitten</label><button class="danger" id="pdel">Avsluta prenumeration</button></div>
+    ${p.canEdit ? `<div class="row"><button class="ghost" id="prf">Uppdatera</button><label class="small muted">Ladda ner de senaste <input id="pkeep" type="number" min="0" max="50" value="${p.keep}" style="width:64px"> avsnitten</label><button class="danger" id="pdel">Avsluta prenumeration</button></div>` : ''}
     ${p.description ? `<p class="overview">${esc(p.description)}</p>` : ''}</div></div>
     <section class="section">${epRows(eps, false)}</section>`;
   bindEps(eps);
+  if (!p.canEdit) return;
   $('#prf').onclick = async () => { try { await api(`/podcasts/${id}/refresh`, { method: 'POST' }); toast('Uppdaterad'); route(); } catch (e) { toast(e.message); } };
   $('#pkeep').onchange = async (e) => { await api('/podcasts/' + id, { method: 'PUT', body: { keep: e.target.value } }); toast('Sparat'); };
   $('#pdel').onclick = async () => { if (confirm('Avsluta prenumerationen och ta bort nedladdade avsnitt?')) { try { await api('/podcasts/' + id, { method: 'DELETE' }); location.hash = '#/podcasts'; } catch (e) { toast(e.message); } } };

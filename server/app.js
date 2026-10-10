@@ -284,8 +284,13 @@ route('DELETE', '/api/me/passkeys/:kid', user, (c) => {
   if (r.changes) audit('passkey_removed', ctx(c));
   send(c.res, 200, { ok: true });
 });
+const pkRate = new Map(); // ip → { n, t }
+setInterval(() => pkRate.clear(), 60e3).unref();
 route('POST', '/api/passkey/options', pub, (c) => {
-  if (ipBlocked(clientIp(c.req))) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  const ip = clientIp(c.req), r = pkRate.get(ip) || { n: 0 };
+  if (++r.n > 30 || pkRate.size > 10000) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  pkRate.set(ip, r);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
   send(c.res, 200, pk.loginOptions(rpFor(c.req)));
 });
 route('POST', '/api/passkey/login', pub, async (c) => {
@@ -1036,13 +1041,28 @@ route('POST', '/api/podcasts', user, async (c) => {
   try { const id = await pods.subscribe(url, c.user); audit('podcast_added', { ...ctx(c), detail: String(url).slice(0, 200) }); send(c.res, 200, { id }); }
   catch (e) { fail(c.res, 400, e.message); }
 });
-route('GET', '/api/podcasts/:pid', user, (c) => { const p = pods.podcast(+c.p.pid, c.user.id); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/podcasts/:pid', user, (c) => {
+  const p = pods.podcast(+c.p.pid, c.user.id); if (!p) return fail(c.res, 404, 'Finns inte');
+  // Flödesadressen kan innehålla en privat nyckel – visas bara för den som lade till podden och administratörer
+  const owner = get('SELECT added_by FROM podcasts WHERE id=?', p.id)?.added_by;
+  if (!c.user.is_admin && owner !== c.user.id) delete p.url;
+  p.canEdit = c.user.max_age == null && (!!c.user.is_admin || owner === c.user.id);
+  send(c.res, 200, p);
+});
+const podOwner = (c) => {
+  const p = get('SELECT * FROM podcasts WHERE id=?', +c.p.pid);
+  if (!p) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (c.user.max_age != null || (!c.user.is_admin && p.added_by !== c.user.id)) { fail(c.res, 403, 'Bara den som lade till podden eller en administratör kan ändra den'); return null; }
+  return p;
+};
 route('PUT', '/api/podcasts/:pid', user, async (c) => {
+  if (!podOwner(c)) return;
   const { keep } = await readJson(c.req);
   if (keep != null) run('UPDATE podcasts SET keep=? WHERE id=?', Math.max(0, Math.min(50, parseInt(keep) || 0)), +c.p.pid);
   send(c.res, 200, { ok: true });
 });
-route('POST', '/api/podcasts/:pid/refresh', user, async (c) => { try { send(c.res, 200, await pods.refresh(+c.p.pid)); } catch (e) { fail(c.res, 502, e.message); } });
+route('POST', '/api/podcasts/:pid/refresh', user, async (c) => {
+  if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); try { send(c.res, 200, await pods.refresh(+c.p.pid)); } catch (e) { fail(c.res, 502, e.message); } });
 route('DELETE', '/api/podcasts/:pid', user, (c) => {
   const p = get('SELECT * FROM podcasts WHERE id=?', +c.p.pid); if (!p) return fail(c.res, 404, 'Finns inte');
   if (!c.user.is_admin && p.added_by !== c.user.id) return fail(c.res, 403, 'Bara den som lade till podden eller en administratör kan ta bort den');
@@ -1056,7 +1076,7 @@ route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const { position, played } = await readJson(c.req);
   const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
 });
-route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
+route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
 route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
   const e = get(`SELECT e.*, p.title AS ptitle, q.position, q.played FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id
     LEFT JOIN podcast_progress q ON q.episode_id=e.id AND q.user_id=? WHERE e.id=?`, c.user.id, +c.p.eid);
@@ -1127,11 +1147,10 @@ route('GET', '/api/live/logo/:cid', img, async (c) => {
   const f = path.join(IMAGES, `ch${ch.id}-${crypto.createHash('sha1').update(ch.logo).digest('hex').slice(0, 10)}.img`);
   if (!fs.existsSync(f)) {
     try {
-      const r = await fetch(ch.logo, { signal: AbortSignal.timeout(10000) });
+      const { r } = await pods.safeFetch(ch.logo, { timeout: 10000 });
       const ct = r.headers.get('content-type') || '';
-      if (!r.ok || !/^image\/(png|jpeg|gif|webp|svg\+xml)/.test(ct)) return fail(c.res, 404, 'Ingen logotyp');
-      const b = Buffer.from(await r.arrayBuffer());
-      if (b.length > 1 << 20) return fail(c.res, 404, 'För stor');
+      if (!r.ok || !/^image\/(png|jpeg|gif|webp|svg\+xml)/.test(ct)) { r.body.destroy(); return fail(c.res, 404, 'Ingen logotyp'); }
+      const b = await pods.readLimited(r, 1 << 20);
       fs.writeFileSync(f, Buffer.concat([Buffer.from(ct.split(';')[0].padEnd(32)), b]));
     } catch { return fail(c.res, 404, 'Ingen logotyp'); }
   }
@@ -1182,7 +1201,12 @@ route('DELETE', '/api/dvr/recordings/:rid', user, (c) => {
   if (r.status === 'scheduled') dvr.cancel(r.id); else dvr.removeRecording(r.id);
   send(c.res, 200, { ok: true });
 });
-route('POST', '/api/dvr/recordings/:rid/stop', user, (c) => { dvr.stopRecording(+c.p.rid); send(c.res, 200, { ok: true }); });
+route('POST', '/api/dvr/recordings/:rid/stop', user, (c) => {
+  if (!liveOk(c)) return;
+  const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!c.user.is_admin && r.created_by !== c.user.id) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan stoppa den');
+  dvr.stopRecording(r.id); send(c.res, 200, { ok: true });
+});
 route('POST', '/api/dvr/recordings/:rid/play', user, (c) => {
   if (!liveOk(c)) return;
   const t = c.user.via !== 'cookie' || c.q.get('cast') === '1' ? createSession(c.user.id, 'media', { item: REC_SCOPE + (+c.p.rid), ip: clientIp(c.req) }) : null;
@@ -1268,7 +1292,7 @@ async function sendRequest(row) {
 }
 route('GET', '/api/requests', user, (c) => send(c.res, 200, {
   canRequest: canRequest(c.user), radarr: arr.configured('movie'), sonarr: arr.configured('show'), autoApprove: getSetting('requests_auto', '0') === '1',
-  items: all('SELECT * FROM requests ORDER BY created DESC LIMIT 300').map(reqShape)
+  items: c.user.max_age != null ? [] : all('SELECT * FROM requests ORDER BY created DESC LIMIT 300').map(reqShape)
 }));
 route('POST', '/api/requests', user, async (c) => {
   if (!canRequest(c.user)) return fail(c.res, 403, 'Önskemål är inte tillgängliga');

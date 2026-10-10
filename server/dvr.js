@@ -23,7 +23,7 @@ export function dvrDir() {
   return d;
 }
 const pad = () => ({ before: Math.max(0, +getSetting('dvr_pad_before', '60')), after: Math.max(0, +getSetting('dvr_pad_after', '180')) });
-const safeName = (s) => String(s || 'Inspelning').replace(/[\/\\:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Inspelning';
+const safeName = (s) => String(s || 'Inspelning').replace(/[\/\\:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 100).trim() || 'Inspelning';
 
 // ---------- schemaläggning ----------
 export function scheduleProgram(programId, user, ruleId = null) {
