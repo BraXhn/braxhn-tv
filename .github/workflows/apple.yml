@@ -8,6 +8,7 @@ jobs:
   build:
     runs-on: macos-15
     strategy:
+      fail-fast: false
       matrix:
         include:
           - scheme: BraXhnTV-iOS
@@ -22,4 +23,11 @@ jobs:
         run: xcodegen generate
       - name: Kompilera ${{ matrix.scheme }} (osignerat, kontrollerar att koden bygger)
         working-directory: apps/apple
-        run: xcodebuild -project BraXhnTV.xcodeproj -scheme "${{ matrix.scheme }}" -destination "${{ matrix.dest }}" -configuration Debug CODE_SIGNING_ALLOWED=NO build | tail -50; exit ${PIPESTATUS[0]}
+        run: |
+          set +e
+          xcodebuild -project BraXhnTV.xcodeproj -scheme "${{ matrix.scheme }}" -destination "${{ matrix.dest }}" -configuration Debug CODE_SIGNING_ALLOWED=NO build > build.log 2>&1
+          code=$?
+          tail -40 build.log
+          # Visa kompileringsfel som annoteringar i GitHub
+          grep -E "error:" build.log | sort -u | head -30 | while IFS= read -r line; do echo "::error::${line}"; done
+          exit $code
