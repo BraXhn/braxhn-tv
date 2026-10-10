@@ -5,6 +5,7 @@ import path from 'node:path';
 import { handle } from './app.js';
 import { scan } from './scanner.js';
 import { CONFIG } from './db.js';
+import { scheduleRenewal } from './acme.js';
 
 const PORT = +process.env.PORT || 8420;
 const app = (req, res) => handle(req, res).catch(e => { console.error(e); try { res.writeHead(500); res.end(); } catch {} });
@@ -43,5 +44,8 @@ fs.mkdirSync(TLS_DIR, { recursive: true });
 loadTls();
 // Läs in förnyade certifikat automatiskt (kollas var 6:e timme)
 setInterval(loadTls, 6 * 3600e3).unref();
+globalThis.__braxhnReloadTls = loadTls;
+// Let's Encrypt: förnya automatiskt när en domän är inställd
+scheduleRenewal(loadTls);
 
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { server.close(); tlsServer?.close(); process.exit(0); });

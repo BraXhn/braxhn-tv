@@ -1,6 +1,6 @@
 # BraXhn TV – egen mediaserver för Unraid
 
-BraXhn TV är en självhostad mediaserver för **filmer och serier**, skriven från grunden. Den kräver inga konton, ingen molntjänst och ingen prenumeration. Allt körs på din egen server.
+BraXhn TV är en självhostad mediaserver för **filmer, serier och musik**, skriven från grunden. Den kräver inga konton, ingen molntjänst och ingen prenumeration. Allt körs på din egen server.
 
 ## Innehåll
 
@@ -16,18 +16,26 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 
 | Område | Vad som ingår |
 |---|---|
-| Bibliotek | Filmer och serier, mappväljare, automatisk skanning. Igenkänning via filnamn (`S01E02`, `Film (2020)`). |
+| Bibliotek | Filmer, serier och **musik**, mappväljare. Nya filer upptäcks direkt med **filbevakning** (med periodisk skanning som reserv). Igenkänning via filnamn (`S01E02`, `Film (2020)`). |
 | Metadata | Affischer, beskrivningar, betyg och avsnittsnamn via TMDB (gratis nyckel, valfritt). Utan nyckel skapas miniatyrbilder ur videon. |
 | Användare | Flera konton med egen tittarhistorik, *Fortsätt titta*, *Nästa avsnitt* och sedd/osedd. |
+| **Profiler** | *Vem tittar?* – profiler i hushållet med egen historik och Min lista, valfri **PIN** och **åldersgräns** för barn (svensk åldersgräns från TMDB, med USA/Tyskland som reserv). |
+| **Upptäck** | **Min lista**, **samlingar** (t.ex. alla Bond-filmer), **rekommendationer** utifrån det du sett och *Liknande titlar*. |
 | **Direktuppspelning** | Filer som enheten klarar skickas orörda (med spolning). |
-| **Remux** | H.264-filer i MKV eller med fel ljudformat strömmas med **originalbilden kopierad**. Bara ljudet konverteras vid behov, så processorbelastningen blir nästan noll. Segmenten delas exakt på filens nyckelbilder, som indexeras vid skanningen. |
+| **Remux** | H.264-, **HEVC**-, **HDR10**- och **Dolby Vision**-filer i MKV eller med fel ljudformat strömmas med **originalbilden kopierad**. Bara ljudet konverteras vid behov, så processorbelastningen blir nästan noll. Segmenten delas exakt på filens nyckelbilder, som indexeras vid skanningen. HEVC strömmas som fMP4-HLS till Apple-enheter. **Surroundljud** (AC-3/E-AC-3) skickas vidare orört när enheten klarar det. |
 | Omkodning | Behövs bara för t.ex. HEVC till enheter utan HEVC-stöd, lägre kvalitet eller inbränning. Kan köras med processor eller GPU (Intel/AMD VAAPI, Quick Sync, NVIDIA NVENC). |
 | **HDR → SDR** | HDR10, HLG och Dolby Vision (bas-lagret) tonmappas automatiskt när skärmen saknar HDR. Det görs med processor (zscale/tonemap) eller Intel/AMD-GPU (tonemap_vaapi). |
 | **Undertexter** | Inbäddade och externa `.srt/.vtt/.ass`. Teckenkodningen för gamla svenska srt-filer identifieras automatiskt. Bildundertexter (Blu-ray PGS och DVD) **bränns in**. Undertexter kan sökas och laddas ner från **OpenSubtitles**, med exakt matchning via filhash. Tidsjustering ±. |
-| **Hoppa över intro** | Introt hittas automatiskt genom ljudfingeravtryck: avsnitten i en säsong jämförs och den gemensamma ljudsekvensen blir introt. Även **eftertexter** hittas och ger knappen *Nästa avsnitt*. Tiderna kan justeras manuellt. |
+| **Hoppa över intro** | Introt hittas automatiskt genom ljudfingeravtryck: avsnitten i en säsong jämförs och den gemensamma ljudsekvensen blir introt. Även **eftertexter** och **"tidigare i serien"** hittas och ger knapparna *Nästa avsnitt* och *Hoppa över sammanfattning*. Tiderna kan justeras manuellt. |
+| **Förhandsbilder vid spolning** | Miniatyrer visas ovanför tidslinjen när du drar i den (skapas vid skanningen). |
 | **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. |
 | **Utanför hemmet** | Kvaliteten begränsas automatiskt för tittare utanför hemnätet. Inbyggd HTTPS eller omvänd proxy, och appar med token-inloggning. Se nedan. |
-| Appar | iPhone, iPad, Apple TV och Android Automotive (Polestar 4). |
+| **Musik** | Album, artister, spellistor, favoriter och sökning. Omslag från `cover.jpg` eller inbäddad bild. Ljudspelare som fortsätter medan du bläddrar, med mediaknappar i telefon och bil. |
+| **Titta tillsammans** | Synkad uppspelning med chatt, även mellan olika hem. Dela en länk – play, paus och spolning följer med för alla. |
+| **Offline** | Ladda ner filmer och avsnitt i iPhone/iPad- och Android-appen och titta utan nät. Servern gör en mobilanpassad MP4 (H.264/AAC) i vald kvalitet. |
+| **Statistik** | *Spelas nu* med möjlighet att stoppa en ström, tittartimmar, populäraste titlar och direkt/remux/omkodning-fördelning. |
+| **Säkerhetskopior** | Databasen kopieras automatiskt kl. 03.00 varje natt (14 sparas) och kan laddas ner från statistiksidan. |
+| Appar | iPhone, iPad, Apple TV och Android Automotive (Polestar 4), med musik i bilen. |
 
 ## Installation på Unraid
 
@@ -90,11 +98,17 @@ Ingenting exponeras mot internet. Om NetBird-routen maskerar trafiken (standard)
 
 BraXhn TV litar på `X-Forwarded-For` bara när anslutningen kommer från det lokala nätet, alltså från proxyn. Inloggningsspärren mot gissade lösenord fungerar därför även bakom proxyn.
 
-### 3. Inbyggd HTTPS (utan proxy)
+### 3. Inbyggd HTTPS med Let's Encrypt (utan proxy)
 
-Lägg ett certifikat som `cert.pem` och `key.pem` i `/mnt/user/appdata/braxhn-tv/tls/`. BraXhn TV startar då HTTPS på port **8443**, och förnyade certifikat läses in automatiskt var sjätte timme.
+BraXhn TV kan själv hämta och förnya ett gratis certifikat från Let's Encrypt:
 
-Certifikatet kan t.ex. utfärdas med OPNsense-pluginen **os-acme-client** (Let's Encrypt) och exporteras automatiskt till Unraid-delningen. Vidarebefordra sedan WAN 443 → Unraid-IP:8443 i OPNsense.
+1. Skaffa ett domännamn som pekar på din publika IP, t.ex. `tv.dindomän.se` (eller gratis via DuckDNS).
+2. I OPNsense: vidarebefordra **WAN 80 → Unraid-IP:8420** (för valideringen) och **WAN 443 → Unraid-IP:8443**.
+3. Gå till **Administration → HTTPS med Let's Encrypt**, ange domänen och klicka *Hämta certifikat*. Prova gärna med *Testmiljö* först.
+
+Certifikatet sparas i `/mnt/user/appdata/braxhn-tv/tls/`, HTTPS startar på port **8443** utan omstart, och det förnyas automatiskt 30 dagar före utgång.
+
+Du kan också lägga ett eget certifikat som `cert.pem` och `key.pem` i samma mapp, t.ex. från OPNsense-pluginen **os-acme-client**. Förnyade filer läses in var sjätte timme.
 
 > **Undvik Cloudflare Tunnel för video.** Cloudflares villkor begränsar videoströmning genom deras nät.
 
@@ -105,6 +119,7 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 | Skydd | Hur det fungerar |
 |---|---|
 | **Tvåstegsverifiering (TOTP)** | Fungerar med Google/Microsoft Authenticator, 1Password, Bitwarden m.fl. Du får 10 engångs-reservkoder, och en kod kan inte användas två gånger. Aktiveras under **Mitt konto**. |
+| **Passkeys** | Logga in med Face ID, Touch ID, Windows Hello eller säkerhetsnyckel (WebAuthn). Kan inte nätfiskas och räknas som tvåstegsverifiering. Läggs till under **Mitt konto** (kräver HTTPS och domännamn). |
 | **Kräv 2FA utanför hemmet** | Inställning i **Administration → Säkerhet**. Konton utan 2FA kan då bara logga in på hemnätet eller via VPN. |
 | **Starka lösenord** | Minst 10 tecken med tre olika teckentyper, eller minst 14 tecken. Vanliga lösenord och lösenord som innehåller användarnamnet nekas. Lösenorden hashas med scrypt. |
 | **Skydd mot gissning** | Max 10 felaktiga försök per IP-adress (IPv6 räknas per /64) och 10 minuter. Lösenordskontrollen körs utanför händelseloopen, max 4 samtidigt, så att en attack inte fryser strömmar. Efter 5 fel spärras kontot för inloggning utifrån i 5 min, sedan växer spärren upp till 24 h. Spärren gäller inte från hemnätet, så ingen kan låsa ute dig. Svarstiden avslöjar inte om ett konto finns. |
@@ -127,12 +142,14 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 - Om du vet proxyns adress, sätt `TRUSTED_PROXIES` (t.ex. `172.17.0.5/32`) så att bara den får ange klientadress.
 
 **Rekommenderad konfiguration när servern nås från internet:**
-1. Använd HTTPS, via Nginx Proxy Manager eller inbyggt (se ovan). Kör aldrig okrypterat över internet.
-2. Aktivera 2FA på alla administratörskonton, och slå på *Kräv tvåstegsverifiering utanför hemmet*.
+1. Använd HTTPS, via Nginx Proxy Manager eller inbyggt Let's Encrypt (se ovan). Kör aldrig okrypterat över internet.
+2. Aktivera 2FA eller passkeys på alla administratörskonton, och slå på *Kräv tvåstegsverifiering utanför hemmet*.
 3. Låt *Administration från internet* vara avstängd. Administrera hemifrån eller via NetBird.
 4. Geoblockera i OPNsense (GeoIP-alias på WAN-regeln) så att t.ex. bara Sverige och EU släpps in.
 5. Valfritt: CrowdSec eller fail2ban kan läsa containerloggen. Misslyckade inloggningar loggas som `[auth] login_fail ip=… user=…`.
 6. Håll containern uppdaterad, och säkerhetskopiera `/mnt/user/appdata/braxhn-tv`.
+
+> **Uppgradering till 0.4:** Inga åtgärder krävs. Databasen uppgraderas automatiskt. Uppdatera apparna för musik, offline och "tidigare i serien".
 
 > **Uppgradering till 0.3:** Alla loggas ut en gång eftersom token nu lagras hashade. Apparna måste också uppdateras till den nya versionen. Logga in igen i webben och i apparna. Befintliga lösenord fungerar, men svaga lösenord ger en uppmaning att byta.
 
@@ -179,6 +196,9 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `TRUST_VPN_RANGE` | 0 | 1 = räkna 100.64.0.0/10 (NetBird/Tailscale/CGNAT) som hemma |
 | `ADMIN_ANYWHERE` | 0 | 1 = tillåt administration från internet (avråds) |
 | `MAX_TRANSCODES` / `MAX_TRANSCODES_USER` | 4 / 2 | Tak för samtidiga omkodningar |
+| `ACME_DOMAIN` / `ACME_EMAIL` | – | Domän och e-post för Let's Encrypt (kan även sättas i webbgränssnittet) |
+| `WATCH_FILES` | 1 | 0 = stäng av filbevakning |
+| `TRICKPLAY` | 1 | 0 = skapa inga förhandsbilder för spolning |
 | `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
 
 ## Testat och otestat
@@ -192,12 +212,23 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Introdetektering | Träffade inom 0,5 s på syntetiska avsnitt. |
 | Eftertexter | Hittades. |
 | Undertexter | Fungerade, liksom token-inloggning för appar, cast-token, CORS, HTTPS och kvalitetsgränsen utanför hemmet. |
+| HEVC-remux (fMP4) | Tidsstämplar och init-segment stämde, även efter spolning. |
+| Musik | Skanning av taggar och omslag, strömning direkt och omkodad. |
+| Profiler och åldersgränser | Barnprofiler såg bara tillåtna titlar. |
+| Titta tillsammans | Två webbläsare höll synk vid play, paus och spolning. |
+| Offline, förhandsbilder, säkerhetskopior, filbevakning | Fungerade. |
+| Passkeys | Registrering och inloggning med en mjukvaru-autentiserare, inklusive avvisning av fel domän, fel nyckel och kopierad nyckel. |
+| Let's Encrypt | CSR och nyckeltumavtryck verifierade (openssl, RFC 7638). |
 
 **Inte testat här:**
 - inbränning av bildundertexter (ingen testfil fanns)
 - GPU-omkodning och VAAPI-tonmappning
 - OpenSubtitles (API:t var inte nåbart härifrån)
 - Chromecast och AirPlay
+- certifikat från Let's Encrypt på riktigt (kräver en publik domän)
+- passkeys i en riktig webbläsare/telefon
+- offline-nedladdning och musik i en riktig bil
+- CarPlay (kräver ett särskilt tillstånd från Apple och är därför inte byggt)
 - Docker-bygget
 - apparna, som byggs via GitHub Actions (se respektive README)
 

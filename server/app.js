@@ -15,6 +15,8 @@ import * as trick from './trickplay.js';
 import * as music from './music.js';
 import * as party from './party.js';
 import * as offline from './offline.js';
+import * as acme from './acme.js';
+import * as pk from './passkeys.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -23,7 +25,7 @@ hooks.music = (lib, status) => music.scanMusic(lib, status);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 // ---------- formning av objekt ----------
 const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
@@ -240,6 +242,81 @@ route('POST', '/api/me/sessions/revoke-others', user, (c) => {
   run('DELETE FROM sessions WHERE user_id=? AND token != ?', c.user.id, c.user.tokenHash);
   audit('sessions_revoked_all', ctx(c));
   send(c.res, 200, { ok: true });
+});
+
+// ---------- Passkeys (WebAuthn) ----------
+const hostOf = (req) => (isPrivate(req.socket.remoteAddress) && req.headers['x-forwarded-host']) || req.headers.host;
+const rpFor = (req) => pk.rpOf(String(hostOf(req) || '').split(',')[0].trim(), getSetting('public_url', process.env.PUBLIC_URL || '') || null);
+route('GET', '/api/me/passkeys', user, (c) => send(c.res, 200, pk.list(c.user.id)));
+route('POST', '/api/me/passkeys/options', user, async (c) => {
+  if (c.user.parent_id) return fail(c.res, 400, 'Passkeys läggs till på huvudkontot');
+  const { password } = await readJson(c.req);
+  const u = get('SELECT pass FROM users WHERE id=?', c.user.id);
+  if (!await checkPw(String(password || ''), u.pass)) return fail(c.res, 401, 'Fel lösenord');
+  send(c.res, 200, pk.registrationOptions(c.user, rpFor(c.req)));
+});
+route('POST', '/api/me/passkeys', user, async (c) => {
+  const b = await readJson(c.req, 64 * 1024);
+  try { pk.verifyRegistration(c.user, b, rpFor(c.req)); }
+  catch (e) { audit('passkey_add_fail', { ...ctx(c), detail: e.message }); return fail(c.res, 400, e.message); }
+  audit('passkey_added', { ...ctx(c), detail: String(b.name || '').slice(0, 60) });
+  send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/me/passkeys/:kid', user, (c) => {
+  const r = pk.remove(c.user.id, c.p.kid);
+  if (r.changes) audit('passkey_removed', ctx(c));
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/passkey/options', pub, (c) => {
+  if (ipBlocked(clientIp(c.req))) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  send(c.res, 200, pk.loginOptions(rpFor(c.req)));
+});
+route('POST', '/api/passkey/login', pub, async (c) => {
+  const ip = clientIp(c.req);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  const b = await readJson(c.req, 64 * 1024);
+  let uid;
+  try { uid = pk.verifyLogin(b, rpFor(c.req)); }
+  catch (e) { noteFail(ip); audit('login_fail', { ip, detail: 'passkey: ' + e.message }); return fail(c.res, 401, e.message); }
+  const u = get('SELECT * FROM users WHERE id=?', uid);
+  if (!u || u.parent_id) return fail(c.res, 401, 'Okänd passkey');
+  if (!isTrusted(c.req) && !u.remote_allowed) { audit('login_denied', { ip, user: u, detail: 'fjärråtkomst ej tillåten' }); return fail(c.res, 403, 'Ditt konto får bara användas på hemnätverket'); }
+  clearFails(u.name);
+  audit('login_ok', { ip, user: u, detail: (b.app ? 'app' : 'webb') + ', passkey' });
+  const meta = { ua: c.req.headers['user-agent'], ip };
+  if (b.app) return send(c.res, 200, { ok: true, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin } });
+  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', meta), isHttps(c.req)) });
+});
+
+// ---------- Let's Encrypt ----------
+const reloadTls = () => globalThis.__braxhnReloadTls?.();
+route('GET', '/api/acme', admin, (c) => send(c.res, 200, {
+  domain: getSetting('acme_domain', process.env.ACME_DOMAIN || ''), email: getSetting('acme_email', process.env.ACME_EMAIL || ''),
+  staging: getSetting('acme_staging', '0') === '1', auto: getSetting('acme_auto', '1') === '1',
+  running: acme.state.running, log: acme.state.log, error: acme.state.error, cert: acme.certInfo(), httpsPort: +process.env.HTTPS_PORT || 8443
+}));
+route('PUT', '/api/acme', admin, async (c) => {
+  const b = await readJson(c.req);
+  if (typeof b.domain === 'string') {
+    const d = b.domain.trim().toLowerCase();
+    if (d && !/^(?=.{1,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/.test(d)) return fail(c.res, 400, 'Ange en giltig domän, t.ex. tv.dindomän.se');
+    setSetting('acme_domain', d);
+  }
+  if (typeof b.email === 'string') {
+    const e = b.email.trim();
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return fail(c.res, 400, 'Ogiltig e-postadress');
+    setSetting('acme_email', e);
+  }
+  if (b.staging != null) setSetting('acme_staging', b.staging ? '1' : '0');
+  if (b.auto != null) setSetting('acme_auto', b.auto ? '1' : '0');
+  audit('settings_changed', { ...ctx(c), detail: 'acme' });
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/acme/obtain', admin, (c) => {
+  if (acme.state.running) return fail(c.res, 409, 'Pågår redan');
+  audit('acme_obtain', ctx(c));
+  acme.obtain(reloadTls).catch(() => {});
+  send(c.res, 202, { ok: true });
 });
 
 // Bibliotek
@@ -960,6 +1037,10 @@ export async function handle(req, res) {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   if (!url.pathname.startsWith('/api/stream/')) res.setHeader('X-Frame-Options', 'DENY');
   if (isHttps(req) && process.env.HSTS !== '0') res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+  if (url.pathname.startsWith('/.well-known/acme-challenge/')) {
+    const ka = acme.challenges.get(url.pathname.slice(28));
+    return ka ? send(res, 200, ka, { 'Content-Type': 'text/plain' }) : fail(res, 404, 'Finns inte');
+  }
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
   // Chromecast-mottagare och andra enheter hämtar media från annan origin
   if (url.pathname.startsWith('/api/stream/')) {
@@ -987,7 +1068,8 @@ export async function handle(req, res) {
       const trusted = isTrusted(req);
       if (!trusted && !c.user.remote_allowed) return fail(res, 403, 'Ditt konto får bara användas på hemnätverket');
       // Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll)
-      const has2fa = c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled);
+      const owner = c.user.parent_id || c.user.id;
+      const has2fa = c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled) || pk.hasPasskey(owner);
       if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !has2fa) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
     }
     if (r.admin) {
@@ -995,7 +1077,7 @@ export async function handle(req, res) {
       if (!adminAnywhere() && !isTrusted(req)) { audit('admin_denied', { user: c.user, ip: clientIp(req), detail: url.pathname }); return fail(res, 403, 'Administration är bara tillåten från hemnätverket eller VPN'); }
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && c.user?.via === 'cookie' && !sameOrigin(req)) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
-    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
+    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
     try { return await r.fn(c); }
     catch (e) { if (!e.status) console.error(e); return fail(res, e.status || 500, e.status ? e.message : 'Internt fel'); }
   }

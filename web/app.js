@@ -61,6 +61,27 @@ function card(it, land = false) {
   return `<a class="card${land ? ' land' : ''}" href="${href}" data-id="${it.id}">${art(it, land)}<div class="t">${esc(t)}</div><div class="s">${s}</div></a>`;
 }
 
+// ---------- passkeys (WebAuthn) ----------
+const b64uEnc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64uDec = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const passkeyOk = () => !!window.PublicKeyCredential && window.isSecureContext;
+async function passkeyLogin() {
+  const o = await (await fetch('/api/passkey/options', { method: 'POST' })).json();
+  if (o.error) throw new Error(o.error);
+  const cred = await navigator.credentials.get({ publicKey: { ...o, challenge: b64uDec(o.challenge) } });
+  const r = await fetch('/api/passkey/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    id: cred.id, response: { clientDataJSON: b64uEnc(cred.response.clientDataJSON), authenticatorData: b64uEnc(cred.response.authenticatorData),
+      signature: b64uEnc(cred.response.signature) } }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
+}
+async function passkeyRegister(password, name) {
+  const o = await api('/me/passkeys/options', { method: 'POST', body: { password } });
+  const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64uDec(o.challenge), user: { ...o.user, id: b64uDec(o.user.id) },
+    excludeCredentials: o.excludeCredentials.map(c => ({ ...c, id: b64uDec(c.id) })) } });
+  await api('/me/passkeys', { method: 'POST', body: { name, id: cred.id, response: { clientDataJSON: b64uEnc(cred.response.clientDataJSON), attestationObject: b64uEnc(cred.response.attestationObject) } } });
+}
+
 // ---------- vyer ----------
 const views = {};
 
@@ -77,7 +98,12 @@ views.login = async () => {
     <div id="codebox" hidden><label for="code">Kod från autentiseringsappen (eller reservkod)</label>
       <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12"></div>
     <div class="err" id="e"></div>
-    <button class="primary">${setup ? 'Skapa konto' : 'Logga in'}</button></form>`;
+    <button class="primary">${setup ? 'Skapa konto' : 'Logga in'}</button>
+    ${!setup && passkeyOk() ? '<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>' : ''}</form>`;
+  if ($('#pkl')) $('#pkl').onclick = async () => {
+    try { await passkeyLogin(); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : '#/'; }
+    catch (e) { $('#e').textContent = e.name === 'NotAllowedError' ? 'Avbrutet' : e.message; }
+  };
   $('#n').focus();
   $('#f').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -322,7 +348,7 @@ const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', lo
   setup: 'Server konfigurerad', password_changed: 'Lösenord bytt', '2fa_enabled': '2FA aktiverad', '2fa_disabled': '2FA avstängd',
   '2fa_recovery_used': 'Reservkod använd', '2fa_recovery_regenerated': 'Nya reservkoder', session_revoked: 'Enhet utloggad', sessions_revoked_all: 'Alla enheter utloggade',
   user_created: 'Användare skapad', user_updated: 'Användare ändrad', user_deleted: 'Användare borttagen', settings_changed: 'Inställningar ändrade',
-  admin_denied: 'Admin nekad (utifrån)', library_added: 'Bibliotek tillagt', library_removed: 'Bibliotek borttaget' };
+  admin_denied: 'Admin nekad (utifrån)', passkey_added: 'Passkey tillagd', passkey_removed: 'Passkey borttagen', passkey_add_fail: 'Passkey misslyckades', acme_obtain: 'Certifikat begärt', library_added: 'Bibliotek tillagt', library_removed: 'Bibliotek borttaget' };
 const fmtDate = (t) => t ? new Date(t * 1000).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }) : '–';
 const device = (ua) => {
   ua = ua || '';
@@ -347,7 +373,7 @@ function showCodes(codes) {
 }
 
 views.account = async () => {
-  const [tfa, sess] = await Promise.all([api('/me/2fa'), api('/me/sessions')]);
+  const [tfa, sess, pks] = await Promise.all([api('/me/2fa'), api('/me/sessions'), api('/me/passkeys')]);
   main.innerHTML = `
   <div class="panel"><h2>Mitt konto – ${esc(me.name)}</h2>
     <h3 style="font-size:15px;margin:0 0 4px">Byt lösenord</h3>
@@ -362,6 +388,11 @@ views.account = async () => {
     : `<p class="muted">Skyddar kontot även om lösenordet läcker. Fungerar med t.ex. Google Authenticator, Microsoft Authenticator, 1Password eller Bitwarden.${tfa.required ? ' <b>Krävs för att logga in utanför hemmet.</b>' : ''}</p>
       <div id="tfasetup"><button class="primary" id="on">Aktivera tvåstegsverifiering</button></div>`}
   </div>
+  ${!me.kid ? `<div class="panel"><h2>Passkeys</h2>
+    <p class="muted small">Logga in med Face ID, Touch ID, Windows Hello eller en säkerhetsnyckel i stället för lösenord. En passkey räknas som tvåstegsverifiering och kan inte nätfiskas. Kräver HTTPS och att du når servern via ett domännamn (inte en IP-adress).</p>
+    ${pks.length ? `<table>${pks.map(k => `<tr><td>${esc(k.name || 'Passkey')}</td><td class="muted small">Skapad ${fmtDate(k.created)} · senast använd ${fmtDate(k.last_used)}</td>
+      <td class="r"><button class="danger small" data-pkdel="${esc(k.id)}">Ta bort</button></td></tr>`).join('')}</table>` : ''}
+    <div class="row" style="margin-top:12px">${passkeyOk() ? '<button class="primary" id="pkadd">Lägg till passkey</button>' : '<span class="muted">Passkeys kräver HTTPS (eller localhost) i den här webbläsaren.</span>'}</div></div>` : ''}
   ${!me.kid ? `<div class="panel"><h2>Profiler i hushållet</h2>
     <p class="muted small">Profiler delar inloggning men har egen tittarhistorik och Min lista. Barnprofiler ser bara titlar upp till sin åldersgräns. Med PIN kan barnen inte byta till vuxnas profiler.</p>
     <div id="proflist"><div class="spin"></div></div>
@@ -382,6 +413,13 @@ views.account = async () => {
     catch (er) { toast(er.message); }
   };
   $$('[data-rev]').forEach(b => b.onclick = async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); });
+  $$('[data-pkdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } });
+  if ($('#pkadd')) $('#pkadd').onclick = async () => {
+    const password = prompt('Ange ditt lösenord för att lägga till en passkey:'); if (!password) return;
+    const name = prompt('Namn på passkeyn (t.ex. "iPhone" eller "Jobbdator"):', device(navigator.userAgent)) || 'Passkey';
+    try { await passkeyRegister(password, name); toast('Passkey tillagd'); route(); }
+    catch (e) { toast(e.name === 'NotAllowedError' ? 'Avbrutet' : e.name === 'InvalidStateError' ? 'Den här enheten har redan en passkey för kontot' : e.message); }
+  };
   if ($('#proflist')) {
     const P2 = await api('/profiles');
     $('#proflist').innerHTML = `<table>${P2.profiles.map(p => `<tr><td>${esc(p.name)}${p.owner ? ' <span class="muted small">(huvudkonto)</span>' : ''}</td>
@@ -484,7 +522,7 @@ views.stats = async () => {
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
-  const [L, U, S, SC, AU] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60')]);
+  const [L, U, S, SC, AU, AC] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
   <div class="panel"><h2>Säkerhetskontroll</h2>
@@ -533,6 +571,16 @@ views.admin = async () => {
     <div class="row"><div style="flex:1"><label>Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
     <div style="flex:1"><label>Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
     <div class="row" style="margin-top:14px"><button class="primary">Spara säkerhetsinställningar</button></div></form>
+  </div>
+  <div class="panel"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>
+    <p class="muted small">Inbyggt gratis certifikat som förnyas automatiskt. Kräver ett domännamn som pekar på din publika IP (t.ex. via DuckDNS eller din DNS-leverantör) och att port <b>80</b> i routern vidarebefordras till BraXhn TV:s port 8420 under valideringen. HTTPS serveras på port ${AC.httpsPort} – vidarebefordra 443 dit. Använder du redan en omvänd proxy (Nginx Proxy Manager, SWAG) behövs inte detta.</p>
+    ${AC.cert ? `<p class="small">Certifikat för <b>${esc(AC.cert.san || AC.cert.subject)}</b> från ${esc(AC.cert.issuer || '')}, gäller till ${esc(AC.cert.validTo)}.</p>` : ''}
+    <form id="acmeform"><div class="row"><div style="flex:1;min-width:180px"><label>Domän</label><input id="acd" value="${esc(AC.domain)}" placeholder="tv.dindomän.se"></div>
+      <div style="flex:1;min-width:180px"><label>E-post för påminnelser (valfri)</label><input id="ace" type="email" value="${esc(AC.email)}"></div></div>
+      <label class="switch"><input type="checkbox" id="acs" ${AC.staging ? 'checked' : ''}> Testmiljö (staging) – prova först utan att riskera Let's Encrypts gränser</label>
+      <label class="switch"><input type="checkbox" id="aca" ${AC.auto ? 'checked' : ''}> Förnya automatiskt (30 dagar före utgång)</label>
+      <div class="row" style="margin-top:12px"><button class="ghost">Spara</button><button type="button" class="primary" id="acgo" ${AC.running ? 'disabled' : ''}>${AC.cert ? 'Förnya nu' : 'Hämta certifikat'}</button></div></form>
+    <pre id="aclog" class="small muted" style="white-space:pre-wrap;margin-top:10px;${AC.log.length ? '' : 'display:none'}">${esc(AC.log.join('\n'))}</pre>
   </div>
   <div class="panel"><h2>Säkerhetslogg</h2>
     <div style="max-height:360px;overflow:auto"><table><tr><th>Tid</th><th>Händelse</th><th>Användare</th><th>IP</th><th>Detaljer</th></tr>
@@ -598,6 +646,18 @@ views.admin = async () => {
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
     if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
     try { await api('/settings', { method: 'PUT', body }); toast('Sparat'); route(); } catch (er) { toast(er.message); }
+  };
+  const acSave = () => api('/acme', { method: 'PUT', body: { domain: $('#acd').value, email: $('#ace').value, staging: $('#acs').checked, auto: $('#aca').checked } });
+  $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
+  const acPoll = async () => {
+    if (location.hash !== '#/admin' || !$('#aclog')) return;
+    const a = await api('/acme').catch(() => null); if (!a) return;
+    $('#aclog').style.display = ''; $('#aclog').textContent = a.log.join('\n');
+    if (a.running) setTimeout(acPoll, 1500);
+    else { $('#acgo').disabled = false; toast(a.error ? 'Certifikatet kunde inte hämtas: ' + a.error : 'Certifikatet är klart – HTTPS är igång'); if (!a.error) setTimeout(route, 1500); }
+  };
+  $('#acgo').onclick = async () => {
+    try { await acSave(); await api('/acme/obtain', { method: 'POST' }); $('#acgo').disabled = true; setTimeout(acPoll, 800); } catch (er) { toast(er.message); }
   };
   $$('[data-adm]').forEach(b => b.onclick = async () => { await api('/users/' + b.dataset.adm, { method: 'PUT', body: { isAdmin: b.dataset.v === '1' } }); route(); });
   $$('[data-pw]').forEach(b => b.onclick = async () => {
