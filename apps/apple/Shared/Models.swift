@@ -151,6 +151,16 @@ struct Playback: Decodable {
     let quality: String?
     let remote: Bool?
     let tonemap: Bool?
+    let chapters: [Chapter]?
+    let audio: [AudioStream]?
+    let audioSelected: String?
+}
+
+struct Chapter: Decodable, Hashable, Identifiable {
+    let start: Double
+    let end: Double
+    let title: String
+    var id: Double { start }
 }
 
 struct APIError: LocalizedError {

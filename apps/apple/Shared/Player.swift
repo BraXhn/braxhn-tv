@@ -45,6 +45,11 @@ final class PlayerController: ObservableObject {
     @Published var status = ""
     @Published var error: String?
     @Published var title = ""
+    @Published var audioTracks: [AudioStream] = []
+    @Published var subtitleTracks: [SubtitleTrack] = []
+    @Published var chapters: [Chapter] = []
+    @Published var selectedAudio: Int?
+    @Published var selectedSubtitle: String = "none"
 
     private let model: AppModel
     private var item: MediaItem?
@@ -95,6 +100,8 @@ final class PlayerController: ObservableObject {
                     ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true }
             }
             self.subtitle = sub
+            subtitleTracks = it.subtitles ?? []
+            selectedSubtitle = sub?.id ?? "none"
             #if os(iOS)
             // Nedladdad fil spelas lokalt (fungerar utan nät)
             if let local = Downloads.shared.localURL(for: itemId) {
@@ -110,12 +117,18 @@ final class PlayerController: ObservableObject {
             #endif
             let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
             pb = p
+            audioTracks = p.audio ?? []
+            chapters = p.chapters ?? []
+            selectedAudio = p.audioSelected.flatMap { Int($0) } ?? audio
             status = [p.mode == "direct" ? "Direkt" : p.mode == "remux" ? "Remux" : "Omkodning",
                       p.tonemap == true ? "HDR→SDR" : nil, p.remote == true ? "utanför hemmet" : nil].compactMap { $0 }.joined(separator: " · ")
             guard let url = model.absolute(p.url) else { throw APIError(message: "Ogiltig ström-URL") }
             let asset = AVURLAsset(url: url)
             let playerItem = AVPlayerItem(asset: asset)
             playerItem.externalMetadata = metadata(it)
+            #if os(tvOS)
+            playerItem.navigationMarkerGroups = chapterMarkers(p.chapters ?? [])
+            #endif
             player.replaceCurrentItem(with: playerItem)
             if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
             player.play()
@@ -142,6 +155,55 @@ final class PlayerController: ObservableObject {
             out.append(d)
         }
         return out
+    }
+
+    #if os(tvOS)
+    /// Kapitel visas i Apple TV:s egen spelare (svep nedåt → Kapitel)
+    private func chapterMarkers(_ ch: [Chapter]) -> [AVNavigationMarkersGroup] {
+        guard !ch.isEmpty else { return [] }
+        let groups = ch.map { c -> AVTimedMetadataGroup in
+            let t = AVMutableMetadataItem()
+            t.identifier = .commonIdentifierTitle
+            t.value = c.title as NSString
+            t.extendedLanguageTag = "und"
+            let range = CMTimeRange(start: CMTime(seconds: c.start, preferredTimescale: 600), end: CMTime(seconds: max(c.end, c.start + 1), preferredTimescale: 600))
+            return AVTimedMetadataGroup(items: [t], timeRange: range)
+        }
+        return [AVNavigationMarkersGroup(title: nil, timedNavigationMarkers: groups)]
+    }
+    #endif
+
+    // MARK: - byte av spår under uppspelning
+    func selectAudio(_ index: Int) {
+        guard index != selectedAudio else { return }
+        restart(audio: index, subtitle: subtitle)
+    }
+
+    func selectSubtitle(_ id: String) {
+        let s = subtitleTracks.first { $0.id == id }
+        model.subtitleLang = s?.lang ?? ""
+        // Bildundertexter bränns in av servern och kräver en ny ström; textundertexter byts direkt
+        if s?.bitmap == true || subtitle?.bitmap == true { restart(audio: audio, subtitle: s); return }
+        subtitle = s
+        selectedSubtitle = s?.id ?? "none"
+        cues = []
+        subtitleText = ""
+        if let s, let ps = pb?.subtitles.first(where: { $0.id == s.id }) { Task { await loadCues(ps) } }
+    }
+
+    func seek(to chapter: Chapter) {
+        player.seek(to: CMTime(seconds: chapter.start + 0.05, preferredTimescale: 600))
+    }
+
+    var currentChapter: Chapter? {
+        let t = player.currentTime().seconds
+        return chapters.last { $0.start <= t }
+    }
+
+    private func restart(audio: Int?, subtitle: SubtitleTrack?) {
+        guard let it = item else { return }
+        let t = player.currentTime().seconds
+        Task { await start(itemId: it.id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle) }
     }
 
     private func loadCues(_ s: PlaybackSubtitle) async {
@@ -219,6 +281,7 @@ struct PlayerVC: UIViewControllerRepresentable {
     let player: AVPlayer
     let skipTitle: String?
     let onSkip: () -> Void
+    @ObservedObject var ctrl: PlayerController
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
@@ -238,6 +301,20 @@ struct PlayerVC: UIViewControllerRepresentable {
         } else {
             vc.contextualActions = []
         }
+        // Ljud och undertexter i spelarens menyrad (svep nedåt på fjärrkontrollen)
+        var menus: [UIMenuElement] = []
+        if ctrl.audioTracks.count > 1 {
+            menus.append(UIMenu(title: "Ljud", image: UIImage(systemName: "speaker.wave.2"), options: .singleSelection, children: ctrl.audioTracks.map { a in
+                UIAction(title: a.label, state: a.index == ctrl.selectedAudio ? .on : .off) { _ in ctrl.selectAudio(a.index) }
+            }))
+        }
+        if !ctrl.subtitleTracks.isEmpty {
+            let none = UIAction(title: "Inga", state: ctrl.selectedSubtitle == "none" ? .on : .off) { _ in ctrl.selectSubtitle("none") }
+            menus.append(UIMenu(title: "Undertexter", image: UIImage(systemName: "captions.bubble"), options: .singleSelection, children: [none] + ctrl.subtitleTracks.map { s in
+                UIAction(title: s.label, state: s.id == ctrl.selectedSubtitle ? .on : .off) { _ in ctrl.selectSubtitle(s.id) }
+            }))
+        }
+        vc.transportBarCustomMenuItems = menus
         #endif
     }
 }
@@ -281,7 +358,7 @@ struct PlayerContent: View {
 
     var body: some View {
         ZStack {
-            PlayerVC(player: ctrl.player, skipTitle: ctrl.skipTitle, onSkip: { ctrl.skip() })
+            PlayerVC(player: ctrl.player, skipTitle: ctrl.skipTitle, onSkip: { ctrl.skip() }, ctrl: ctrl)
                 .ignoresSafeArea()
             // Undertexter ritas av appen (fungerar för alla lägen, även direktuppspelning)
             VStack {
@@ -305,6 +382,32 @@ struct PlayerContent: View {
                     Text(ctrl.title).font(.subheadline.weight(.semibold)).lineLimit(1).shadow(radius: 2)
                     Spacer()
                     Text(ctrl.status).font(.caption2).foregroundStyle(.secondary)
+                    if ctrl.audioTracks.count > 1 || !ctrl.subtitleTracks.isEmpty || !ctrl.chapters.isEmpty {
+                        Menu {
+                            if ctrl.audioTracks.count > 1 {
+                                Picker("Ljud", selection: Binding(get: { ctrl.selectedAudio ?? -1 }, set: { ctrl.selectAudio($0) })) {
+                                    ForEach(ctrl.audioTracks) { a in Text(a.label).tag(a.index) }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                            if !ctrl.subtitleTracks.isEmpty {
+                                Picker("Undertexter", selection: Binding(get: { ctrl.selectedSubtitle }, set: { ctrl.selectSubtitle($0) })) {
+                                    Text("Inga").tag("none")
+                                    ForEach(ctrl.subtitleTracks) { s in Text(s.label).tag(s.id) }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                            if !ctrl.chapters.isEmpty {
+                                Menu("Kapitel") {
+                                    ForEach(ctrl.chapters) { c in
+                                        Button { ctrl.seek(to: c) } label: { Text("\(c.title)  \(Self.fmt(c.start))") }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "list.bullet.rectangle").font(.title3).padding(10).background(.ultraThinMaterial, in: Circle())
+                        }
+                    }
                 }
                 .padding()
                 Spacer()
@@ -329,6 +432,11 @@ struct PlayerContent: View {
                 .padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
+    }
+
+    static func fmt(_ s: Double) -> String {
+        let t = Int(s), h = t / 3600, m = (t % 3600) / 60, sec = t % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
     }
 
     private var subtitleFont: Font {

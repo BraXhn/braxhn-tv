@@ -80,8 +80,10 @@ class App : Application() {
 @Serializable data class Playback(
     val mode: String, val url: String, val reasons: List<String> = emptyList(), val subtitles: List<PlaybackSubtitle> = emptyList(),
     val intro: Marker? = null, val recap: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
-    val remote: Boolean? = null, val tonemap: Boolean? = null
+    val remote: Boolean? = null, val tonemap: Boolean? = null,
+    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null
 )
+@Serializable data class Chapter(val start: Double, val end: Double, val title: String)
 
 class ApiException(msg: String, val need2fa: Boolean = false) : IOException(msg)
 
