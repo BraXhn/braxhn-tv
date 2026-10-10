@@ -50,7 +50,7 @@ struct MainTabs: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             tabs
-            MiniPlayer().padding(.bottom, miniPlayerPadding)
+            VStack(spacing: 6) { MiniPlayer(); SpokenMiniPlayer() }.padding(.bottom, miniPlayerPadding)
         }
     }
     private var tabs: some View {
@@ -61,6 +61,8 @@ struct MainTabs: View {
                 .tabItem { Label("Sök", systemImage: "magnifyingglass") }
             NavigationStack { MusicView() }
                 .tabItem { Label("Musik", systemImage: "music.note") }
+            NavigationStack { ListenView() }
+                .tabItem { Label("Lyssna", systemImage: "headphones") }
             #if os(iOS)
             NavigationStack { DownloadsView() }
                 .tabItem { Label("Nedladdat", systemImage: "arrow.down.circle") }

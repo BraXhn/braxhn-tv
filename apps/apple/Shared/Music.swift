@@ -65,15 +65,17 @@ final class MusicPlayer: ObservableObject {
             Task { @MainActor [weak self] in self?.position = s.isFinite ? s : 0 }
         }
         let cc = MPRemoteCommandCenter.shared()
-        cc.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
-        cc.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pause() }; return .success }
-        cc.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.toggle() }; return .success }
+        // Spelas en ljudbok/podd styr knapparna den i stället
+        cc.playCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.resume() } else { self?.resume() } }; return .success }
+        cc.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.pause() } else { self?.pause() } }; return .success }
+        cc.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in if SpokenPlayer.shared.track != nil { SpokenPlayer.shared.toggle() } else { self?.toggle() } }; return .success }
         cc.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.next() }; return .success }
         cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.previous() }; return .success }
     }
 
     func play(_ tracks: [MTrack], at i: Int, model: AppModel) {
         self.model = model
+        SpokenPlayer.shared.stop()
         queue = tracks
         Task { await load(i) }
     }

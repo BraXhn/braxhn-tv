@@ -1010,8 +1010,18 @@ route('GET', '/api/audiobooks/cover/:bid', img, (c) => {
   c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); fs.createReadStream(f).pipe(c.res);
 });
 const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
-route('GET', '/api/audiobooks/files/:fid/stream', user, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
-route('HEAD', '/api/audiobooks/files/:fid/stream', user, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+// Strömmar för ljudböcker/poddar: kortlivad token (24 h) som bara gäller den boken/det avsnittet – för appar och AirPlay
+const BOOK_SCOPE = 2e9, POD_SCOPE = 3e9;
+const bookStream = { auth: true, media: true, scope: (p) => BOOK_SCOPE + (books.fileRow(+p.fid)?.book_id || 0) };
+const podStream = { auth: true, media: true, scope: (p) => POD_SCOPE + (+p.eid) };
+route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+route('GET', '/api/audiobooks/book/:bid/play', user, (c) => {
+  const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
+  const t = createSession(c.user.id, 'media', { item: BOOK_SCOPE + b.id, ip: clientIp(c.req) });
+  const a = encodeURIComponent(String(c.q.get('a') || 'mp3,aac,flac'));
+  send(c.res, 200, { ...b, token: t, files: b.files.map(f => ({ ...f, url: `/api/audiobooks/files/${f.id}/stream?a=${a}&t=${t}` })) });
+});
 
 // ---------- Poddar ----------
 route('GET', '/api/podcasts', user, (c) => send(c.res, 200, { podcasts: pods.list(c.user.id), latest: pods.latest(c.user.id, 30), canAdd: c.user.max_age == null }));
@@ -1050,8 +1060,12 @@ route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
     downloaded: !!e.file, position: e.position || 0, played: !!e.played });
 });
 const podEp = (c) => { const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
-route('GET', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
-route('HEAD', '/api/podcasts/episodes/:eid/stream', user, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
+  const e = pods.episodeRow(+c.p.eid); if (!e) return fail(c.res, 404, 'Finns inte');
+  send(c.res, 200, { url: `/api/podcasts/episodes/${e.id}/stream?t=${createSession(c.user.id, 'media', { item: POD_SCOPE + e.id, ip: clientIp(c.req) })}` });
+});
+route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 
 // ---------- Sonarr/Radarr och önskemål ----------
 route('POST', '/api/webhook/arr', pub, async (c) => {
@@ -1359,7 +1373,7 @@ export async function handle(req, res) {
     if (u) {
       // Kortlivade token gäller bara där de är avsedda
       if (u.kind === 'media' && !(r.media || r.img)) c.user = null;
-      else if (u.kind === 'media' && u.scope_item && String(u.scope_item) !== (r.music ? String(-(+p.tid)) : String(p.id))) c.user = null;
+      else if (u.kind === 'media' && u.scope_item && String(u.scope_item) !== (r.scope ? String(r.scope(p)) : r.music ? String(-(+p.tid)) : String(p.id))) c.user = null;
       else if (u.kind === 'img' && !r.img) c.user = null;
     }
     if (r.auth && !c.user) return fail(res, 401, 'Inte inloggad');
