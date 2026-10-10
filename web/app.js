@@ -498,7 +498,7 @@ views.account = async () => {
 
 views.stats = async () => {
   if (!me.adminHere) { location.hash = '#/'; return; }
-  const [S, B] = await Promise.all([api('/stats'), api('/backups')]);
+  const [S, B, OF] = await Promise.all([api('/stats'), api('/backups'), api('/offsite')]);
   const L = S.library;
   const gb = (b) => b > 1e12 ? (b / 1e12).toFixed(1) + ' TB' : (b / 1e9).toFixed(0) + ' GB';
   const hrs = (x) => Math.round(x / 3600);
@@ -528,9 +528,48 @@ views.stats = async () => {
     <div class="row" style="margin-bottom:10px"><label class="switch"><input type="checkbox" id="bken" ${B.enabled ? 'checked' : ''}> Automatisk säkerhetskopiering</label>
       <input id="bkkeep" type="number" min="1" max="365" value="${B.keep}" style="width:90px"> <span class="muted small">kopior</span>
       <button class="ghost small" id="bksave">Spara</button><button class="primary small" id="bknow">Säkerhetskopiera nu</button></div>
-    <table>${B.files.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><a class="btn small" href="/api/backups/${encodeURIComponent(f.name)}">Ladda ner</a></td></tr>`).join('') || '<tr><td class="muted">Inga kopior ännu.</td></tr>'}</table>
-    <p class="muted small">Återställ: stoppa containern, kopiera en fil till <code>/config/braxhn-tv.db</code> och starta igen.</p>
+    <table>${B.files.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><a class="btn small" href="/api/backups/${encodeURIComponent(f.name)}">Ladda ner</a> <button class="ghost small" data-rlocal="${esc(f.name)}">Återställ</button></td></tr>`).join('') || '<tr><td class="muted">Inga kopior ännu.</td></tr>'}</table>
+    ${OF.restorePending ? `<p class="warn-badge" style="display:inline-block;margin-top:10px">En återställning väntar – starta om containern i Unraid för att använda den.</p> <button class="ghost small" id="rcancel">Avbryt återställningen</button>` : ''}
+  </div>
+  <div class="panel"><h2>Extern säkerhetskopia ${OF.kind !== 'none' ? (OF.state.error ? '<span class="warn-badge">Fel</span>' : OF.state.last ? '<span class="ok-badge">OK</span>' : '') : ''}</h2>
+    <p class="muted small">Skickar en <b>krypterad</b> kopia av databasen varje natt efter den lokala – till en annan disk eller NAS (lägg till en sökvägsmappning i Unraid, t.ex. <code>/backup</code>) eller till S3-kompatibel molnlagring som Backblaze B2, Wasabi, Cloudflare R2, MinIO eller AWS. Ingen hos lagringstjänsten kan läsa kopian utan din lösenfras – och <b>inte du heller om du tappar bort den</b>.</p>
+    <form id="ofform"><div class="row"><div><label>Mål</label><select id="ofk"><option value="none">Av</option><option value="folder">Mapp (annan disk/NAS)</option><option value="s3">S3-kompatibel lagring</option></select></div>
+      <div style="flex:1;min-width:200px"><label>Lösenfras (minst 12 tecken)</label><input id="ofp" type="password" autocomplete="new-password" placeholder="${OF.passSet ? '•••••• (sparad)' : ''}"></div>
+      <div><label>Antal kopior</label><input id="ofkeep" type="number" min="1" max="365" value="${OF.keep}" style="width:90px"></div></div>
+      <div id="ofdir"><label>Mapp i containern</label><input id="ofd" value="${esc(OF.dir)}" placeholder="/backup"></div>
+      <div id="ofs3"><div class="row"><div style="flex:2;min-width:220px"><label>Adress (endpoint)</label><input id="ofe" value="${esc(OF.endpoint)}" placeholder="https://s3.eu-central-003.backblazeb2.com"></div>
+        <div style="flex:1;min-width:120px"><label>Region</label><input id="ofr" value="${esc(OF.region)}"></div></div>
+        <div class="row"><div style="flex:1;min-width:150px"><label>Bucket</label><input id="ofb" value="${esc(OF.bucket)}"></div><div style="flex:1;min-width:150px"><label>Mapp i bucketen</label><input id="ofpre" value="${esc(OF.prefix)}"></div></div>
+        <div class="row"><div style="flex:1;min-width:180px"><label>Nyckel-id (access key)</label><input id="ofa" value="${esc(OF.accessKey)}" autocomplete="off"></div>
+        <div style="flex:1;min-width:180px"><label>Hemlig nyckel</label><input id="ofs" type="password" autocomplete="off" placeholder="${OF.secretSet ? '•••••• (sparad)' : ''}"></div></div>
+        <label class="switch"><input type="checkbox" id="ofv" ${OF.vhost ? 'checked' : ''}> Bucket i värdnamnet (virtual-hosted – krävs av vissa tjänster)</label></div>
+      <div class="row" style="margin-top:12px"><button class="ghost">Spara</button><button type="button" class="ghost" id="oftest">Testa anslutningen</button><button type="button" class="primary" id="ofrun">Skicka en kopia nu</button></div></form>
+    <p class="muted small">${OF.state.last ? 'Senast skickad ' + new Date(OF.state.last).toLocaleString('sv-SE') + ' (' + esc(OF.state.lastName || '') + ')' : ''}${OF.state.error ? ' · Fel: ' + esc(OF.state.error) : ''}</p>
+    <div id="oflist"></div>
   </div>`;
+  $('#ofk').value = OF.kind;
+  const ofShow = () => { $('#ofdir').hidden = $('#ofk').value !== 'folder'; $('#ofs3').hidden = $('#ofk').value !== 's3'; };
+  $('#ofk').onchange = ofShow; ofShow();
+  const ofSave = () => {
+    const body = { kind: $('#ofk').value, keep: $('#ofkeep').value, dir: $('#ofd').value, endpoint: $('#ofe').value, region: $('#ofr').value, bucket: $('#ofb').value, prefix: $('#ofpre').value, accessKey: $('#ofa').value, vhost: $('#ofv').checked };
+    if ($('#ofp').value) body.passphrase = $('#ofp').value;
+    if ($('#ofs').value) body.secretKey = $('#ofs').value;
+    return api('/offsite', { method: 'PUT', body });
+  };
+  $('#ofform').onsubmit = async (e) => { e.preventDefault(); try { await ofSave(); toast('Sparat'); route(); } catch (er) { toast(er.message); } };
+  $('#oftest').onclick = async () => { try { await ofSave(); await api('/offsite/test', { method: 'POST' }); toast('Anslutningen fungerar'); } catch (er) { toast(er.message); } };
+  $('#ofrun').onclick = async () => { $('#ofrun').disabled = true; try { await ofSave(); const r = await api('/offsite/run', { method: 'POST' }); toast('Skickade ' + r.name); route(); } catch (er) { toast(er.message); $('#ofrun').disabled = false; } };
+  const restore = async (body, label) => {
+    if (!confirm(`Återställ ${label}? Allt som ändrats efter kopian (tittarhistorik, konton, inställningar) försvinner. Den nuvarande databasen sparas och återställningen sker när containern startas om.`)) return;
+    try { await api('/restore', { method: 'POST', body }); toast('Klart – starta om containern i Unraid'); route(); } catch (e) { toast(e.message); }
+  };
+  $$('[data-rlocal]').forEach(b => b.onclick = () => restore({ local: b.dataset.rlocal }, b.dataset.rlocal));
+  if ($('#rcancel')) $('#rcancel').onclick = async () => { await api('/restore', { method: 'DELETE' }); route(); };
+  if (OF.kind !== 'none') api('/offsite/list').then(list => {
+    if (!$('#oflist')) return;
+    $('#oflist').innerHTML = list.length ? `<table>${list.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><button class="ghost small" data-rremote="${esc(f.name)}">Återställ</button></td></tr>`).join('')}</table>` : '<p class="muted small">Inga externa kopior ännu.</p>';
+    $$('[data-rremote]').forEach(b => b.onclick = () => restore({ remote: b.dataset.rremote }, b.dataset.rremote));
+  }).catch(e => { if ($('#oflist')) $('#oflist').innerHTML = `<p class="err small">${esc(e.message)}</p>`; });
   $('#bknow').onclick = async () => { try { const r = await api('/backups', { method: 'POST' }); toast('Skapade ' + r.name); route(); } catch (e) { toast(e.message); } };
   $('#bksave').onclick = async () => { await api('/settings', { method: 'PUT', body: { backupEnabled: $('#bken').checked, backupKeep: $('#bkkeep').value } }); toast('Sparat'); };
   const loadNow = async () => {

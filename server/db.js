@@ -6,7 +6,16 @@ export const CONFIG = process.env.CONFIG_DIR || '/config';
 export const IMAGES = path.join(CONFIG, 'images');
 fs.mkdirSync(IMAGES, { recursive: true });
 
-export const db = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db'));
+// Återställning: en förberedd databas (restore.db) byts in innan databasen öppnas
+const DBFILE = path.join(CONFIG, 'braxhn-tv.db'), RESTORE = path.join(CONFIG, 'restore.db');
+if (fs.existsSync(RESTORE)) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  for (const ext of ['', '-wal', '-shm']) if (fs.existsSync(DBFILE + ext)) fs.renameSync(DBFILE + ext, `${DBFILE}.före-återställning-${stamp}${ext}`);
+  fs.renameSync(RESTORE, DBFILE);
+  console.log('[db] Säkerhetskopian återställdes. Den tidigare databasen sparades som', `braxhn-tv.db.före-återställning-${stamp}`);
+}
+export const RESTORE_FILE = RESTORE;
+export const db = new DatabaseSync(DBFILE);
 db.exec(`
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;

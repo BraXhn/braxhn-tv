@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { get, all, run, now, getSetting, setSetting, IMAGES } from './db.js';
+import { get, all, run, now, getSetting, setSetting, IMAGES, RESTORE_FILE } from './db.js';
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
 import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
@@ -19,6 +19,7 @@ import * as acme from './acme.js';
 import * as pk from './passkeys.js';
 import * as notifier from './notify.js';
 import * as updates from './updates.js';
+import * as offsite from './offsite.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -1026,6 +1027,55 @@ route('GET', '/api/backups/:name', admin, (c) => {
   c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${f.name}"`, 'Content-Length': f.size });
   fs.createReadStream(path.join(act.BACKUP_DIR, f.name)).pipe(c.res);
 });
+
+// Extern säkerhetskopiering och återställning
+route('GET', '/api/offsite', admin, (c) => {
+  const k = offsite.cfg();
+  send(c.res, 200, { kind: k.kind, dir: k.dir, endpoint: k.endpoint, region: k.region, bucket: k.bucket, prefix: k.prefix, accessKey: k.accessKey, vhost: k.vhost, keep: k.keep,
+    secretSet: !!k.secretKey, passSet: !!k.passphrase, state: offsite.state, restorePending: fs.existsSync(RESTORE_FILE) });
+});
+route('PUT', '/api/offsite', admin, async (c) => {
+  const b = await readJson(c.req);
+  if (b.kind != null) { if (!['none', 'folder', 's3'].includes(b.kind)) return fail(c.res, 400, 'Okänd typ'); setSetting('offsite_kind', b.kind); }
+  if (typeof b.dir === 'string') setSetting('offsite_dir', b.dir.trim());
+  for (const [k, s] of [['endpoint', 's3_endpoint'], ['region', 's3_region'], ['bucket', 's3_bucket'], ['prefix', 's3_prefix'], ['accessKey', 's3_access_key']])
+    if (typeof b[k] === 'string') setSetting(s, b[k].trim().slice(0, 300));
+  if (typeof b.secretKey === 'string' && b.secretKey) setSetting('s3_secret_key', b.secretKey.trim());
+  if (typeof b.passphrase === 'string' && b.passphrase) {
+    if (b.passphrase.length < 12) return fail(c.res, 400, 'Lösenfrasen ska vara minst 12 tecken');
+    setSetting('offsite_pass', b.passphrase);
+  }
+  if (b.vhost != null) setSetting('s3_vhost', b.vhost ? '1' : '0');
+  if (b.keep != null) setSetting('offsite_keep', Math.max(1, Math.min(365, parseInt(b.keep) || 30)));
+  audit('settings_changed', { ...ctx(c), detail: 'extern säkerhetskopiering' });
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/offsite/test', admin, async (c) => {
+  try { await offsite.test(); send(c.res, 200, { ok: true }); } catch (e) { fail(c.res, 400, e.message); }
+});
+route('POST', '/api/offsite/run', admin, async (c) => {
+  try { const name = act.backupNow(); const r = await offsite.upload(path.join(act.BACKUP_DIR, name)); audit('backup_created', { ...ctx(c), detail: 'extern: ' + r }); send(c.res, 200, { name: r }); }
+  catch (e) { fail(c.res, 400, e.message); }
+});
+route('GET', '/api/offsite/list', admin, async (c) => {
+  try { send(c.res, 200, await offsite.list()); } catch (e) { fail(c.res, 502, e.message); }
+});
+// Förbered återställning – databasen byts vid nästa omstart av containern
+route('POST', '/api/restore', admin, async (c) => {
+  const { local, remote } = await readJson(c.req);
+  try {
+    if (local) {
+      const f = act.listBackups().find(b => b.name === local);
+      if (!f) return fail(c.res, 404, 'Finns inte');
+      fs.copyFileSync(path.join(act.BACKUP_DIR, f.name), RESTORE_FILE + '.part');
+      fs.renameSync(RESTORE_FILE + '.part', RESTORE_FILE);
+    } else if (remote) await offsite.fetchAndDecrypt(String(remote), RESTORE_FILE);
+    else return fail(c.res, 400, 'Välj en säkerhetskopia');
+    audit('restore_prepared', { ...ctx(c), detail: local || remote });
+    send(c.res, 200, { ok: true });
+  } catch (e) { fs.rmSync(RESTORE_FILE, { force: true }); fail(c.res, 400, e.message); }
+});
+route('DELETE', '/api/restore', admin, (c) => { fs.rmSync(RESTORE_FILE, { force: true }); send(c.res, 200, { ok: true }); });
 
 // Revisionslogg och säkerhetskontroll
 route('GET', '/api/audit', admin, (c) => {
