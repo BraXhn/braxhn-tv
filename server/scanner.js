@@ -201,6 +201,10 @@ async function saveCollection(c) {
   return c.id;
 }
 
+/** TVDB-id för en TMDB-serie (krävs av Sonarr) */
+export async function tvdbOf(tmdbId) { try { return (await tmdb(`/tv/${+tmdbId}/external_ids`)).tvdb_id || null; } catch { return null; } }
+export const hasTmdb = () => !!tmdbKey();
+
 /** Sök i TMDB för manuell matchning */
 export async function tmdbSearch(kind, query, year) {
   const tv = kind === 'show';
@@ -380,7 +384,7 @@ export function scan(libId = null) {
     status.running = true;
     try { for (const l of libs) { if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); } else await scanLibrary(l); } }
     catch (e) { console.error('[scan] fel:', e); }
-    finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); }
+    finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }
   });
   return queue;
 }

@@ -403,7 +403,7 @@ function showCodes(codes) {
 }
 
 views.account = async () => {
-  const [tfa, sess, pks] = await Promise.all([api('/me/2fa'), api('/me/sessions'), api('/me/passkeys')]);
+  const [tfa, sess, pks, TR] = await Promise.all([api('/me/2fa'), api('/me/sessions'), api('/me/passkeys'), api('/me/trakt')]);
   main.innerHTML = `
   <div class="panel"><h2>Mitt konto – ${esc(me.name)}</h2>
     <h3 style="font-size:15px;margin:0 0 4px">Byt lösenord</h3>
@@ -431,6 +431,10 @@ views.account = async () => {
       <div><label>Åldersgräns</label><select id="pa"><option value="">Vuxen (ingen)</option><option value="0">Barntillåten</option><option value="7">7 år</option><option value="11">11 år</option><option value="13">13 år</option><option value="15">15 år</option></select></div>
       <div><label>PIN (valfri)</label><input id="pp" inputmode="numeric" maxlength="8" style="width:110px"></div>
       <button class="primary">Lägg till profil</button></form></div>` : ''}
+  ${TR.enabled ? `<div class="panel"><h2>Trakt ${TR.connected ? '<span class="ok-badge">Kopplat</span>' : ''}</h2>
+    ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
+      <div class="row"><button class="ghost" id="trsync">Synka nu</button><button class="danger" id="troff">Koppla från</button></div>`
+    : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
   <div class="panel"><h2>Inloggade enheter</h2>
     <table><tr><th>Enhet</th><th>IP</th><th>Senast aktiv</th><th></th></tr>
     ${sess.map(s => `<tr><td>${esc(device(s.ua))}${s.current ? ' <span class="ok-badge">Den här</span>' : ''}</td><td class="muted">${esc(s.ip || '–')}</td><td class="muted">${fmtDate(s.last_seen)}</td>
@@ -443,6 +447,22 @@ views.account = async () => {
     catch (er) { toast(er.message); }
   };
   $$('[data-rev]').forEach(b => b.onclick = async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); });
+  if ($('#tron')) $('#tron').onclick = async () => {
+    try {
+      const r = await api('/me/trakt/connect', { method: 'POST' });
+      $('#trbox').innerHTML = `<p>Gå till <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> och ange koden:</p><p style="font-size:32px;letter-spacing:6px;font-weight:800">${esc(r.userCode)}</p><p class="muted small" id="trst">Väntar…</p>`;
+      const tick = async () => {
+        if (location.hash !== '#/account') return;
+        const p = await api('/me/trakt/poll', { method: 'POST' }).catch(() => ({ status: 'pending' }));
+        if (p.status === 'connected') { toast('Trakt kopplat – synkar'); route(); }
+        else if (p.status === 'pending') setTimeout(tick, (r.interval || 5) * 1000);
+        else $('#trst').textContent = p.status === 'denied' ? 'Nekades på Trakt.' : 'Koden gick ut – försök igen.';
+      };
+      setTimeout(tick, (r.interval || 5) * 1000);
+    } catch (e) { toast(e.message); }
+  };
+  if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt`); route(); } catch (e) { toast(e.message); } };
+  if ($('#troff')) $('#troff').onclick = async () => { if (confirm('Koppla från Trakt?')) { await api('/me/trakt', { method: 'DELETE' }); route(); } };
   $$('[data-pkdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } });
   if ($('#pkadd')) $('#pkadd').onclick = async () => {
     const password = prompt('Ange ditt lösenord för att lägga till en passkey:'); if (!password) return;
@@ -495,6 +515,47 @@ views.account = async () => {
   };
 };
 
+
+const REQ_STATUS = { pending: ['Väntar på godkännande', 'warn-badge'], approved: ['Godkänd', 'ok-badge'], sent: ['Laddas ner', 'ok-badge'],
+  available: ['Finns att titta på', 'ok-badge'], declined: ['Nekad', 'warn-badge'], failed: ['Misslyckades', 'warn-badge'] };
+views.requests = async () => {
+  const R = await api('/requests');
+  const kind = store.get('reqkind', 'movie');
+  main.innerHTML = `<div class="toolbar"><h1>Önskningar</h1><span class="muted">Önska filmer och serier som saknas${R.radarr || R.sonarr ? ' – de laddas ner automatiskt när de godkänts' : ''}</span></div>
+    ${R.canRequest ? `<form id="rqf" class="row panel" style="align-items:flex-end"><div><label>Typ</label><select id="rqk"><option value="movie">Film</option><option value="show">Serie</option></select></div>
+      <div style="flex:1;min-width:200px"><label>Sök</label><input id="rqq" placeholder="Titel…" autocomplete="off"></div><button class="primary">Sök</button></form>
+      <div id="rqres" class="matchgrid" style="max-height:none"></div>` : '<p class="muted">Önskemål är avstängda.</p>'}
+    <div class="panel"><h2>Alla önskemål</h2><table>${R.items.map(r => `<tr><td style="width:48px">${r.poster ? `<img src="${esc(r.poster)}" alt="" style="width:40px;border-radius:4px">` : ''}</td>
+      <td><b>${esc(r.title)}</b> ${r.year ? `<span class="muted">(${r.year})</span>` : ''}<div class="muted small">${r.kind === 'movie' ? 'Film' : 'Serie'} · ${esc(r.user || '')} · ${fmtDate(r.created)}${r.note ? ' · ' + esc(r.note) : ''}</div></td>
+      <td><span class="${REQ_STATUS[r.status]?.[1] || ''}">${REQ_STATUS[r.status]?.[0] || esc(r.status)}</span></td>
+      <td class="r">${me.adminHere && ['pending', 'failed', 'approved'].includes(r.status) ? `<button class="primary small" data-rqok="${r.id}">${r.status === 'failed' ? 'Försök igen' : r.status === 'approved' ? 'Skicka' : 'Godkänn'}</button>` : ''}
+        ${me.adminHere && r.status === 'pending' ? `<button class="ghost small" data-rqno="${r.id}">Neka</button>` : ''}
+        ${me.adminHere || (r.userId === me.id && r.status === 'pending') ? `<button class="ghost small" data-rqdel="${r.id}">Ta bort</button>` : ''}</td></tr>`).join('') || '<tr><td class="muted">Inga önskemål ännu.</td></tr>'}</table></div>`;
+  $$('[data-rqok]').forEach(b => b.onclick = async () => { try { await api(`/requests/${b.dataset.rqok}/approve`, { method: 'POST' }); toast('Skickad'); } catch (e) { toast(e.message); } route(); });
+  $$('[data-rqno]').forEach(b => b.onclick = async () => { const note = prompt('Anledning (valfritt):'); if (note === null) return; await api(`/requests/${b.dataset.rqno}/decline`, { method: 'POST', body: { note } }); route(); });
+  $$('[data-rqdel]').forEach(b => b.onclick = async () => { await api(`/requests/${b.dataset.rqdel}`, { method: 'DELETE' }); route(); });
+  if (!$('#rqf')) return;
+  $('#rqk').value = kind;
+  $('#rqk').onchange = () => store.set('reqkind', $('#rqk').value);
+  $('#rqq').focus();
+  $('#rqf').onsubmit = async (e) => {
+    e.preventDefault();
+    const k = $('#rqk').value, q = $('#rqq').value.trim(); if (!q) return;
+    $('#rqres').innerHTML = '<div class="spin"></div>';
+    try {
+      const res = await api(`/requests/search?kind=${k}&q=${encodeURIComponent(q)}`);
+      $('#rqres').innerHTML = res.map((x, i) => `<div class="mcard">${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+        <div style="flex:1"><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}<div class="small muted">${esc(x.overview)}</div></div>
+        <div>${x.inLibrary ? `<a class="btn small" href="#/item/${x.inLibrary}">Finns – titta</a>` : x.request ? `<span class="${REQ_STATUS[x.request]?.[1]}">${REQ_STATUS[x.request]?.[0]}</span>` : `<button class="primary small" data-rqadd="${i}">Önska</button>`}</div></div>`).join('') || '<p class="muted">Inga träffar.</p>';
+      $$('[data-rqadd]').forEach(b => b.onclick = async () => {
+        const x = res[+b.dataset.rqadd]; b.disabled = true;
+        try { const r = await api('/requests', { method: 'POST', body: { kind: k, tmdbId: x.id, title: x.title, year: x.year, poster: x.poster, overview: x.overview } });
+          b.outerHTML = `<span class="${REQ_STATUS[r.status]?.[1]}">${REQ_STATUS[r.status]?.[0]}</span>`; }
+        catch (er) { toast(er.message); b.disabled = false; }
+      });
+    } catch (er) { $('#rqres').innerHTML = `<p class="err">${esc(er.message)}</p>`; }
+  };
+};
 
 views.stats = async () => {
   if (!me.adminHere) { location.hash = '#/'; return; }
@@ -591,6 +652,7 @@ views.stats = async () => {
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
+  const IN = await api('/integrations');
   const [L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
@@ -646,6 +708,24 @@ views.admin = async () => {
     ${UP.available ? `<p>Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}` : ''}
     <p class="muted small">${UP.checked ? 'Senast kontrollerat ' + new Date(UP.checked).toLocaleString('sv-SE') : 'Inte kontrollerat än'}${UP.error ? ' – fel: ' + esc(UP.error) : ''}. Servern hämtar bara versionsnumret från GitHub (${esc(UP.repo)}) och skickar ingenting om dig.</p>
     <div class="row"><label class="switch" style="margin:0"><input type="checkbox" id="upen" ${UP.enabled ? 'checked' : ''}> Leta efter nya versioner</label><button class="ghost small" id="upchk">Kontrollera nu</button></div>
+  </div>
+  <div class="panel"><h2>Sonarr, Radarr och Trakt</h2>
+    <p class="muted small"><b>Direkt skanning:</b> lägg till en webhook i Sonarr och Radarr (Settings → Connect → + → Webhook, händelser <i>On Import</i>, <i>On Upgrade</i>, <i>On Rename</i> och <i>On Delete</i>) med adressen nedan. Då dyker nya avsnitt upp direkt efter nedladdning.</p>
+    <div class="row"><input id="whurl" readonly value="${esc((S.publicUrl || location.origin) + IN.webhookPath)}" style="flex:1"><button type="button" class="ghost small" id="whcopy">Kopiera</button><button type="button" class="ghost small" id="whnew">Ny nyckel</button></div>
+    <form id="inform">
+      <label>Sökvägar i Sonarr/Radarr → här (om de skiljer sig), t.ex. <code>/tv=/media/Serier,/movies=/media/Filmer</code></label><input id="inpm" value="${esc(IN.pathMap)}">
+      ${['radarr', 'sonarr'].map(k => `<h3 style="margin:18px 0 0;font-size:15px">${k === 'radarr' ? 'Radarr (filmer)' : 'Sonarr (serier)'}</h3>
+      <div class="row"><div style="flex:2;min-width:200px"><label>Adress</label><input id="${k}u" value="${esc(IN[k + 'Url'])}" placeholder="http://192.168.1.10:${k === 'radarr' ? 7878 : 8989}"></div>
+      <div style="flex:1;min-width:160px"><label>API-nyckel</label><input id="${k}k" type="password" autocomplete="off" placeholder="${IN[k + 'KeySet'] ? '•••••• (sparad)' : 'Settings → General'}"></div></div>
+      <div class="row"><div style="flex:1"><label>Kvalitetsprofil</label><select id="${k}p"><option value="0">Första</option></select></div>
+      <div style="flex:1"><label>Rotmapp</label><select id="${k}r"><option value="">Första</option></select></div><button type="button" class="ghost small" data-arrload="${k}">Hämta från ${k === 'radarr' ? 'Radarr' : 'Sonarr'}</button></div>`).join('')}
+      <label class="switch"><input type="checkbox" id="inre" ${IN.requestsEnabled ? 'checked' : ''}> Användare kan önska filmer och serier</label>
+      <label class="switch"><input type="checkbox" id="inra" ${IN.requestsAuto ? 'checked' : ''}> Godkänn önskemål automatiskt (annars godkänner en administratör)</label>
+      <h3 style="margin:18px 0 0;font-size:15px">Trakt</h3>
+      <p class="muted small">Skapa en gratis app på <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">trakt.tv/oauth/applications</a> (Redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>). Varje användare kopplar sedan sitt konto under Mitt konto.</p>
+      <div class="row"><div style="flex:1;min-width:180px"><label>Client ID</label><input id="trid" value="${esc(IN.traktClientId)}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label>Client Secret</label><input id="trsec" type="password" autocomplete="off" placeholder="${IN.traktSecretSet ? '•••••• (sparad)' : ''}"></div></div>
+      <div class="row" style="margin-top:12px"><button class="primary">Spara</button></div></form>
   </div>
   <div class="panel"><h2>Notiser till mobilen</h2>
     <p class="muted small">Få larm vid t.ex. attacker, spärrade konton, certifikatproblem och misslyckade säkerhetskopior. Enklast är <b>ntfy</b>: installera ntfy-appen, hitta på ett långt hemligt ämnesnamn och ange <code>https://ntfy.sh/ditt-ämne</code> (eller din egen ntfy-server).</p>
@@ -746,6 +826,30 @@ views.admin = async () => {
     if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
   $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#notest').onclick = async () => { try { await noSave(); await api('/notify/test', { method: 'POST' }); toast('Testnotis skickad'); } catch (er) { toast(er.message); } };
+  $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
+  $('#whnew').onclick = async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); };
+  for (const k of ['radarr', 'sonarr']) {
+    const prof = IN[k + 'Profile'], root = IN[k + 'Root'];
+    if (prof) $('#' + k + 'p').innerHTML += `<option value="${prof}" selected>Profil ${prof}</option>`;
+    if (root) $('#' + k + 'r').innerHTML += `<option value="${esc(root)}" selected>${esc(root)}</option>`;
+  }
+  $$('[data-arrload]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.arrload;
+    try {
+      await api('/integrations', { method: 'PUT', body: { [k + 'Url']: $('#' + k + 'u').value, [k + 'Key']: $('#' + k + 'k').value } });
+      const o = await api('/integrations/arr-options?kind=' + (k === 'radarr' ? 'movie' : 'show'));
+      $('#' + k + 'p').innerHTML = o.profiles.map(p => `<option value="${p.id}" ${p.id === IN[k + 'Profile'] ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+      $('#' + k + 'r').innerHTML = o.roots.map(r => `<option value="${esc(r.path)}" ${r.path === IN[k + 'Root'] ? 'selected' : ''}>${esc(r.path)} (${Math.round(r.free / 1e9)} GB ledigt)</option>`).join('');
+      toast('Ansluten');
+    } catch (e) { toast(e.message); }
+  });
+  $('#inform').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { pathMap: $('#inpm').value, requestsEnabled: $('#inre').checked, requestsAuto: $('#inra').checked, traktClientId: $('#trid').value };
+    if ($('#trsec').value) body.traktSecret = $('#trsec').value;
+    for (const k of ['radarr', 'sonarr']) { body[k + 'Url'] = $('#' + k + 'u').value; if ($('#' + k + 'k').value) body[k + 'Key'] = $('#' + k + 'k').value; body[k + 'Profile'] = $('#' + k + 'p').value; body[k + 'Root'] = $('#' + k + 'r').value; }
+    try { await api('/integrations', { method: 'PUT', body }); toast('Sparat'); } catch (er) { toast(er.message); }
+  };
   const acSave = () => api('/acme', { method: 'PUT', body: { domain: $('#acd').value, email: $('#ace').value, staging: $('#acs').checked, auto: $('#aca').checked } });
   $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
   const acPoll = async () => {
@@ -1412,6 +1516,7 @@ async function boot() {
   $('#userbtn').textContent = (me.kid ? '🧸 ' : '') + me.name + ' ▾';
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
+  $$('[data-requests]').forEach(e => e.hidden = me.kid);
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();

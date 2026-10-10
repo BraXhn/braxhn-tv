@@ -6,7 +6,7 @@ import { get, all, run, now, getSetting, setSetting, IMAGES, RESTORE_FILE } from
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
 import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
-import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks, tmdbSearch, autoSubs, readChapters } from './scanner.js';
+import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks, tmdbSearch, autoSubs, readChapters, tvdbOf, hasTmdb } from './scanner.js';
 import * as st from './stream.js';
 import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
@@ -20,12 +20,15 @@ import * as pk from './passkeys.js';
 import * as notifier from './notify.js';
 import * as updates from './updates.js';
 import * as offsite from './offsite.js';
+import * as arr from './arr.js';
+import * as trakt from './trakt.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
+hooks.afterScan = () => arr.markAvailable();
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -427,14 +430,16 @@ route('GET', '/api/items/:id', user, (c) => {
 });
 route('POST', '/api/items/:id/progress', user, async (c) => {
   const { position, duration } = await readJson(c.req);
-  const it = get('SELECT id,duration FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
+  const it = get('SELECT * FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
   const dur = it.duration || +duration || 0, pos = Math.max(0, +position || 0);
+  const wasWatched = !!get('SELECT watched FROM progress WHERE user_id=? AND item_id=?', c.user.id, it.id)?.watched;
   const watched = dur && (pos / dur > 0.92 || dur - pos < 120 && pos > 60) ? 1 : 0;
   run(`INSERT INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(?,?,?,?,?,?)
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=excluded.position, duration=excluded.duration,
     watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, now());
   if (watched) run('UPDATE progress SET position=0 WHERE user_id=? AND item_id=?', c.user.id, it.id);
+  if (watched && !wasWatched) trakt.scrobble(c.user.id, it, 'stop', 100).catch(() => {});
   act.touch(c.user.id, it.id, pos);
   send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) });
 });
@@ -448,6 +453,7 @@ route('POST', '/api/items/:id/watched', user, async (c) => {
     ? all('SELECT id FROM items WHERE parent_id=? AND season=?', it.id, +season).map(r => r.id) : ids;
   for (const id of targets) run(`INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,?,?)
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=0, watched=excluded.watched, updated=excluded.updated`, c.user.id, id, watched ? 1 : 0, now());
+  if (watched) trakt.markWatched(c.user.id, targets.map(id => get('SELECT * FROM items WHERE id=?', id)).filter(Boolean)).catch(() => {});
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/items/:id/refresh', admin, async (c) => {
@@ -804,6 +810,7 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${st.hlsParams(d, o, token)}`;
+  if (it.duration) trakt.scrobble(c.user.id, it, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
   act.startPlay({ user: c.user, item: it, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
@@ -976,6 +983,109 @@ route('PUT', '/api/settings', admin, async (c) => {
   audit('settings_changed', { ...ctx(c), detail: changed.join(', ') });
   send(c.res, 200, { ok: true });
 });
+
+// ---------- Sonarr/Radarr och önskemål ----------
+route('POST', '/api/webhook/arr', pub, async (c) => {
+  if (!arr.checkKey(c.q.get('key'))) { audit('webhook_denied', { ip: clientIp(c.req) }); return fail(c.res, 403, 'Fel nyckel'); }
+  const b = await readJson(c.req, 2 << 20);
+  const w = arr.parseWebhook(b);
+  if (arr.SCAN_EVENTS.test(w.event)) { for (const id of w.libIds) scan(id); console.log(`[arr] ${w.event}: ${w.title || ''} → skannar`); }
+  send(c.res, 200, { ok: true, event: w.event, scanned: arr.SCAN_EVENTS.test(w.event) ? w.libIds.length : 0 });
+});
+const canRequest = (u) => getSetting('requests_enabled', '1') === '1' && u.max_age == null && (arr.configured('movie') || arr.configured('show') || getSetting('requests_without_arr', '1') === '1');
+const reqShape = (r) => ({ id: r.id, kind: r.kind, tmdbId: r.tmdb_id, title: r.title, year: r.year, poster: r.poster, overview: r.overview, status: r.status, note: r.note,
+  user: r.user_name, userId: r.user_id, created: r.created });
+route('GET', '/api/requests/search', user, async (c) => {
+  if (!canRequest(c.user)) return fail(c.res, 403, 'Önskemål är inte tillgängliga');
+  if (!hasTmdb()) return fail(c.res, 400, 'Kräver en TMDB-nyckel (Administration → Inställningar)');
+  const kind = c.q.get('kind') === 'show' ? 'show' : 'movie';
+  try {
+    const res = await tmdbSearch(kind, String(c.q.get('q') || '').slice(0, 100), null);
+    send(c.res, 200, res.map(r => {
+      const lib = get('SELECT id FROM items WHERE tmdb_id=? AND kind=?', r.id, kind);
+      const rq = get('SELECT status FROM requests WHERE tmdb_id=? AND kind=?', r.id, kind);
+      return { ...r, kind, inLibrary: lib?.id || null, request: rq?.status || null };
+    }));
+  } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+async function sendRequest(row) {
+  if (!arr.configured(row.kind)) { arr.setStatus(row.id, 'approved', 'Godkänd – lägg till manuellt (Radarr/Sonarr är inte inställt)'); return; }
+  try { const r = await arr.send(row, tvdbOf); arr.setStatus(row.id, 'sent', r.already ? 'Fanns redan i ' + (row.kind === 'movie' ? 'Radarr' : 'Sonarr') : null); }
+  catch (e) { arr.setStatus(row.id, 'failed', e.message); throw e; }
+}
+route('GET', '/api/requests', user, (c) => send(c.res, 200, {
+  canRequest: canRequest(c.user), radarr: arr.configured('movie'), sonarr: arr.configured('show'), autoApprove: getSetting('requests_auto', '0') === '1',
+  items: all('SELECT * FROM requests ORDER BY created DESC LIMIT 300').map(reqShape)
+}));
+route('POST', '/api/requests', user, async (c) => {
+  if (!canRequest(c.user)) return fail(c.res, 403, 'Önskemål är inte tillgängliga');
+  const { kind, tmdbId, title, year, poster, overview } = await readJson(c.req);
+  if (!['movie', 'show'].includes(kind) || !(+tmdbId > 0) || !title) return fail(c.res, 400, 'Ogiltig önskan');
+  if (poster && !/^https:\/\/image\.tmdb\.org\//.test(poster)) return fail(c.res, 400, 'Ogiltig bild');
+  const open = get("SELECT COUNT(*) AS n FROM requests WHERE user_id=? AND status='pending'", c.user.id).n;
+  if (open >= 20 && !c.user.is_admin) return fail(c.res, 429, 'Du har redan 20 obesvarade önskemål');
+  const { row, existing } = arr.create(c.user, { kind, tmdbId: +tmdbId, title, year: +year || null, poster, overview });
+  if (existing) return send(c.res, 200, reqShape(row));
+  audit('request_created', { ...ctx(c), detail: `${title} (${kind})` });
+  if (c.user.is_admin || getSetting('requests_auto', '0') === '1') { try { await sendRequest(row); } catch (e) { return fail(c.res, 502, e.message); } }
+  else notifier.notify('request', 'Ny önskan', `${c.user.name} önskar ${kind === 'movie' ? 'filmen' : 'serien'} ${title}${year ? ` (${year})` : ''}.`);
+  send(c.res, 200, reqShape(get('SELECT * FROM requests WHERE id=?', row.id)));
+});
+route('POST', '/api/requests/:rid/approve', admin, async (c) => {
+  const row = get('SELECT * FROM requests WHERE id=?', +c.p.rid); if (!row) return fail(c.res, 404, 'Finns inte');
+  try { await sendRequest(row); audit('request_approved', { ...ctx(c), detail: row.title }); send(c.res, 200, reqShape(get('SELECT * FROM requests WHERE id=?', row.id))); }
+  catch (e) { fail(c.res, 502, e.message); }
+});
+route('POST', '/api/requests/:rid/decline', admin, async (c) => {
+  const { note } = await readJson(c.req);
+  arr.setStatus(+c.p.rid, 'declined', String(note || '').slice(0, 200) || null);
+  send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/requests/:rid', user, (c) => {
+  const row = get('SELECT * FROM requests WHERE id=?', +c.p.rid); if (!row) return fail(c.res, 404, 'Finns inte');
+  if (!c.user.is_admin && !(row.user_id === c.user.id && row.status === 'pending')) return fail(c.res, 403, 'Kan inte tas bort');
+  run('DELETE FROM requests WHERE id=?', row.id);
+  send(c.res, 200, { ok: true });
+});
+route('GET', '/api/integrations', admin, (c) => send(c.res, 200, {
+  radarrUrl: getSetting('radarr_url', process.env.RADARR_URL || ''), radarrKeySet: !!getSetting('radarr_key', process.env.RADARR_API_KEY || ''),
+  radarrProfile: +getSetting('radarr_profile', '0'), radarrRoot: getSetting('radarr_root', ''),
+  sonarrUrl: getSetting('sonarr_url', process.env.SONARR_URL || ''), sonarrKeySet: !!getSetting('sonarr_key', process.env.SONARR_API_KEY || ''),
+  sonarrProfile: +getSetting('sonarr_profile', '0'), sonarrRoot: getSetting('sonarr_root', ''),
+  pathMap: getSetting('arr_path_map', process.env.ARR_PATH_MAP || ''), webhookPath: `/api/webhook/arr?key=${arr.webhookKey()}`,
+  requestsEnabled: getSetting('requests_enabled', '1') === '1', requestsAuto: getSetting('requests_auto', '0') === '1',
+  traktClientId: getSetting('trakt_client_id', process.env.TRAKT_CLIENT_ID || ''), traktSecretSet: !!getSetting('trakt_client_secret', process.env.TRAKT_CLIENT_SECRET || '')
+}));
+route('PUT', '/api/integrations', admin, async (c) => {
+  const b = await readJson(c.req);
+  for (const k of ['radarr', 'sonarr']) {
+    if (typeof b[k + 'Url'] === 'string') {
+      const u = b[k + 'Url'].trim().replace(/\/+$/, '');
+      if (u && !/^https?:\/\/[^\s]+$/i.test(u)) return fail(c.res, 400, 'Adressen ska vara t.ex. http://192.168.1.10:7878');
+      setSetting(k + '_url', u);
+    }
+    if (typeof b[k + 'Key'] === 'string' && b[k + 'Key']) setSetting(k + '_key', b[k + 'Key'].trim());
+    if (b[k + 'Profile'] != null) setSetting(k + '_profile', parseInt(b[k + 'Profile']) || 0);
+    if (typeof b[k + 'Root'] === 'string') setSetting(k + '_root', b[k + 'Root']);
+  }
+  if (typeof b.pathMap === 'string') setSetting('arr_path_map', b.pathMap.trim().slice(0, 500));
+  if (b.requestsEnabled != null) setSetting('requests_enabled', b.requestsEnabled ? '1' : '0');
+  if (b.requestsAuto != null) setSetting('requests_auto', b.requestsAuto ? '1' : '0');
+  if (typeof b.traktClientId === 'string') setSetting('trakt_client_id', b.traktClientId.trim());
+  if (typeof b.traktSecret === 'string' && b.traktSecret) setSetting('trakt_client_secret', b.traktSecret.trim());
+  if (b.newWebhookKey) setSetting('arr_webhook_key', '');
+  audit('settings_changed', { ...ctx(c), detail: 'integrationer' });
+  send(c.res, 200, { ok: true });
+});
+route('GET', '/api/integrations/arr-options', admin, async (c) => {
+  try { send(c.res, 200, await arr.options(c.q.get('kind') === 'show' ? 'show' : 'movie')); } catch (e) { fail(c.res, 502, e.message); }
+});
+// Trakt (per användare)
+route('GET', '/api/me/trakt', user, (c) => send(c.res, 200, trakt.info(c.user.id)));
+route('POST', '/api/me/trakt/connect', user, async (c) => { try { send(c.res, 200, await trakt.startDevice(c.user.id)); } catch (e) { fail(c.res, 400, e.message); } });
+route('POST', '/api/me/trakt/poll', user, async (c) => { try { send(c.res, 200, await trakt.pollDevice(c.user.id)); } catch (e) { fail(c.res, 502, e.message); } });
+route('POST', '/api/me/trakt/sync', user, async (c) => { try { send(c.res, 200, await trakt.sync(c.user.id)); } catch (e) { fail(c.res, 502, 'Trakt: ' + e.message); } });
+route('DELETE', '/api/me/trakt', user, (c) => { trakt.disconnect(c.user.id); send(c.res, 200, { ok: true }); });
 
 // Notiser och uppdateringar
 auditHooks.push(notifier.onAudit);
