@@ -12,10 +12,12 @@ import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
 import * as act from './activity.js';
 import * as trick from './trickplay.js';
+import * as music from './music.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
+hooks.music = (lib, status) => music.scanMusic(lib, status);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -77,6 +79,7 @@ const route = (method, pattern, opts, fn) => {
 const pub = { auth: false }, user = { auth: true }, admin = { auth: true, admin: true };
 const media = { auth: true, media: true }; // strömmar: tillåter kortlivad mediatoken (?t=) för just den titeln
 const img = { auth: true, img: true };     // bilder: tillåter bildtoken (?t=) för appar
+const audio = { auth: true, media: true, music: true }; // musikströmmar: mediatoken för just det spåret
 
 // ---------- betrodda nätverk ----------
 // Hemnät (RFC1918), VPN/CGNAT (100.64.0.0/10, t.ex. NetBird/Tailscale) och egna nät i inställningarna
@@ -239,11 +242,12 @@ route('POST', '/api/me/sessions/revoke-others', user, (c) => {
 
 // Bibliotek
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
-  (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) AS count FROM libraries l ORDER BY l.name`)));
+  CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
+  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) END AS count FROM libraries l ORDER BY l.type='music', l.name`)));
 route('POST', '/api/libraries', admin, async (c) => {
   const { name, type, path: p } = await readJson(c.req);
   const real = insideMedia(String(p || ''));
-  if (!name?.trim() || !['movie', 'show'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
+  if (!name?.trim() || !['movie', 'show', 'music'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
   if (!real) return fail(c.res, 400, `Sökvägen måste finnas och ligga under ${MEDIA_ROOT}`);
   const id = Number(run('INSERT INTO libraries(name,type,path) VALUES(?,?,?)', name.trim(), type, real).lastInsertRowid);
   audit('library_added', { ...ctx(c), detail: `${name.trim()} (${real})` });
@@ -284,7 +288,7 @@ route('GET', '/api/home', user, (c) => {
       [s.sid], 'i.season, i.episode', 1)[0];
     if (next) cont.push(next);
   }
-  const rows = all('SELECT * FROM libraries ORDER BY name').map(l => ({
+  const rows = all("SELECT * FROM libraries WHERE type != 'music' ORDER BY name").map(l => ({
     library: l, title: `Nytt i ${l.name}`,
     items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24)
   }));
@@ -379,6 +383,73 @@ route('PUT', '/api/items/:id', admin, async (c) => {
   send(c.res, 200, { ok: true });
 });
 
+
+
+// ---------- Musik ----------
+const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget musikbibliotek'); return l; };
+route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id) }); });
+route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
+route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.artists(l.id)); });
+route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.searchMusic(String(c.q.get('q') || '').slice(0, 100), c.user.id)); });
+route('GET', '/api/music/albums/:aid', user, (c) => { const a = music.album(+c.p.aid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/music/artists/:arid', user, (c) => { const a = music.artist(+c.p.arid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/music/cover/:aid', img, (c) => {
+  const f = music.coverPath(+c.p.aid);
+  if (!f) return fail(c.res, 404, 'Inget omslag');
+  fs.readFile(f, (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+});
+const trackRow = (c) => { const t = get('SELECT * FROM tracks WHERE id=?', +c.p.tid); if (!t) fail(c.res, 404, 'Spåret finns inte'); return t; };
+route('GET', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t) music.streamTrack(c.req, c.res, t, c.q); });
+route('HEAD', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t) music.streamTrack(c.req, c.res, t, c.q); });
+// Kortlivad länk till ett spår (för appar, Chromecast och AirPlay)
+route('GET', '/api/music/tracks/:tid/play', user, (c) => {
+  const t = trackRow(c); if (!t) return;
+  const tok = createSession(c.user.id, 'media', { item: -t.id, ip: clientIp(c.req) });
+  send(c.res, 200, { url: `/api/music/tracks/${t.id}/stream?t=${tok}` });
+});
+route('POST', '/api/music/tracks/:tid/played', user, (c) => {
+  const t = trackRow(c); if (!t) return;
+  run('INSERT INTO track_plays(user_id,track_id,ts) VALUES(?,?,?)', c.user.id, t.id, now());
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/music/tracks/:tid/favorite', user, async (c) => {
+  const t = trackRow(c); if (!t) return;
+  const { on } = await readJson(c.req);
+  if (on === false) run('DELETE FROM favorites WHERE user_id=? AND track_id=?', c.user.id, t.id);
+  else run('INSERT OR IGNORE INTO favorites(user_id,track_id) VALUES(?,?)', c.user.id, t.id);
+  send(c.res, 200, { ok: true });
+});
+route('GET', '/api/music/playlists', user, (c) => send(c.res, 200, music.playlists(c.user.id)));
+route('POST', '/api/music/playlists', user, async (c) => {
+  const { name, trackIds } = await readJson(c.req);
+  const nm = String(name || '').trim().slice(0, 100);
+  if (!nm) return fail(c.res, 400, 'Namn krävs');
+  if (all('SELECT id FROM playlists WHERE user_id=?', c.user.id).length >= 200) return fail(c.res, 400, 'För många spellistor');
+  const id = Number(run('INSERT INTO playlists(user_id,name,created) VALUES(?,?,?)', c.user.id, nm, now()).lastInsertRowid);
+  (Array.isArray(trackIds) ? trackIds.slice(0, 5000) : []).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', id, +t, i); });
+  send(c.res, 200, { id });
+});
+route('GET', '/api/music/playlists/:pid', user, (c) => { const p = music.playlist(+c.p.pid, c.user.id); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
+route('PUT', '/api/music/playlists/:pid', user, async (c) => {
+  const p = get('SELECT * FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id);
+  if (!p) return fail(c.res, 404, 'Finns inte');
+  const { name, trackIds } = await readJson(c.req);
+  if (name) run('UPDATE playlists SET name=? WHERE id=?', String(name).trim().slice(0, 100), p.id);
+  if (Array.isArray(trackIds)) { // ny ordning / nytt innehåll
+    run('DELETE FROM playlist_items WHERE playlist_id=?', p.id);
+    trackIds.slice(0, 5000).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, i); });
+  }
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
+  const p = get('SELECT * FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id);
+  if (!p) return fail(c.res, 404, 'Finns inte');
+  const { trackIds } = await readJson(c.req);
+  let pos = (get('SELECT MAX(pos) AS m FROM playlist_items WHERE playlist_id=?', p.id).m ?? -1) + 1;
+  for (const t of (Array.isArray(trackIds) ? trackIds : []).slice(0, 2000)) if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, pos++);
+  send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
 
 // ---------- Min lista ----------
 route('GET', '/api/watchlist', user, (c) => send(c.res, 200,
@@ -855,7 +926,7 @@ export async function handle(req, res) {
     if (u) {
       // Kortlivade token gäller bara där de är avsedda
       if (u.kind === 'media' && !(r.media || r.img)) c.user = null;
-      else if (u.kind === 'media' && u.scope_item && String(u.scope_item) !== String(p.id)) c.user = null;
+      else if (u.kind === 'media' && u.scope_item && String(u.scope_item) !== (r.music ? String(-(+p.tid)) : String(p.id))) c.user = null;
       else if (u.kind === 'img' && !r.img) c.user = null;
     }
     if (r.auth && !c.user) return fail(res, 401, 'Inte inloggad');

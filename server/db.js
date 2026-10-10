@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions(
   token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS libraries(
-  id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN('movie','show')),
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN('movie','show','music')),
   path TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS items(
   id INTEGER PRIMARY KEY,
@@ -82,6 +82,35 @@ db.exec(`CREATE TABLE IF NOT EXISTS collections(id INTEGER PRIMARY KEY, name TEX
 CREATE TABLE IF NOT EXISTS watchlist(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, added INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));
 CREATE INDEX IF NOT EXISTS items_coll ON items(collection_id);`);
+// v0.5: biblioteket får även typen 'music' (SQLite kan inte ändra CHECK – bygg om tabellen)
+if (!/'music'/.test(db.prepare("SELECT sql FROM sqlite_master WHERE name='libraries'").get().sql)) {
+  db.exec(`PRAGMA foreign_keys=OFF; BEGIN;
+    CREATE TABLE libraries_new(id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN('movie','show','music')), path TEXT NOT NULL);
+    INSERT INTO libraries_new SELECT id,name,type,path FROM libraries; DROP TABLE libraries; ALTER TABLE libraries_new RENAME TO libraries;
+    COMMIT; PRAGMA foreign_keys=ON;`);
+}
+db.exec(`CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, sort_name TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS artists_name ON artists(library_id, name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS albums(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  artist_id INTEGER REFERENCES artists(id) ON DELETE SET NULL, title TEXT NOT NULL, sort_title TEXT, year INTEGER, genre TEXT,
+  cover INTEGER NOT NULL DEFAULT 0, dir TEXT, added INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS albums_artist ON albums(artist_id);
+CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  album_id INTEGER REFERENCES albums(id) ON DELETE CASCADE, artist_id INTEGER REFERENCES artists(id) ON DELETE SET NULL,
+  title TEXT NOT NULL, track_no INTEGER, disc_no INTEGER, duration REAL, path TEXT NOT NULL, size INTEGER, mtime INTEGER,
+  codec TEXT, bitrate INTEGER, sample_rate INTEGER, channels INTEGER, added INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id, disc_no, track_no);
+CREATE INDEX IF NOT EXISTS tracks_path ON tracks(path);
+CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS playlist_items(playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, pos INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS pli ON playlist_items(playlist_id, pos);
+CREATE TABLE IF NOT EXISTS track_plays(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, ts INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS tp_user ON track_plays(user_id, ts);
+CREATE TABLE IF NOT EXISTS favorites(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, PRIMARY KEY(user_id, track_id));`);
 const ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver >= 3 && ver < 4) {
   // v0.4: hämta om metadata för genrer, åldersgräns och samlingar

@@ -492,13 +492,13 @@ views.admin = async () => {
   </div>
   <div class="panel"><h2>Bibliotek</h2>
     <table><tr><th>Namn</th><th>Typ</th><th>Mapp</th><th>Titlar</th><th></th></tr>
-    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${l.type === 'movie' ? 'Filmer' : 'Serier'}</td><td class="muted">${esc(l.path)}</td><td>${l.count}</td>
+    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik' }[l.type]}</td><td class="muted">${esc(l.path)}</td><td>${l.count}</td>
       <td class="r"><button class="ghost small" data-scan="${l.id}">Skanna</button> <button class="danger small" data-del="${l.id}">Ta bort</button></td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <h3 style="margin:22px 0 4px;font-size:15px">Lägg till bibliotek</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label>Namn</label><input id="ln" placeholder="Filmer" required></div>
-      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option></select></div></div>
+      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option></select></div></div>
       <label>Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
@@ -748,6 +748,7 @@ function loadHls() {
 
 async function play(id, start = 0) {
   const it = await api('/items/' + id);
+  if (M.audio && !M.audio.paused) M.audio.pause();
   if (P) closePlayer(false);
   const el = $('#player');
   const audios = it.audio, defAudio = audios.find(a => a.default) || audios[0];
@@ -930,10 +931,226 @@ function closePlayer(refresh = true) {
 window.addEventListener('pagehide', () => sendProgress(true));
 initCast();
 
+// ================= MUSIK =================
+let ACAPS = null;
+function audioCaps() {
+  if (ACAPS) return ACAPS;
+  const a = document.createElement('audio'), ok = (t) => { try { return !!a.canPlayType(t); } catch { return false; } };
+  const c = ['mp3'];
+  if (ok('audio/mp4; codecs="mp4a.40.2"')) c.push('aac');
+  if (ok('audio/flac')) c.push('flac');
+  if (ok('audio/ogg; codecs="opus"') || ok('audio/webm; codecs="opus"')) c.push('opus');
+  if (ok('audio/ogg; codecs="vorbis"')) c.push('vorbis');
+  if (ok('audio/mp4; codecs="alac"')) c.push('alac');
+  return (ACAPS = c.join(','));
+}
+const cover = (albumId, has, cls = '') => {
+  const h = hue(String(albumId));
+  return `<div class="cover ${cls}" style="--h1:hsl(${h} 40% 30%);--h2:hsl(${(h + 60) % 360} 45% 16%)">♪${has ? `<img loading="lazy" src="/api/music/cover/${albumId}" alt="" data-fb="1">` : ''}</div>`;
+};
+const albumCard = (a) => `<a class="card mcard" href="#/album/${a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</div></a>`;
+function trackRows(tracks, opts = {}) {
+  return `<table class="tracks">${tracks.map((t, i) => `<tr data-ti="${i}" class="${M.cur && M.cur.id === t.id ? 'playing' : ''}">
+    <td class="muted num">${opts.showCover ? cover(t.albumId, t.cover, 'tiny') : (t.track || i + 1)}</td>
+    <td><b>${esc(t.title)}</b>${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
+    <td class="r muted">${fmtTime(t.duration)}</td>
+    <td class="r"><button class="ghost small fav" data-fav="${t.id}" title="Favorit">${t.favorite ? '♥' : '♡'}</button>
+    <button class="ghost small" data-addpl="${t.id}" title="Lägg till i spellista">+</button></td></tr>`).join('')}</table>`;
+}
+function bindTracks(tracks, root = main) {
+  $$('[data-ti]', root).forEach(r => r.ondblclick = r.onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
+  $$('[data-fav]', root).forEach(b => b.onclick = async () => {
+    const on = b.textContent !== '♥'; b.textContent = on ? '♥' : '♡';
+    await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on } });
+  });
+  $$('[data-addpl]', root).forEach(b => b.onclick = () => addToPlaylist([+b.dataset.addpl]));
+}
+async function addToPlaylist(ids) {
+  const pls = await api('/music/playlists');
+  const d = document.createElement('dialog');
+  d.innerHTML = `<h2>Lägg till i spellista</h2><div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…"><button class="primary" id="mkpl">Skapa</button></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  $('#cl', d).onclick = () => { d.close(); d.remove(); };
+  $$('[data-pl]', d).forEach(b => b.onclick = async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids } }); toast('Tillagd'); d.close(); d.remove(); });
+  $('#mkpl', d).onclick = async () => { const n = $('#newpl', d).value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids } }); toast('Spellista skapad'); d.close(); d.remove(); };
+}
+
+views.music = async (lid, tab) => {
+  tab = tab || store.get('mtab.' + lid, 'home');
+  store.set('mtab.' + lid, tab);
+  const tabs = [['home', 'Översikt'], ['albums', 'Album'], ['artists', 'Artister'], ['playlists', 'Spellistor']];
+  let body = '';
+  if (tab === 'home') {
+    const d = await api(`/music/${lid}/home`);
+    body = `<p class="muted">${d.stats.artists} artister · ${d.stats.albums} album · ${d.stats.tracks} låtar</p>
+      ${d.recentlyPlayed.length ? `<section class="section"><h2>Spelat nyligen</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
+      <section class="section"><h2>Nytt i biblioteket</h2><div class="shelf">${d.recentAlbums.map(albumCard).join('') || '<p class="muted">Inga album ännu.</p>'}</div></section>
+      ${d.favorites.length ? `<section class="section"><h2>Favoriter <button class="ghost small" id="playfav">▶ Spela</button> <button class="ghost small" id="shufav">⤨ Blanda</button></h2>${trackRows(d.favorites, { showCover: true })}</section>` : ''}`;
+    main.innerHTML = musicHeader(lid, tabs, tab) + body;
+    if (d.favorites.length) { bindTracks(d.favorites); $('#playfav').onclick = () => playQueue(d.favorites, 0); $('#shufav').onclick = () => playQueue(shuffle(d.favorites), 0); }
+    return;
+  }
+  if (tab === 'albums') {
+    const sort = store.get('msort', 'artist');
+    const a = await api(`/music/${lid}/albums?sort=${sort}`);
+    body = `<div class="toolbar"><select id="msort"><option value="artist">Artist</option><option value="title">Titel</option><option value="added">Senast tillagda</option><option value="year">År</option></select></div>
+      <div class="grid">${a.map(albumCard).join('')}</div>`;
+    main.innerHTML = musicHeader(lid, tabs, tab) + body;
+    $('#msort').value = sort; $('#msort').onchange = (e) => { store.set('msort', e.target.value); route(); };
+    return;
+  }
+  if (tab === 'artists') {
+    const a = await api(`/music/${lid}/artists`);
+    body = `<div class="grid">${a.map(x => `<a class="card mcard" href="#/artist/${x.id}">${cover(x.cover_album || x.id, !!x.cover_album, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.albums} album</div></a>`).join('')}</div>`;
+  }
+  if (tab === 'playlists') {
+    const p = await api('/music/playlists');
+    body = `<div class="row" style="margin-bottom:14px"><input id="npl" placeholder="Ny spellista" style="max-width:260px"><button class="primary" id="mknpl">Skapa</button></div>
+      <table>${p.map(x => `<tr><td><a href="#/playlist/${x.id}"><b>${esc(x.name)}</b></a></td><td class="muted">${x.tracks} låtar · ${fmtDur(x.duration || 0)}</td></tr>`).join('') || '<tr><td class="muted">Inga spellistor ännu.</td></tr>'}</table>`;
+  }
+  main.innerHTML = musicHeader(lid, tabs, tab) + body;
+  if ($('#mknpl')) $('#mknpl').onclick = async () => { const n = $('#npl').value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n } }); route(); };
+};
+function musicHeader(lid, tabs, tab) {
+  const lib = libs.find(l => l.id === +lid);
+  return `<div class="toolbar"><h1>${esc(lib?.name || 'Musik')}</h1><input id="msearch" placeholder="Sök artist, album, låt (Enter)" style="max-width:280px"></div>
+    <div class="tabs">${tabs.map(([k, n]) => `<a class="tabbtn ${k === tab ? 'on' : ''}" href="#/music/${lid}/${k}">${n}</a>`).join('')}</div>`;
+}
+document.addEventListener('keydown', async (e) => {
+  if (e.target.id !== 'msearch' || e.key !== 'Enter') return;
+  const lid = location.hash.split('/')[2], q = e.target.value.trim(); if (!q) return;
+  const r = await api(`/music/${lid}/search?q=${encodeURIComponent(q)}`);
+  const box = document.createElement('div');
+  box.innerHTML = `<section class="section"><h2>Sökresultat för ”${esc(q)}”</h2>
+    ${r.artists.length ? `<div class="row" style="margin-bottom:10px">${r.artists.map(a => `<a class="btn small" href="#/artist/${a.id}">${esc(a.name)}</a>`).join('')}</div>` : ''}
+    ${r.albums.length ? `<div class="shelf" style="margin-bottom:14px">${r.albums.map(albumCard).join('')}</div>` : ''}
+    ${r.tracks.length ? trackRows(r.tracks, { showCover: true }) : ''}${!r.artists.length && !r.albums.length && !r.tracks.length ? '<p class="muted">Inga träffar.</p>' : ''}</section>`;
+  $$('.msearchres').forEach(x => x.remove()); box.className = 'msearchres';
+  $('.tabs').after(box); bindTracks(r.tracks, box);
+});
+
+views.album = async (id) => {
+  const a = await api('/music/albums/' + id);
+  main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">ALBUM</div><h1>${esc(a.title)}</h1>
+    <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
+    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button></div></div></div>
+    ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}`;
+  bindTracks(a.trackList);
+  $('#pa').onclick = () => playQueue(a.trackList, 0);
+  $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
+  $('#aa').onclick = () => addToPlaylist(a.trackList.map(t => t.id));
+};
+views.artist = async (id) => {
+  const a = await api('/music/artists/' + id);
+  main.innerHTML = `<div class="mhero">${cover(a.albums[0]?.id || a.id, a.albums[0]?.cover, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
+    <div class="row"><button class="primary" id="pp">▶ Spela populära</button></div></div></div>
+    ${a.popular.length ? `<section class="section"><h2>Populärt</h2>${trackRows(a.popular, { showCover: true })}</section>` : ''}
+    <section class="section"><h2>Album</h2><div class="grid">${a.albums.map(albumCard).join('')}</div></section>`;
+  bindTracks(a.popular);
+  $('#pp').onclick = () => playQueue(a.popular, 0);
+};
+views.playlist = async (id) => {
+  const p = await api('/music/playlists/' + id);
+  main.innerHTML = `<div class="mhero"><div class="cover big plcover">♫</div><div><div class="muted small">SPELLISTA</div><h1>${esc(p.name)}</h1>
+    <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span></div>
+    <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="rn">Byt namn</button><button class="danger" id="dl">Ta bort</button></div></div></div>
+    <div id="pltracks">${trackRows(p.trackList, { showCover: true })}</div>`;
+  bindTracks(p.trackList);
+  // Ta bort enskilda låtar
+  $$('#pltracks tr').forEach((r, i) => { const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '✕'; b.title = 'Ta bort ur listan';
+    b.onclick = async () => { const ids = p.trackList.map(t => t.id); ids.splice(i, 1); await api('/music/playlists/' + id, { method: 'PUT', body: { trackIds: ids } }); route(); };
+    r.lastElementChild.append(b); });
+  $('#pp').onclick = () => playQueue(p.trackList, 0);
+  $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
+  $('#rn').onclick = async () => { const n = prompt('Nytt namn:', p.name); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } };
+  $('#dl').onclick = async () => { if (confirm('Ta bort spellistan?')) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } };
+};
+const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// ---------- musikspelare (följer med mellan sidor) ----------
+const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false };
+function ensureBar() {
+  if ($('#mbar')) return;
+  const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
+  bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
+    <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
+    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev">⏮</button><button class="primary" id="mplay">⏸</button><button class="ghost small" id="mnext">⏭</button>
+      <button class="ghost small" id="mrep" title="Upprepa">🔁</button></div>
+      <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
+    <div class="mright"><input type="range" id="mvol" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq">Kö</button><button class="ghost small" id="mx" title="Stäng">✕</button></div>`;
+  document.body.append(bar);
+  const a = M.audio = $('#maudio');
+  a.volume = store.get('mvol', 1);
+  a.ontimeupdate = () => { $('#mcurt').textContent = fmtTime(a.currentTime); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (a.currentTime / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
+  a.onended = () => nextTrack(true);
+  a.onplay = () => { $('#mplay').textContent = '⏸'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
+  a.onpause = () => { $('#mplay').textContent = '▶'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; };
+  a.onerror = () => toast('Kunde inte spela låten');
+  $('#mplay').onclick = () => a.paused ? a.play() : a.pause();
+  $('#mnext').onclick = () => nextTrack(false);
+  $('#mprev').onclick = () => { if (a.currentTime > 3) a.currentTime = 0; else if (M.idx > 0) loadTrack(M.idx - 1); };
+  $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); };
+  $('#mvol').oninput = (e) => { a.volume = +e.target.value; store.set('mvol', a.volume); };
+  $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
+  $('#mx').onclick = () => { a.pause(); a.removeAttribute('src'); bar.hidden = true; document.body.classList.remove('hasbar'); M.cur = null; };
+  $('#mq').onclick = showQueue;
+  if (navigator.mediaSession) {
+    navigator.mediaSession.setActionHandler('play', () => a.play());
+    navigator.mediaSession.setActionHandler('pause', () => a.pause());
+    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
+    navigator.mediaSession.setActionHandler('previoustrack', () => $('#mprev').click());
+    try { navigator.mediaSession.setActionHandler('seekto', (d) => seekTo(d.seekTime)); } catch {}
+  }
+}
+function seekTo(t) {
+  const a = M.audio;
+  // Omkodade strömmar saknar Range – starta om på rätt position
+  if (M.transcoded) { M.offset = t; a.src = M.url + (M.url.includes('?') ? '&' : '?') + 'ss=' + t; a.play(); }
+  else a.currentTime = t;
+}
+function playQueue(tracks, i) {
+  if (!tracks.length) return;
+  ensureBar();
+  if (P) closePlayer(false);
+  M.queue = tracks; loadTrack(i);
+}
+async function loadTrack(i) {
+  const t = M.queue[i]; if (!t) return;
+  M.idx = i; M.cur = t;
+  const a = M.audio, bar = $('#mbar');
+  bar.hidden = false; document.body.classList.add('hasbar');
+  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  a.src = M.url;
+  a.play().catch(() => {});
+  fetch(M.url, { method: 'HEAD' }).then(r => { M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
+  $('#mcov').innerHTML = cover(t.albumId, t.cover, 'small');
+  $('#mtitle').textContent = t.title;
+  $('#martist').textContent = t.artist || ''; $('#martist').href = t.artistId ? `#/artist/${t.artistId}` : '#';
+  $$('tr[data-ti]').forEach(r => r.classList.remove('playing'));
+  if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || '', album: t.album || '',
+    artwork: t.cover ? [{ src: `/api/music/cover/${t.albumId}`, sizes: '600x600', type: 'image/jpeg' }] : [] });
+  fetch(`/api/music/tracks/${t.id}/played`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+}
+function nextTrack(auto) {
+  if (M.idx + 1 < M.queue.length) loadTrack(M.idx + 1);
+  else if (M.repeat) loadTrack(0);
+  else if (auto) { M.audio.pause(); }
+}
+function showQueue() {
+  const d = document.createElement('dialog');
+  d.innerHTML = `<h2>Kö</h2><div style="max-height:60vh;overflow:auto">${trackRows(M.queue, { showCover: true })}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); r.onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
+  $('#cl', d).onclick = () => { d.close(); d.remove(); };
+}
+
 // ---------- routing ----------
 async function loadLibs() {
   libs = await api('/libraries');
-  $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/lib/${l.id}">${esc(l.name)}</a>`).join('');
+  $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/${l.type === 'music' ? 'music' : 'lib'}/${l.id}">${esc(l.name)}</a>`).join('');
 }
 async function boot() {
   const st = await api('/status');
@@ -948,14 +1165,14 @@ async function boot() {
 }
 async function route() {
   const h = location.hash.slice(2) || '';
-  const [name, arg] = h.split('/');
+  const [name, arg, arg2] = h.split('/');
   if (!me && name !== 'login') { location.hash = '#/login'; return; }
   if (P && name !== 'play') closePlayer(false);
-  $$('#libnav a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#/' + h || (a.getAttribute('href') === '#/' && h === '')));
+  $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
   main.innerHTML = '<div class="spin"></div>';
-  try { await v(arg); window.scrollTo(0, 0); }
+  try { await v(arg, arg2); window.scrollTo(0, 0); }
   catch (e) { if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
 }
 window.addEventListener('hashchange', route);

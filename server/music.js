@@ -1,0 +1,218 @@
+// Musikbibliotek: skanning av ljudfiler, artister, album, spår, omslag och spellistor.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { get, all, run, now, IMAGES } from './db.js';
+import { send, fail } from './util.js';
+
+const pexec = promisify(execFile);
+const AUDIO = new Set(['.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
+const COVERS = ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'albumart.jpg'];
+const sortName = (t) => String(t || '').toLowerCase().replace(/^(the|a|an|en|ett)\s+/, '');
+const coverFile = (albumId) => path.join(IMAGES, `a${albumId}-cover.jpg`);
+
+function* walk(dir) {
+  let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of ents) {
+    if (e.name.startsWith('.') || e.name === '@eaDir') continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) yield* walk(p);
+    else if (e.isFile() && AUDIO.has(path.extname(e.name).toLowerCase())) yield p;
+  }
+}
+
+async function probe(file) {
+  const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_format', '-show_streams', file],
+    { maxBuffer: 8 << 20, timeout: 60000 });
+  const j = JSON.parse(stdout);
+  const tags = {};
+  for (const src of [j.format?.tags || {}, ...(j.streams || []).map(s => s.tags || {})]) for (const [k, v] of Object.entries(src)) { const kk = k.toLowerCase(); if (!(kk in tags)) tags[kk] = v; }
+  const a = (j.streams || []).find(s => s.codec_type === 'audio');
+  const pic = (j.streams || []).find(s => s.codec_type === 'video' && (s.disposition?.attached_pic || ['mjpeg', 'png'].includes(s.codec_name)));
+  return {
+    tags, duration: parseFloat(j.format?.duration) || null, codec: a?.codec_name || null, bitrate: parseInt(j.format?.bit_rate) || null,
+    sampleRate: parseInt(a?.sample_rate) || null, channels: a?.channels || null, hasPic: !!pic
+  };
+}
+
+// Mappstruktur som reserv: Artist/Album/01 - Titel.flac
+function fromPath(lib, file) {
+  const rel = path.relative(lib.path, file).split(path.sep);
+  const base = path.basename(file, path.extname(file));
+  const m = base.match(/^(?:(\d+)[-.]?)?(\d{1,3})?[\s._-]*(.*)$/);
+  const tn = base.match(/^(\d{1,3})(?:[\s._-]+|$)/);
+  return {
+    artist: rel.length >= 3 ? rel[rel.length - 3] : null,
+    album: rel.length >= 2 ? rel[rel.length - 2].replace(/^\s*\(?\d{4}\)?\s*[-–]\s*/, '') : null,
+    title: (tn ? base.slice(tn[0].length) : base).replace(/^[\s._-]+/, '').trim() || m?.[3] || base,
+    track: tn ? +tn[1] : null
+  };
+}
+
+function artistId(lib, name) {
+  name = String(name || 'Okänd artist').trim().slice(0, 200) || 'Okänd artist';
+  const r = get('SELECT id FROM artists WHERE library_id=? AND name=? COLLATE NOCASE', lib.id, name);
+  if (r) return r.id;
+  return Number(run('INSERT INTO artists(library_id,name,sort_name) VALUES(?,?,?)', lib.id, name, sortName(name)).lastInsertRowid);
+}
+function albumId(lib, artist, title, year, genre, dir) {
+  title = String(title || 'Okänt album').trim().slice(0, 300) || 'Okänt album';
+  const r = get('SELECT id FROM albums WHERE library_id=? AND title=? COLLATE NOCASE AND COALESCE(artist_id,0)=? ', lib.id, title, artist || 0);
+  if (r) return r.id;
+  return Number(run('INSERT INTO albums(library_id,artist_id,title,sort_title,year,genre,dir,added) VALUES(?,?,?,?,?,?,?,?)',
+    lib.id, artist, title, sortName(title), year, genre, dir, now()).lastInsertRowid);
+}
+
+async function ensureCover(albumIdNum, dir, file, hasPic) {
+  const out = coverFile(albumIdNum);
+  if (fs.existsSync(out)) return true;
+  for (const c of COVERS) {
+    const f = fs.readdirSync(dir).find(x => x.toLowerCase() === c);
+    if (f) {
+      try {
+        await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-i', path.join(dir, f), '-vf', 'scale=600:600:force_original_aspect_ratio=decrease', '-q:v', '3', out], { timeout: 30000 });
+        if (fs.existsSync(out)) return true;
+      } catch {}
+    }
+  }
+  if (hasPic) {
+    try {
+      await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-i', file, '-map', '0:v:0', '-frames:v', '1', '-vf', 'scale=600:600:force_original_aspect_ratio=decrease', '-q:v', '3', out], { timeout: 30000 });
+      if (fs.existsSync(out)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+export async function scanMusic(lib, status) {
+  status.phase = 'Söker musikfiler'; status.done = 0;
+  const files = [...walk(lib.path)];
+  status.total = files.length; status.phase = 'Läser taggar';
+  const known = new Map(all('SELECT id, path, size, mtime FROM tracks WHERE library_id=?', lib.id).map(r => [r.path, r]));
+  const seen = new Set();
+  for (const f of files) {
+    status.done++; seen.add(f);
+    let st; try { st = fs.statSync(f); } catch { continue; }
+    const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
+    if (k && k.size === st.size && k.mtime === mtime) continue;
+    let info;
+    try { info = await probe(f); } catch (e) { console.warn('[music] ffprobe', f, e.message); continue; }
+    const t = info.tags, fp = fromPath(lib, f);
+    const albumArtist = t.album_artist || t.albumartist || t['album artist'] || t.artist || fp.artist;
+    const aId = artistId(lib, albumArtist);
+    const trackArtist = t.artist && t.artist !== albumArtist ? artistId(lib, t.artist) : aId;
+    const year = parseInt(t.date || t.year || t.originaldate) || null;
+    const alId = albumId(lib, aId, t.album || fp.album, year, t.genre || null, path.dirname(f));
+    const trackNo = parseInt(String(t.track || t.tracknumber || '').split('/')[0]) || fp.track;
+    const discNo = parseInt(String(t.disc || t.discnumber || '').split('/')[0]) || 1;
+    const title = String(t.title || fp.title).slice(0, 300);
+    if (k) run(`UPDATE tracks SET album_id=?,artist_id=?,title=?,track_no=?,disc_no=?,duration=?,size=?,mtime=?,codec=?,bitrate=?,sample_rate=?,channels=? WHERE id=?`,
+      alId, trackArtist, title, trackNo, discNo, info.duration, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, k.id);
+    else run(`INSERT INTO tracks(library_id,album_id,artist_id,title,track_no,disc_no,duration,path,size,mtime,codec,bitrate,sample_rate,channels,added)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, alId, trackArtist, title, trackNo, discNo, info.duration, f, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, now());
+    const al = get('SELECT cover FROM albums WHERE id=?', alId);
+    if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
+  }
+  for (const [p, r] of known) if (!seen.has(p)) run('DELETE FROM tracks WHERE id=?', r.id);
+  for (const a of all('SELECT id FROM albums WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id=albums.id)', lib.id)) {
+    run('DELETE FROM albums WHERE id=?', a.id); fs.rmSync(coverFile(a.id), { force: true });
+  }
+  run(`DELETE FROM artists WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=artists.id)
+    AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id=artists.id)`, lib.id);
+}
+
+// ---------------- API-hjälpare ----------------
+const ALBUM_SQL = `SELECT al.id, al.title, al.year, al.genre, al.cover, al.added, al.library_id, ar.id AS artist_id, ar.name AS artist,
+  (SELECT COUNT(*) FROM tracks t WHERE t.album_id=al.id) AS tracks, (SELECT SUM(duration) FROM tracks t WHERE t.album_id=al.id) AS duration
+  FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id`;
+const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
+export const TRACK_SQL = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id
+  FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id`;
+export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
+  albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined });
+
+export function albums(libId, sort = 'title', limit = 5000) {
+  const order = { title: 'al.sort_title', added: 'al.added DESC', year: 'al.year DESC, al.sort_title', artist: 'ar.sort_name, al.year' }[sort] || 'al.sort_title';
+  return all(`${ALBUM_SQL} WHERE al.library_id=? ORDER BY ${order} LIMIT ?`, libId, limit).map(shapeAlbum);
+}
+export function album(id, uid) {
+  const a = get(`${ALBUM_SQL} WHERE al.id=?`, id);
+  if (!a) return null;
+  const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  return { ...shapeAlbum(a), trackList: all(`${TRACK_SQL} WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title`, id).map(t => shapeTrack(t, favs)) };
+}
+export function artists(libId) {
+  return all(`SELECT ar.id, ar.name, (SELECT COUNT(*) FROM albums a WHERE a.artist_id=ar.id) AS albums,
+    (SELECT a.id FROM albums a WHERE a.artist_id=ar.id AND a.cover=1 ORDER BY a.year DESC LIMIT 1) AS cover_album
+    FROM artists ar WHERE ar.library_id=? AND EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=ar.id) ORDER BY ar.sort_name`, libId);
+}
+export function artist(id, uid) {
+  const a = get('SELECT * FROM artists WHERE id=?', id);
+  if (!a) return null;
+  const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  const popular = all(`${TRACK_SQL} WHERE t.artist_id=? OR al.artist_id=? ORDER BY (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id) DESC, t.title LIMIT 10`, id, id).map(t => shapeTrack(t, favs));
+  return { id: a.id, name: a.name, albums: all(`${ALBUM_SQL} WHERE al.artist_id=? ORDER BY al.year DESC`, id).map(shapeAlbum), popular };
+}
+export function searchMusic(q, uid) {
+  const like = `%${q}%`;
+  const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  return {
+    artists: all(`SELECT id, name FROM artists WHERE name LIKE ? AND EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=artists.id) LIMIT 20`, like),
+    albums: all(`${ALBUM_SQL} WHERE al.title LIKE ? OR ar.name LIKE ? LIMIT 30`, like, like).map(shapeAlbum),
+    tracks: all(`${TRACK_SQL} WHERE t.title LIKE ? LIMIT 50`, like).map(t => shapeTrack(t, favs))
+  };
+}
+export function musicHome(libId, uid) {
+  const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  return {
+    recentAlbums: all(`${ALBUM_SQL} WHERE al.library_id=? ORDER BY al.added DESC LIMIT 24`, libId).map(shapeAlbum),
+    recentlyPlayed: all(`${ALBUM_SQL} WHERE al.library_id=? AND al.id IN (SELECT t.album_id FROM track_plays p JOIN tracks t ON t.id=p.track_id WHERE p.user_id=?
+      GROUP BY t.album_id ORDER BY MAX(p.ts) DESC LIMIT 24)`, libId, uid).map(shapeAlbum),
+    favorites: all(`${TRACK_SQL} WHERE t.library_id=? AND t.id IN (SELECT track_id FROM favorites WHERE user_id=?) ORDER BY al.sort_title, t.disc_no, t.track_no LIMIT 500`, libId, uid).map(t => shapeTrack(t, favs)),
+    stats: get('SELECT (SELECT COUNT(*) FROM artists WHERE library_id=?) AS artists, (SELECT COUNT(*) FROM albums WHERE library_id=?) AS albums, (SELECT COUNT(*) FROM tracks WHERE library_id=?) AS tracks', libId, libId, libId)
+  };
+}
+export function playlists(uid) {
+  return all(`SELECT p.id, p.name, p.created, COUNT(i.track_id) AS tracks, SUM(t.duration) AS duration FROM playlists p
+    LEFT JOIN playlist_items i ON i.playlist_id=p.id LEFT JOIN tracks t ON t.id=i.track_id WHERE p.user_id=? GROUP BY p.id ORDER BY p.name`, uid);
+}
+export function playlist(id, uid) {
+  const p = get('SELECT * FROM playlists WHERE id=? AND user_id=?', id, uid);
+  if (!p) return null;
+  const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  return { id: p.id, name: p.name, trackList: all(`${TRACK_SQL} JOIN playlist_items i ON i.track_id=t.id WHERE i.playlist_id=? ORDER BY i.pos`, id).map(t => shapeTrack(t, favs)) };
+}
+
+// ---------------- strömning av ljud ----------------
+const MIME = { mp3: 'audio/mpeg', aac: 'audio/aac', flac: 'audio/flac', vorbis: 'audio/ogg', opus: 'audio/ogg', alac: 'audio/mp4', pcm_s16le: 'audio/wav' };
+const EXT_MIME = { '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav' };
+/** Direkt om klienten klarar formatet (med Range för spolning), annars omkodning till AAC (eller MP3) i realtid. */
+export function streamTrack(req, res, t, query) {
+  const caps = new Set(String(query.get('a') || 'mp3,aac,flac,opus,vorbis').split(','));
+  const ext = path.extname(t.path).toLowerCase();
+  const direct = caps.has(t.codec) && EXT_MIME[ext] && !(t.codec === 'alac');
+  const maxKbps = parseInt(query.get('br')) || 0; // t.ex. 192 i bilen på mobilnät
+  if (direct && !(maxKbps && t.bitrate && t.bitrate / 1000 > maxKbps * 1.5)) {
+    let st; try { st = fs.statSync(t.path); } catch { return fail(res, 404, 'Filen saknas'); }
+    const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+    let start = 0, end = st.size - 1, code = 200;
+    if (m) { start = m[1] === '' ? Math.max(0, st.size - +m[2]) : +m[1]; if (m[2] !== '' && m[1] !== '') end = Math.min(+m[2], end); code = 206; }
+    if (start > end) return send(res, 416, '', { 'Content-Range': `bytes */${st.size}` });
+    const h = { 'Content-Type': EXT_MIME[ext], 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'private, max-age=3600' };
+    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
+    res.writeHead(code, h);
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(t.path, { start, end }).pipe(res);
+  }
+  const ss = Math.max(0, parseFloat(query.get('ss')) || 0);
+  const kbps = Math.min(320, maxKbps || 256);
+  const useMp3 = !caps.has('aac');
+  const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', ...(ss ? ['-ss', String(ss)] : []), '-i', t.path,
+    '-map', '0:a:0', '-vn', ...(useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
+    { stdio: ['ignore', 'pipe', 'ignore'] });
+  res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' });
+  p.stdout.pipe(res);
+  req.on('close', () => p.kill('SIGKILL'));
+}
+export const coverPath = (albumIdNum) => { const f = coverFile(albumIdNum); return fs.existsSync(f) ? f : null; };
