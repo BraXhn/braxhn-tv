@@ -61,6 +61,10 @@ struct MainTabs: View {
                 .tabItem { Label("Sök", systemImage: "magnifyingglass") }
             NavigationStack { MusicView() }
                 .tabItem { Label("Musik", systemImage: "music.note") }
+            #if os(iOS)
+            NavigationStack { DownloadsView() }
+                .tabItem { Label("Nedladdat", systemImage: "arrow.down.circle") }
+            #endif
             NavigationStack { SettingsView() }
                 .tabItem { Label("Inställningar", systemImage: "gearshape") }
         }

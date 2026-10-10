@@ -70,6 +70,20 @@ final class PlayerController: ObservableObject {
     func start(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) async {
         stopReporting(final: true)
         self.audio = audio
+        #if os(iOS)
+        // Utan kontakt med servern: spela nedladdad fil direkt
+        if let local = Downloads.shared.localURL(for: itemId) {
+            let online: ServerStatus? = try? await model.get("/api/status")
+            if online == nil {
+                title = Downloads.shared.records.first { $0.id == itemId }?.title ?? ""
+                status = "Offline"
+                player.replaceCurrentItem(with: AVPlayerItem(url: local))
+                if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
+                player.play()
+                return
+            }
+        }
+        #endif
         do {
             let it: MediaItem = try await model.get("/api/items/\(itemId)")
             item = it
@@ -81,6 +95,19 @@ final class PlayerController: ObservableObject {
                     ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true }
             }
             self.subtitle = sub
+            #if os(iOS)
+            // Nedladdad fil spelas lokalt (fungerar utan nät)
+            if let local = Downloads.shared.localURL(for: itemId) {
+                status = "Offline"
+                let playerItem = AVPlayerItem(url: local)
+                player.replaceCurrentItem(with: playerItem)
+                if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
+                player.play()
+                pb = try? await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
+                installObservers()
+                return
+            }
+            #endif
             let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
             pb = p
             status = [p.mode == "direct" ? "Direkt" : p.mode == "remux" ? "Remux" : "Omkodning",

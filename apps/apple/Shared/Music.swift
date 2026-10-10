@@ -144,6 +144,7 @@ final class MusicPlayer: ObservableObject {
 
 // MARK: - Vyer
 
+@MainActor
 func coverView(_ model: AppModel, albumId: Int?, has: Bool, size: CGFloat) -> some View {
     let url: URL? = {
         guard let a = albumId, has, let t = model.imageToken else { return nil }

@@ -134,6 +134,9 @@ struct ItemDetailView: View {
                     Task { try? await model.post("/api/items/\(it.id)/watched", ["watched": !(it.watched ?? false)]); await load() }
                 }.buttonStyle(.bordered)
             }
+            #if os(iOS)
+            DownloadButton(item: it)
+            #endif
             HStack(spacing: 14) {
                 if let a = it.audio, a.count > 1 {
                     OptionButton<Int>(title: "Ljud", options: a.map { ($0.index, $0.label) }, selection: $audio)
@@ -189,3 +192,27 @@ struct ItemDetailView: View {
         .padding(.horizontal)
     }
 }
+
+#if os(iOS)
+struct DownloadButton: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject private var dl = Downloads.shared
+    let item: MediaItem
+    @State private var ask = false
+    var body: some View {
+        if dl.isDownloaded(item.id) {
+            Button(role: .destructive) { dl.remove(item.id) } label: { Label("Ta bort nedladdning", systemImage: "trash") }.buttonStyle(.bordered)
+        } else if let p = dl.active[item.id] {
+            HStack { ProgressView(value: p).frame(width: 160); Text(p < 0.5 ? "Förbereder…" : "Laddar ner…").font(.caption) }
+        } else {
+            Button { ask = true } label: { Label("Ladda ner för offline", systemImage: "arrow.down.circle") }
+                .buttonStyle(.bordered)
+                .confirmationDialog("Kvalitet", isPresented: $ask) {
+                    Button("Hög (1080p)") { dl.download(item, quality: "1080", model: model) }
+                    Button("Mellan (720p)") { dl.download(item, quality: "720", model: model) }
+                    Button("Låg (480p, sparar utrymme)") { dl.download(item, quality: "480", model: model) }
+                }
+        }
+    }
+}
+#endif

@@ -14,6 +14,7 @@ import * as act from './activity.js';
 import * as trick from './trickplay.js';
 import * as music from './music.js';
 import * as party from './party.js';
+import * as offline from './offline.js';
 
 hooks.keyframes = (it) => st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
@@ -452,6 +453,24 @@ route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
 });
 route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
 
+
+
+// ---------- Offline-nedladdning (appar) ----------
+route('GET', '/api/items/:id/offline', user, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const q = c.q.get('q') || '720';
+  const st = offline.status(it, q);
+  if (st.status === 'ready') st.url = `/api/stream/${it.id}/offline-file?q=${encodeURIComponent(q)}&t=${createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) })}`;
+  send(c.res, 200, st);
+});
+route('POST', '/api/items/:id/offline', user, async (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const { q } = await readJson(c.req);
+  send(c.res, 200, offline.start(it, q || '720'));
+});
+route('DELETE', '/api/items/:id/offline', user, (c) => { const it = mediaItem(c); if (!it) return; offline.cancel(it, c.q.get('q') || '720'); send(c.res, 200, { ok: true }); });
+route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
+route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
 
 // ---------- Titta tillsammans ----------
 route('POST', '/api/party', user, async (c) => {
