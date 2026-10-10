@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths: ['apps/apple/**', '.github/workflows/apple.yml']
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: macos-15
@@ -16,7 +18,7 @@ jobs:
           - scheme: BraXhnTV-tvOS
             dest: generic/platform=tvOS Simulator
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: brew install xcodegen
       - name: Generera Xcode-projekt
         working-directory: apps/apple

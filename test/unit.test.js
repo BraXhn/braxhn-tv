@@ -108,3 +108,11 @@ test('anime: absolut numrering och mappning till säsonger', () => {
   assert.equal(scanner.mapAbsolute(99, seasons), null);
   assert.ok(scanner.langMatches('swe', 'sv') && scanner.langMatches('en', 'en') && !scanner.langMatches('eng', 'sv'));
 });
+
+test('integritet: inbäddade filer stämmer och manifestet är stabilt', async () => {
+  const v = await import('../server/verify.js');
+  assert.deepEqual(v.checkVendor(), []);
+  const a = v.buildManifest(), b = v.buildManifest();
+  assert.deepEqual(a, b);
+  assert.ok(a['server/app.js'] && a['web/vendor/hls.min.js'] && a['package.json']);
+});

@@ -1,0 +1,12 @@
+# Håller de låsta versionerna (commit-SHA) av GitHub Actions uppdaterade
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: gradle
+    directory: /apps/automotive
+    schedule: { interval: monthly }

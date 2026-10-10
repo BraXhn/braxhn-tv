@@ -9,4 +9,3 @@ apps/automotive/build/
 apps/automotive/app/build/
 apps/automotive/local.properties
 .DS_Store
-web/vendor/qrcode.min.js

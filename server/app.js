@@ -28,6 +28,7 @@ import * as pods from './podcasts.js';
 import * as live from './livetv.js';
 import * as dvr from './dvr.js';
 import * as streaming from './streaming.js';
+import { checkManifest } from './verify.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
@@ -53,6 +54,10 @@ const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop,
   i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay`;
 const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
 
+// Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
+let integCache = null, integAt = 0;
+const integrity = () => { if (Date.now() - integAt > 600e3) { try { integCache = checkManifest(); } catch { integCache = null; } integAt = Date.now(); } return integCache; };
+setTimeout(() => { const r = integrity(); if (r && !r.ok) console.warn('[integritet] ändrade programfiler:', [...r.changed, ...r.added].join(', ')); else if (r) console.log(`[integritet] ${r.files} programfiler stämmer`); }, 2000).unref();
 const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
 function shape(r) {
   const o = {
@@ -1545,6 +1550,11 @@ route('GET', '/api/security-check', admin, (c) => {
   const add = (level, title, detail) => items.push({ level, title, detail });
   const pub = getSetting('public_url', process.env.PUBLIC_URL || '');
   const https = isHttps(c.req);
+  // Programfilernas integritet (jämförs med integrity.json som skapas vid Docker-bygget)
+  const integ = integrity();
+  if (integ === null) add('info', 'Ingen integritetsmanifest', 'Servern körs utan integrity.json (t.ex. vid utveckling). Docker-imagen har alltid en.');
+  else if (integ.ok) add('ok', 'Programfilerna är oförändrade', `${integ.files} filer stämmer med checksummorna från bygget.`);
+  else add('bad', 'Programfiler har ändrats', `Ändrade: ${[...integ.changed, ...integ.added].slice(0, 10).join(', ')}. Om du inte ändrat något själv: hämta om imagen (Check for updates → Apply update).`);
   if (pub && !pub.startsWith('https://')) add('bad', 'Publik adress använder inte HTTPS', 'Lösenord och strömmar skickas okrypterat över internet. Använd en omvänd proxy med Let\'s Encrypt eller inbyggd HTTPS.');
   else if (pub) add('ok', 'Publik adress använder HTTPS', pub);
   else add('info', 'Ingen publik adress angiven', 'Servern verkar bara användas på hemnätet/VPN. Ange publik adress om den nås från internet.');
