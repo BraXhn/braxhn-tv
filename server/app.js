@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, now, getSetting, setSetting, IMAGES } from './db.js';
@@ -28,7 +29,9 @@ function shape(r) {
   const o = {
     id: r.id, kind: r.kind, title: r.title, year: r.year, library: r.library_id,
     poster: !!r.poster, backdrop: !!r.backdrop, thumb: !!r.thumb,
-    duration: r.duration, rating: r.rating, overview: r.overview, added: r.added, hdr: r.hdr || null
+    duration: r.duration, rating: r.rating, overview: r.overview, added: r.added, hdr: r.hdr || null,
+    genres: (() => { try { return JSON.parse(r.genres || '[]'); } catch { return []; } })(), cert: r.cert || null, age: r.age ?? null,
+    collection: r.collection_id || null
   };
   if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title });
   if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched });
@@ -36,9 +39,24 @@ function shape(r) {
     intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null });
   return o;
 }
-const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0) =>
-  all(`SELECT i.*, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
-    uid, ...params, limit, offset).map(shape);
+// ---------- åldersgräns för profiler ----------
+const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
+const maxAgeOf = (uid) => get('SELECT max_age FROM users WHERE id=?', uid)?.max_age ?? null;
+/** Får användaren se titeln? Avsnitt ärver seriens åldersgräns. Okänd ålder döljs för begränsade profiler. */
+function allowedFor(uid, it) {
+  const max = maxAgeOf(uid);
+  if (max == null || !it) return true;
+  let age = it.age;
+  if (age == null && it.parent_id) age = get('SELECT age FROM items WHERE id=?', it.parent_id)?.age;
+  return age == null ? allowUnrated() : age <= max;
+}
+const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0) => {
+  const max = maxAgeOf(uid);
+  const ageSql = max == null ? '' : ` AND COALESCE(i.age, s.age, ?) <= ?`;
+  const ageParams = max == null ? [] : [allowUnrated() ? max : 999, max];
+  return all(`SELECT i.*, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${ageSql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+    uid, ...params, ...ageParams, limit, offset).map(shape);
+};
 const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1)[0];
 
 function insideMedia(p) {
@@ -75,6 +93,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',
   publicUrl: getSetting('public_url', process.env.PUBLIC_URL || '') || null,
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
+    profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
+    kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) } : null
 }));
 route('POST', '/api/setup', pub, async (c) => {
@@ -101,7 +121,8 @@ route('POST', '/api/login', pub, async (c) => {
   if (ipBlocked(ip)) { audit('login_denied', { ip, detail: 'ip-spärr' }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
   // Kontospärren gäller inte från hemnätet – annars kan en angripare låsa ute dig från ditt eget nät
   if (userLocked(uname) && !isTrusted(c.req)) { noteFail(ip); audit('login_locked', { ip, user: { name: uname } }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
-  const u = get('SELECT * FROM users WHERE name=?', uname);
+  const u0 = get('SELECT * FROM users WHERE name=?', uname);
+  const u = u0 && !u0.parent_id ? u0 : null; // profiler nås bara via profilbyte i sitt hushåll
   const ok = u ? await checkPw(String(password || ''), u.pass) : await dummyCheck(String(password || ''));
   if (!ok) {
     const locked = noteFail(ip, isTrusted(c.req) ? null : uname);
@@ -264,7 +285,9 @@ route('GET', '/api/home', user, (c) => {
     library: l, title: `Nytt i ${l.name}`,
     items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24)
   }));
-  send(c.res, 200, { continue: cont, rows });
+  const watchlist = listItems(uid, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 30);
+  const recommended = recommend(uid, 20);
+  send(c.res, 200, { continue: cont, rows, watchlist, recommended });
 });
 const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title' };
 route('GET', '/api/libraries/:id/items', user, (c) => {
@@ -285,7 +308,14 @@ route('GET', '/api/search', user, (c) => {
 route('GET', '/api/items/:id', user, (c) => {
   const uid = c.user.id, it = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
+  if (!allowedFor(uid, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const out = oneItem(uid, it.id);
+  out.inWatchlist = !!get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, it.kind === 'episode' ? it.parent_id : it.id);
+  if (it.collection_id) {
+    const col = get('SELECT * FROM collections WHERE id=?', it.collection_id);
+    if (col) out.collectionInfo = { id: col.id, name: col.name, items: listItems(uid, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 50) };
+  }
+  if (it.kind !== 'episode') out.similar = similarTo(uid, it, 12);
   if (it.kind === 'show') {
     out.children = listItems(uid, 'i.parent_id=?', [it.id], 'i.season, i.episode', 5000);
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
@@ -339,13 +369,151 @@ route('POST', '/api/items/:id/refresh', admin, async (c) => {
   } catch (e) { fail(c.res, 502, 'Metadata misslyckades: ' + e.message); }
 });
 route('PUT', '/api/items/:id', admin, async (c) => {
-  const { title, year, overview } = await readJson(c.req);
+  const { title, year, overview, age } = await readJson(c.req);
   run(`UPDATE items SET title=COALESCE(?,title), sort_title=COALESCE(lower(?),sort_title), year=?, overview=? WHERE id=?`,
     title || null, title || null, year ? +year : null, overview ?? null, c.p.id);
+  if (age !== undefined) run('UPDATE items SET age=?, cert=? WHERE id=?', age === '' || age == null ? null : Math.max(0, Math.min(18, parseInt(age) || 0)), age === '' || age == null ? null : 'manuell', c.p.id);
   send(c.res, 200, { ok: true });
 });
 
+
+// ---------- Min lista ----------
+route('GET', '/api/watchlist', user, (c) => send(c.res, 200,
+  listItems(c.user.id, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 500)));
+route('POST', '/api/items/:id/watchlist', user, async (c) => {
+  const { add } = await readJson(c.req);
+  let it = get('SELECT id, kind, parent_id, age FROM items WHERE id=?', c.p.id);
+  if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
+  const id = it.kind === 'episode' ? it.parent_id : it.id; // avsnitt → hela serien
+  if (add === false) run('DELETE FROM watchlist WHERE user_id=? AND item_id=?', c.user.id, id);
+  else run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now());
+  send(c.res, 200, { ok: true });
+});
+
+// ---------- Samlingar ----------
+route('GET', '/api/collections', user, (c) => {
+  const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie'
+    GROUP BY c.id HAVING n >= 2 ORDER BY c.name`);
+  // dölj samlingar där profilen inte får se något
+  send(c.res, 200, cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop, count: col.n, years: [col.y0, col.y1],
+    visible: listItems(c.user.id, 'i.collection_id=?', [col.id], 'i.year', 1).length > 0 })).filter(x => x.visible));
+});
+route('GET', '/api/collections/:cid', user, (c) => {
+  const col = get('SELECT * FROM collections WHERE id=?', +c.p.cid);
+  if (!col) return fail(c.res, 404, 'Finns inte');
+  send(c.res, 200, { id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
+    items: listItems(c.user.id, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 100) });
+});
+
+// ---------- Profiler (hushåll) ----------
+const householdRoot = (u) => u.parent_id || u.id;
+const profileOut = (p, rootId) => ({ id: p.id, name: p.name, owner: p.id === rootId, kid: p.max_age != null, maxAge: p.max_age, hasPin: !!p.pin, color: p.color || null });
+route('GET', '/api/profiles', user, (c) => {
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  const list = all('SELECT * FROM users WHERE id=? OR parent_id=? ORDER BY parent_id IS NOT NULL, name', root, root);
+  send(c.res, 200, { current: c.user.id, profiles: list.map(p => profileOut(p, root)) });
+});
+const canManage = (c, root) => c.user.is_admin || (c.user.id === root);
+route('POST', '/api/profiles', user, async (c) => {
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  if (!canManage(c, root)) return fail(c.res, 403, 'Bara huvudkontot kan skapa profiler');
+  const { name, maxAge, pin, color } = await readJson(c.req);
+  const nm = String(name || '').trim().slice(0, 40);
+  if (!nm) return fail(c.res, 400, 'Namn krävs');
+  if (pin != null && pin !== '' && !/^\d{4,8}$/.test(String(pin))) return fail(c.res, 400, 'PIN ska vara 4–8 siffror');
+  if (all('SELECT id FROM users WHERE parent_id=?', root).length >= 10) return fail(c.res, 400, 'Max 10 profiler per hushåll');
+  const pass = await hashPw(crypto.randomBytes(24).toString('hex')); // profiler loggar aldrig in med lösenord
+  try {
+    run('INSERT INTO users(name,pass,is_admin,created,parent_id,pin,max_age,color,remote_allowed) VALUES(?,?,0,?,?,?,?,?,?)', nm, pass, now(), root,
+      pin ? await hashPw(String(pin)) : null, maxAge === '' || maxAge == null ? null : Math.max(0, Math.min(18, parseInt(maxAge) || 0)), color ? String(color).slice(0, 20) : null,
+      get('SELECT remote_allowed FROM users WHERE id=?', root).remote_allowed);
+  } catch { return fail(c.res, 409, 'Namnet är upptaget'); }
+  audit('profile_created', { ...ctx(c), detail: nm + (maxAge != null && maxAge !== '' ? ` (max ${maxAge} år)` : '') });
+  send(c.res, 200, { ok: true });
+});
+route('PUT', '/api/profiles/:pid', user, async (c) => {
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  const p = get('SELECT * FROM users WHERE id=?', +c.p.pid);
+  if (!p || (p.id !== root && p.parent_id !== root)) return fail(c.res, 404, 'Finns inte');
+  if (!canManage(c, root)) return fail(c.res, 403, 'Bara huvudkontot kan ändra profiler');
+  const { name, maxAge, pin, color } = await readJson(c.req);
+  if (name && p.id !== root) { try { run('UPDATE users SET name=? WHERE id=?', String(name).trim().slice(0, 40), p.id); } catch { return fail(c.res, 409, 'Namnet är upptaget'); } }
+  if (maxAge !== undefined && p.id !== root) run('UPDATE users SET max_age=? WHERE id=?', maxAge === '' || maxAge == null ? null : Math.max(0, Math.min(18, parseInt(maxAge) || 0)), p.id);
+  if (pin !== undefined) {
+    if (pin && !/^\d{4,8}$/.test(String(pin))) return fail(c.res, 400, 'PIN ska vara 4–8 siffror');
+    run('UPDATE users SET pin=? WHERE id=?', pin ? await hashPw(String(pin)) : null, p.id);
+  }
+  if (color !== undefined) run('UPDATE users SET color=? WHERE id=?', color ? String(color).slice(0, 20) : null, p.id);
+  audit('profile_updated', { ...ctx(c), detail: p.name });
+  send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/profiles/:pid', user, (c) => {
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  const p = get('SELECT * FROM users WHERE id=? AND parent_id=?', +c.p.pid, root);
+  if (!p) return fail(c.res, 404, 'Finns inte');
+  if (!canManage(c, root)) return fail(c.res, 403, 'Bara huvudkontot kan ta bort profiler');
+  run('DELETE FROM users WHERE id=?', p.id);
+  audit('profile_deleted', { ...ctx(c), detail: p.name });
+  send(c.res, 200, { ok: true });
+});
+route('POST', '/api/profiles/switch', user, async (c) => {
+  const ip = clientIp(c.req);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund');
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  const { id, pin, password } = await readJson(c.req);
+  const t = get('SELECT * FROM users WHERE id=?', +id);
+  if (!t || (t.id !== root && t.parent_id !== root)) return fail(c.res, 404, 'Profilen finns inte');
+  if (t.id !== me.id) {
+    if (t.pin) {
+      if (!pin || !await checkPw(String(pin), t.pin)) { noteFail(ip, t.name); audit('profile_pin_fail', { ip, user: t }); return send(c.res, 401, { error: 'Fel PIN', needPin: true }); }
+    } else if (t.max_age == null && me.max_age != null) {
+      // Från en barnprofil till en vuxenprofil utan PIN: kräv huvudkontots lösenord
+      const r = get('SELECT * FROM users WHERE id=?', root);
+      if (!password || !await checkPw(String(password), r.pass)) { noteFail(ip, r.name); return send(c.res, 401, { error: 'Ange huvudkontots lösenord', needPassword: true }); }
+    }
+  }
+  const meta = { ua: c.req.headers['user-agent'], ip };
+  run('DELETE FROM sessions WHERE token=?', c.user.tokenHash);
+  audit('profile_switched', { ip, user: t, detail: `från ${me.name}` });
+  if (c.user.kind === 'app') return send(c.res, 200, { ok: true, token: createSession(t.id, 'app', meta), user: { id: t.id, name: t.name, is_admin: t.is_admin } });
+  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(t.id, 'web', meta), isHttps(c.req)) });
+});
+
+// ---------- Rekommendationer (lokalt, utan molntjänst) ----------
+function genreProfile(uid) {
+  const rows = all(`SELECT COALESCE(s.genres, i.genres) AS g, COUNT(*) AS n FROM progress p JOIN items i ON i.id=p.item_id LEFT JOIN items s ON s.id=i.parent_id
+    WHERE p.user_id=? AND (p.watched=1 OR p.position > 300) GROUP BY COALESCE(s.id, i.id)`, uid);
+  const w = {};
+  for (const r of rows) { let g = []; try { g = JSON.parse(r.g || '[]'); } catch {} for (const x of g) w[x] = (w[x] || 0) + 1; }
+  for (const r of all(`SELECT i.genres FROM watchlist l JOIN items i ON i.id=l.item_id WHERE l.user_id=?`, uid)) {
+    let g = []; try { g = JSON.parse(r.genres || '[]'); } catch {} for (const x of g) w[x] = (w[x] || 0) + 0.5;
+  }
+  return w;
+}
+function recommend(uid, limit) {
+  const w = genreProfile(uid);
+  if (!Object.keys(w).length) return [];
+  const cands = listItems(uid, `i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'
+    AND NOT EXISTS (SELECT 1 FROM progress q JOIN items e ON e.id=q.item_id WHERE q.user_id=p_uid.uid AND (e.id=i.id OR e.parent_id=i.id) AND (q.watched=1 OR q.position > 0))
+    AND NOT EXISTS (SELECT 1 FROM watchlist l WHERE l.user_id=p_uid.uid AND l.item_id=i.id)`, [], 'i.added DESC', 3000);
+  const total = Object.values(w).reduce((a, b) => a + b, 0);
+  return cands.map(it => ({ it, score: it.genres.reduce((a, g) => a + (w[g] || 0) / total, 0) / Math.sqrt(it.genres.length || 1) + (it.rating || 6) / 50 }))
+    .filter(x => x.score > 0.2).sort((a, b) => b.score - a.score).slice(0, limit).map(x => x.it);
+}
+function similarTo(uid, it, limit) {
+  let g = []; try { g = JSON.parse(it.genres || '[]'); } catch {}
+  if (!g.length) return [];
+  const cands = listItems(uid, `i.kind=? AND i.id != ? AND i.genres IS NOT NULL`, [it.kind, it.id], 'i.rating DESC', 2000);
+  return cands.map(x => ({ x, s: x.genres.filter(y => g.includes(y)).length / Math.max(g.length, x.genres.length) + (x.collection && x.collection === it.collection_id ? 1 : 0) }))
+    .filter(o => o.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, limit).map(o => o.x);
+}
+
 // Bilder
+route('GET', '/api/collection-image/:cid/:type', img, (c) => {
+  if (!['poster', 'backdrop'].includes(c.p.type)) return fail(c.res, 404, '');
+  fs.readFile(path.join(IMAGES, `c${+c.p.cid}-${c.p.type}.jpg`), (e, data) => e ? fail(c.res, 404, 'Ingen bild')
+    : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
+});
 route('GET', '/api/image/:id/:type', img, (c) => {
   if (!['poster', 'backdrop', 'thumb'].includes(c.p.type)) return fail(c.res, 404, '');
   const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
@@ -357,6 +525,7 @@ route('GET', '/api/image/:id/:type', img, (c) => {
 const mediaItem = (c) => {
   const it = get(`SELECT * FROM items WHERE id=? AND kind!='show'`, c.p.id);
   if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
   if (c.req.url.includes('/api/stream/')) {
     if (act.isStopped(c.user.id, it.id)) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
     act.touch(c.user.id, it.id);
@@ -493,7 +662,7 @@ route('GET', '/api/settings', admin, (c) => {
     adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
-    watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount()
+    watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated()
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -531,6 +700,7 @@ route('PUT', '/api/settings', admin, async (c) => {
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
     setSetting('trusted_networks', nets.join(','));
   }
+  if (b.allowUnrated != null) setSetting('allow_unrated', b.allowUnrated ? '1' : '0');
   if (b.backupEnabled != null) setSetting('backup_enabled', b.backupEnabled ? '1' : '0');
   if (b.backupKeep != null) setSetting('backup_keep', Math.max(1, Math.min(365, parseInt(b.backupKeep) || 14)));
   if (b.watchEnabled != null) { setSetting('watch_enabled', b.watchEnabled ? '1' : '0'); act.watchLibraries(scan); }
@@ -670,7 +840,9 @@ export async function handle(req, res) {
     if (c.user) {
       const trusted = isTrusted(req);
       if (!trusted && !c.user.remote_allowed) return fail(res, 403, 'Ditt konto får bara användas på hemnätverket');
-      if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !c.user.totp_enabled) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
+      // Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll)
+      const has2fa = c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled);
+      if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !has2fa) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
     }
     if (r.admin) {
       if (!c.user.is_admin) return fail(res, 403, 'Kräver administratör');

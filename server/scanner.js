@@ -168,6 +168,29 @@ async function image(tmdbPath, size, id, type) {
   } catch { return 0; }
 }
 
+// Åldersgräns: svensk klassning i första hand, annars amerikansk
+const AGE = { SE: { 'Btl': 0, 'BTL': 0, '7': 7, '11': 11, '15': 15 }, US: { 'G': 0, 'PG': 7, 'PG-13': 13, 'R': 17, 'NC-17': 18,
+  'TV-Y': 0, 'TV-Y7': 7, 'TV-G': 0, 'TV-PG': 10, 'TV-14': 14, 'TV-MA': 17 }, DE: { '0': 0, '6': 6, '12': 12, '16': 16, '18': 18 } };
+function pickCert(list) {
+  for (const c of ['SE', 'US', 'DE']) {
+    const e = list.find(x => x.iso_3166_1 === c && x.cert);
+    if (e && AGE[c][e.cert] != null) return { cert: `${c}:${e.cert}`, age: AGE[c][e.cert] };
+  }
+  return { cert: null, age: null };
+}
+async function saveCollection(c) {
+  if (!c?.id) return null;
+  const ex = get('SELECT id FROM collections WHERE id=?', c.id);
+  if (!ex) {
+    let overview = null;
+    try { overview = (await tmdb(`/collection/${c.id}`)).overview || null; } catch {}
+    const poster = await image(c.poster_path, 'w500', 'c' + c.id, 'poster');
+    const backdrop = await image(c.backdrop_path, 'w1280', 'c' + c.id, 'backdrop');
+    run('INSERT OR REPLACE INTO collections(id,name,overview,poster,backdrop) VALUES(?,?,?,?,?)', c.id, c.name, overview, poster, backdrop);
+  }
+  return c.id;
+}
+
 export async function refreshItem(item, tmdbId = null) {
   if (item.kind === 'movie') {
     let id = tmdbId;
@@ -176,12 +199,17 @@ export async function refreshItem(item, tmdbId = null) {
       id = s.results?.[0]?.id;
     }
     if (!id) return false;
-    const d = await tmdb(`/movie/${id}`);
+    const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates' });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
-    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,
+    const certs = (d.release_dates?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: (r.release_dates || []).map(x => x.certification).find(Boolean) }));
+    const { cert, age } = pickCert(certs);
+    const coll = await saveCollection(d.belongs_to_collection).catch(() => null);
+    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,
+      genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age), collection_id=? WHERE id=?`,
       d.title || item.title, sortTitle(d.title || item.title), parseInt(d.release_date) || item.year,
-      d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
+      d.overview || null, d.vote_average || null, id, poster, backdrop,
+      JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, item.id);
     return true;
   }
   if (item.kind === 'show') {
@@ -191,7 +219,9 @@ export async function refreshItem(item, tmdbId = null) {
       id = s.results?.[0]?.id;
     }
     if (!id) return false;
-    const d = await tmdb(`/tv/${id}`);
+    const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings' });
+    const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
+    run('UPDATE items SET genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age) WHERE id=?', JSON.stringify((d.genres || []).map(g => g.name)), cert, age, item.id);
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
     run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,

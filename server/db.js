@@ -66,15 +66,32 @@ db.exec(`CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts INTEGER NOT
   ip TEXT, event TEXT NOT NULL, detail TEXT);
 CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);`);
+addCol('items', 'genres', 'TEXT');
+addCol('items', 'cert', 'TEXT');
+addCol('items', 'age', 'INTEGER');
+addCol('items', 'collection_id', 'INTEGER');
+addCol('users', 'parent_id', 'INTEGER');
+addCol('users', 'pin', 'TEXT');
+addCol('users', 'max_age', 'INTEGER');
+addCol('users', 'color', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS collections(id INTEGER PRIMARY KEY, name TEXT NOT NULL, overview TEXT,
+  poster INTEGER NOT NULL DEFAULT 0, backdrop INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS watchlist(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, added INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));
+CREATE INDEX IF NOT EXISTS items_coll ON items(collection_id);`);
 const ver = db.prepare('PRAGMA user_version').get().user_version;
+if (ver >= 3 && ver < 4) {
+  // v0.4: hämta om metadata för genrer, åldersgräns och samlingar
+  db.exec("UPDATE items SET meta_done=0 WHERE kind IN ('movie','show') AND tmdb_id IS NOT NULL; PRAGMA user_version=4;");
+}
 if (ver < 3) {
   // v0.3: token lagras hashade – gamla sessioner gäller inte längre (alla loggas ut en gång)
   db.exec("DELETE FROM sessions; UPDATE sessions SET expires = 0 WHERE expires IS NULL;");
-  if (ver >= 2) db.exec('PRAGMA user_version=3;');
+  if (ver >= 2) db.exec("PRAGMA user_version=4; UPDATE items SET meta_done=0 WHERE kind IN ('movie','show') AND tmdb_id IS NOT NULL;");
 }
 if (ver < 2) {
   // v0.2: analysera om alla filer (HDR-info, bildundertexter)
-  db.exec("UPDATE items SET mtime=0 WHERE path IS NOT NULL; PRAGMA user_version=3;");
+  db.exec("UPDATE items SET mtime=0 WHERE path IS NOT NULL; PRAGMA user_version=4;");
 }
 export const CACHE = path.join(CONFIG, 'cache');
 export const SUBS_DIR = path.join(CONFIG, 'subtitles');
