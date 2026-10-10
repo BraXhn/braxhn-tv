@@ -56,7 +56,7 @@ function art(it, land) {
 function card(it, land = false) {
   let t = it.title, s = it.year || '';
   if (it.kind === 'episode') { t = land && it.showTitle ? it.showTitle : it.title; s = `${sxe(it)}${land && it.showTitle ? ' · ' + esc(it.title) : ''}`; }
-  if (it.kind === 'show') s = `${it.year || ''}${it.episodes ? ` · ${it.episodes} avsnitt` : ''}`;
+  if (it.kind === 'show') s = [it.year, it.episodes ? `${it.episodes} avsnitt` : ''].filter(Boolean).join(' · ');
   const href = it.kind === 'episode' && !land ? `#/item/${it.show}` : `#/item/${it.id}`;
   return `<a class="card${land ? ' land' : ''}" href="${href}" data-id="${it.id}">${art(it, land)}<div class="t">${esc(t)}</div><div class="s">${s}</div></a>`;
 }
@@ -90,19 +90,31 @@ views.login = async () => {
       if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
       await boot();
       if (d.weakPassword) { toast('Ditt lösenord är svagt – byt det under Mitt konto'); location.hash = '#/account'; }
-      else location.hash = setup ? '#/admin' : '#/';
+      else location.hash = setup ? '#/admin' : me.profiles > 1 ? '#/profiles' : '#/';
     } catch (e) { $('#e').textContent = e.message; }
   };
 };
 
+function shelf(title, items, land = false, more = '') {
+  return items?.length ? `<section class="section"><h2>${esc(title)} ${more}</h2><div class="shelf${land ? ' wide' : ''}">${items.map(i => card(i, land)).join('')}</div></section>` : '';
+}
+function colCard(c) {
+  const h = hue(c.name);
+  return `<a class="card" href="#/collection/${c.id}"><div class="art"><div class="ph" style="--h1:hsl(${h} 45% 32%);--h2:hsl(${(h + 50) % 360} 50% 18%)">${esc(c.name)}</div>
+    ${c.poster ? `<img loading="lazy" src="/api/collection-image/${c.id}/poster" alt="" data-fb="1">` : ''}<span class="badge">${c.count}</span></div>
+    <div class="t">${esc(c.name)}</div><div class="s">${c.years?.[0] || ''}${c.years?.[1] && c.years[1] !== c.years[0] ? '–' + c.years[1] : ''}</div></a>`;
+}
 views.home = async () => {
-  const d = await api('/home');
+  const [d, cols] = await Promise.all([api('/home'), api('/collections').catch(() => [])]);
   let html = '';
   if (!libs.length) {
     html = `<div class="empty"><h2>Inga bibliotek ännu</h2><p>${me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.'}</p>
       ${me.is_admin ? '<a class="btn primary" href="#/admin">Lägg till bibliotek</a>' : ''}</div>`;
   }
   if (d.continue.length) html += `<section class="section"><h2>Fortsätt titta</h2><div class="shelf wide">${d.continue.map(i => card(i, true)).join('')}</div></section>`;
+  html += shelf('Min lista', d.watchlist, false, '<a href="#/watchlist">Visa alla</a>');
+  html += shelf('Rekommenderat för dig', d.recommended);
+  if (cols.length) html += `<section class="section"><h2>Samlingar</h2><div class="shelf">${cols.map(colCard).join('')}</div></section>`;
   for (const r of d.rows) if (r.items.length)
     html += `<section class="section"><h2>${esc(r.title)} <a href="#/lib/${r.library.id}">Visa alla</a></h2><div class="shelf">${r.items.map(i => card(i)).join('')}</div></section>`;
   if (libs.length && !d.rows.some(r => r.items.length)) {
@@ -138,7 +150,9 @@ views.search = async (q) => {
 
 function heroHtml(it, extra = '') {
   const meta = [it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
-    it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '']
+    it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
+    it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? 'Barntillåten' : it.age + '+'}</span>` : '',
+    (it.genres || []).slice(0, 3).map(esc).join(', ')]
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
   return `<div class="hero">${it.backdrop ? `<div class="bd" style="background-image:url(/api/image/${it.id}/backdrop)"></div>` : ''}
     <div class="in"><div class="poster card">${art({ ...it, position: 0 })}</div>
@@ -154,6 +168,7 @@ views.item = async (id) => {
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
     <a class="btn" href="/api/stream/${it.id}/download" download>Ladda ner</a>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
@@ -173,6 +188,9 @@ views.item = async (id) => {
     $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
+  bindWatchlist(it);
+  if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
+  main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
   $$('[data-play]').forEach(b => b.onclick = () => play(it.id, +b.dataset.play));
   $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
@@ -189,6 +207,7 @@ function showView(it) {
   const nx = it.next;
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
     `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
@@ -206,6 +225,8 @@ function showView(it) {
     $('#seasonSeen').onclick = async () => { await api(`/items/${it.id}/watched?season=${cur}`, { method: 'POST', body: { watched: !allSeen } }); route(); };
   };
   renderEps();
+  bindWatchlist(it);
+  main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
   $$('#tabs button').forEach(b => b.onclick = () => {
     cur = +b.dataset.s; store.set('season.' + it.id, cur);
     $$('#tabs button').forEach(x => x.classList.toggle('on', x === b)); renderEps();
@@ -214,6 +235,59 @@ function showView(it) {
   $('#seen').onclick = async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); };
   if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); }
 }
+
+function bindWatchlist(it) {
+  const b = $('#wl'); if (!b) return;
+  b.onclick = async () => {
+    it.inWatchlist = !it.inWatchlist;
+    await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add: it.inWatchlist } });
+    b.textContent = it.inWatchlist ? '✓ I Min lista' : '+ Min lista';
+    toast(it.inWatchlist ? 'Tillagd i Min lista' : 'Borttagen från Min lista');
+  };
+}
+
+views.watchlist = async () => {
+  const items = await api('/watchlist');
+  main.innerHTML = `<div class="toolbar"><h1>Min lista</h1><span class="muted">${items.length} titlar</span></div>
+    <div class="grid">${items.map(i => card(i)).join('') || '<p class="muted">Lägg till filmer och serier med ”+ Min lista”.</p>'}</div>`;
+};
+views.collection = async (id) => {
+  const c = await api('/collections/' + id);
+  main.innerHTML = `<div class="hero">${c.backdrop ? `<div class="bd" style="background-image:url(/api/collection-image/${c.id}/backdrop)"></div>` : ''}
+    <div class="in"><div><h1>${esc(c.name)}</h1><div class="meta"><span>${c.items.length} filmer</span></div>${c.overview ? `<p class="overview">${esc(c.overview)}</p>` : ''}
+    ${c.items.find(i => !i.watched) ? `<button class="primary" id="playfirst">▶ Spela ${esc(c.items.find(i => !i.watched).title)}</button>` : ''}</div></div></div>
+    <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;
+  const first = c.items.find(i => !i.watched);
+  if (first) $('#playfirst').onclick = () => play(first.id, first.position || 0);
+};
+
+// ---------- Profiler: "Vem tittar?" ----------
+views.profiles = async () => {
+  const d = await api('/profiles');
+  $('#top').hidden = true;
+  main.innerHTML = `<div class="profiles"><h1>Vem tittar?</h1><div class="plist">${d.profiles.map(p => {
+    const h = hue(p.name);
+    return `<button class="pcard" data-pid="${p.id}" data-pin="${p.hasPin ? 1 : 0}" data-kid="${p.kid ? 1 : 0}">
+      <span class="pav" style="background:${esc(p.color) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+      <span>${esc(p.name)}</span>${p.kid ? `<small class="muted">Barn · max ${p.maxAge} år</small>` : p.hasPin ? '<small class="muted">🔒 PIN</small>' : ''}</button>`;
+  }).join('')}</div>
+  <div class="row" style="justify-content:center;margin-top:30px"><button class="ghost" id="pdone">Fortsätt som ${esc(me.name)}</button></div></div>`;
+  $('#pdone').onclick = () => { $('#top').hidden = false; location.hash = '#/'; };
+  $$('[data-pid]').forEach(b => b.onclick = async () => {
+    const id = +b.dataset.pid;
+    if (id === me.id) { $('#top').hidden = false; location.hash = '#/'; return; }
+    const body = { id };
+    const attempt = async () => {
+      const r = await fetch('/api/profiles/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (j.needPin) { const pin = prompt(body.pin ? 'Fel PIN – försök igen:' : 'Ange PIN för profilen:'); if (!pin) return; body.pin = pin; return attempt(); }
+      if (j.needPassword) { const pw = prompt('Ange huvudkontots lösenord:'); if (!pw) return; body.password = pw; return attempt(); }
+      if (!r.ok) return toast(j.error || 'Kunde inte byta profil');
+      await boot(); location.hash = '#/';
+    };
+    attempt();
+  });
+};
 
 async function refreshMeta(it) {
   toast('Uppdaterar…');
@@ -226,6 +300,7 @@ function editItem(it) {
     <label>Titel</label><input id="et" value="${esc(it.title)}">
     <label>År</label><input id="ey" type="number" value="${it.year || ''}">
     <label>Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
+    ${it.kind !== 'episode' ? `<label>Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}
     ${it.kind !== 'episode' ? `<label>Matcha mot TMDB-id (valfritt, kräver TMDB-nyckel)</label><input id="ei" placeholder="t.ex. 603">` : ''}
     <div class="row" style="margin-top:18px;justify-content:flex-end"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></div></form>`;
   document.body.append(d); d.showModal();
@@ -234,7 +309,7 @@ function editItem(it) {
       try {
         const tid = $('#ei', d)?.value.trim();
         if (tid) await api(`/items/${it.id}/refresh`, { method: 'POST', body: { tmdbId: tid } });
-        else await api(`/items/${it.id}`, { method: 'PUT', body: { title: $('#et', d).value, year: $('#ey', d).value, overview: $('#eo', d).value } });
+        else await api(`/items/${it.id}`, { method: 'PUT', body: { title: $('#et', d).value, year: $('#ey', d).value, overview: $('#eo', d).value, ...($('#eage', d) ? { age: $('#eage', d).value } : {}) } });
         toast('Sparat'); route();
       } catch (e) { toast(e.message); }
     }
@@ -286,6 +361,14 @@ views.account = async () => {
     : `<p class="muted">Skyddar kontot även om lösenordet läcker. Fungerar med t.ex. Google Authenticator, Microsoft Authenticator, 1Password eller Bitwarden.${tfa.required ? ' <b>Krävs för att logga in utanför hemmet.</b>' : ''}</p>
       <div id="tfasetup"><button class="primary" id="on">Aktivera tvåstegsverifiering</button></div>`}
   </div>
+  ${!me.kid ? `<div class="panel"><h2>Profiler i hushållet</h2>
+    <p class="muted small">Profiler delar inloggning men har egen tittarhistorik och Min lista. Barnprofiler ser bara titlar upp till sin åldersgräns. Med PIN kan barnen inte byta till vuxnas profiler.</p>
+    <div id="proflist"><div class="spin"></div></div>
+    <form id="addprof" class="row" style="margin-top:12px;align-items:flex-end">
+      <div style="flex:1;min-width:140px"><label>Namn</label><input id="pn" required maxlength="40"></div>
+      <div><label>Åldersgräns</label><select id="pa"><option value="">Vuxen (ingen)</option><option value="0">Barntillåten</option><option value="7">7 år</option><option value="11">11 år</option><option value="13">13 år</option><option value="15">15 år</option></select></div>
+      <div><label>PIN (valfri)</label><input id="pp" inputmode="numeric" maxlength="8" style="width:110px"></div>
+      <button class="primary">Lägg till profil</button></form></div>` : ''}
   <div class="panel"><h2>Inloggade enheter</h2>
     <table><tr><th>Enhet</th><th>IP</th><th>Senast aktiv</th><th></th></tr>
     ${sess.map(s => `<tr><td>${esc(device(s.ua))}${s.current ? ' <span class="ok-badge">Den här</span>' : ''}</td><td class="muted">${esc(s.ip || '–')}</td><td class="muted">${fmtDate(s.last_seen)}</td>
@@ -298,6 +381,23 @@ views.account = async () => {
     catch (er) { toast(er.message); }
   };
   $$('[data-rev]').forEach(b => b.onclick = async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); });
+  if ($('#proflist')) {
+    const P2 = await api('/profiles');
+    $('#proflist').innerHTML = `<table>${P2.profiles.map(p => `<tr><td>${esc(p.name)}${p.owner ? ' <span class="muted small">(huvudkonto)</span>' : ''}</td>
+      <td class="muted small">${p.kid ? (p.maxAge === 0 ? 'Barntillåten' : 'max ' + p.maxAge + ' år') : 'Vuxen'}${p.hasPin ? ' · PIN' : ''}</td>
+      <td class="r"><button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
+      ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">Ta bort</button>`}</td></tr>`).join('')}</table>`;
+    $$('[data-ppin]').forEach(b => b.onclick = async () => {
+      const pin = prompt('Ny PIN (4–8 siffror). Lämna tomt för att ta bort PIN:'); if (pin === null) return;
+      try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toast(e.message); }
+    });
+    $$('[data-pdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort profilen och dess tittarhistorik?')) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } });
+    $('#addprof').onsubmit = async (e) => {
+      e.preventDefault();
+      try { await api('/profiles', { method: 'POST', body: { name: $('#pn').value, maxAge: $('#pa').value, pin: $('#pp').value } }); toast('Profil skapad'); route(); }
+      catch (er) { toast(er.message); }
+    };
+  }
   $('#revall').onclick = async () => { if (confirm('Logga ut alla andra enheter, inklusive appar?')) { await api('/me/sessions/revoke-others', { method: 'POST' }); toast('Utloggade'); route(); } };
   if ($('#on')) $('#on').onclick = async () => {
     const r = await api('/me/2fa/setup', { method: 'POST' });
@@ -425,6 +525,8 @@ views.admin = async () => {
     <label class="switch"><input type="checkbox" id="sadm" ${S.adminAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Tillåt administration från internet <span class="muted">(rekommenderas inte)</span></label>
     <label class="switch"><input type="checkbox" id="svpn" ${S.trustVpnRange ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Räkna VPN-nätet 100.64.0.0/10 (NetBird/Tailscale) som hemma <span class="muted">(behövs normalt inte om VPN:et routas via routern)</span></label>
     <label>Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="kommaseparerade CIDR">
+    <label class="switch"><input type="checkbox" id="sunr" ${S.allowUnrated ? 'checked' : ''}> Barnprofiler får se titlar utan känd åldersgräns</label>
+    <label class="switch"><input type="checkbox" id="swatch" ${S.watchEnabled ? 'checked' : ''}> Skanna direkt när filer läggs till (filbevakning – ${S.watching} bibliotek bevakas)</label>
     <div class="row"><div style="flex:1"><label>Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
     <div style="flex:1"><label>Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
     <div class="row" style="margin-top:14px"><button class="primary">Spara säkerhetsinställningar</button></div></form>
@@ -487,7 +589,8 @@ views.admin = async () => {
   $$('[data-lout]').forEach(b => b.onclick = async () => { if (confirm('Logga ut användaren från alla enheter?')) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } });
   $('#secform').onsubmit = async (e) => {
     e.preventDefault();
-    const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value };
+    const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
+      allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked };
     if (!$('#sadm').disabled) body.adminAnywhere = $('#sadm').checked;
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
     if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
@@ -807,7 +910,8 @@ async function boot() {
   status = st; me = st.user;
   if (!me) return false;
   $('#top').hidden = false;
-  $('#userbtn').textContent = me.name + ' ▾';
+  $('#userbtn').textContent = (me.kid ? '🧸 ' : '') + me.name + ' ▾';
+  $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
   await loadLibs();
   return true;
