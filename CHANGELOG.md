@@ -11,6 +11,10 @@
 - iOS/tvOS: poddlistan visas igen
 - Android: nedladdningar kan spelas utan nät från Inställningar, spelade låtar räknas, och byte av ljudspår eller undertext lämnar ingen omkodning kvar på servern
 - Musik- och ljudboksbibliotek visas inte längre som tomma rutnät i apparna
+- Serier med samma namn men olika år ("Doctor Who (1963)" och "(2005)") hålls isär; serier som redan slagits ihop delas upp vid nästa skanning
+- Två enheter på samma konto kan titta på samma titel samtidigt utan att stoppa varandras omkodning
+- Webben: låtar, kapitel, träffar i TV-guiden och mappväljaren går att välja med tangentbord och fjärrkontroll; Bakåt stänger spelaren; TV-guiden går att bläddra ett dygn bakåt
+- iOS: nedladdningar som blir klara i bakgrunden sparas direkt, inte först när appen öppnas
 
 ## 0.5.0
 - Notiser till mobilen (ntfy, Pushover, Gotify, Discord, Telegram, webhook) vid attacker, spärrade konton, certifikat- och backupproblem

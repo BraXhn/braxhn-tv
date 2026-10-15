@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
@@ -280,7 +281,10 @@ function audioPlan(a, o) {
 
 // Parametrar som identifierar en HLS-session (och följer med i alla segment-URL:er)
 export function hlsParams(d, o, token) {
-  const p = new URLSearchParams({ mode: d.mode, q: d.q, audio: d.audio, am: d.audioMode, burn: d.burn, tm: d.tonemap ? '1' : '0', fmt: d.fmt, tag: d.tag || '' });
+  // pid: en egen omkodningssession per uppspelning – två enheter på samma konto som tittar på samma titel
+  // ska inte stoppa varandras ffmpeg
+  const p = new URLSearchParams({ mode: d.mode, q: d.q, audio: d.audio, am: d.audioMode, burn: d.burn, tm: d.tonemap ? '1' : '0', fmt: d.fmt, tag: d.tag || '',
+    pid: crypto.randomBytes(4).toString('hex') });
   if (d.hdr) p.set('vr', d.hdr === 'hlg' ? 'HLG' : 'PQ');
   if (o.hlsSubs) p.set('hlssubs', '1');
   if (token) p.set('t', token);
@@ -293,7 +297,8 @@ function readParams(q) {
     audioMode: ['copy', 'eac3', 'aac'].includes(q.get('am')) ? q.get('am') : 'aac',
     fmt: q.get('fmt') === 'fmp4' ? 'fmp4' : 'ts', tag: ['hvc1', 'dvh1'].includes(q.get('tag')) ? q.get('tag') : '',
     burn: /^e\d+$/.test(q.get('burn') || '') ? q.get('burn') : '', tonemap: q.get('tm') === '1', hlsSubs: q.get('hlssubs') === '1',
-    vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : ''
+    vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : '',
+    pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : ''
   };
 }
 const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
@@ -523,7 +528,7 @@ function ensureCapacity(s, userId) {
 function sessionFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now() };

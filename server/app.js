@@ -1214,7 +1214,8 @@ const recStream = { auth: true, media: true, scope: (p) => REC_SCOPE + (+p.rid) 
 route('GET', '/api/live/channels', user, (c) => { if (liveOk(c)) send(c.res, 200, { channels: live.channelList(false), tuners: get('SELECT COUNT(*) AS n FROM tuners WHERE enabled=1').n, active: live.activeLive() }); });
 route('GET', '/api/live/guide', user, (c) => {
   if (!liveOk(c)) return;
-  const from = Math.max(now() - 6 * 3600, parseInt(c.q.get('from')) || now() - 1800), hours = Math.max(1, Math.min(24, parseInt(c.q.get('hours')) || 6));
+  // Guiden sparar sändningar ett dygn bakåt (livetv.js) – så långt går det att bläddra
+  const from = Math.max(now() - 25 * 3600, parseInt(c.q.get('from')) || now() - 1800), hours = Math.max(1, Math.min(24, parseInt(c.q.get('hours')) || 6));
   send(c.res, 200, { from, to: from + hours * 3600, channels: live.guide(from, from + hours * 3600), guide: live.guideState });
 });
 route('GET', '/api/live/programs/:pid', user, (c) => {
