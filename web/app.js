@@ -238,7 +238,7 @@ views.item = async (id) => {
     <span>Uppspelning</span><b id="pbinfo">…</b></div>
     <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">Sök undertexter online</button>
     ${me.is_admin && it.kind === 'episode' ? '<button class="ghost small" id="markers">Justera intro/eftertexter</button>' : ''}</div>`;
-  api(`/items/${it.id}/playback?${capsQuery()}`).then(p => {
+  api(`/items/${it.id}/playback?${capsQuery()}&info=1`).then(p => {
     const m = { direct: 'Direktuppspelning', remux: 'Remux', transcode: 'Omkodning' }[p.mode];
     if ($('#pbinfo')) $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
   }).catch(() => {});
@@ -340,6 +340,7 @@ views.profiles = async () => {
       if (j.needPin) { const pin = prompt(body.pin ? 'Fel PIN – försök igen:' : 'Ange PIN för profilen:'); if (!pin) return; body.pin = pin; return attempt(); }
       if (j.needPassword) { const pw = prompt('Ange huvudkontots lösenord:'); if (!pw) return; body.password = pw; return attempt(); }
       if (!r.ok) return toast(j.error || 'Kunde inte byta profil');
+      stopAudio(); // framsteg ska inte sparas på den nya profilen
       await boot(); location.hash = '#/';
     };
     act(attempt)();
@@ -1022,9 +1023,7 @@ views.stats = async () => {
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
-  const IN = await api('/integrations');
-  const LT = await api('/live/tuners');
-  const [L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
+  const [IN, LT, L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/integrations'), api('/live/tuners'), api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
   <div class="panel"><h2>Säkerhetskontroll</h2>
@@ -1571,6 +1570,8 @@ function markers() {
 function keys(e) {
   if (!P || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
   const v = $('#vid', P.el); if (!v) return;
+  // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
+  if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
   if (e.key === 'Escape' && !document.fullscreenElement) closePlayer();
   else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
   else if (e.key === 'ArrowRight') v.currentTime += 10;
@@ -1775,7 +1776,7 @@ function trackRows(tracks, opts = {}) {
     <button class="ghost small" data-addpl="${t.id}" title="Lägg till i spellista">+</button></td></tr>`).join('')}</table>`;
 }
 function bindTracks(tracks, root = main) {
-  $$('[data-ti]', root).forEach(r => r.ondblclick = r.onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
+  $$('[data-ti]', root).forEach(r => r.onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
   $$('[data-fav]', root).forEach(b => b.onclick = act(async () => {
     const on = b.textContent !== '♥'; b.textContent = on ? '♥' : '♡';
     try { await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on }, bg: true }); }
@@ -1893,7 +1894,17 @@ views.playlist = async (id) => {
 const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 // ---------- musikspelare (följer med mellan sidor) ----------
-const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false };
+const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false, seekSeq: 0 };
+// Stäng musikbaren och sluta ladda ljudet (utan load() fortsätter elementet buffra och håller omkodningen vid liv)
+function stopAudio() {
+  if (!M.audio) return;
+  if (M.spoken) spokenSave();
+  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++;
+  stopVideo(M.audio);
+  const bar = $('#mbar'); if (bar) bar.hidden = true;
+  document.body.classList.remove('hasbar');
+  setSession({});
+}
 function ensureBar() {
   if ($('#mbar')) return;
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
@@ -1908,7 +1919,9 @@ function ensureBar() {
   a.volume = store.get('mvol', 1);
   a.ontimeupdate = () => {
     if (M.spoken) return spokenTick();
-    $('#mcurt').textContent = fmtTime(a.currentTime); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (a.currentTime / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
+    // Omkodad ström som startats om vid spolning börjar på 0 – lägg till startpositionen
+    const t = a.currentTime + (M.offset || 0);
+    $('#mcurt').textContent = fmtTime(t); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
   a.onended = () => M.spoken ? spokenEnded() : nextTrack(true);
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
   a.onplay = () => { $('#mplay').textContent = '⏸'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
@@ -1916,11 +1929,11 @@ function ensureBar() {
   a.onerror = () => toast('Kunde inte spela låten');
   $('#mplay').onclick = () => a.paused ? a.play() : a.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + 30) : nextTrack(false);
-  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - 15); if (a.currentTime > 3) a.currentTime = 0; else if (M.idx > 0) loadTrack(M.idx - 1); };
+  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - 15); if (a.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
   $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); };
   $('#mvol').oninput = (e) => { a.volume = +e.target.value; store.set('mvol', a.volume); };
   $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
-  $('#mx').onclick = () => { if (M.spoken) spokenSave(); M.spoken = null; a.pause(); a.removeAttribute('src'); bar.hidden = true; document.body.classList.remove('hasbar'); M.cur = null; };
+  $('#mx').onclick = stopAudio;
   $('#mq').onclick = showQueue;
   if (!P && !LP && !RP) musicSession();
 }
@@ -1971,9 +1984,12 @@ async function spokenSeek(t) {
   t = Math.max(0, Math.min(t, (s.duration || 1e9) - 0.5));
   const f = [...s.files].reverse().find(x => x.offset <= t) || s.files[0];
   const local = t - f.offset;
+  const seq = ++M.seekSeq;
   if (M.sfile === f && !M.transcoded) { a.currentTime = local; return; }
-  M.sfile = f;
   const head = await fetch(f.url, { method: 'HEAD' }).catch(() => null);
+  // Ett senare hopp eller ett annat avsnitt har hunnit före – detta svar gäller inte längre
+  if (seq !== M.seekSeq || M.spoken !== s) return;
+  M.sfile = f;
   M.transcoded = head?.headers.get('x-transcoded') === '1';
   M.soff = M.transcoded ? local : 0;
   a.src = M.transcoded ? f.url + (f.url.includes('?') ? '&' : '?') + 'ss=' + local : f.url;
@@ -2006,8 +2022,8 @@ function seekTo(t) {
   if (M.spoken) return spokenSeek(t);
   const a = M.audio;
   // Omkodade strömmar saknar Range – starta om på rätt position
-  if (M.transcoded) { M.offset = t; a.src = M.url + (M.url.includes('?') ? '&' : '?') + 'ss=' + t; a.play(); }
-  else a.currentTime = t;
+  if (M.transcoded) { M.offset = t; a.src = M.url + (M.url.includes('?') ? '&' : '?') + 'ss=' + t; a.play().catch(() => {}); }
+  else { M.offset = 0; a.currentTime = t; }
 }
 function playQueue(tracks, i) {
   if (!tracks.length) return;
@@ -2023,9 +2039,10 @@ async function loadTrack(i) {
   const a = M.audio, bar = $('#mbar');
   bar.hidden = false; document.body.classList.add('hasbar');
   M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  M.offset = 0; M.transcoded = false; // inte föregående spårs (eller bokens) värden
   a.src = M.url;
   a.play().catch(() => {});
-  fetch(M.url, { method: 'HEAD' }).then(r => { M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
+  fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
   $('#mcov').innerHTML = cover(t.albumId, t.cover, 'small');
   $('#mtitle').textContent = t.title;
   $('#martist').textContent = t.artist || ''; $('#martist').href = t.artistId ? `#/artist/${t.artistId}` : '#';
@@ -2082,6 +2099,8 @@ async function route() {
   $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
+  // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
+  $('#top').hidden = !me || name === 'login' || name === 'profiles';
   main.innerHTML = '<div class="spin"></div>';
   try { await v(arg, arg2); if (gen !== routeGen) return; window.scrollTo(0, 0); fillWatch(); }
   catch (e) { if (gen !== routeGen || e?.aborted) return; if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
@@ -2090,7 +2109,7 @@ window.addEventListener('hashchange', route);
 
 $('#userbtn').onclick = (e) => { e.stopPropagation(); $('#usermenu').hidden = !$('#usermenu').hidden; };
 document.addEventListener('click', () => { $('#usermenu').hidden = true; });
-$('#logout').onclick = async () => { await api('/logout', { method: 'POST' }).catch(() => {}); me = null; location.hash = '#/login'; };
+$('#logout').onclick = async () => { stopAudio(); await api('/logout', { method: 'POST' }).catch(() => {}); me = null; location.hash = '#/login'; };
 let qt;
 $('#q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { const q = e.target.value.trim(); location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/'; }, 300); };
 
