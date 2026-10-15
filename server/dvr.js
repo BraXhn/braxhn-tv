@@ -7,7 +7,7 @@ import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { liveEncoder } from './stream.js';
 import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts } from './livetv.js';
 import { notify } from './notify.js';
-import { send, fail } from './util.js';
+import { fail, streamFile } from './util.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS dvr_rules(id INTEGER PRIMARY KEY, title TEXT NOT NULL, channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
   new_only INTEGER NOT NULL DEFAULT 1, keep INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created INTEGER NOT NULL);
@@ -134,7 +134,10 @@ function startRecording(rec) {
     const dir = path.join(dvrDir(), safeName(rec.title));
     fs.mkdirSync(dir, { recursive: true });
     const se = rec.season != null && rec.episode != null ? ` S${String(rec.season).padStart(2, '0')}E${String(rec.episode).padStart(2, '0')}` : '';
-    const base = `${safeName(rec.title)}${se} ${d.toISOString().slice(0, 10)} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+    let base = `${safeName(rec.title)}${se} ${d.toISOString().slice(0, 10)} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+    // Samma sändning på två kanaler (regel utan kanal) får inte skriva till samma fil
+    const taken = (b) => [...active.values()].some(a => a.ts === path.join(dir, b + '.ts')) || fs.existsSync(path.join(dir, b + '.ts')) || fs.existsSync(path.join(dir, b + '.mp4'));
+    if (taken(base)) base += ` (${rec.id})`;
     const ts = path.join(dir, base + '.ts');
     const until = rec.stop + pad().after;
     const dur = Math.max(10, until - now());
@@ -142,7 +145,7 @@ function startRecording(rec) {
       '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a?', '-map', '0:s?', '-c', 'copy', '-t', String(dur), '-f', 'mpegts', ts], { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '', ended = false;
     proc.stderr.on('data', x => { err = (err + x).slice(-800); });
-    active.set(rec.id, { proc, key, tuner: ch.tuner_id });
+    active.set(rec.id, { proc, key, tuner: ch.tuner_id, ts });
     run("UPDATE recordings SET status='recording', file=?, error=NULL WHERE id=?", ts, rec.id);
     console.log('[dvr] spelar in', rec.title, '→', ts);
     const tunerId = ch.tuner_id;
@@ -322,14 +325,8 @@ export const cancel = (id) => {
 export function serveRecording(req, res, id) {
   const r = get('SELECT * FROM recordings WHERE id=?', id);
   if (!r?.file || !fs.existsSync(r.file) || !r.file.endsWith('.mp4')) return fail(res, 404, 'Inspelningen är inte klar');
-  const st = fs.statSync(r.file);
-  const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
-  let start = 0, end = st.size - 1, code = 200;
-  if (m) { start = m[1] === '' ? Math.max(0, st.size - +m[2]) : +m[1]; if (m[1] !== '' && m[2] !== '') end = Math.min(+m[2], end); code = 206; }
-  if (start > end) return send(res, 416, '', { 'Content-Range': `bytes */${st.size}` });
-  const h = { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1 };
-  if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
-  res.writeHead(code, h);
-  if (req.method === 'HEAD') return res.end();
-  fs.createReadStream(r.file, { start, end }).pipe(res);
+  let st;
+  try { st = fs.statSync(r.file); } catch { return fail(res, 404, 'Inspelningen är inte klar'); }
+  // Gemensam Range-hantering; pipeline stänger filen när spelaren avbryter vid spolning
+  streamFile(req, res, r.file, st.size, { 'Content-Type': 'video/mp4' });
 }

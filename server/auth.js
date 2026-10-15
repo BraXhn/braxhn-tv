@@ -4,14 +4,18 @@ import { cookies, clean } from './util.js';
 
 // ---------------- lösenord ----------------
 const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
-// Lösenordshashning körs utanför händelseloopen och högst 4 samtidigt – så att en
-// inloggningsstorm inte fryser strömmar för andra användare.
+// Lösenordshashning körs utanför händelseloopen och högst 2 samtidigt – så att en
+// inloggningsstorm inte upptar libuv-trådarna som även all fil-I/O (strömmar, bilder) använder.
+// Kön är begränsad: en flod av inloggningar får 429 i stället för att köas i minuter.
+const MAX_SCRYPT = 2, MAX_WAITING = 50;
 let active = 0; const waiting = [];
 // När en hashning blir klar lämnas platsen direkt över till nästa i kön (active ändras inte),
-// så att ingen ny förfrågan hinner emellan och fler än 4 körs samtidigt.
+// så att ingen ny förfrågan hinner emellan och fler körs samtidigt.
 async function slot(fn) {
-  if (active >= 4) await new Promise(r => waiting.push(r));
-  else active++;
+  if (active >= MAX_SCRYPT) {
+    if (waiting.length >= MAX_WAITING) throw Object.assign(new Error('Servern är upptagen – försök igen om en stund'), { status: 429 });
+    await new Promise(r => waiting.push(r));
+  } else active++;
   try { return await fn(); }
   finally { const next = waiting.shift(); if (next) next(); else active--; }
 }
@@ -110,7 +114,16 @@ const ipFails = new Map();   // ip -> [tider]
 const userFails = new Map(); // namn -> { n, until }
 const WINDOW = 600e3;
 // IPv6: räkna per /64 (en angripare har normalt ett helt /64-nät)
-const ipKey = (ip) => String(ip).includes(':') ? String(ip).toLowerCase().split(':').slice(0, 4).join(':') : String(ip);
+// Komprimerade adresser (2001:db8::1) expanderas först, annars får varje värd en egen nyckel
+export function ipKey(ip) {
+  ip = String(ip).toLowerCase();
+  if (!ip.includes(':')) return ip;
+  if (ip.startsWith('::ffff:') && ip.includes('.')) return ip.slice(7);
+  const [a, b = ''] = ip.split('%')[0].split('::');
+  const head = a ? a.split(':') : [], tail = ip.includes('::') && b ? b.split(':') : [];
+  const groups = ip.includes('::') ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  return groups.slice(0, 4).map(g => g.replace(/^0+(?=.)/, '')).join(':');
+}
 export function ipBlocked(ip) {
   ip = ipKey(ip);
   const f = (ipFails.get(ip) || []).filter(t => Date.now() - t < WINDOW);

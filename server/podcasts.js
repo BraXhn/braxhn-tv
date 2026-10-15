@@ -9,7 +9,16 @@ import net from 'node:net';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG, IMAGES } from './db.js';
+import { streamFile } from './util.js';
 
+// RFC 822-datum med tidszonsförkortningar (CEST, BST …) som Date.parse inte förstår
+const TZ = { CET: '+0100', CEST: '+0200', BST: '+0100', EET: '+0200', EEST: '+0300', WET: '+0000', WEST: '+0100', IST: '+0530', AEST: '+1000', AEDT: '+1100' };
+export function parseDate(v) {
+  if (!v) return NaN;
+  const t = Date.parse(v);
+  if (!isNaN(t)) return t;
+  return Date.parse(String(v).trim().replace(/\b([A-Z]{3,4})$/, (m) => TZ[m] || m));
+}
 export const DIR = process.env.PODCAST_DIR || path.join(CONFIG, 'podcasts');
 fs.mkdirSync(DIR, { recursive: true });
 db.exec(`CREATE TABLE IF NOT EXISTS podcasts(id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, title TEXT, author TEXT, description TEXT, link TEXT,
@@ -129,7 +138,8 @@ export function parseFeed(xml) {
     if (!url) continue;
     items.push({ guid: tag(x, 'guid') || url, title: tag(x, 'title') || 'Avsnitt', url,
       mime: attr(x, 'enclosure', 'type'), size: parseInt(attr(x, 'enclosure', 'length')) || null,
-      published: Math.floor((Date.parse(tag(x, 'pubDate') || '') || Date.now()) / 1000),
+      // Odaterade avsnitt behåller flödets ordning (inte alla samma tid)
+      published: Math.floor((parseDate(tag(x, 'pubDate')) || Date.now() - items.length * 1000) / 1000),
       duration: dur(tag(x, 'itunes:duration')),
       description: stripHtml(tag(x, 'content:encoded') || tag(x, 'description') || tag(x, 'itunes:summary') || '').slice(0, 5000) });
   }
@@ -202,7 +212,8 @@ export function download(epId) {
   queue.push(async () => {
     const out = epFile(ep), tmp = out + '.part';
     try {
-      const { r } = await safeFetch(ep.url, { timeout: 30 * 60e3 });
+      // Total tidsgräns: en server som droppar en byte i taget får inte hålla en nedladdningsplats i dagar
+      const { r } = await safeFetch(ep.url, { timeout: 30 * 60e3, signal: AbortSignal.timeout(3 * 3600e3) });
       if (!r.ok) throw new Error(`Avsnittet svarade ${r.status}`);
       let n = 0;
       const limit = new Transform({ transform(c, _e, cb) { n += c.length; cb(n > MAX_EP ? new Error('Filen är för stor') : null, c); } });
@@ -231,6 +242,11 @@ export function cleanup() {
       if (keepIds.has(e.id)) continue;
       const inProgress = get('SELECT 1 FROM podcast_progress WHERE episode_id=? AND played=0 AND position>0 AND updated > ?', e.id, now() - 30 * 86400);
       if (inProgress) continue;
+      // Ett avsnitt som laddats ner nyligen (t.ex. för att lyssna offline) och som ingen lyssnat klart på får vara kvar i 30 dagar
+      const f = path.join(DIR, path.basename(e.file));
+      let age = Infinity; try { age = Date.now() - fs.statSync(f).mtimeMs; } catch {}
+      const played = get('SELECT 1 FROM podcast_progress WHERE episode_id=? AND played=1', e.id);
+      if (!played && age < 30 * 86400e3) continue;
       fs.rmSync(path.join(DIR, path.basename(e.file)), { force: true });
       run('UPDATE podcast_episodes SET file=NULL WHERE id=?', e.id);
     }
@@ -247,15 +263,8 @@ export async function stream(req, res, ep) {
   if (ep.file) {
     const f = path.join(DIR, path.basename(ep.file));
     let st; try { st = fs.statSync(f); } catch { run('UPDATE podcast_episodes SET file=NULL WHERE id=?', ep.id); return stream(req, res, { ...ep, file: null }); }
-    const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
-    let start = 0, end = st.size - 1, code = 200;
-    if (m) { start = m[1] === '' ? Math.max(0, st.size - +m[2]) : +m[1]; if (m[1] !== '' && m[2] !== '') end = Math.min(+m[2], end); code = 206; }
-    if (start > end) { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
-    const h = { 'Content-Type': ep.mime && /^audio\//.test(ep.mime) ? ep.mime : 'audio/mpeg', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'private, max-age=3600' };
-    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
-    res.writeHead(code, h);
-    if (req.method === 'HEAD') return res.end();
-    return fs.createReadStream(f, { start, end }).pipe(res);
+    // streamFile: korrekt Range-hantering och pipeline (stänger filen när spelaren avbryter vid spolning)
+    return streamFile(req, res, f, st.size, { 'Content-Type': ep.mime && /^audio\//.test(ep.mime) ? ep.mime : 'audio/mpeg', 'Cache-Control': 'private, max-age=3600' });
   }
   // Inte nedladdat: vidarebefordra från poddens server (med Range) och ladda ner i bakgrunden
   download(ep.id);

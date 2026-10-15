@@ -15,7 +15,7 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh && node server/verify.js --manifest && chmod 444 integrity.json
 
 ENV PORT=8420 HTTPS_PORT=8443 CONFIG_DIR=/config MEDIA_ROOT=/media TRANSCODE_DIR=/transcode \
-    PUID=99 PGID=100 HWACCEL=none NODE_ENV=production
+    PUID=99 PGID=100 HWACCEL=none NODE_ENV=production UV_THREADPOOL_SIZE=16
 EXPOSE 8420 8443
 VOLUME ["/config", "/transcode"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

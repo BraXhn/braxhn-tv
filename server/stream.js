@@ -102,7 +102,8 @@ function extractVtt(it, sub) {
       clearTimeout(timer);
       if (code !== 0 && !chunks.length) return no(new Error('Kunde inte läsa undertexten'));
       const vtt = Buffer.concat(chunks).toString('utf8');
-      try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, vtt); } catch {}
+      // Avbruten eller misslyckad körning: skicka det som finns men cacha inte en avkortad fil
+      if (code === 0) try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, vtt); } catch {}
       ok(vtt);
     });
   })).finally(() => subRunning.delete(key));
@@ -462,10 +463,21 @@ function startFfmpeg(s, it, n) {
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
   });
-  s.proc = p; s.start = n; s.done = false; s.total = segs.length;
+  s.proc = p; s.paused = false; s.start = n; s.done = false; s.total = segs.length;
 }
 
+// ffmpeg som ligger långt före uppspelningen pausas (SIGSTOP), annars kopieras en hel 4K-remux
+// till disk på några minuter. Den återupptas när spelaren närmar sig eller ber om något som saknas.
+const AHEAD = 40;
+function resume(s) { if (s.paused && s.proc) s.proc.kill('SIGCONT'); s.paused = false; }
+function throttle(s, n) {
+  if (!s.proc) return;
+  const ahead = highestFile(s) - n;
+  if (!s.paused && ahead > AHEAD) { s.proc.kill('SIGSTOP'); s.paused = true; }
+  else if (s.paused && ahead < AHEAD / 2) resume(s);
+}
 function stopProc(s) {
+  s.paused = false;
   if (!s.proc) return;
   s.proc.kill('SIGKILL'); s.proc = null;
   // segment-muxern skriver direkt till slutligt filnamn – radera det senaste (ev. halvfärdiga) segmentet
@@ -529,9 +541,17 @@ export async function serveInit(req, res, it, query, userId) {
   const t0 = Date.now();
   // Initfilen är färdigskriven när första mediasegmentet finns
   const ready = () => { const f = initFile(s); return f && fs.statSync(f).size > 0 && fs.readdirSync(s.dir).some(x => /^seg_\d+\.m4s$/.test(x)); };
+  let starts = 0;
+  resume(s);
   while (!ready()) {
-    if (!s.proc) { if (!ensureCapacity(s, userId)) return fail(res, 503, 'För många samtidiga strömmar'); startFfmpeg(s, it, 0); }
+    if (!s.proc) {
+      // ffmpeg som dör direkt (trasig fil) ska inte startas om var 100:e ms
+      if (++starts > 3) return fail(res, 500, 'ffmpeg misslyckades – se serverloggen');
+      if (!ensureCapacity(s, userId)) return fail(res, 503, 'För många samtidiga strömmar');
+      startFfmpeg(s, it, 0);
+    }
     if (Date.now() - t0 > 30000 || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
+    s.last = Date.now();
     await new Promise(r => setTimeout(r, 100));
   }
   sendSegment(req, res, initFile(s), 'video/mp4');
@@ -544,6 +564,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
   s.total = total;
   if (!(n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
   if (!complete(s, n)) {
+    resume(s);
     const hi = s.proc ? highestFile(s) : -1;
     const covered = s.proc && n >= s.start && n <= Math.max(hi, s.start) + 4;
     let starts = 0;
@@ -554,6 +575,8 @@ export async function serveSegment(req, res, it, n, query, userId) {
     const t0 = Date.now();
     while (!complete(s, n)) {
       if (Date.now() - t0 > 90000 || req.destroyed) return fail(res, 504, 'Omkodningen hann inte med');
+      // Långsam omkodning (4K-tonmappning): städningen får inte döda ffmpeg medan någon väntar
+      s.last = Date.now();
       if (!s.proc && !complete(s, n)) {
         if (++starts > 3) return fail(res, 500, 'ffmpeg misslyckades – se serverloggen');
         if (!ensureCapacity(s, userId)) return fail(res, 503, 'Servern har för många samtidiga omkodningar just nu');
@@ -562,6 +585,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
       await new Promise(r => setTimeout(r, 120));
     }
   }
+  throttle(s, n);
   sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
 }
 function sendSegment(req, res, file, type) {

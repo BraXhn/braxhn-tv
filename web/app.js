@@ -103,8 +103,8 @@ async function passkeyLogin() {
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
 }
-async function passkeyRegister(password, name) {
-  const o = await api('/me/passkeys/options', { method: 'POST', body: { password } });
+async function passkeyRegister(password, name, code) {
+  const o = await api('/me/passkeys/options', { method: 'POST', body: { password, code } });
   const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64uDec(o.challenge), user: { ...o.user, id: b64uDec(o.user.id) },
     excludeCredentials: o.excludeCredentials.map(c => ({ ...c, id: b64uDec(c.id) })) } });
   await api('/me/passkeys', { method: 'POST', body: { name, id: cred.id, response: { clientDataJSON: b64uEnc(cred.response.clientDataJSON), attestationObject: b64uEnc(cred.response.attestationObject) } } });
@@ -494,8 +494,10 @@ views.account = async () => {
   $$('[data-pkdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } }));
   if ($('#pkadd')) $('#pkadd').onclick = async () => {
     const password = prompt('Ange ditt lösenord för att lägga till en passkey:'); if (!password) return;
+    // Med tvåstegsverifiering krävs även en kod (en passkey loggar in utan den)
+    const code = me?.totp ? prompt('Ange koden från din autentiseringsapp:') : undefined; if (me?.totp && !code) return;
     const name = prompt('Namn på passkeyn (t.ex. "iPhone" eller "Jobbdator"):', device(navigator.userAgent)) || 'Passkey';
-    try { await passkeyRegister(password, name); toast('Passkey tillagd'); route(); }
+    try { await passkeyRegister(password, name, code); toast('Passkey tillagd'); route(); }
     catch (e) { toast(e.name === 'NotAllowedError' ? 'Avbrutet' : e.name === 'InvalidStateError' ? 'Den här enheten har redan en passkey för kontot' : e.message); }
   };
   if ($('#proflist')) {

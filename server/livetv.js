@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { TRANSCODE, liveEncoder } from './stream.js';
-import { send, fail } from './util.js';
+import { send, fail, streamFile } from './util.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS tuners(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN('hdhr','m3u')), name TEXT NOT NULL, url TEXT NOT NULL,
   epg_url TEXT, tuner_count INTEGER NOT NULL DEFAULT 2, device_auth TEXT, enabled INTEGER NOT NULL DEFAULT 1, last_refresh INTEGER, error TEXT);
@@ -474,7 +474,7 @@ function startLive(ch) {
     // auto: försök kopiera H.264, annars koda om (MPEG-2 från antenn kräver omkodning för webbläsare)
     const copyV = transcode !== 'always' && /h264|avc/i.test(ch.codec || '');
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
-      ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0', '-map', '0:a:0?',
+      ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a:0?',
       ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
       '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '8', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
       '-hls_segment_filename', path.join(s.dir, 'seg-%05d.ts'), path.join(s.dir, 'live.m3u8')];
@@ -557,8 +557,9 @@ export function serveSegment(req, res, chId, name) {
   const f = path.join(s.dir, name);
   fs.stat(f, (err, st) => {
     if (err) return fail(res, 404, 'Finns inte');
-    res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Content-Length': st.size, 'Cache-Control': 'no-store' });
-    fs.createReadStream(f).pipe(res);
+    // streamFile använder pipeline: ett segment som hinner raderas (delete_segments) eller en avbruten
+    // hämtning får inte krascha servern eller lämna filen öppen
+    streamFile(req, res, f, st.size, { 'Content-Type': 'video/mp2t', 'Cache-Control': 'no-store' }, { ranges: false });
   });
 }
 export const activeLive = () => [...sessions.entries()].map(([id, s]) => ({ channelId: id, since: s.started, error: s.error }));

@@ -10,7 +10,7 @@ CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id);`);
 const b64u = (b) => Buffer.from(b).toString('base64url');
 const fromB64u = (s) => Buffer.from(String(s || ''), 'base64url');
 const challenges = new Map(); // challenge → { userId|null, type, exp }
-const MAX_CHALLENGES = 2000;
+const MAX_CHALLENGES = 20000;
 function addChallenge(ch, v) {
   // Begränsa minnet: äldsta utmaningarna tas bort först (Map behåller insättningsordning)
   while (challenges.size >= MAX_CHALLENGES) challenges.delete(challenges.keys().next().value);
@@ -23,21 +23,30 @@ export function cborDecode(buf) {
   let i = 0;
   const readLen = (ai) => {
     if (ai < 24) return ai;
-    if (ai === 24) return buf[i++];
+    if (ai === 24) { if (i >= buf.length) throw new Error('CBOR: avkortad'); return buf[i++]; }
     if (ai === 25) { const v = buf.readUInt16BE(i); i += 2; return v; }
     if (ai === 26) { const v = buf.readUInt32BE(i); i += 4; return v; }
     if (ai === 27) { const v = Number(buf.readBigUInt64BE(i)); i += 8; return v; }
     throw new Error('CBOR: obestämd längd stöds inte');
   };
+  // Längder kontrolleras mot bufferten: en påhittad längd (t.ex. 2^64 element) får inte läsa
+  // förbi slutet och fylla minnet tills processen dör
+  const len = (ai) => { const n = readLen(ai); if (n > buf.length - i) throw new Error('CBOR: avkortad'); return n; };
+  let depth = 0;
   const item = () => {
+    if (i >= buf.length) throw new Error('CBOR: avkortad');
+    if (++depth > 32) throw new Error('CBOR: för djup nästling');
+    try { return one(); } finally { depth--; }
+  };
+  const one = () => {
     const b = buf[i++], mt = b >> 5, ai = b & 31;
     switch (mt) {
       case 0: return readLen(ai);
       case 1: return -1 - readLen(ai);
-      case 2: { const n = readLen(ai); const v = buf.subarray(i, i + n); i += n; return v; }
-      case 3: { const n = readLen(ai); const v = buf.subarray(i, i + n).toString('utf8'); i += n; return v; }
-      case 4: { const n = readLen(ai); const a = []; for (let k = 0; k < n; k++) a.push(item()); return a; }
-      case 5: { const n = readLen(ai); const m = new Map(); for (let k = 0; k < n; k++) { const key = item(); m.set(key, item()); } return m; }
+      case 2: { const n = len(ai); const v = buf.subarray(i, i + n); i += n; return v; }
+      case 3: { const n = len(ai); const v = buf.subarray(i, i + n).toString('utf8'); i += n; return v; }
+      case 4: { const n = len(ai); const a = []; for (let k = 0; k < n; k++) a.push(item()); return a; }
+      case 5: { const n = len(ai); const m = new Map(); for (let k = 0; k < n; k++) { const key = item(); m.set(key, item()); } return m; }
       case 6: readLen(ai); return item(); // tagg ignoreras
       case 7: if (ai === 20) return false; if (ai === 21) return true; if (ai === 22 || ai === 23) return null;
         if (ai === 25) { i += 2; return 0; } if (ai === 26) { const v = buf.readFloatBE(i); i += 4; return v; } if (ai === 27) { const v = buf.readDoubleBE(i); i += 8; return v; }
