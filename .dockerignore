@@ -1,0 +1,6 @@
+.git
+config
+node_modules
+*.zip
+apps
+.github

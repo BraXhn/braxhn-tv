@@ -1,0 +1,35 @@
+name: Apple-app (iOS, iPadOS, tvOS)
+on:
+  push:
+    branches: [main]
+    paths: ['apps/apple/**', '.github/workflows/apple.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: BraXhnTV-iOS
+            dest: generic/platform=iOS Simulator
+          - scheme: BraXhnTV-tvOS
+            dest: generic/platform=tvOS Simulator
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: brew install xcodegen
+      - name: Generera Xcode-projekt
+        working-directory: apps/apple
+        run: xcodegen generate
+      - name: Kompilera ${{ matrix.scheme }} (osignerat, kontrollerar att koden bygger)
+        working-directory: apps/apple
+        run: |
+          set +e
+          xcodebuild -project BraXhnTV.xcodeproj -scheme "${{ matrix.scheme }}" -destination "${{ matrix.dest }}" -configuration Debug CODE_SIGNING_ALLOWED=NO build > build.log 2>&1
+          code=$?
+          tail -40 build.log
+          # Visa kompileringsfel som annoteringar i GitHub
+          grep -E "error:" build.log | sort -u | head -30 | while IFS= read -r line; do echo "::error::${line}"; done
+          exit $code

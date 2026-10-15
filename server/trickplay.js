@@ -1,0 +1,51 @@
+// Förhandsbilder vid spolning: en bild var 10:e sekund, 10×10 bilder per sprite-ark.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { all, run, CACHE, getSetting } from './db.js';
+
+const pexec = promisify(execFile);
+export const INTERVAL = 10, COLS = 10, ROWS = 10, WIDTH = 240;
+const dirOf = (it) => path.join(CACHE, 'trickplay', `${it.id}-${it.mtime}`);
+
+function sizeOf(it) {
+  let v; try { v = JSON.parse(it.streams || '[]').find(s => s.type === 'video'); } catch {}
+  const h = v?.width && v?.height ? Math.max(2, Math.round(WIDTH * v.height / v.width / 2) * 2) : 136;
+  return { w: WIDTH, h };
+}
+
+export function info(it) {
+  try { return JSON.parse(fs.readFileSync(path.join(dirOf(it), 'info.json'), 'utf8')); } catch { return null; }
+}
+export function sprite(it, n) {
+  const f = path.join(dirOf(it), `sprite_${String(+n).padStart(3, '0')}.jpg`);
+  return fs.existsSync(f) ? f : null;
+}
+
+export async function generate(it) {
+  const { w, h } = sizeOf(it);
+  const dir = dirOf(it);
+  fs.mkdirSync(dir, { recursive: true });
+  // Endast nyckelbilder avkodas (snabbt), fps-filtret väljer en bild per intervall
+  await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-skip_frame', 'nokey', '-i', it.path,
+    '-an', '-sn', '-dn', '-map', '0:v:0', '-vf', `fps=1/${INTERVAL},scale=${w}:${h}:flags=fast_bilinear,tile=${COLS}x${ROWS}`,
+    '-fps_mode', 'vfr', '-q:v', '6', path.join(dir, 'sprite_%03d.jpg')], { timeout: 60 * 60e3 });
+  const count = Math.ceil((it.duration || 0) / INTERVAL);
+  const sheets = fs.readdirSync(dir).filter(f => /^sprite_\d+\.jpg$/.test(f)).length;
+  if (!sheets) throw new Error('inga bilder skapades');
+  fs.writeFileSync(path.join(dir, 'info.json'), JSON.stringify({ interval: INTERVAL, w, h, cols: COLS, rows: ROWS, count, sheets, first: 1 }));
+  // Ta bort gamla versioner (om filen ändrats)
+  for (const d of fs.readdirSync(path.dirname(dir))) if (d.startsWith(`${it.id}-`) && d !== path.basename(dir)) fs.rmSync(path.join(path.dirname(dir), d), { recursive: true, force: true });
+  run('UPDATE items SET trickplay=1 WHERE id=?', it.id);
+}
+
+export async function generateLibrary(lib, status) {
+  if (getSetting('trickplay', process.env.TRICKPLAY || '1') !== '1') return;
+  const todo = all(`SELECT id, path, mtime, duration, streams FROM items WHERE library_id=? AND kind IN ('movie','episode') AND trickplay=0 AND vcodec IS NOT NULL AND duration > 60`, lib.id);
+  if (status) { status.phase = 'Skapar förhandsbilder för spolning'; status.done = 0; status.total = todo.length; }
+  for (const it of todo) {
+    if (status) status.done++;
+    try { await generate(it); } catch (e) { console.warn('[trickplay]', it.path, e.message); run('UPDATE items SET trickplay=2 WHERE id=?', it.id); }
+  }
+}

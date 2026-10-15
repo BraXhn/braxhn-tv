@@ -1,0 +1,24 @@
+# Håller beroenden uppdaterade. Uppdateringar grupperas i en PR per område; stora versionshopp
+# för Android-verktygen (som kan kräva kodändringar) föreslås inte automatiskt.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ['*'] } }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+    ignore:
+      # Byte av Node-huvudversion görs för hand (bara LTS-versioner, jämna nummer)
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
+  - package-ecosystem: gradle
+    directory: /apps/automotive
+    schedule: { interval: monthly }
+    groups: { android: { patterns: ['*'] } }
+    ignore:
+      # Android-verktygen hänger ihop (Gradle, AGP, Kotlin, Media3, compileSdk) och kräver
+      # ofta kodändringar – bara buggfixar föreslås automatiskt, större steg görs för hand
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
