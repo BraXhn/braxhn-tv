@@ -13,8 +13,8 @@ android {
         applicationId = "net.braxhn.tv"
         minSdk = 29          // Android Automotive i Polestar 4 kör Android 12+ (API 31+)
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.5.0"
+        versionCode = 4
+        versionName = "0.5.1"
     }
 
     signingConfigs {

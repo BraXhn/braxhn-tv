@@ -1,6 +1,6 @@
 # Ändringar
 
-## Ej utgiven
+## 0.5.1
 - Stabilitet: servern kraschar inte längre när ett live-segment, en inspelning eller ett poddavsnitt raderas under uppspelning, och avbrutna spolningar lämnar inga öppna filer
 - Omkodning/remux pausas när den ligger långt före spelaren – en 4K-film fyller inte längre disken på några minuter
 - Säkerhet: profilernas sessioner loggas ut tillsammans med kontot, passkey-data kan inte längre stoppa servern, barnprofiler kan inte byta till en profil med högre åldersgräns utan lösenord, och att lägga till en passkey kräver tvåstegskod när 2FA är på
