@@ -9,10 +9,16 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      # Byte av Node-huvudversion görs för hand (bara LTS-versioner, jämna nummer)
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
   - package-ecosystem: gradle
     directory: /apps/automotive
     schedule: { interval: monthly }
     groups: { android: { patterns: ['*'] } }
     ignore:
+      # Android-verktygen hänger ihop (Gradle, AGP, Kotlin, Media3, compileSdk) och kräver
+      # ofta kodändringar – bara buggfixar föreslås automatiskt, större steg görs för hand
       - dependency-name: '*'
-        update-types: ['version-update:semver-major']
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']

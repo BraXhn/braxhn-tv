@@ -12,7 +12,7 @@ Testerna kräver `ffmpeg`/`ffprobe` (startas med riktiga mediafiler). Allt ska v
 
 ## Grundregler
 
-- **Inga npm-beroenden.** Servern använder bara Node 22:s inbyggda moduler (`node:sqlite`, `http`, `crypto` …) plus ffmpeg. Lös det med standardbiblioteket.
+- **Inga npm-beroenden.** Servern använder bara Nodes inbyggda moduler (Node 22+, imagen kör Node 24 LTS) (`node:sqlite`, `http`, `crypto` …) plus ffmpeg. Lös det med standardbiblioteket.
 - **Tredjepartsfiler** för webben ligger i `web/vendor/` med SHA-256 i `web/vendor/checksums.json`; byts en fil ska checksumman och `VENDOR.md` uppdateras i samma commit. Inget laddas från CDN (CSP tillåter det inte).
 - **Apparna kan inte byggas lokalt.** De kompileras av GitHub Actions vid push (`apple.yml`, `android-automotive.yml`). Skriv försiktig kod mot iOS/tvOS 16, Media3 1.4.1 och Compose BOM 2024.09, och kontrollera CI-körningen efter push; kompileringsfel visas som annoteringar.
 - **Avsluta processer via PID.** `pkill -f <mönster>` träffar även det egna skalet.

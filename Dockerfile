@@ -1,4 +1,4 @@
-FROM node:25-bookworm-slim
+FROM node:24-bookworm-slim
 
 # ffmpeg för analys/omkodning, VAAPI-drivrutiner för Intel/AMD-GPU, tini som init
 ARG TARGETARCH
