@@ -186,7 +186,7 @@ test('ljudböcker: saknad biblioteksmapp raderar inga böcker eller positioner',
   await books.scanBooks(get('SELECT * FROM libraries WHERE id=9'), st);
   assert.equal(get('SELECT COUNT(*) AS n FROM books WHERE library_id=9').n, 3);
   assert.equal(get('SELECT COUNT(*) AS n FROM book_progress WHERE user_id=1').n, 3);
-  assert.match(st.warning, /går inte att läsa/);
+  assert.match((st.warnings || []).join(' '), /går inte att läsa/);
   // Tom men läsbar mapp: inte heller
   fs.mkdirSync(lib);
   await books.scanBooks(get('SELECT * FROM libraries WHERE id=9'), st);

@@ -77,7 +77,7 @@ async function probe(file) {
     };
   } catch (e) {
     console.warn('[scan] ffprobe misslyckades:', file, e.message);
-    return { hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' };
+    return { failed: true, hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' };
   }
 }
 
@@ -139,13 +139,15 @@ async function scanLibrary(lib) {
       const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
       if (k && k.size === st.size && k.mtime === mtime) continue;
       const info = await probe(f);
+      // Misslyckad probe (t.ex. disken vaknade för långsamt): spara mtime 0 så att filen läses om vid nästa skanning
+      const saveMtime = info.failed ? 0 : mtime;
       if (lib.type === 'movie') {
         const p = parseMovie(f);
         pending.push(() => {
           if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-            st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+            st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
           else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, mtime,
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, saveMtime,
             info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
           run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
         });
@@ -156,10 +158,10 @@ async function scanLibrary(lib) {
         const title = p.epTitle || `Avsnitt ${p.episode}`;
         pending.push(() => {
           if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-            showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+            showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
           else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
-            st.size, mtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+            st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
           // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
           run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
           run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
@@ -201,13 +203,17 @@ export function removeImages(id) {
 
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
 function tmdbKey() { return getSetting('tmdb_key') || process.env.TMDB_API_KEY || ''; }
-export async function tmdb(p, params = {}) {
+export async function tmdb(p, params = {}, attempt = 0) {
   const key = tmdbKey();
   const q = new URLSearchParams({ language: getSetting('language', 'sv-SE'), ...params });
   const headers = { accept: 'application/json' };
   if (key.startsWith('eyJ')) headers.authorization = 'Bearer ' + key; else q.set('api_key', key);
   const r = await fetch(`https://api.themoviedb.org/3${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) });
-  if (r.status === 429) { await new Promise(s => setTimeout(s, 2000)); return tmdb(p, params); }
+  // Begränsat antal omförsök: en spärrad nyckel får inte låsa skanningskön för alltid
+  if (r.status === 429 && attempt < 4) {
+    const wait = Math.min(30, +r.headers.get('retry-after') || 2) * 1000;
+    await new Promise(s => setTimeout(s, wait)); return tmdb(p, params, attempt + 1);
+  }
   if (!r.ok) throw new Error(`TMDB ${r.status}`);
   return r.json();
 }
@@ -421,12 +427,26 @@ async function thumbnails(lib) {
 }
 
 let queue = Promise.resolve();
+const queued = new Set(); // köade men ej påbörjade skanningar ('all' eller bibliotekets id)
 export function scan(libId = null) {
+  // Samma skanning köas bara en gång (t.ex. en webhook från Sonarr per avsnitt i ett säsongspaket)
+  const key = libId ? String(libId) : 'all';
+  if (queued.has(key) || queued.has('all')) return queue;
+  queued.add(key);
   queue = queue.then(async () => {
+    queued.delete(key);
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
     status.running = true; status.warnings = [];
-    try { for (const l of libs) { if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); } else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); } else await scanLibrary(l); } }
-    catch (e) { console.error('[scan] fel:', e); }
+    try {
+      for (const l of libs) {
+        // Ett fel i ett bibliotek ska inte hoppa över resten
+        try {
+          if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); }
+          else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); }
+          else await scanLibrary(l);
+        } catch (e) { console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`); }
+      }
+    }
     finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }
   });
   return queue;

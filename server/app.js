@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream';
 import { get, all, run, tx, now, getSetting, setSetting, IMAGES, RESTORE_FILE } from './db.js';
 import { send, fail, readJson, MIME, clientIp, peerIp, isLocalReq, isHttps, isPrivate, inCidr } from './util.js';
-import { hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
+import { ipKey, hashPw, checkPw, dummyCheck, weakPassword, createSession, cookieHeader, userFromReq, listSessions, ipBlocked, userLocked, noteFail,
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
 import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks, tmdbSearch, autoSubs, readChapters, tvdbOf, hasTmdb } from './scanner.js';
 import * as st from './stream.js';
@@ -172,6 +172,9 @@ route('POST', '/api/login', pub, async (c) => {
     audit('login_fail', { ip, user: { id: u?.id, name: uname }, detail: locked ? 'kontot spärrat tillfälligt för inloggning utifrån' : null });
     return generic();
   }
+  // Läs om 2FA-fälten efter den långsamma lösenordskontrollen: två samtidiga inloggningar får inte
+  // använda samma engångskod eller återställningskod (resten av routen är synkron)
+  Object.assign(u, get('SELECT totp_enabled, totp_secret, totp_last, recovery FROM users WHERE id=?', u.id));
   const remote = !isTrusted(c.req);
   if (remote && !u.remote_allowed) { audit('login_denied', { ip, user: u, detail: 'fjärråtkomst ej tillåten' }); return fail(c.res, 403, 'Ditt konto får bara användas på hemnätverket'); }
   if (remote && require2faRemote() && !u.totp_enabled) { audit('login_denied', { ip, user: u, detail: '2FA krävs utifrån' }); return fail(c.res, 403, 'Tvåstegsverifiering krävs för inloggning utanför hemmet. Aktivera den under Mitt konto från hemnätet.'); }
@@ -208,7 +211,8 @@ route('POST', '/api/me/password', user, async (c) => {
   const weak = weakPassword(password, u.name); if (weak) return fail(c.res, 400, weak);
   run('UPDATE users SET pass=?, pw_changed=? WHERE id=?', await hashPw(password), now(), c.user.id);
   // Logga ut alla andra enheter
-  run('DELETE FROM sessions WHERE user_id=? AND token != ?', c.user.id, c.user.tokenHash); // alla andra, även media/bildtoken
+  // alla andra, även media/bildtoken och profilernas sessioner (en profil kan byta tillbaka till kontot)
+  run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
   audit('password_changed', ctx(c));
   send(c.res, 200, { ok: true });
 });
@@ -237,7 +241,7 @@ route('POST', '/api/me/2fa/enable', user, async (c) => {
   if (step < 0) return fail(c.res, 400, 'Koden stämmer inte – kontrollera att klockan i telefonen går rätt');
   const rc = newRecoveryCodes();
   run('UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_enabled=1, totp_last=?, recovery=? WHERE id=?', step, JSON.stringify(rc.hashes), c.user.id);
-  run('DELETE FROM sessions WHERE user_id=? AND token != ?', c.user.id, c.user.tokenHash);
+  run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
   audit('2fa_enabled', ctx(c));
   send(c.res, 200, { ok: true, recoveryCodes: rc.codes });
 });
@@ -272,7 +276,7 @@ route('DELETE', '/api/me/sessions/:sid', user, (c) => {
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/me/sessions/revoke-others', user, (c) => {
-  run('DELETE FROM sessions WHERE user_id=? AND token != ?', c.user.id, c.user.tokenHash);
+  run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
   audit('sessions_revoked_all', ctx(c));
   send(c.res, 200, { ok: true });
 });
@@ -283,9 +287,13 @@ const rpFor = (req) => pk.rpOf(String(hostOf(req) || '').split(',')[0].trim(), g
 route('GET', '/api/me/passkeys', user, (c) => send(c.res, 200, pk.list(c.user.id)));
 route('POST', '/api/me/passkeys/options', user, async (c) => {
   if (c.user.parent_id) return fail(c.res, 400, 'Passkeys läggs till på huvudkontot');
-  const { password } = await readJson(c.req);
-  const u = get('SELECT pass FROM users WHERE id=?', c.user.id);
-  if (!await checkPw(String(password || ''), u.pass)) return fail(c.res, 401, 'Fel lösenord');
+  const { password, code } = await readJson(c.req);
+  const ip = clientIp(c.req);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund');
+  const u = get('SELECT name, pass, totp_enabled, totp_secret FROM users WHERE id=?', c.user.id);
+  if (!await checkPw(String(password || ''), u.pass)) { noteFail(ip, u.name); return fail(c.res, 401, 'Fel lösenord'); }
+  // En passkey loggar in utan tvåstegskod – kräv koden när den läggs till, annars kringgår en stulen session 2FA
+  if (u.totp_enabled && verifyTotp(u.totp_secret, code, 0) < 0) { noteFail(ip, u.name); return send(c.res, 401, { error: 'Ange koden från din autentiseringsapp', need2fa: true }); }
   send(c.res, 200, pk.registrationOptions(c.user, rpFor(c.req)));
 });
 route('POST', '/api/me/passkeys', user, async (c) => {
@@ -303,9 +311,12 @@ route('DELETE', '/api/me/passkeys/:kid', user, (c) => {
 const pkRate = new Map(); // ip → { n, t }
 setInterval(() => pkRate.clear(), 60e3).unref();
 route('POST', '/api/passkey/options', pub, (c) => {
-  const ip = clientIp(c.req), r = pkRate.get(ip) || { n: 0 };
-  if (++r.n > 30 || pkRate.size > 10000) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
-  pkRate.set(ip, r);
+  // Räkna per /64 för IPv6; en full tabell rensas i stället för att neka alla
+  const ip = clientIp(c.req), k = ipKey(ip);
+  if (!pkRate.has(k) && pkRate.size >= 10000) pkRate.clear();
+  const r = pkRate.get(k) || { n: 0 };
+  if (++r.n > 30) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  pkRate.set(k, r);
   if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
   send(c.res, 200, pk.loginOptions(rpFor(c.req)));
 });
@@ -766,10 +777,11 @@ route('POST', '/api/profiles/switch', user, async (c) => {
   const t = get('SELECT * FROM users WHERE id=?', +id);
   if (!t || (t.id !== root && t.parent_id !== root)) return fail(c.res, 404, 'Profilen finns inte');
   if (t.id !== me.id) {
+    if (userLocked(t.name) && !isTrusted(c.req)) { noteFail(ip); return fail(c.res, 429, 'För många försök – vänta en stund'); }
     if (t.pin) {
       if (!pin || !await checkPw(String(pin), t.pin)) { noteFail(ip, t.name); audit('profile_pin_fail', { ip, user: t }); return send(c.res, 401, { error: 'Fel PIN', needPin: true }); }
-    } else if (t.max_age == null && me.max_age != null) {
-      // Från en barnprofil till en vuxenprofil utan PIN: kräv huvudkontots lösenord
+    } else if (me.max_age != null && (t.max_age == null || t.max_age > me.max_age)) {
+      // Från en barnprofil till en profil med högre åldersgräns utan PIN: kräv huvudkontots lösenord
       const r = get('SELECT * FROM users WHERE id=?', root);
       if (!password || !await checkPw(String(password), r.pass)) { noteFail(ip, r.name); return send(c.res, 401, { error: 'Ange huvudkontots lösenord', needPassword: true }); }
     }
@@ -977,22 +989,24 @@ route('PUT', '/api/users/:id', admin, async (c) => {
   if (password) {
     const weak = weakPassword(password, target.name); if (weak) return fail(c.res, 400, weak);
     run('UPDATE users SET pass=?, pw_changed=? WHERE id=?', await hashPw(password), now(), target.id);
-    run('DELETE FROM sessions WHERE user_id=?', target.id); changes.push('nytt lösenord');
+    run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1)', target.id); changes.push('nytt lösenord');
   }
   if (isAdmin != null && target.id !== c.user.id) { run('UPDATE users SET is_admin=? WHERE id=?', isAdmin ? 1 : 0, target.id); changes.push(isAdmin ? 'admin' : 'ej admin'); }
   if (remoteAllowed != null) {
-    run('UPDATE users SET remote_allowed=? WHERE id=?', remoteAllowed ? 1 : 0, target.id); changes.push(remoteAllowed ? 'fjärråtkomst på' : 'fjärråtkomst av');
-    if (!remoteAllowed) run("DELETE FROM sessions WHERE user_id=? AND kind IN ('media','img')", target.id);
+    // Profilerna ärver kontots fjärråtkomst
+    run('UPDATE users SET remote_allowed=?1 WHERE id=?2 OR parent_id=?2', remoteAllowed ? 1 : 0, target.id); changes.push(remoteAllowed ? 'fjärråtkomst på' : 'fjärråtkomst av');
+    if (!remoteAllowed) run("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND kind IN ('media','img')", target.id);
   }
   if (reset2fa) { run('UPDATE users SET totp_enabled=0, totp_secret=NULL, totp_pending=NULL, recovery=NULL WHERE id=?', target.id); changes.push('2FA återställd'); }
-  if (logoutAll) { run('DELETE FROM sessions WHERE user_id=? AND token != ?', target.id, c.user.tokenHash); changes.push('utloggad överallt'); }
+  if (logoutAll) { run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', target.id, c.user.tokenHash); changes.push('utloggad överallt'); }
   audit('user_updated', { ...ctx(c), detail: `${target.name}: ${changes.join(', ')}` });
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/users/:id', admin, (c) => {
   if (+c.p.id === c.user.id) return fail(c.res, 400, 'Du kan inte ta bort dig själv');
   const t = get('SELECT name FROM users WHERE id=?', +c.p.id);
-  run('DELETE FROM users WHERE id=?', c.p.id);
+  // Profilerna försvinner med kontot (deras sessioner tas bort via ON DELETE CASCADE)
+  tx(() => { run('DELETE FROM users WHERE parent_id=?', +c.p.id); run('DELETE FROM users WHERE id=?', +c.p.id); });
   audit('user_deleted', { ...ctx(c), detail: t?.name });
   send(c.res, 200, { ok: true });
 });
@@ -1531,11 +1545,15 @@ route('POST', '/api/restore', admin, async (c) => {
       if (!f) return fail(c.res, 404, 'Finns inte');
       fs.copyFileSync(path.join(act.BACKUP_DIR, f.name), RESTORE_FILE + '.part');
       fs.renameSync(RESTORE_FILE + '.part', RESTORE_FILE);
-    } else if (remote) await offsite.fetchAndDecrypt(String(remote), RESTORE_FILE);
+    } else if (remote) {
+      // Via .part: en omstart mitt i dekrypteringen får inte lämna en halv databas som byts in vid start
+      await offsite.fetchAndDecrypt(String(remote), RESTORE_FILE + '.part');
+      fs.renameSync(RESTORE_FILE + '.part', RESTORE_FILE);
+    }
     else return fail(c.res, 400, 'Välj en säkerhetskopia');
     audit('restore_prepared', { ...ctx(c), detail: local || remote });
     send(c.res, 200, { ok: true });
-  } catch (e) { fs.rmSync(RESTORE_FILE, { force: true }); fail(c.res, 400, e.message); }
+  } catch (e) { for (const f of [RESTORE_FILE, RESTORE_FILE + '.part']) fs.rmSync(f, { force: true }); fail(c.res, 400, e.message); }
 });
 route('DELETE', '/api/restore', admin, (c) => { fs.rmSync(RESTORE_FILE, { force: true }); send(c.res, 200, { ok: true }); });
 
@@ -1655,9 +1673,10 @@ export async function handle(req, res) {
       const trusted = isTrusted(req);
       if (!trusted && !c.user.remote_allowed) return fail(res, 403, 'Ditt konto får bara användas på hemnätverket');
       // Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll)
-      const owner = c.user.parent_id || c.user.id;
-      const has2fa = c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled) || pk.hasPasskey(owner);
-      if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !has2fa) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
+      // (slås bara upp när det behövs – inte för varje segment och affisch)
+      const has2fa = () => { const owner = c.user.parent_id || c.user.id;
+        return c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled) || pk.hasPasskey(owner); };
+      if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !has2fa()) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
     }
     if (r.admin) {
       if (!c.user.is_admin) return fail(res, 403, 'Kräver administratör');

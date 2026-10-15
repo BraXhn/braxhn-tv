@@ -21,8 +21,12 @@ export async function readJson(req, limit = 1 << 20) {
     chunks.push(c);
   }
   if (!size) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  let v;
+  try { v = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw Object.assign(new Error('Ogiltig JSON'), { status: 400 }); }
+  // Routerna destrukturerar svaret – null, tal och strängar ska ge 400, inte ett internt fel
+  if (v === null || typeof v !== 'object') throw Object.assign(new Error('Ogiltig JSON'), { status: 400 });
+  return v;
 }
 
 export function cookies(req) {

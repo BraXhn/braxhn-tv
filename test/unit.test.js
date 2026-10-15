@@ -116,3 +116,34 @@ test('integritet: inbäddade filer stämmer och manifestet är stabilt', async (
   assert.deepEqual(a, b);
   assert.ok(a['server/app.js'] && a['web/vendor/hls.min.js'] && a['package.json']);
 });
+
+test('CBOR: påhittade längder ger fel i stället för att fylla minnet', async () => {
+  const { cborDecode } = await import('../server/passkeys.js');
+  assert.deepEqual([...cborDecode(Buffer.from('a2616101616282020a', 'hex')).value], [['a', 1], ['b', [2, 10]]]);
+  for (const hex of ['9bffffffffffffffff', '5a7fffffff', 'bbffffffffffffffff', '18', '82', '8'.repeat(200)]) {
+    assert.throws(() => cborDecode(Buffer.from(hex, 'hex')), /CBOR/, hex);
+  }
+});
+
+test('IPv6: gissningsskyddet räknar per /64 även för komprimerade adresser', () => {
+  assert.equal(auth.ipKey('2001:db8::1'), auth.ipKey('2001:db8::abcd:2'));
+  assert.equal(auth.ipKey('2001:0db8:0001:0002:3:4:5:6'), '2001:db8:1:2');
+  assert.notEqual(auth.ipKey('2001:db8:0:1::1'), auth.ipKey('2001:db8:0:2::1'));
+  assert.equal(auth.ipKey('::ffff:192.168.1.5'), '192.168.1.5');
+  assert.equal(auth.ipKey('10.0.0.1'), '10.0.0.1');
+});
+
+test('JSON-kropp som inte är ett objekt ger 400', async () => {
+  const { Readable } = await import('node:stream');
+  for (const body of ['null', '5', '"x"']) {
+    await assert.rejects(util.readJson(Readable.from([Buffer.from(body)])), (e) => e.status === 400);
+  }
+  assert.deepEqual(await util.readJson(Readable.from([Buffer.from('{"a":1}')])), { a: 1 });
+});
+
+test('poddar: datum med tidszonsförkortning', async () => {
+  const { parseDate } = await import('../server/podcasts.js');
+  assert.equal(new Date(parseDate('Mon, 06 Oct 2025 10:00:00 CEST')).toISOString(), '2025-10-06T08:00:00.000Z');
+  assert.equal(new Date(parseDate('Mon, 06 Oct 2025 10:00:00 GMT')).toISOString(), '2025-10-06T10:00:00.000Z');
+  assert.ok(isNaN(parseDate('')));
+});

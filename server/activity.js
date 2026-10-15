@@ -128,18 +128,23 @@ setInterval(() => {
 // ---------------- filbevakning ----------------
 const VIDEO = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|wmv|mpg|mpeg|flv|ogv|srt|vtt|ass|mp3|flac|m4a|aac|ogg|opus|wav|alac|wma)$/i;
 const watchers = new Map();
+const pending = new Map(); // väntande skanning per bibliotek
 export function watchLibraries(onChange) {
   for (const [, w] of watchers) w.close();
   watchers.clear();
+  // Ändrade inställningar: gamla väntande skanningar (ev. för borttagna bibliotek) ska inte köras
+  for (const [, t] of pending) clearTimeout(t);
+  pending.clear();
   if (getSetting('watch_enabled', process.env.WATCH_FILES || '1') !== '1') return;
   for (const lib of all('SELECT * FROM libraries')) {
-    let timer = null;
     try {
       const w = fs.watch(lib.path, { recursive: true, persistent: false }, (ev, file) => {
         if (file && !VIDEO.test(String(file)) && !/^[^.]*$/.test(path.basename(String(file)))) return; // mappar saknar ändelse
-        clearTimeout(timer);
+        clearTimeout(pending.get(lib.id));
         // Vänta tills kopieringen är klar (inga nya händelser på 30 s)
-        timer = setTimeout(() => onChange(lib.id), 30000);
+        const t = setTimeout(() => { pending.delete(lib.id); onChange(lib.id); }, 30000);
+        t.unref();
+        pending.set(lib.id, t);
       });
       w.on('error', (e) => { console.warn('[watch]', lib.path, e.message); w.close(); watchers.delete(lib.id); });
       watchers.set(lib.id, w);

@@ -8,6 +8,24 @@ fs.mkdirSync(IMAGES, { recursive: true });
 
 // Återställning: en förberedd databas (restore.db) byts in innan databasen öppnas
 const DBFILE = path.join(CONFIG, 'braxhn-tv.db'), RESTORE = path.join(CONFIG, 'restore.db');
+// En trasig eller ofullständig fil byts aldrig in – då startar servern inte alls
+function validRestore(f) {
+  try {
+    const fd = fs.openSync(f, 'r'), head = Buffer.alloc(16);
+    fs.readSync(fd, head, 0, 16, 0); fs.closeSync(fd);
+    if (head.toString('latin1') !== 'SQLite format 3\0') return false;
+    // Kontrollen kan skapa -wal/-shm bredvid filen; ta bort dem som inte fanns innan
+    const extra = ['-wal', '-shm'].map(x => f + x).filter(x => !fs.existsSync(x));
+    const t = new DatabaseSync(f, { readOnly: true });
+    try { return t.prepare('PRAGMA quick_check').get()?.quick_check === 'ok'; }
+    finally { t.close(); for (const x of extra) fs.rmSync(x, { force: true }); }
+  } catch { return false; }
+}
+if (fs.existsSync(RESTORE) && !validRestore(RESTORE)) {
+  const bad = `${RESTORE}.ogiltig-${Date.now()}`;
+  fs.renameSync(RESTORE, bad);
+  console.error('[db] Säkerhetskopian att återställa är trasig och användes inte – den sparades som', path.basename(bad));
+}
 if (fs.existsSync(RESTORE)) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   for (const ext of ['', '-wal', '-shm']) if (fs.existsSync(DBFILE + ext)) fs.renameSync(DBFILE + ext, `${DBFILE}.före-återställning-${stamp}${ext}`);

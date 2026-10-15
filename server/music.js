@@ -13,16 +13,6 @@ const COVERS = ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg
 const sortName = (t) => String(t || '').toLowerCase().replace(/^(the|a|an|en|ett)\s+/, '');
 const coverFile = (albumId) => path.join(IMAGES, `a${albumId}-cover.jpg`);
 
-export function* walk(dir) {
-  let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of ents) {
-    if (e.name.startsWith('.') || e.name === '@eaDir') continue;
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p);
-    else if (e.isFile() && AUDIO.has(path.extname(e.name).toLowerCase())) yield p;
-  }
-}
-
 export async function probe(file) {
   const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json', '-show_format', '-show_streams', file],
     { maxBuffer: 8 << 20, timeout: 60000 });
