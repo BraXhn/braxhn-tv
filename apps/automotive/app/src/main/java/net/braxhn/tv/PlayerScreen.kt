@@ -78,10 +78,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         // Nedladdad fil: spela lokalt (fungerar utan nät)
         Downloads.localFile(req.id)?.let { f ->
             status = "Offline"
-            item = runCatching { Api.get<MediaItem>("/api/items/${req.id}") }.getOrNull()
-            pb = runCatching { Api.get<Playback>("/api/items/${req.id}/playback", Api.capabilities(req.audio, null)) }.getOrNull()
+            // Starta den lokala filen först – nätanropen nedan kan ta lång tid eller misslyckas utan täckning
             player.setMediaItem(M3Item.fromUri(Uri.fromFile(f)), (req.start * 1000).toLong())
             player.prepare(); player.playWhenReady = true
+            item = runCatching { Api.get<MediaItem>("/api/items/${req.id}") }.getOrNull()
+            // info=1: bara intro/eftertexter – räknas inte som en strömning på servern
+            pb = runCatching { Api.get<Playback>("/api/items/${req.id}/playback", Api.capabilities(req.audio, null) + ("info" to "1")) }.getOrNull()
             return@LaunchedEffect
         }
         try {
@@ -166,7 +168,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         val it = item ?: return
         Api.subtitleLang = s?.lang ?: ""
         if (s?.bitmap == true || currentSub?.bitmap == true) {
-            report(final = true); onPlay(Screen.Play(it.id, player.currentPosition / 1000.0, req.audio, s)); return
+            // Stoppa den gamla strömmen direkt, annars startar dess nästa segment en ny omkodning på servern
+            val at = player.currentPosition / 1000.0; report(final = true); player.stop(); onPlay(Screen.Play(it.id, at, req.audio, s)); return
         }
         currentSub = s
         val b = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -222,7 +225,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                                 items(p.audio) { a ->
                                     OptionRow(a.label, a.index == sel) {
                                         menu = null
-                                        if (a.index != sel) { report(final = true); onPlay(Screen.Play(req.id, player.currentPosition / 1000.0, a.index, currentSub)) }
+                                        if (a.index != sel) { val at = player.currentPosition / 1000.0; report(final = true); player.stop(); onPlay(Screen.Play(req.id, at, a.index, currentSub)) }
                                     }
                                 }
                             }
@@ -238,7 +241,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 val p = pb
                 if (label == "Hoppa över sammanfattning" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
                 else if (label == "Hoppa över intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
-                else item?.nextId?.let { next -> report(final = true); onPlay(Screen.Play(next, 0.0, null, null)) }
+                else item?.nextId?.let { next -> report(final = true); player.stop(); onPlay(Screen.Play(next, 0.0, null, null)) }
             }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
                 .focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {

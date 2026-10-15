@@ -271,7 +271,8 @@ struct HomeView: View {
             async let l: [Library] = model.get("/api/libraries")
             let (hh, ll) = try await (h, l)
             home = hh
-            libs = ll
+            // Musik och ljudböcker har egna vyer – i rutnätet för film/serier blir de tomma
+            libs = ll.filter { $0.type == "movie" || $0.type == "show" }
             error = nil
         } catch { self.error = error.localizedDescription }
     }
