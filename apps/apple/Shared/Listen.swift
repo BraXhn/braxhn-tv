@@ -40,6 +40,20 @@ struct Podcast: Decodable, Identifiable, Hashable {
     let unplayed: Int?
     let description: String?
     let episodes: [Episode]?
+
+    // Listan (/api/podcasts) skickar antalet avsnitt som ett tal, detaljvyn en lista –
+    // avkoda listan bara när den finns så att hela poddlistan inte misslyckas
+    enum CodingKeys: String, CodingKey { case id, title, author, image, unplayed, description, episodes }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        image = (try? c.decodeIfPresent(Bool.self, forKey: .image)) ?? false
+        unplayed = try? c.decodeIfPresent(Int.self, forKey: .unplayed)
+        description = try? c.decodeIfPresent(String.self, forKey: .description)
+        episodes = try? c.decodeIfPresent([Episode].self, forKey: .episodes)
+    }
 }
 
 struct Episode: Decodable, Identifiable, Hashable {

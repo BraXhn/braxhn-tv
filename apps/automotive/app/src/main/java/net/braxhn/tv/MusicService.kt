@@ -90,6 +90,12 @@ class MusicService : MediaLibraryService() {
         // Spara position för ljudböcker och poddar var 15:e sekund och vid paus
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) saveSpoken(player) }
+            // Spelade låtar syns under "Spelat nyligen" (som i webben och iOS)
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val p = mediaItem?.mediaId?.split(":") ?: return
+                val tid = if (p[0] == "t") p.getOrNull(1)?.toIntOrNull() else null
+                if (tid != null) Api.appScope.launch { runCatching { Api.post("/api/music/tracks/$tid/played") } }
+            }
             // Byte av fil/avsnitt: spara slutpositionen för det föregående
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 if (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) return
@@ -287,21 +293,28 @@ class MusicService : MediaLibraryService() {
 
         /** Valt spår → köa hela sammanhanget (albumet/listan) och starta på rätt låt. */
         override fun onSetMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long):
-                ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+                ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            // Spara positionen i boken/podden som spelas innan kön byts – currentBook ersätts nedan och
+            // de senare paus-/bytehändelserna kan då inte längre spara den
+            mediaSession.player.currentMediaItem?.mediaId?.let { saveSpoken(it, mediaSession.player.currentPosition / 1000.0) }
+            return scope.future { setItems(mediaItems, startIndex, startPositionMs) }
+        }
+
+        private suspend fun setItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): MediaSession.MediaItemsWithStartPosition {
             val one = mediaItems.singleOrNull()?.mediaId
             val parts = one?.split(":")
-            if (parts != null && parts[0] == "b") runCatching { bookQueue(parts[1]) }.getOrNull()?.let { return@future it }
+            if (parts != null && parts[0] == "b") runCatching { bookQueue(parts[1]) }.getOrNull()?.let { return it }
             if (parts != null && parts[0] == "pe") runCatching {
                 val e = Api.get<PEp>("/api/podcasts/episodes/${parts[1]}")
                 MediaSession.MediaItemsWithStartPosition(listOf(epMedia(e)), 0, if (e.played) 0 else (e.position * 1000).toLong())
-            }.getOrNull()?.let { return@future it }
+            }.getOrNull()?.let { return it }
             if (parts == null || parts[0] != "bf") currentBook = null
             if (parts != null && parts.size >= 3 && parts[0] == "t") {
                 val list = runCatching { tracksOf(parts[2]) }.getOrDefault(emptyList())
                 val idx = list.indexOfFirst { it.id.toString() == parts[1] }
-                if (idx >= 0) return@future MediaSession.MediaItemsWithStartPosition(list.map { track(it, parts[2]) }, idx, startPositionMs)
+                if (idx >= 0) return MediaSession.MediaItemsWithStartPosition(list.map { track(it, parts[2]) }, idx, startPositionMs)
             }
-            MediaSession.MediaItemsWithStartPosition(resolve(mediaItems), startIndex, startPositionMs)
+            return MediaSession.MediaItemsWithStartPosition(resolve(mediaItems), startIndex, startPositionMs)
         }
 
         override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>): ListenableFuture<MutableList<MediaItem>> =

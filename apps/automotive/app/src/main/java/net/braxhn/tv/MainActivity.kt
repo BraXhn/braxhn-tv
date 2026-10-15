@@ -105,7 +105,7 @@ fun AppRoot() {
             when (current) {
                 is Screen.Home -> HomeScreen(push)
                 is Screen.Search -> SearchScreen(push)
-                is Screen.Settings -> SettingsScreen()
+                is Screen.Settings -> SettingsScreen(push)
                 is Screen.Lib -> LibraryScreen(current.library, push)
                 is Screen.Detail -> DetailScreen(current.id, push)
                 is Screen.Live -> LiveScreen(onPlay = push, push = push)
@@ -212,7 +212,8 @@ fun HomeScreen(push: (Screen) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         Api.refreshImageToken()
-        try { libs = Api.get("/api/libraries"); home = Api.get("/api/home") } catch (e: Exception) { error = e.message }
+        // Musik och ljudböcker har egna vyer – i rutnätet för film/serier blir de tomma
+        try { libs = Api.get<List<Library>>("/api/libraries").filter { it.type == "movie" || it.type == "show" }; home = Api.get("/api/home") } catch (e: Exception) { error = e.message }
     }
     val h = home
     when {
@@ -275,7 +276,7 @@ fun SearchScreen(push: (Screen) -> Unit) {
 }
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(push: (Screen) -> Unit) {
     val scope = rememberCoroutineScope()
     var quality by remember { mutableStateOf(Api.quality) }
     var lang by remember { mutableStateOf(Api.subtitleLang) }
@@ -295,7 +296,7 @@ fun SettingsScreen() {
                 modifier = Modifier.padding(top = 24.dp).height(52.dp)) { Text("Logga ut") }
         }
         item { Text("Nedladdat för offline", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
-        item { DownloadsList() }
+        item { DownloadsList(push) }
         item { Text("Video kan bara spelas när bilen står parkerad.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
     }
 }
@@ -417,13 +418,15 @@ fun DownloadRow(item: MediaItem) {
 }
 
 @Composable
-fun DownloadsList() {
+fun DownloadsList(push: (Screen) -> Unit) {
     val records by Downloads.records.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (records.isEmpty()) Text("Inget nedladdat.", color = Color.Gray)
         records.forEach { r ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(r.title, fontWeight = FontWeight.SemiBold); Text("${r.subtitle} · ${r.size / 1_000_000} MB", color = Color.Gray, fontSize = 13.sp) }
+                // Spelas direkt från filen – fungerar utan nät (titelsidan kräver servern)
+                TextButton(onClick = { push(Screen.Play(r.id, 0.0, null, null)) }) { Text("Spela") }
                 TextButton(onClick = { Downloads.remove(r.id) }) { Text("Ta bort") }
             }
         }
