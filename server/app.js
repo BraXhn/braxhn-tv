@@ -901,12 +901,14 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   // Token i URL behövs för appar, Chromecast och AirPlay (de skickar inte webbläsarens cookie)
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;
-  if (c.q.get('cast') === '1' || c.user.via !== 'cookie') token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
+  if (c.q.get('info') !== '1' && (c.q.get('cast') === '1' || c.user.via !== 'cookie')) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${st.hlsParams(d, o, token)}`;
-  if (it.duration) trakt.scrobble(c.user.id, it, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
-  act.startPlay({ user: c.user, item: it, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
+  // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning
+  const info = c.q.get('info') === '1';
+  if (it.duration && !info) trakt.scrobble(c.user.id, it, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
+  if (!info) act.startPlay({ user: c.user, item: it, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
