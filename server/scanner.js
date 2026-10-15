@@ -84,15 +84,48 @@ async function probe(file) {
 const SKIP_DIR = /^(sample|extras|featurettes|@eaDir)$/i;
 const isVideo = (name) => VIDEO.has(path.extname(name).toLowerCase()) && !/\bsample\b/i.test(name);
 
-// Serien matchas på namnet från mappen/filen (src_name) – TMDB kan ha bytt titeln.
+// Serien matchas på namnet från mappen/filen (src_name) – TMDB kan ha bytt titeln. Årtalet ingår i nyckeln
+// så att "Doctor Who (1963)" och "Doctor Who (2005)" blir två serier.
 // Äldre rader utan src_name matchas på titeln och får src_name ifyllt.
+export const showKey = (name, year) => year ? `${name} (${year})` : name;
 function showFor(lib, name, year) {
-  const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, name);
+  const key = showKey(name, year);
+  const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, key);
   if (r) return r.id;
+  // Tidigare versioner sparade namnet utan årtal: ta över en sådan serie om årtalet inte talar emot
+  const old = year && get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE AND (year IS NULL OR year=?)`, lib.id, name, year);
+  if (old) { run('UPDATE items SET src_name=? WHERE id=?', key, old.id); return old.id; }
   const t = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IS NULL AND title=? COLLATE NOCASE`, lib.id, name);
-  if (t) { run('UPDATE items SET src_name=? WHERE id=?', name, t.id); return t.id; }
+  if (t) { run('UPDATE items SET src_name=? WHERE id=?', key, t.id); return t.id; }
   return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,src_name,added) VALUES(?,?,?,?,?,?,?)`,
-    lib.id, 'show', name, sortTitle(name), year, name, now()).lastInsertRowid);
+    lib.id, 'show', name, sortTitle(name), year, key, now()).lastInsertRowid);
+}
+/** Flytta avsnitt som ligger under fel serie (t.ex. två serier med samma namn men olika år som slogs ihop
+ *  av tidigare versioner). Bara strängjämförelser – inga filer läses. */
+function regroupShows(lib) {
+  const keyOf = new Map(all(`SELECT id, src_name FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, String(r.src_name || '').toLowerCase()]));
+  const eps = all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL`, lib.id);
+  const touched = new Set(), years = new Map();
+  tx(() => {
+    for (const e of eps) {
+      const p = parseEpisode(path.relative(lib.path, e.path));
+      if (!p) continue;
+      const key = showKey(p.show, p.year);
+      if (keyOf.get(e.parent_id) === key.toLowerCase()) continue;
+      const sid = showFor(lib, p.show, p.year);
+      keyOf.set(sid, key.toLowerCase());
+      if (sid === e.parent_id) continue;
+      run('UPDATE items SET parent_id=? WHERE id=?', sid, e.id);
+      touched.add(e.parent_id).add(sid);
+      if (p.year) years.set(sid, p.year);
+    }
+    for (const id of touched) {
+      if (!get('SELECT 1 FROM items WHERE parent_id=? LIMIT 1', id)) { run('DELETE FROM items WHERE id=?', id); removeImages(id); continue; }
+      // Matcha om mot TMDB med mappens årtal (om matchningen inte är låst för hand)
+      run(`UPDATE items SET year=COALESCE(?, year), meta_done=0 WHERE id=? AND match_locked=0`, years.get(id) ?? null, id);
+    }
+  });
+  if (touched.size) console.log(`[scan] ${lib.name}: ${touched.size} serier delades upp eller slogs ihop efter årtal`);
 }
 /** Fyll i src_name för serier från tidigare versioner (utifrån ett av seriens avsnitt) */
 function backfillSrcNames(lib) {
@@ -102,7 +135,7 @@ function backfillSrcNames(lib) {
   tx(() => {
     for (const r of rows) {
       const p = r.ep && parseEpisode(path.relative(lib.path, r.ep));
-      if (p?.show) run('UPDATE items SET src_name=? WHERE id=?', p.show, r.id);
+      if (p?.show) run('UPDATE items SET src_name=? WHERE id=?', showKey(p.show, p.year), r.id);
     }
   });
 }
@@ -118,7 +151,7 @@ async function scanLibrary(lib) {
   for (const d of failed) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
-  if (lib.type === 'show') backfillSrcNames(lib);
+  if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
   const seen = new Set();
   // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
   // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.

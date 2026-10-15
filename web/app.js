@@ -43,6 +43,12 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(data?.error || `Fel ${r.status}`);
   return data;
 }
+// Rader och mappar som bara har onclick: gör dem nåbara med tangentbord och fjärrkontroll (Tab/D-pad + Enter)
+function keyClick(el) {
+  el.tabIndex = 0; el.setAttribute('role', 'button');
+  el.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); el.click(); } };
+  return el;
+}
 function toast(msg) {
   if (!msg) return;
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
@@ -580,7 +586,7 @@ views.book = async (id) => {
   const sp = bookSpoken(b);
   $('#bp').onclick = () => playSpoken(sp);
   if ($('#bstart')) $('#bstart').onclick = () => playSpoken({ ...sp, position: 0 });
-  $$('[data-chs]').forEach(r => r.onclick = () => { if (M.spoken?.kind === 'book' && M.spoken.id === b.id) spokenSeek(+r.dataset.chs + 0.01); else playSpoken({ ...sp, position: +r.dataset.chs + 0.01 }); });
+  $$('[data-chs]').forEach(r => keyClick(r).onclick = () => { if (M.spoken?.kind === 'book' && M.spoken.id === b.id) spokenSeek(+r.dataset.chs + 0.01); else playSpoken({ ...sp, position: +r.dataset.chs + 0.01 }); });
   $$('[data-bm]').forEach(x => x.onclick = () => { if (M.spoken?.kind === 'book' && M.spoken.id === b.id) spokenSeek(+x.dataset.bm); else playSpoken({ ...sp, position: +x.dataset.bm }); });
   $$('[data-bmdel]').forEach(x => x.onclick = act(async () => { await api('/audiobooks/bookmarks/' + x.dataset.bmdel, { method: 'DELETE' }); route(); }));
   $('#bmark').onclick = act(async () => {
@@ -641,8 +647,25 @@ const dayName = (t) => { const d = new Date(t * 1000), n = new Date(); const dif
 const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
 let LP = null, RP = null; // live-spelare, inspelningsspelare
 // Gemensamt för helskärmsspelarna i #player
-function overlayOpen(el) { el.hidden = false; document.body.style.overflow = 'hidden'; }
-function overlayClose(el) { el.hidden = true; el.innerHTML = ''; document.body.style.overflow = ''; }
+// En öppen spelare får en egen post i historiken: Bakåt (t.ex. på TV-fjärrkontrollen) stänger spelaren
+// i stället för att lämna sidan bakom den
+let overlayHist = false;
+function overlayOpen(el) {
+  el.hidden = false; document.body.style.overflow = 'hidden';
+  if (!history.state?.overlay) history.pushState({ overlay: 1 }, '');
+  overlayHist = true;
+}
+function overlayClose(el) {
+  el.hidden = true; el.innerHTML = ''; document.body.style.overflow = '';
+  overlayHist = false;
+  // Stängd med knapp/Escape: ta bort spelarens historikpost (om en ny spelare öppnas direkt behålls den)
+  setTimeout(() => { if (!overlayHist && history.state?.overlay) history.back(); }, 0);
+}
+window.addEventListener('popstate', () => {
+  if (!overlayHist || history.state?.overlay) return;
+  overlayHist = false;
+  if (P) closePlayer(); else { closeLive(); closeRec(); }
+});
 function stopVideo(v) { if (!v) return; v.pause(); v.removeAttribute('src'); v.load(); }
 // Stänger öppna spelare (vanlig, live, inspelning)
 function closeOverlays() { closePlayer(false); closeLive(); closeRec(); }
@@ -738,7 +761,7 @@ views.guide = async (dayOffset) => {
   const nowX = x(Date.now() / 1000);
   const ticks = []; for (let t = G.from; t < G.to; t += 1800) ticks.push(t);
   main.innerHTML = `<div class="toolbar"><h1>TV-guide</h1><span class="muted">${dayName(G.from)}</span>
-    <div class="row" style="margin-left:auto"><a class="btn ghost small" href="#/guide/${(+dayOffset || 0) - 0.25}">← Tidigare</a><a class="btn ghost small" href="#/guide">Nu</a><a class="btn ghost small" href="#/guide/${(+dayOffset || 0) + 0.25}">Senare →</a><a class="btn ghost small" href="#/dvr">⏺ Inspelningar</a></div></div>
+    <div class="row" style="margin-left:auto">${start - 21600 >= Date.now() / 1000 - 25 * 3600 ? `<a class="btn ghost small" href="#/guide/${(+dayOffset || 0) - 0.25}">← Tidigare</a>` : ''}<a class="btn ghost small" href="#/guide">Nu</a><a class="btn ghost small" href="#/guide/${(+dayOffset || 0) + 0.25}">Senare →</a><a class="btn ghost small" href="#/dvr">⏺ Inspelningar</a></div></div>
     <form id="gsearch" class="row" style="margin-bottom:12px"><input id="gq" placeholder="Sök program…" style="max-width:320px"><button class="ghost">Sök</button></form><div id="gres"></div>
     <div class="guide"><div class="gch">${'<div class="gtime-pad"></div>' + G.channels.map(c => `<div class="grow-h">${chLogo(c, 'small')}<span>${esc(c.name)}</span></div>`).join('')}</div>
       <div class="gscroll"><div style="width:${W}px;position:relative">
@@ -755,7 +778,7 @@ views.guide = async (dayOffset) => {
     const r = await api('/live/search?q=' + encodeURIComponent(q));
     if (!$('#gres')) return;
     $('#gres').innerHTML = `<table>${r.map(p => `<tr data-pid2="${p.id}" style="cursor:pointer"><td>${dayName(p.start)} ${hhmm(p.start)}</td><td><b>${esc(p.title)}</b>${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</td><td class="muted">${esc(p.channel)}</td></tr>`).join('') || '<tr><td class="muted">Inga träffar</td></tr>'}</table>`;
-    $$('[data-pid2]').forEach(r2 => r2.onclick = () => programDialog(+r2.dataset.pid2));
+    $$('[data-pid2]').forEach(r2 => keyClick(r2).onclick = () => programDialog(+r2.dataset.pid2));
   });
   loadLogos();
 };
@@ -1171,7 +1194,7 @@ views.admin = async () => {
       $('#lp').value = r.path;
       $('#fsb').innerHTML = (r.parent ? `<div data-p="${esc(r.parent)}">⬆ ..</div>` : '') + r.dirs.map(d => `<div data-p="${esc(r.path + '/' + d)}">📁 ${esc(d)}</div>`).join('')
         || '<div class="muted">Inga undermappar</div>';
-      $$('#fsb [data-p]').forEach(el => el.onclick = () => browse(el.dataset.p));
+      $$('#fsb [data-p]').forEach(el => keyClick(el).onclick = () => browse(el.dataset.p));
     } catch (e) { $('#fsb').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   };
   browse(S.mediaRoot);
@@ -1776,7 +1799,7 @@ function trackRows(tracks, opts = {}) {
     <button class="ghost small" data-addpl="${t.id}" title="Lägg till i spellista">+</button></td></tr>`).join('')}</table>`;
 }
 function bindTracks(tracks, root = main) {
-  $$('[data-ti]', root).forEach(r => r.onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
+  $$('[data-ti]', root).forEach(r => keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
   $$('[data-fav]', root).forEach(b => b.onclick = act(async () => {
     const on = b.textContent !== '♥'; b.textContent = on ? '♥' : '♡';
     try { await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on }, bg: true }); }
@@ -2061,7 +2084,7 @@ function showQueue() {
   d.innerHTML = `<h2>Kö</h2><div style="max-height:60vh;overflow:auto">${trackRows(M.queue, { showCover: true })}</div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
   document.body.append(d); d.showModal();
-  $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); r.onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
+  $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
 }
 

@@ -82,6 +82,31 @@ test('skanning: serie som bytt namn via TMDB får inga dubbletter (src_name)', a
   assert.equal(D.get('SELECT COUNT(*) AS n FROM items WHERE parent_id=?', show.id).n, 3);
 });
 
+test('skanning: serier med samma namn men olika år hålls isär (även efter äldre sammanslagning)', async () => {
+  const dir = path.join(MEDIA, 'Serier2');
+  touch(path.join(dir, 'Doctor Who (1963)', 'Season 1', 'Doctor Who S01E01.mkv'));
+  touch(path.join(dir, 'Doctor Who (2005)', 'Season 1', 'Doctor Who S01E01.mkv'));
+  const lib = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('TV2','show',?)", dir).lastInsertRowid);
+  await sc.scan(lib);
+  const shows = () => D.all("SELECT s.id, s.year, s.src_name, (SELECT COUNT(*) FROM items e WHERE e.parent_id=s.id) AS n FROM items s WHERE library_id=? AND kind='show' ORDER BY year", lib);
+  assert.deepEqual(shows().map(x => [x.year, x.src_name, x.n]), [[1963, 'Doctor Who (1963)', 1], [2005, 'Doctor Who (2005)', 1]]);
+
+  // Som en äldre version: allt under en serie med namnet utan årtal
+  const [a, b] = shows();
+  D.run('UPDATE items SET parent_id=? WHERE parent_id=?', a.id, b.id);
+  D.run('DELETE FROM items WHERE id=?', b.id);
+  D.run("UPDATE items SET src_name='Doctor Who' WHERE id=?", a.id);
+  await sc.scan(lib);
+  const after2 = shows();
+  assert.deepEqual(after2.map(x => [x.year, x.src_name, x.n]), [[1963, 'Doctor Who (1963)', 1], [2005, 'Doctor Who (2005)', 1]]);
+  assert.equal(after2[0].id, a.id, 'den gamla serien (och dess framsteg) behålls för rätt årtal');
+
+  // Serie utan årtal påverkas inte
+  touch(path.join(dir, 'Utan år', 'Season 1', 'Utan år S01E01.mkv'));
+  await sc.scan(lib); await sc.scan(lib);
+  assert.equal(D.get("SELECT COUNT(*) AS n FROM items WHERE library_id=? AND kind='show' AND src_name='Utan år'", lib).n, 1);
+});
+
 async function serve(handler, fn) {
   const srv = http.createServer(handler);
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
@@ -150,4 +175,11 @@ test('nyckelbildscache i minnet är begränsad', () => {
   }
   assert.ok(st.kfCacheSize() <= 64);
   assert.ok(!st.keyframesCached({ id: 123456789, mtime: 1 }));
+});
+
+test('HLS: varje uppspelning får ett eget sessions-id (två enheter på samma konto stör inte varandra)', () => {
+  const d = { mode: 'transcode', q: '1080', audio: '', audioMode: 'aac', burn: '', tonemap: false, fmt: 'ts', tag: '' };
+  const a = st.hlsParams(d, {}, null).get('pid'), b = st.hlsParams(d, {}, null).get('pid');
+  assert.match(a, /^[0-9a-f]{8}$/);
+  assert.notEqual(a, b);
 });

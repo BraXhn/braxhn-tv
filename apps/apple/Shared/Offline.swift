@@ -195,8 +195,24 @@ final class Downloads: ObservableObject {
 }
 
 /// Tar emot händelser från bakgrundssessionen (körs på en seriell kö).
+/// Systemets klarsignal för bakgrundssessionen (anropas när alla händelser har levererats)
+final class BackgroundDownloadEvents {
+    static let shared = BackgroundDownloadEvents()
+    private let lock = NSLock()
+    private var handler: (() -> Void)?
+    func set(_ h: @escaping () -> Void) { lock.lock(); handler = h; lock.unlock() }
+    func take() -> (() -> Void)? { lock.lock(); defer { lock.unlock() }; let h = handler; handler = nil; return h }
+}
+
 private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     private var lastSent: [Int: Double] = [:]
+
+    #if os(iOS)
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        // Köas efter finished()/failed() på huvudaktören, så att filen hunnit registreras
+        Task { @MainActor in BackgroundDownloadEvents.shared.take()?() }
+    }
+    #endif
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {

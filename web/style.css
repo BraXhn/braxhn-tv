@@ -297,3 +297,6 @@ dialog.wide{width:min(760px,94vw)}
 .prov:hover,.prov:focus-visible{border-color:var(--accent)}
 .provpick{display:flex;flex-wrap:wrap;gap:8px;max-height:60vh;overflow:auto}
 .provpick input{margin:0 2px 0 6px}
+/* Rader som går att välja med tangentbord/fjärrkontroll (keyClick) */
+[role=button]{cursor:pointer}
+[role=button]:focus-visible{outline:2px solid var(--accent,#ffc857);outline-offset:-2px}
