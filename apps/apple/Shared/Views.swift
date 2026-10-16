@@ -250,6 +250,7 @@ struct HomeView: View {
                     }
                 }
                 if let h = home {
+                    if let f = h.forYou, !f.isEmpty { Shelf(title: "Nytt för dig", items: f, landscape: true) }
                     if !h.continueWatching.isEmpty { Shelf(title: "Fortsätt titta", items: h.continueWatching, landscape: true) }
                     ForEach(h.rows) { r in
                         if !r.items.isEmpty { Shelf(title: r.title, items: r.items) }

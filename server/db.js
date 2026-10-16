@@ -163,6 +163,10 @@ addCol('tracks', 'rg_track', 'REAL');
 addCol('tracks', 'rg_album', 'REAL');
 addCol('tracks', 'rg_peak', 'REAL');
 addCol('tracks', 'loudness', 'TEXT');
+// Skärmtid, notiser om nya avsnitt och automatisk offline-synk (JSON per användare)
+addCol('users', 'screen_time', 'TEXT');
+addCol('users', 'notify_personal', 'TEXT');
+addCol('users', 'offline_sync', 'TEXT');
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

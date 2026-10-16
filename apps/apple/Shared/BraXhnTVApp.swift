@@ -14,6 +14,11 @@ struct BraXhnTVApp: App {
                 #if os(iOS)
                 // Återanslut till nedladdningarnas bakgrundssession direkt vid start
                 .onAppear { _ = Downloads.shared }
+                // Automatisk offline-synk vid start och när appen kommer till förgrunden
+                .task { await Downloads.shared.autoSync(model: model) }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                    Task { await Downloads.shared.autoSync(model: model) }
+                }
                 #endif
         }
     }

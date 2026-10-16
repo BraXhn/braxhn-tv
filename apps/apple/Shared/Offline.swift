@@ -1,4 +1,5 @@
 import SwiftUI
+import Network
 
 /// Offline-nedladdningar (iPhone/iPad). Servern skapar en mobilanpassad MP4 som laddas ner till appen.
 struct OfflineStatus: Decodable {
@@ -17,6 +18,22 @@ struct DownloadRecord: Codable, Identifiable, Hashable {
     let file: String
     let size: Int64
 }
+
+/// Serverns plan för automatisk offline-synk (GET /api/offline/sync)
+struct SyncPlan: Decodable {
+    let enabled: Bool
+    let quality: String
+    let wifiOnly: Bool
+    let items: [MediaItem]
+    let remove: [Int]
+}
+
+/// Nätverksbevakning: automatisk synk sker bara på Wi-Fi (eller annat nät som inte är dyrt/begränsat)
+private let pathMonitor: NWPathMonitor = {
+    let m = NWPathMonitor()
+    m.start(queue: DispatchQueue(label: "net.braxhn.tv.network"))
+    return m
+}()
 
 /// Nedladdningar sparas i Application Support (inte Dokument) och undantas från iCloud-säkerhetskopian.
 private let downloadsDirectory: URL = {
@@ -48,6 +65,11 @@ final class Downloads: ObservableObject {
     /// Metadata för nedladdningar som pågår (behövs när filen blir klar, även efter omstart av appen)
     private var pending: [Int: DownloadRecord] = [:]
     private var resumeData: [Int: Data] = [:]
+    /// Avsnitt som den automatiska synken själv laddat ner – bara de tas bort automatiskt
+    private var autoIds: Set<Int> = Set((UserDefaults.standard.array(forKey: "autoSyncIds") as? [Int]) ?? []) {
+        didSet { UserDefaults.standard.set(Array(autoIds), forKey: "autoSyncIds") }
+    }
+    private var syncing = false
 
     /// Bakgrundssession: nedladdningen fortsätter även när appen ligger i bakgrunden
     private lazy var session: URLSession = {
@@ -62,6 +84,7 @@ final class Downloads: ObservableObject {
     }()
 
     private init() {
+        _ = pathMonitor.currentPath
         migrateFromDocuments()
         if let d = try? Data(contentsOf: indexURL), let r = try? JSONDecoder().decode([DownloadRecord].self, from: d) {
             records = r.filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0.file).path) }
@@ -191,6 +214,37 @@ final class Downloads: ObservableObject {
         if let u = localURL(for: id) { try? FileManager.default.removeItem(at: u) }
         records.removeAll { $0.id == id }
         save()
+    }
+
+    private var unmetered: Bool {
+        let p = pathMonitor.currentPath
+        return p.status == .satisfied && !p.isExpensive && !p.isConstrained
+    }
+
+    /// Automatisk synk: servern anger vilka avsnitt som ska finnas offline (nästa osedda i följda serier).
+    /// Saknade laddas ner med den vanliga mekaniken; sedda tas bort – men bara de som synken själv laddat ner.
+    func autoSync(model: AppModel) async {
+        guard !syncing, model.isLoggedIn else { return }
+        syncing = true
+        defer { syncing = false }
+        // Glöm avsnitt som inte längre finns (t.ex. borttagna för hand eller misslyckade) – de kan laddas ner igen
+        autoIds = autoIds.filter { isDownloaded($0) || active[$0] != nil || resumable[$0] != nil }
+        let have = autoIds.sorted().map(String.init).joined(separator: ",")
+        guard let plan: SyncPlan = try? await model.get("/api/offline/sync", [URLQueryItem(name: "have", value: have)]) else { return }
+        for id in plan.remove where autoIds.contains(id) && isDownloaded(id) {
+            remove(id)
+            autoIds.remove(id)
+        }
+        guard plan.enabled, !plan.items.isEmpty else { return }
+        if plan.wifiOnly && !unmetered {
+            // Nätstatus kan vara okänd precis efter start – vänta en stund och kontrollera igen
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !unmetered { return }
+        }
+        for item in plan.items where !isDownloaded(item.id) && active[item.id] == nil && resumable[item.id] == nil {
+            autoIds.insert(item.id)
+            download(item, quality: plan.quality, model: model)
+        }
     }
 }
 

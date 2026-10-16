@@ -38,6 +38,8 @@ import * as people from './people.js';
 import * as trailers from './trailers.js';
 import * as wrapped from './wrapped.js';
 import * as ver from './versions.js';
+import * as screen from './screentime.js';
+import * as follows from './follows.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
@@ -47,6 +49,7 @@ hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 hooks.afterScan = () => arr.markAvailable();
 hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
+hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -150,7 +153,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,
-    streaming: c.user.max_age == null && hasTmdb(),
+    streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.status(c.user.id),
     liveTv: (c.user.max_age == null || allowUnrated()) && !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') } : null
 }));
 route('POST', '/api/setup', pub, async (c) => {
@@ -437,7 +440,8 @@ route('GET', '/api/home', user, (c) => {
   }));
   const watchlist = listItems(uid, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 30);
   const recommended = recommend(uid, 20);
-  send(c.res, 200, { continue: cont, rows, watchlist, recommended });
+  const forYou = listItems(uid, follows.FOR_YOU_WHERE, [], follows.FOR_YOU_ORDER, 30);
+  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou });
 });
 const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title' };
 route('GET', '/api/libraries/:id/items', user, (c) => {
@@ -482,6 +486,7 @@ route('GET', '/api/items/:id', user, (c) => {
   }
   if (it.kind !== 'episode') out.similar = similarTo(uid, it, 12);
   if (it.kind === 'show') {
+    Object.assign(out, follows.followInfo(uid, it.id));
     out.children = listItems(uid, 'i.parent_id=?', [it.id], 'i.season, i.episode', 5000);
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
   } else {
@@ -518,10 +523,12 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=excluded.position, duration=excluded.duration,
     watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, now());
   if (watched && !wasWatched) trakt.scrobble(c.user.id, get('SELECT * FROM items WHERE id=?', it.id), 'stop', 100).catch(() => {});
+  if (watched && !wasWatched && it.kind === 'episode') follows.autoFollow(c.user.id, it.id);
   // Smakprofilen påverkas bara när titeln blir sedd eller passerar 5 minuter
   if ((watched && !wasWatched) || (pos > 300 && !((prev?.position || 0) > 300))) invalidateProfile(c.user.id);
   act.touch(c.user.id, it.id, rawPos);
-  send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) });
+  const sc = screen.heartbeat(c.user.id, 'i:' + it.id, rawPos);
+  send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) || (!!sc && !sc.allowed), ...(sc ? { screenTime: sc } : {}) });
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
   const { watched } = await readJson(c.req);
@@ -601,11 +608,11 @@ route('GET', '/api/music/cover/:aid', img, (c) => {
   fs.readFile(f, (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
 });
 const trackRow = (c) => { const t = get('SELECT * FROM tracks WHERE id=?', +c.p.tid); if (!t) fail(c.res, 404, 'Spåret finns inte'); return t; };
-route('GET', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t) music.streamTrack(c.req, c.res, t, c.q); });
-route('HEAD', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t) music.streamTrack(c.req, c.res, t, c.q); });
+route('GET', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, t, c.q); });
+route('HEAD', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, t, c.q); });
 // Kortlivad länk till ett spår (för appar, Chromecast och AirPlay)
 route('GET', '/api/music/tracks/:tid/play', user, (c) => {
-  const t = trackRow(c); if (!t) return;
+  const t = trackRow(c); if (!t || screenBlock(c, { audio: true })) return;
   const tok = createSession(c.user.id, 'media', { item: -t.id, ip: clientIp(c.req) });
   send(c.res, 200, { url: `/api/music/tracks/${t.id}/stream?t=${tok}` });
 });
@@ -732,7 +739,7 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
   if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
   const id = it.kind === 'episode' ? it.parent_id : ver.mainIdOf(it); // avsnitt → hela serien, version → filmen
   if (add === false) run('DELETE FROM watchlist WHERE user_id=? AND item_id=?', c.user.id, id);
-  else run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now());
+  else { run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now()); follows.autoFollow(c.user.id, id); }
   invalidateProfile(c.user.id);
   send(c.res, 200, { ok: true });
 });
@@ -927,6 +934,8 @@ const mediaItem = (c) => {
   if (c.req.url.includes('/api/stream/')) {
     // "Spelas nu" och admins stopp gäller filmen (huvudraden), även när en annan version strömmas
     if (act.isStopped(c.user.id, ver.mainIdOf(it))) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
+    // Skärmtid: strömmar nekas när tiden är slut (nedladdningar för offline räknas inte som tittande)
+    if (!/\/(offline-file|download)$/.test(c.req.url.split('?')[0]) && screenBlock(c)) return null;
     act.touch(c.user.id, ver.mainIdOf(it));
   }
   return it;
@@ -936,6 +945,7 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   const row = mediaItem(c); if (!row) return;
   const main = ver.mainOf(row);
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
+  if (c.q.get('info') !== '1' && screenBlock(c)) return;
   let o = st.parseCaps(c.q);
   const remote = !isLocalReq(c.req);
   // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv)
@@ -1149,7 +1159,9 @@ route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l)
 route('GET', '/api/audiobooks/book/:bid', user, (c) => { const b = books.book(+c.p.bid, c.user.id); b ? send(c.res, 200, b) : fail(c.res, 404, 'Finns inte'); });
 route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
   const { position, speed } = await readJson(c.req);
-  const r = books.saveProgress(c.user.id, +c.p.bid, position, speed); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
+  const r = books.saveProgress(c.user.id, +c.p.bid, position, speed); if (!r) return fail(c.res, 404, 'Finns inte');
+  const sc = screen.heartbeat(c.user.id, 'b:' + (+c.p.bid), +position, { audio: true });
+  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: sc } : r);
 });
 route('POST', '/api/audiobooks/book/:bid/bookmarks', user, async (c) => {
   const { position, note } = await readJson(c.req);
@@ -1169,10 +1181,11 @@ const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res,
 const BOOK_SCOPE = 2e9, POD_SCOPE = 3e9;
 const bookStream = { auth: true, media: true, scope: (p) => BOOK_SCOPE + (books.fileRow(+p.fid)?.book_id || 0) };
 const podStream = { auth: true, media: true, scope: (p) => POD_SCOPE + (+p.eid) };
-route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
-route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f) music.streamTrack(c.req, c.res, f, c.q); });
+route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q); });
+route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q); });
 route('GET', '/api/audiobooks/book/:bid/play', user, (c) => {
   const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
+  if (screenBlock(c, { audio: true })) return;
   const t = createSession(c.user.id, 'media', { item: BOOK_SCOPE + b.id, ip: clientIp(c.req) });
   const a = encodeURIComponent(String(c.q.get('a') || 'mp3,aac,flac'));
   send(c.res, 200, { ...b, token: t, files: b.files.map(f => ({ ...f, url: `/api/audiobooks/files/${f.id}/stream?a=${a}&t=${t}` })) });
@@ -1219,7 +1232,9 @@ route('GET', '/api/podcasts/:pid/image', img, (c) => {
 });
 route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const { position, played } = await readJson(c.req);
-  const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); r ? send(c.res, 200, r) : fail(c.res, 404, 'Finns inte');
+  const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); if (!r) return fail(c.res, 404, 'Finns inte');
+  const sc = played ? null : screen.heartbeat(c.user.id, 'p:' + (+c.p.eid), +position, { audio: true });
+  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: sc } : r);
 });
 route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
 route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
@@ -1232,10 +1247,11 @@ route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
 const podEp = (c) => { const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
 route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
   const e = pods.episodeRow(+c.p.eid); if (!e) return fail(c.res, 404, 'Finns inte');
+  if (screenBlock(c, { audio: true })) return;
   send(c.res, 200, { url: `/api/podcasts/episodes/${e.id}/stream?t=${createSession(c.user.id, 'media', { item: POD_SCOPE + e.id, ip: clientIp(c.req) })}` });
 });
-route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
-route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 
 // ---------- Streamingtjänster ("var kan jag se den?") ----------
 route('GET', '/api/items/:id/watch', user, async (c) => {
@@ -1308,13 +1324,17 @@ route('GET', '/api/live/logo/:cid', img, async (c) => {
 });
 route('GET', '/api/live/search', user, (c) => { if (liveOk(c)) send(c.res, 200, live.searchPrograms(String(c.q.get('q') || '').slice(0, 80))); });
 route('POST', '/api/live/:cid/play', user, (c) => {
-  if (!liveOk(c)) return;
+  if (!liveOk(c) || screenBlock(c)) return;
   if (!get('SELECT 1 FROM channels WHERE id=?', +c.p.cid)) return fail(c.res, 404, 'Kanalen finns inte');
   const t = c.user.via !== 'cookie' || c.q.get('cast') === '1' ? createSession(c.user.id, 'media', { item: LIVE_SCOPE + (+c.p.cid), ip: clientIp(c.req) }) : null;
   send(c.res, 200, { url: `/api/live/${+c.p.cid}/live.m3u8${t ? '?t=' + t : ''}`, token: t });
 });
-route('GET', '/api/live/:cid/live.m3u8', liveStream, async (c) => { if (liveOk(c)) await live.servePlaylist(c.res, +c.p.cid, c.q.get('t')); });
-route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => { if (liveOk(c)) live.serveSegment(c.req, c.res, +c.p.cid, `seg-${c.p.n}.ts`); });
+route('GET', '/api/live/:cid/live.m3u8', liveStream, async (c) => { if (liveOk(c) && !screenBlock(c)) await live.servePlaylist(c.res, +c.p.cid, c.q.get('t')); });
+route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => {
+  if (!liveOk(c) || screenBlock(c)) return;
+  screen.heartbeat(c.user.id, 'l:' + (+c.p.cid)); // live-TV räknas som tittande så länge segment hämtas
+  live.serveSegment(c.req, c.res, +c.p.cid, `seg-${c.p.n}.ts`);
+});
 // DVR
 route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
 route('POST', '/api/dvr/program', user, async (c) => {
@@ -1360,12 +1380,12 @@ route('POST', '/api/dvr/recordings/:rid/stop', user, (c) => {
   dvr.stopRecording(r.id); send(c.res, 200, { ok: true });
 });
 route('POST', '/api/dvr/recordings/:rid/play', user, (c) => {
-  if (!liveOk(c)) return;
+  if (!liveOk(c) || screenBlock(c)) return;
   const t = c.user.via !== 'cookie' || c.q.get('cast') === '1' ? createSession(c.user.id, 'media', { item: REC_SCOPE + (+c.p.rid), ip: clientIp(c.req) }) : null;
   send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/stream${t ? '?t=' + t : ''}` });
 });
-route('GET', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
-route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
+route('GET', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
+route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
 // Administration av källor
 route('GET', '/api/live/tuners', admin, (c) => send(c.res, 200, {
   tuners: all('SELECT id, kind, name, url, epg_url, tuner_count, enabled, last_refresh, error, (SELECT COUNT(*) FROM channels WHERE tuner_id=tuners.id) AS channels FROM tuners'),
@@ -1739,6 +1759,97 @@ route('GET', '/api/wrapped/:year', user, (c) => {
   if (!u) return fail(c.res, 404, 'Användaren finns inte');
   send(c.res, 200, { ...wrapped.wrapped(uid, year), user: u, years: wrapped.years(uid),
     users: adminOk ? all('SELECT id, name FROM users ORDER BY name COLLATE NOCASE') : undefined });
+});
+
+// ---------- Skärmtid, följda serier och automatisk offline-synk ----------
+/** Neka med skärmtidens förklaring. Returnerar true om förfrågan nekades. audio: ljud (musik/böcker/poddar) */
+function screenBlock(c, opts) {
+  const s = screen.check(c.user.id, opts);
+  if (s) send(c.res, 403, { error: s.message, code: 'screen_time', screenTime: s });
+  return !!s;
+}
+// Stoppa pågående omkodningar när tiden tar slut (övriga förfrågningar nekas av screenBlock)
+function stopScreenStreams(uid) { for (const a of act.listActive()) if (a.userId === uid) st.stopUserSessions(a.itemId, uid); }
+screen.setOnBlocked((uid) => stopScreenStreams(uid));
+// Även utan rapporter (t.ex. när tillåten tid tar slut) – kollas var 30:e sekund för den som tittar
+setInterval(() => {
+  for (const uid of new Set(act.listActive().map(a => a.userId))) if (screen.check(uid)) stopScreenStreams(uid);
+}, 30e3).unref();
+/** Målprofil vars skärmtid den inloggade får styra: profiler i det egna hushållet (huvudkontot) eller,
+ *  för administratörer på betrott nät, andra konton som inte är administratörer. Aldrig sin egen. */
+function screenTarget(c) {
+  const t = get('SELECT id, name, parent_id, is_admin FROM users WHERE id=?', +c.p.uid);
+  if (!t) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (t.id === c.user.id) { fail(c.res, 403, 'Du kan inte ändra skärmtiden för din egen profil'); return null; }
+  const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
+  if (t.parent_id === root && canManage(c, root)) return t;
+  if (c.user.is_admin && !t.is_admin && (adminAnywhere() || isTrusted(c.req))) return t;
+  fail(c.res, 403, 'Bara huvudkontot eller en administratör kan ändra skärmtiden'); return null;
+}
+route('GET', '/api/screentime', user, (c) => send(c.res, 200, screen.status(c.user.id) || { limited: false }));
+route('GET', '/api/screentime/:uid', user, (c) => {
+  const t = screenTarget(c); if (!t) return;
+  send(c.res, 200, { id: t.id, name: t.name, rules: screen.rulesFor(t.id), status: screen.status(t.id) });
+});
+route('PUT', '/api/screentime/:uid', user, async (c) => {
+  const t = screenTarget(c); if (!t) return;
+  const rules = screen.setRules(t.id, await readJson(c.req));
+  audit('screentime_changed', { ...ctx(c), detail: `${t.name}: ${rules ? JSON.stringify(rules) : 'ingen gräns'}` });
+  send(c.res, 200, { rules, status: screen.status(t.id) });
+});
+route('POST', '/api/screentime/:uid/extra', user, async (c) => {
+  const t = screenTarget(c); if (!t) return;
+  const { minutes, reset } = await readJson(c.req);
+  if (reset) screen.resetToday(t.id);
+  const m = Math.max(-240, Math.min(240, parseInt(minutes) || 0));
+  if (m) screen.addExtra(t.id, m);
+  audit('screentime_extra', { ...ctx(c), detail: `${t.name}: ${reset ? 'nollställd, ' : ''}${m >= 0 ? '+' : ''}${m} min` });
+  send(c.res, 200, { status: screen.status(t.id) });
+});
+// Tittande som inte annars rapporteras (t.ex. inspelningar i webben)
+route('POST', '/api/screentime/ping', user, async (c) => {
+  const { key, position } = await readJson(c.req);
+  const k = /^[a-z]:\d{1,12}$/.test(String(key || '')) ? String(key) : 'x:0';
+  const s = screen.heartbeat(c.user.id, k, position == null ? null : +position);
+  send(c.res, 200, s ? { stop: !s.allowed, screenTime: s } : { stop: false });
+});
+
+// Följda serier och "Nytt för dig"
+route('GET', '/api/follows', user, (c) => {
+  const items = listItems(c.user.id, 'i.id IN (SELECT show_id FROM follows WHERE user_id=p_uid.uid AND active=1)', [], 'i.sort_title', 500, 0, { slim: true });
+  const sync = new Map(all('SELECT show_id, sync FROM follows WHERE user_id=? AND active=1', c.user.id).map(r => [r.show_id, r.sync]));
+  send(c.res, 200, items.map(i => ({ ...i, sync: sync.get(i.id) ?? null })));
+});
+route('POST', '/api/items/:id/follow', user, async (c) => {
+  const it = get('SELECT id, kind, parent_id, age FROM items WHERE id=?', +c.p.id);
+  if (!it || it.kind === 'movie' || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
+  const b = await readJson(c.req);
+  const sid = follows.follow(c.user.id, it.id, b.follow !== false);
+  if (b.sync !== undefined) follows.setShowSync(c.user.id, sid, b.sync);
+  send(c.res, 200, follows.followInfo(c.user.id, sid));
+});
+route('GET', '/api/foryou', user, (c) => send(c.res, 200, listItems(c.user.id, follows.FOR_YOU_WHERE, [], follows.FOR_YOU_ORDER, 100)));
+route('POST', '/api/foryou/seen', user, async (c) => { const { ids } = await readJson(c.req); follows.markSeen(c.user.id, Array.isArray(ids) ? ids : null); send(c.res, 200, { ok: true }); });
+// Personlig notisadress (ntfy/webhook). Adressen kontrolleras vid varje utskick (inga lokala adresser).
+const noKidNotify = (c) => { if (c.user.max_age != null) { fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); return true; } return false; };
+route('GET', '/api/me/notify', user, (c) => send(c.res, 200, { ...follows.getPersonal(c.user.id), allowed: c.user.max_age == null }));
+route('PUT', '/api/me/notify', user, async (c) => {
+  if (noKidNotify(c)) return;
+  const b = await readJson(c.req);
+  send(c.res, 200, follows.setPersonal(c.user.id, { kind: b.kind, url: b.url, token: b.token }));
+});
+route('POST', '/api/me/notify/test', user, async (c) => {
+  if (noKidNotify(c)) return;
+  try { await follows.testPersonal(c.user.id); send(c.res, 200, { ok: true }); }
+  catch (e) { fail(c.res, e.status || 502, e.status ? e.message : 'Kunde inte skicka: ' + e.message); }
+});
+// Automatisk offline-synk i apparna
+route('GET', '/api/me/offline-sync', user, (c) => send(c.res, 200, follows.getSync(c.user.id)));
+route('PUT', '/api/me/offline-sync', user, async (c) => send(c.res, 200, follows.setSync(c.user.id, await readJson(c.req))));
+route('GET', '/api/offline/sync', user, (c) => {
+  const have = String(c.q.get('have') || '').split(',').filter(Boolean).slice(0, 500);
+  const { ids, ...plan } = follows.syncPlan(c.user.id, have);
+  send(c.res, 200, { ...plan, items: itemsByIds(c.user.id, ids) }); // itemsByIds tillämpar profilens åldersgräns
 });
 
 // ---------- statiska filer ----------
