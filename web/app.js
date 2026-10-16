@@ -223,18 +223,23 @@ function heroHtml(it, extra = '') {
 }
 
 views.item = async (id) => {
-  const it = await api('/items/' + id);
+  // Flera versioner (t.ex. 4K och 1080p): valet sparas per film i webbläsaren, annars väljer servern
+  const chosen = store.get('version.' + id, '');
+  const it = await api('/items/' + id + (chosen ? '?version=' + encodeURIComponent(chosen) : ''));
   if (it.kind === 'show') return showView(it);
+  const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = it.position > 30;
   const actions = `<div class="row">
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
-    <a class="btn" href="/api/stream/${it.id}/download" download>Ladda ner</a>
+    <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
-  main.innerHTML = heroHtml(it, back + actions) + `<div class="tech">
+  const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
+    <select id="ver"><option value="">Automatiskt</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
+  main.innerHTML = heroHtml(it, back + actions + versions) + `<div class="tech">
     <span>Fil</span><b>${esc(it.file)}</b><span>Storlek</span><b>${fmtSize(it.size)}</b>
     <span>Video</span><b>${esc(it.vcodec || '–')} ${it.width ? it.width + '×' + it.height : ''}</b>
     <span>Ljud</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
@@ -246,9 +251,16 @@ views.item = async (id) => {
     <span>Uppspelning</span><b id="pbinfo">…</b></div>
     <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">Sök undertexter online</button>
     ${me.is_admin && it.kind === 'episode' ? '<button class="ghost small" id="markers">Justera intro/eftertexter</button>' : ''}</div>`;
-  api(`/items/${it.id}/playback?${capsQuery()}&info=1`).then(p => {
+  if ($('#ver')) {
+    $('#ver').value = verSel;
+    $('#ver').onchange = (e) => { store.set('version.' + it.id, e.target.value); route(); };
+  }
+  api(`/items/${it.id}/playback?${capsQuery(verSel ? { version: verSel } : {})}&info=1`).then(p => {
     const m = { direct: 'Direktuppspelning', remux: 'Remux', transcode: 'Omkodning' }[p.mode];
     if ($('#pbinfo')) $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
+    // Visa vilken version servern valde automatiskt
+    const auto = !verSel && p.versions && p.versions.find(v => v.id === p.version);
+    if (auto && $('#ver')) $('#ver').options[0].textContent = 'Automatiskt (' + auto.label + ')';
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   bindWatchlist(it);
@@ -257,7 +269,7 @@ views.item = async (id) => {
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
-  $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play));
+  $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play, verSel ? { version: verSel } : {}));
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) {
     $('#refresh').onclick = () => refreshMeta(it);
@@ -1573,14 +1585,15 @@ async function castItem(it, position) {
   try { await ctx.requestSession(); } catch { return; }
   const sess = ctx.getCurrentSession(); if (!sess) return;
   // Default Media Receiver: H.264/VP8/VP9 + AAC/MP3/Opus i MP4/WebM eller HLS
-  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || '') }), { bg: true });
+  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || ''),
+    ...(it.version ? { version: it.version } : {}) }), { bg: true });
   const origin = status.publicUrl || location.origin;
   const mi = new chrome.cast.media.MediaInfo(origin + p.url, p.mime);
   mi.streamType = chrome.cast.media.StreamType.BUFFERED;
   if (p.mode !== 'direct') { mi.hlsSegmentFormat = chrome.cast.media.HlsSegmentFormat.TS; mi.hlsVideoSegmentFormat = chrome.cast.media.HlsVideoSegmentFormat.MPEG2_TS; }
   mi.metadata = new chrome.cast.media.GenericMediaMetadata();
   mi.metadata.title = it.kind === 'episode' ? `${it.showTitle} – ${sxe(it)} ${it.title}` : it.title;
-  if (it.thumb || it.poster) mi.metadata.images = [new chrome.cast.Image(`${origin}/api/image/${it.id}/${it.poster ? 'poster' : 'thumb'}?t=${p.token}`)];
+  if (it.thumb || it.poster) mi.metadata.images = [new chrome.cast.Image(`${origin}/api/image/${p.version || it.id}/${it.poster ? 'poster' : 'thumb'}?t=${p.token}`)];
   mi.tracks = p.subtitles.map((s, i) => {
     const t = new chrome.cast.media.Track(i + 1, chrome.cast.media.TrackType.TEXT);
     t.trackContentId = origin + s.url; t.trackContentType = 'text/vtt'; t.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
@@ -1611,7 +1624,16 @@ function startPlay(b, ...args) {
 async function play(id, start = 0, opts = {}) {
   const seq = ++playSeq;
   let it;
-  try { it = await api('/items/' + id, { bg: true }); }
+  try {
+    // Flera versioner: hämta spårlistan (ljud/undertexter) för den version som faktiskt spelas
+    const want = opts.version || store.get('version.' + id, '');
+    it = await api('/items/' + id + (want ? '?version=' + encodeURIComponent(want) : ''), { bg: true });
+    if (it.versions && !it.versions.some(v => String(v.id) === String(want))) {
+      const q = store.get('quality', 'auto');
+      const p = await api(`/items/${id}/playback?${capsQuery({ q: q === 'auto' ? '' : q })}&info=1`, { bg: true });
+      if (p.version && p.version !== it.version) it = await api(`/items/${id}?version=${p.version}`, { bg: true });
+    }
+  }
   catch (e) { if (seq === playSeq) toast(e.message); return; }
   if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
   const partyId = opts.party || (P && P.party) || null;
@@ -1774,6 +1796,7 @@ async function load(start) {
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
   const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap ? sub.id : '' };
+  if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   let pb;
@@ -1792,7 +1815,13 @@ async function load(start) {
     catch { if (live()) toast('Kunde inte ladda HLS-spelaren'); return; }
     if (!live()) return;
     if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
-    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, xhrSetup: (x) => { x.withCredentials = true; } });
+    // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
+    // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner
+    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: 6e6, xhrSetup: (x) => { x.withCredentials = true; } });
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
+      const l = hls.levels?.[d.level];
+      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
+    });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || cur.hls !== hls || !live()) return;
       if (d.type === 'networkError') hls.startLoad(); else if (d.type === 'mediaError') hls.recoverMediaError(); else toast('Uppspelningsfel: ' + d.details);

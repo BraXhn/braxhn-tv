@@ -40,7 +40,7 @@ export function pickOwner(file, movies) {
 export async function syncTrailers(lib, files, failed = [], showIdFor = () => null) {
   const byDir = new Map();
   if (lib.type === 'movie') {
-    for (const m of all(`SELECT id, path FROM items WHERE library_id=? AND kind='movie' AND path IS NOT NULL`, lib.id)) {
+    for (const m of all(`SELECT COALESCE(version_of, id) AS id, path FROM items WHERE library_id=? AND kind='movie' AND path IS NOT NULL`, lib.id)) {
       const d = path.dirname(m.path);
       if (!byDir.has(d)) byDir.set(d, []);
       byDir.get(d).push(m);
