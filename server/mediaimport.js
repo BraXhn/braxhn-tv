@@ -181,7 +181,8 @@ async function resolveExternal(records, limit = 400) {
 }
 
 function indexes() {
-  const rows = all("SELECT id, kind, title, year, tmdb_id, path, parent_id, season, episode, src_name FROM items WHERE kind IN ('movie','show','episode')");
+  // Flera versioner av samma film: historiken hamnar alltid på filmen (huvudraden)
+  const rows = all("SELECT COALESCE(version_of, id) AS id, kind, title, year, tmdb_id, path, parent_id, season, episode, src_name FROM items WHERE kind IN ('movie','show','episode')");
   const ix = { movieTmdb: new Map(), showTmdb: new Map(), path: new Map(), base: new Map(), movieTitle: new Map(), showTitle: new Map(), ep: new Map() };
   const push = (m, k, v) => { const a = m.get(k); a ? a.push(v) : m.set(k, [v]); };
   for (const r of rows) {

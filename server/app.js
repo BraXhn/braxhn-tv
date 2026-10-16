@@ -1743,6 +1743,7 @@ const trailerFor = (c) => {
 };
 const serveTrailer = (c) => {
   const t = trailerFor(c); if (!t) return;
+  if (c.user && screenBlock(c)) return; // webben spelar direkt från strömmen
   fs.stat(t.path, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Filen finns inte längre')
     : streamFile(c.req, c.res, t.path, s.size, { 'Content-Type': MIME[path.extname(t.path).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' }));
 };
@@ -1751,6 +1752,7 @@ route('HEAD', '/api/trailers/:tid/stream', trailerStream, serveTrailer);
 // För appar och Chromecast: färdig URL med kortlivad token (webben använder kakan)
 route('GET', '/api/trailers/:tid/play', user, (c) => {
   const t = trailerFor(c); if (!t) return;
+  if (screenBlock(c)) return; // skärmtid gäller även trailers
   const token = c.user.via !== 'cookie' ? createSession(c.user.id, 'media', { item: TRAILER_SCOPE + t.id, ip: clientIp(c.req) }) : null;
   send(c.res, 200, { url: `/api/trailers/${t.id}/stream${token ? '?t=' + token : ''}`, mime: MIME[path.extname(t.path).toLowerCase()] || 'video/mp4' });
 });
