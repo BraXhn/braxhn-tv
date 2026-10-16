@@ -61,7 +61,7 @@ export function castOf(itemId) {
 export function searchPeople(q, age, limit = 20) {
   const like = `%${String(q).trim().replace(/[%_\\]/g, '\\$&')}%`;
   return all(`SELECT p.id, p.name, p.profile_path, COUNT(DISTINCT i.id) AS n FROM people p JOIN item_people ip ON ip.person_id=p.id
-    JOIN items i ON i.id=ip.item_id LEFT JOIN items s ON s.id=i.parent_id WHERE p.name LIKE ? ESCAPE '\\'${age.sql}
+    JOIN items i ON i.id=ip.item_id LEFT JOIN items s ON s.id=i.parent_id WHERE p.name LIKE ? ESCAPE '\\' AND i.version_of IS NULL${age.sql}
     GROUP BY p.id ORDER BY n DESC, p.name LIMIT ?`, like, ...age.params, limit)
     .map(r => ({ id: r.id, name: r.name, image: !!r.profile_path, titles: r.n }));
 }
@@ -140,7 +140,7 @@ export function cleanupPeople() {
  * apply(item, d) sparar övrigt ur svaret (t.ex. trailer).
  */
 export async function backfill(lib, tmdb, { max = 40, status = null, apply = null } = {}) {
-  const todo = all(`SELECT id, kind, tmdb_id FROM items WHERE library_id=? AND kind IN('movie','show') AND tmdb_id IS NOT NULL
+  const todo = all(`SELECT id, kind, tmdb_id FROM items WHERE library_id=? AND kind IN('movie','show') AND tmdb_id IS NOT NULL AND version_of IS NULL
     AND meta_done=1 AND credits_done=0 ORDER BY added DESC LIMIT ?`, lib.id, Math.max(0, max));
   if (!todo.length) { cleanupPeople(); return 0; }
   if (status) { status.phase = 'Hämtar rollistor'; status.done = 0; status.total = todo.length; }
