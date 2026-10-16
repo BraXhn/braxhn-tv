@@ -45,11 +45,19 @@ export async function notify(event, title, message, { priority = 3, key = null, 
   } catch (e) { console.warn('[notify] kunde inte skicka:', e.message); if (force) throw e; return false; }
 }
 
-async function deliver(c, title, message, priority) {
-  const post = async (url, body, headers = {}) => {
-    const r = await fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
-  };
+const fetchPost = async (url, body, headers = {}) => {
+  const r = await fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
+};
+/** Personlig notis till en användares egen ntfy-adress/webhook. post ska vara en SSRF-skyddad POST (se podcasts.safePost). */
+export const PERSONAL_KINDS = ['ntfy', 'webhook'];
+export async function sendPersonal(c, title, message, post) {
+  if (!PERSONAL_KINDS.includes(c?.kind) || !c.url) return false;
+  await deliver(c, `BraXhn TV: ${title}`, message, 3, post);
+  return true;
+}
+
+async function deliver(c, title, message, priority, post = fetchPost) {
   const json = (o) => JSON.stringify(o);
   const J = { 'Content-Type': 'application/json' };
   switch (c.kind) {

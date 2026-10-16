@@ -90,7 +90,9 @@ fun castLine(cast: List<CastMember>?): String? {
 }
 
 @Serializable data class HomeRow(val library: Library, val title: String, val items: List<MediaItem>)
-@Serializable data class HomeResponse(@SerialName("continue") val continueWatching: List<MediaItem>, val rows: List<HomeRow>)
+@Serializable data class HomeResponse(@SerialName("continue") val continueWatching: List<MediaItem>, val rows: List<HomeRow>,
+    /** Nya avsnitt av serier man följer (saknas hos äldre servrar) */
+    val forYou: List<MediaItem> = emptyList())
 @Serializable data class LibraryItems(val library: Library, val items: List<MediaItem>)
 @Serializable data class PlaybackSubtitle(val id: String, val label: String, val lang: String? = null, val url: String)
 @Serializable data class Playback(
