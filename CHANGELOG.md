@@ -1,5 +1,26 @@
 # Ändringar
 
+## Ej utgiven
+- Anpassningsbar kvalitet (ABR): vid omkodning med automatisk kvalitet kan spelaren växla ner till 720p/480p när nätet blir sämre
+- Flera versioner av samma film (t.ex. 4K och 1080p) visas som en film; servern väljer bästa versionen per enhet och webben har en versionsväljare
+- Rollista och personsidor från TMDB, och sökning på personer; apparna visar rollistan i detaljvyn
+- Trailers: lokala trailerfiler spelas från titelsidan (och skannas inte längre in som egna filmer), TMDB-trailern öppnas på YouTube
+- Årssammanfattning ("Ditt år") per person
+- Live-TV: pausa och spola tillbaka (timeshift, standard 2 timmar) med disktak och Live-knapp
+- Inspelningar: reklamavbrott hittas i bakgrunden och kan hoppas över med en knapp eller automatiskt
+- Sovtimer i webben, iOS/tvOS och Android/bil
+- Jämn ljudnivå i musik (ReplayGain/R128, annars mätning i bakgrunden)
+- Låttexter från .lrc eller taggar, synkade i webben
+- Smarta spellistor i webben, iOS och bilen
+- Inställbara hopp för ljudböcker och poddar; hoppa över tystnad i poddar på Android
+- Skärmtid för profiler med "Tiden är slut för idag"-skärm
+- Följ serier: "Nytt för dig" i webben och apparna, och personliga notiser om nya avsnitt via ntfy eller webhook
+- Automatisk offline-synk av nästa osedda avsnitt i iOS- och Android-appen
+- Diskövervakning med notiser och tidigare städning av omkodningsmappen
+- Import av tittarhistorik från Plex och Jellyfin/Emby
+- Prometheus-mätvärden på /metrics
+- DLNA/UPnP för smart-TV utan app (avstängt som standard)
+
 ## 0.5.1
 - Stabilitet: servern kraschar inte längre när ett live-segment, en inspelning eller ett poddavsnitt raderas under uppspelning, och avbrutna spolningar lämnar inga öppna filer
 - Omkodning/remux pausas när den ligger långt före spelaren – en 4K-film fyller inte längre disken på några minuter

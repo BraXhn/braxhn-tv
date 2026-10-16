@@ -44,6 +44,21 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Notiser** | Larm till mobilen via ntfy, Pushover, Gotify, Discord, Telegram eller webhook: attacker, spärrade konton, certifikat, säkerhetskopior, inspelningar, önskningar och nya versioner. |
 | **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
+| **Anpassningsbar kvalitet** | När servern omkodar med automatisk kvalitet kan spelaren själv växla ner (1080p/720p/480p) när nätet blir sämre, t.ex. i bilen eller på mobilnät. |
+| **Flera versioner** | Samma film i flera versioner (t.ex. 4K och 1080p) visas som en film. Servern väljer den version enheten kan spela utan omkodning, och på webben kan du välja själv. Framsteg och sedd gäller filmen oavsett version. |
+| **Rollista och personsidor** | Skådespelare, regi och skapare från TMDB. Klicka på en person för bild, biografi och allt med personen i biblioteket. Sökningen hittar även personer. |
+| **Trailers** | Lokala trailers (`Film (2020)-trailer.mkv` eller mappen `trailers/`) spelas från titelsidan och räknas inte som egna filmer. TMDB-trailern öppnas på YouTube. |
+| **Ditt år** | Årssammanfattning per person: timmar, mest sett, favoritgenre, musik och ljudböcker. |
+| **Timeshift i live-TV** | Pausa och spola tillbaka upp till 2 timmar (inställbart, med disktak). Knappen *Live* tar dig tillbaka till direktsändningen. |
+| **Hoppa över reklam** | Reklamavbrott i inspelningar hittas i bakgrunden (svart bild + tystnad) och hoppas över med en knapp eller automatiskt. |
+| **Lyssning** | **Sovtimer** (15–60 min eller vid kapitlets/avsnittets slut, med nedtoning), **jämn ljudnivå** i musik (ReplayGain/R128-taggar, annars mätning i bakgrunden), **låttexter** från `.lrc` eller taggar (synkade i webben), **smarta spellistor** (mest spelat, bortglömda favoriter, nyligen tillagt, aldrig spelat) och inställbara hopp för ljudböcker och poddar. *Hoppa över tystnad* i poddar finns i Android-appen. |
+| **Skärmtid** | Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer. |
+| **Följ serier** | *Nytt för dig* när nya avsnitt kommer, och personlig notis via ntfy eller webhook. Serier följs automatiskt när du lägger dem i Min lista eller ser klart ett avsnitt. |
+| **Automatisk offline-synk** | iPhone/iPad- och Android-appen håller de nästa osedda avsnitten nedladdade (valfritt bara på Wi-Fi) och tar bort sedda. |
+| **Diskövervakning** | Ledigt utrymme för /config, omkodning, inspelningar, poddar och bibliotek. Notis när det börjar ta slut, och omkodningsmappen städas tidigare när den är nästan full. |
+| **Import från Plex/Jellyfin** | Sedda och påbörjade titlar förs över från Plex eller Jellyfin/Emby, matchade på TMDB/IMDb/TVDB-id, sökväg eller titel – med förhandsvisning. |
+| **Prometheus** | Mätvärden på `/metrics` (strömmar, omkodningar, skanning, disk, tuners) för Grafana, skyddade med token. |
+| **DLNA** | Smart-TV utan app hittar biblioteket på hemnätet. Avstängt som standard, se nedan. |
 | Appar | iPhone, iPad, Apple TV, **Google TV/Android TV** och Android Automotive (Polestar 4) – med musik, ljudböcker och poddar i bilen och byte av ljud/undertext samt kapitel i spelaren. |
 
 ## Installation på Unraid
@@ -140,6 +155,8 @@ BraXhn TV är byggt för att kunna nås från internet. Detta finns inbyggt:
 | **Överbelastning** | Tidsgränser mot långsamma anslutningar (slowloris). Tak för samtidiga omkodningar: 4 totalt och 2 per användare, kan ändras. Remux har tak på 4 per användare och 16 totalt. Undertexter extraheras en gång och cachas. |
 | **Mediafiler** | ffmpeg får bara läsa lokala filer (`-protocol_whitelist file,pipe`), och undertextformat bestäms från filändelsen. |
 | **Tvåstegsbyte** | Att aktivera eller byta 2FA kräver lösenordet, så en stulen session räcker inte för att ta över kontot. |
+| **DLNA och mätvärden** | DLNA är avstängt som standard, svarar bara på hemnätet och aldrig via omvänd proxy, och följer en inställbar åldersgräns. `/metrics` är avstängt utan token; token sparas bara som hash och fel token räknas som ett misslyckat försök. |
+| **Skärmtid** | Gränserna upprätthålls av servern, så de gäller i alla appar och kan inte kringgås i klienten. Bara huvudkontot (eller admin på hemnätet) kan ändra dem. |
 | **Docker** | Servern körs som PUID/PGID (inte root), med `no-new-privileges` och mediamappen skrivskyddad. |
 | **Kodens integritet** | Tredjepartsfiler (hls.js, qrcode-generator) ligger i repot med checksummor som kontrolleras i CI och vid bygget – inget hämtas från CDN. Imagen innehåller `integrity.json` med SHA-256 för alla programfiler; säkerhetskontrollen larmar om något ändrats i containern. GitHub Actions är låsta på commit-SHA (uppdateras av Dependabot), och varje image byggs med SBOM och provenance och signeras med Sigstore. |
 | **Säkerhetslogg och säkerhetskontroll** | Inloggningar, misslyckade försök och adminändringar loggas med IP-adress. **Administration** visar en checklista över vad som bör åtgärdas. |
@@ -181,6 +198,10 @@ cosign verify ghcr.io/braxhn/braxhn-tv:latest \
 
 Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i H.264 kopieras utan omkodning. Antalet samtidiga kanaler begränsas av antalet tuners.
 
+**Timeshift:** live-TV sparas 2 timmar bakåt från att någon börjar titta på kanalen (*Timeshift (min)* och *Timeshift max (GB)* i Live-TV-panelen). Minst 2 GB lämnas alltid ledigt. Strömmen stängs när ingen hämtat den på 45 sekunder.
+
+**Reklam:** efter varje inspelning letas reklamavbrott upp i bakgrunden, en inspelning i taget och med lägsta prioritet. Det fungerar bara på kanaler som har svart bild och tystnad mellan reklamfilmerna. Analysen kan stängas av i panelen eller med `DVR_COMSKIP=0`.
+
 ## Sonarr, Radarr och önskningar
 
 - **Direkt skanning:** kopiera webhook-adressen under Administration → *Sonarr, Radarr och Trakt* och lägg in den i Sonarr/Radarr under *Settings → Connect → Webhook*. Ser Sonarr filerna under en annan sökväg (t.ex. `/tv`) anger du `/tv=/media/Serier`.
@@ -202,8 +223,28 @@ Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i
 /media/Filmer/Inception (2010)/Inception (2010).mkv
 /media/Filmer/Arrival.2016.1080p.BluRay.x264.mkv
 /media/Filmer/Arrival.2016.1080p.BluRay.x264.sv.srt     ← extern undertext
+/media/Filmer/Dune (2021)/Dune (2021) - 2160p.mkv       ← två versioner av samma film
+/media/Filmer/Dune (2021)/Dune (2021) - 1080p.mkv
+/media/Filmer/Dune (2021)/Dune (2021)-trailer.mp4       ← trailer (eller mappen trailers/)
 /media/Serier/Bron (2011)/Season 1/Bron - S01E01.mkv
+/media/Serier/Doctor Who (2005)/Season 1/...            ← årtalet skiljer serier med samma namn
+/media/Musik/Artist/Album/01 Låt.flac
+/media/Musik/Artist/Album/01 Låt.lrc                    ← låttext
 ```
+
+Filer utan årtal grupperas aldrig som versioner.
+
+## DLNA (smart-TV utan app)
+
+Slå på under **Administration → DLNA** (eller `DLNA=1`). TV:n hittar servern via multicast (239.255.255.250:1900), så containern behöver nätverkstypen **host** (eller macvlan/br0 med egen IP) – med bridge-nätverk syns servern inte. Om en annan DLNA-server redan använder port 1900: sätt `DLNA_SSDP=0` och ange adressen manuellt i spelaren.
+
+Alla enheter på hemnätet kan se och spela upp det som DLNA visar **utan inloggning**, så ställ in en åldersgräns om barnen har egna enheter. DLNA svarar bara på hemnätet och aldrig via en omvänd proxy. Ljudböcker och poddar visas inte, och det finns ingen sökning.
+
+## Import, diskövervakning och Prometheus
+
+- **Import från Plex/Jellyfin:** *Administration → Import*. Ange serverns adress och token (Plex: `X-Plex-Token`; Jellyfin/Emby: API-nyckel och användare) och vid behov sökvägsmappning (t.ex. `/data/movies` → `/media/Filmer`). Förhandsvisningen visar vad som matchar innan något skrivs. Redan sedda titlar markeras aldrig som osedda.
+- **Diskövervakning:** gränserna (standard 10 % och 10 GB) ställs in på adminsidan. Notistypen *Lågt diskutrymme* behöver kryssas i om du redan har sparat dina notisval.
+- **Prometheus:** skapa en token på adminsidan (visas en gång) eller sätt `METRICS_TOKEN`, och skrapa `/metrics` med `Authorization: Bearer <token>`. Utan token är `/metrics` avstängt.
 
 ## Hårdvaruomkodning
 
@@ -246,6 +287,15 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `BACKUP_PASSPHRASE` | – | Extern säkerhetskopia |
 | `WATCH_REGION` | SE | Land för *var kan jag se den?* |
 | `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
+| `LIVE_TIMESHIFT_MINUTES` | 120 | Minuter live-TV sparas bakåt (0 = av, max 720) |
+| `LIVE_TIMESHIFT_MAX_GB` | 20 | Diskutrymme för timeshift, alla kanaler tillsammans |
+| `DVR_COMSKIP` | 1 | 0 = leta inte reklamavbrott i inspelningar |
+| `CREDITS_PER_SCAN` | 40 | Äldre titlar per skanning som får rollista och trailer från TMDB (0 = av) |
+| `MUSIC_LOUDNESS` / `MUSIC_LOUDNESS_PER_SCAN` | 1 / 200 | Mät ljudstyrka för spår utan ReplayGain-taggar, och hur många per skanning |
+| `NEW_EPISODE_NOTIFY_DELAY` | 600 | Sekunder som nya avsnitt samlas innan den personliga notisen skickas |
+| `DISK_MIN_PCT` / `DISK_MIN_GB` | 10 / 10 | Varna när ledigt utrymme är under gränsen (0 = av) |
+| `METRICS_TOKEN` | – | Bearer-token för `/metrics` (kan även skapas på adminsidan) |
+| `DLNA` / `DLNA_IP` / `DLNA_SSDP` | 0 / auto / 1 | Slå på DLNA, adress som annonseras, och SSDP-annonsering |
 
 ## Testat och otestat
 
@@ -269,6 +319,12 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Ljudböcker och poddar | Kapitel från m4b och flera mp3-filer, position över filgränser i webben, RSS-tolkning, nedladdning och spärr mot lokala adresser. |
 | Sonarr/Radarr, Trakt, notiser | Mot simulerade tjänster: webhook och sökvägsmappning, önskan till Radarr, tvåvägssynk med Trakt, ntfy. |
 | Säkerhetskopior | Kryptering fram och tillbaka, fel lösenfras nekas, S3-signering mot AWS testvektor, återställning via omstart. |
+| Anpassningsbar kvalitet | Mastern listar rätt steg, och segmentgränser och starttider är identiska mellan stegen (ffprobe). |
+| Flera versioner, trailers | Gruppering, automatiskt val, versionsväljare och trailerknapp i webben; en kvarvarande version tar över när huvudfilen försvinner. |
+| Timeshift och reklam | Lång live-lista mot en simulerad direktsändning, disktak och städning; reklamavbrott hittades i en syntetisk fil med lockbeten. |
+| Lyssning | ReplayGain/R128-taggar, ebur128-mätning, LRC-tolkning, smarta listor och inställningar. |
+| Skärmtid, följ serier, offline-synk | Räkning utan dubbelräkning, nekade uppspelningar, notiser och synkplan (serversidan). |
+| Drift | Diskövervakning, import mot simulerade Plex- och Jellyfin-servrar, `/metrics` och DLNA:s SOAP/DIDL samt spärr mot andra nät. |
 
 **Inte testat här:**
 - inbränning av bildundertexter (ingen testfil fanns)
@@ -282,6 +338,10 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 - offline-nedladdning och musik i en riktig bil
 - CarPlay (kräver ett särskilt tillstånd från Apple och är därför inte byggt)
 - Docker-bygget
-- apparna, som byggs via GitHub Actions (se respektive README)
+- apparna, som byggs via GitHub Actions (se respektive README) – bl.a. sovtimer, rollista, smarta listor, Nytt för dig och automatisk offline-synk
+- anpassningsbar kvalitet i Safari, AVPlayer, ExoPlayer och Chromecast
+- timeshift i Safari/AVPlayer och reklamdetektering på riktiga sändningar
+- DLNA mot en riktig TV, och import mot riktiga Plex- och Jellyfin-servrar
+- TMDB-rollistor och personbilder mot riktiga TMDB (simulerat här)
 
 Licens: MIT.

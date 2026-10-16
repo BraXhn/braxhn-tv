@@ -182,6 +182,10 @@ test('trailerfiler känns igen och kopplas till rätt film', () => {
   assert.equal(trailers.pickOwner('/m/Annan.(2019).trailer.mp4', movies), 3);
   assert.equal(trailers.pickOwner('/m/Okänd-trailer.mkv', movies), null);
   assert.equal(trailers.pickOwner('/m/Film/trailers/Officiell trailer.mp4', [{ id: 9, path: '/m/Film/Film (2020).mkv' }]), 9);
+  // Flera versioner av samma film i mappen (samma id) – trailern hör till filmen
+  const vers = [{ id: 7, path: '/m/F (2020)/F (2020) - 2160p.mkv' }, { id: 7, path: '/m/F (2020)/F (2020) - 1080p.mkv' }];
+  assert.equal(trailers.pickOwner('/m/F (2020)/F (2020)-trailer.mkv', vers), 7);
+  assert.equal(trailers.pickOwner('/m/F (2020)/trailers/Teaser.mp4', vers), 7);
 });
 
 test('skanning: trailers blir inte egna filmer utan kopplas till filmen', { skip: !hasFfmpeg && 'ffmpeg saknas' }, async () => {

@@ -226,9 +226,10 @@ async function scanLibrary(lib) {
     moveImages(moves);
     for (const r of missing) removeImages(r.id);
   }
-  await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
   // Filmfiler med samma titel och år blir versioner av samma film
   groupVersions(lib, parseMovie);
+  // Efter grupperingen: en trailer i en mapp med flera versioner hör till filmen
+  await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
   await metadata(lib);
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
