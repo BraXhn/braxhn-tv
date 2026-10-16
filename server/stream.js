@@ -613,6 +613,16 @@ export function stopUserSessions(itemId, userId) {
   for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`)) stopProc(s);
 }
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
+// Diskövervakning: antal HLS-sessioner och rensning av inaktiva när omkodningsdisken är nästan full
+export const sessionCount = () => sessions.size;
+export function purgeIdle(idleMs) {
+  let n = 0;
+  for (const [k, s] of sessions) {
+    if (Date.now() - s.last <= idleMs) continue;
+    stopProc(s); fs.rmSync(s.dir, { recursive: true, force: true }); sessions.delete(k); n++;
+  }
+  return n;
+}
 export const hwMode = HW;
 
 /** Kodare för live-TV och efterbearbetning av inspelningar (avflätning + valfri skalning, hårdvara om möjligt) */
