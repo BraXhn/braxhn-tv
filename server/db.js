@@ -152,6 +152,9 @@ addCol('items', 'abs_episode', 'INTEGER');
 addCol('items', 'sub_auto', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'chapters', 'TEXT');
 addCol('items', 'src_name', 'TEXT'); // seriens namn enligt mappen/filen (TMDB kan byta titel)
+// Rollista och trailers: credits_done = rollistan hämtad (1) eller saknas hos TMDB (2), trailer_yt = YouTube-nyckel från TMDB
+addCol('items', 'credits_done', 'INTEGER NOT NULL DEFAULT 0');
+addCol('items', 'trailer_yt', 'TEXT');
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

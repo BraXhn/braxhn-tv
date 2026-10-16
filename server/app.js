@@ -31,6 +31,11 @@ import * as comskip from './comskip.js';
 import * as timeshift from './timeshift.js';
 import * as streaming from './streaming.js';
 import { checkManifest } from './verify.js';
+import { tmdb } from './scanner.js';
+import { streamFile } from './util.js';
+import * as people from './people.js';
+import * as trailers from './trailers.js';
+import * as wrapped from './wrapped.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
@@ -458,6 +463,7 @@ route('GET', '/api/items/:id', user, (c) => {
   if (!allowedFor(uid, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const out = oneItem(uid, it.id);
   out.inWatchlist = !!get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, it.kind === 'episode' ? it.parent_id : it.id);
+  Object.assign(out, titleExtras(c.user, it)); // rollista och trailers
   if (it.collection_id) {
     const col = get('SELECT * FROM collections WHERE id=?', it.collection_id);
     if (col) out.collectionInfo = { id: col.id, name: col.name, items: listItems(uid, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 50) };
@@ -1614,6 +1620,69 @@ route('GET', '/api/security-check', admin, (c) => {
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
   if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
   send(c.res, 200, items);
+});
+
+// ---------- Skådespelare, trailers och årssammanfattning ----------
+const TRAILER_SCOPE = 6.5e9;
+/** Rollista (avsnitt visar seriens), lokala trailers och YouTube-trailer (inte för barnprofiler – länken leder ut från appen) */
+function titleExtras(u, it) {
+  const ep = it.kind === 'episode';
+  return { cast: people.castOf(ep ? it.parent_id : it.id), trailers: ep ? [] : trailers.trailersOf(it.id),
+    youtube: !ep && u.max_age == null && trailers.youtubeOk(it.trailer_yt) ? it.trailer_yt : null };
+}
+route('GET', '/api/search/people', user, (c) => {
+  const q = String(c.q.get('q') || '').trim().slice(0, 100);
+  send(c.res, 200, q.length < 2 ? [] : people.searchPeople(q, ageFilter(c.user.id), 20));
+});
+route('GET', '/api/people/:pid', user, async (c) => {
+  const pid = +c.p.pid;
+  if (!people.personRow(pid)) return fail(c.res, 404, 'Finns inte');
+  // Bara titlar som finns i biblioteket och som profilen får se; utan sådana visas inte personen alls
+  const items = listItems(c.user.id, `i.kind IN ('movie','show') AND i.id IN (SELECT item_id FROM item_people WHERE person_id=?)`, [pid],
+    'i.year IS NULL, i.year DESC, i.sort_title', 300, 0, { slim: true });
+  if (!items.length) return fail(c.res, 404, 'Finns inte');
+  const roles = people.rolesOf(pid);
+  const info = await people.person(pid, tmdb, hasTmdb());
+  send(c.res, 200, { ...info, items: items.map(i => ({ ...i, roles: roles.get(i.id) || [] })) });
+});
+route('GET', '/api/people/:pid/image', img, async (c) => {
+  const f = await people.personImage(+c.p.pid);
+  if (!f) return fail(c.res, 404, 'Ingen bild');
+  fs.readFile(f, (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+});
+// Lokala trailers spelas direkt (som filen är). Mediatoken gäller bara den trailern.
+const trailerStream = { auth: true, media: true, scope: (p) => TRAILER_SCOPE + (+p.tid) };
+const trailerFor = (c) => {
+  const t = trailers.trailerRow(+c.p.tid);
+  const it = t && get('SELECT * FROM items WHERE id=?', t.item_id);
+  if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
+  return t;
+};
+const serveTrailer = (c) => {
+  const t = trailerFor(c); if (!t) return;
+  fs.stat(t.path, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Filen finns inte längre')
+    : streamFile(c.req, c.res, t.path, s.size, { 'Content-Type': MIME[path.extname(t.path).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' }));
+};
+route('GET', '/api/trailers/:tid/stream', trailerStream, serveTrailer);
+route('HEAD', '/api/trailers/:tid/stream', trailerStream, serveTrailer);
+// För appar och Chromecast: färdig URL med kortlivad token (webben använder kakan)
+route('GET', '/api/trailers/:tid/play', user, (c) => {
+  const t = trailerFor(c); if (!t) return;
+  const token = c.user.via !== 'cookie' ? createSession(c.user.id, 'media', { item: TRAILER_SCOPE + t.id, ip: clientIp(c.req) }) : null;
+  send(c.res, 200, { url: `/api/trailers/${t.id}/stream${token ? '?t=' + token : ''}`, mime: MIME[path.extname(t.path).toLowerCase()] || 'video/mp4' });
+});
+// Årssammanfattning: den egna, eller (administratör på betrott nät) någon annans
+route('GET', '/api/wrapped/:year', user, (c) => {
+  const year = parseInt(c.p.year);
+  if (!(year >= 2000 && year <= 2100)) return fail(c.res, 400, 'Ogiltigt år');
+  const adminOk = !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req));
+  const uid = c.q.get('user') ? +c.q.get('user') : c.user.id;
+  if (uid !== c.user.id && !adminOk) return fail(c.res, 403, 'Du kan bara se din egen sammanfattning');
+  const u = get('SELECT id, name FROM users WHERE id=?', uid);
+  if (!u) return fail(c.res, 404, 'Användaren finns inte');
+  send(c.res, 200, { ...wrapped.wrapped(uid, year), user: u, years: wrapped.years(uid),
+    users: adminOk ? all('SELECT id, name FROM users ORDER BY name COLLATE NOCASE') : undefined });
 });
 
 // ---------- statiska filer ----------

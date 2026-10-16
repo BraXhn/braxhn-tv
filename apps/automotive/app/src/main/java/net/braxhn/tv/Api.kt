@@ -49,6 +49,19 @@ class App : Application() {
     val id: String, val label: String, val lang: String? = null, val forced: Boolean? = null, val bitmap: Boolean? = null
 )
 
+@Serializable data class CastMember(val id: Int, val name: String, val role: String = "cast", val character: String? = null)
+
+/** Rollistan som en textrad, t.ex. "Regi: X · Medverkande: A, B, C" (null om den saknas) */
+fun castLine(cast: List<CastMember>?): String? {
+    if (cast.isNullOrEmpty()) return null
+    val lead = cast.filter { it.role != "cast" }.map { it.name }.distinct()
+    val actors = cast.filter { it.role == "cast" }.take(8).map { it.name }
+    val parts = mutableListOf<String>()
+    if (lead.isNotEmpty()) parts.add((if (cast.any { it.role == "creator" }) "Skapad av: " else "Regi: ") + lead.joinToString(", "))
+    if (actors.isNotEmpty()) parts.add("Medverkande: " + actors.joinToString(", "))
+    return if (parts.isEmpty()) null else parts.joinToString("  ·  ")
+}
+
 @Serializable data class ItemRef(val id: Int, val season: Int? = null, val episode: Int? = null, val position: Double? = null)
 
 @Serializable data class MediaItem(
@@ -60,7 +73,8 @@ class App : Application() {
     val intro: Marker? = null, val credits: Double? = null,
     val children: List<MediaItem>? = null, val next: ItemRef? = null,
     val audio: List<AudioStream>? = null, val subtitles: List<SubtitleTrack>? = null,
-    val nextId: Int? = null, val prevId: Int? = null
+    val nextId: Int? = null, val prevId: Int? = null,
+    val cast: List<CastMember>? = null
 ) {
     val isShow get() = kind == "show"
     val isEpisode get() = kind == "episode"

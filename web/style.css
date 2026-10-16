@@ -303,3 +303,18 @@ dialog.wide{width:min(760px,94vw)}
 /* Timeshift i live-TV: röd "Live" vid direktsändningen, annars en knapp tillbaka dit */
 #player .pbar .liveind{background:rgba(20,22,30,.85);border:1px solid #fff3;color:#fff;font-weight:700}
 #player .pbar .liveind.on{background:#c62828;border-color:#c62828}
+/* Rollista och personsidor */
+.shelf.people{grid-auto-columns:112px}
+.pcard .art{aspect-ratio:1;border-radius:50%}
+.pcard .art .ph{font-size:26px}
+.pcard .t,.pcard .s{text-align:center}
+.person-head{display:flex;gap:28px;align-items:flex-start;margin-bottom:10px}
+.person-head .pcard{flex:0 0 180px}
+.person-head .bio{white-space:pre-line}
+.person-head .bio.clamp{display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical;overflow:hidden}
+.role{font-size:13px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8px;display:block}
+/* Årssammanfattning */
+.wrap-hero{font-size:17px;color:var(--dim);margin:-10px 0 20px}
+.wrap-hero b{color:var(--text)}
+@media (max-width:700px){.person-head{flex-direction:column;gap:16px}.person-head .pcard{flex:none;width:130px}}

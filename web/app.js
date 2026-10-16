@@ -200,12 +200,14 @@ views.lib = async (id) => {
 views.search = async (q) => {
   q = decodeURIComponent(q || '');
   if ($('#q').value !== q && document.activeElement !== $('#q')) $('#q').value = q;
-  const r = q.length >= 1 ? await api('/search?q=' + encodeURIComponent(q)) : [];
+  const [r, ppl] = q.length >= 1 ? await Promise.all([api('/search?q=' + encodeURIComponent(q)),
+    api('/search/people?q=' + encodeURIComponent(q)).catch(e => { if (e?.aborted) throw e; return []; })]) : [[], []];
   const top = r.filter(i => i.kind !== 'episode'), eps = r.filter(i => i.kind === 'episode');
   main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1></div>
     ${top.length ? `<section class="section"><h2>Filmer och serier</h2><div class="grid">${top.map(i => card(i)).join('')}</div></section>` : ''}
+    ${ppl.length ? `<section class="section"><h2>Personer</h2><div class="shelf people">${ppl.map(p => personCard(p, `${p.titles} ${p.titles === 1 ? 'titel' : 'titlar'}`)).join('')}</div></section>` : ''}
     ${eps.length ? `<section class="section"><h2>Avsnitt</h2><div class="grid">${eps.map(i => card(i, true)).join('')}</div></section>` : ''}
-    ${!r.length ? '<div class="empty">Inga träffar.</div>' : ''}`;
+    ${!r.length && !ppl.length ? '<div class="empty">Inga träffar.</div>' : ''}`;
 };
 
 function heroHtml(it, extra = '') {
@@ -228,7 +230,7 @@ views.item = async (id) => {
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
     <a class="btn" href="/api/stream/${it.id}/download" download>Ladda ner</a>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
@@ -250,6 +252,8 @@ views.item = async (id) => {
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   bindWatchlist(it);
+  bindTrailers(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it));
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
@@ -269,7 +273,7 @@ function showView(it) {
   const nx = it.next;
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
     `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
@@ -288,6 +292,8 @@ function showView(it) {
   };
   renderEps();
   bindWatchlist(it);
+  bindTrailers(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it));
   main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
   $$('#tabs button').forEach(b => b.onclick = () => {
     cur = +b.dataset.s; store.set('season.' + it.id, cur);
@@ -322,6 +328,101 @@ views.collection = async (id) => {
     <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;
   const first = c.items.find(i => !i.watched);
   if (first) $('#playfirst').onclick = (e) => startPlay(e.currentTarget, first.id, first.position || 0);
+};
+
+// ---------- Skådespelare och personsidor ----------
+const ROLE_NAME = { director: 'Regi', creator: 'Skapare' };
+const initials = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+function personArt(p) {
+  const h = hue(p.name);
+  return `<div class="art"><div class="ph" style="--h1:hsl(${h} 30% 34%);--h2:hsl(${(h + 40) % 360} 35% 18%)">${esc(initials(p.name))}</div>
+    ${p.image ? `<img loading="lazy" src="/api/people/${+p.id}/image" alt="" data-fb="1">` : ''}</div>`;
+}
+const personCard = (p, sub = '') => `<a class="card pcard" href="#/person/${+p.id}">${personArt(p)}<div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></a>`;
+function castShelf(it) {
+  if (!it.cast?.length) return '';
+  return `<section class="section"><h2>Rollista</h2><div class="shelf people">${it.cast.map(p => personCard(p, p.role === 'cast' ? p.character || '' : ROLE_NAME[p.role] || '')).join('')}</div></section>`;
+}
+const fmtDay = (d) => { const t = new Date(d + 'T12:00:00'); return isNaN(t) ? d : t.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' }); };
+views.person = async (id) => {
+  const p = await api('/people/' + encodeURIComponent(id));
+  const age = p.birthday ? Math.floor(((p.deathday ? new Date(p.deathday) : new Date()) - new Date(p.birthday)) / 31557600000) : null;
+  const life = [p.birthday ? `Född ${fmtDay(p.birthday)}${!p.deathday && age ? ` (${age} år)` : ''}` : '', p.birthplace || '',
+    p.deathday ? `Död ${fmtDay(p.deathday)}${age ? ` (${age} år)` : ''}` : ''].filter(Boolean);
+  const roleText = (i) => i.roles.map(r => r.role === 'cast' ? (r.character || 'Medverkar') : ROLE_NAME[r.role] || r.role).join(', ');
+  main.innerHTML = `<div class="person-head"><div class="card pcard">${personArt(p)}</div>
+    <div><h1>${esc(p.name)}</h1><div class="meta">${life.map(x => `<span>${esc(x)}</span>`).join('')}</div>
+    ${p.bio ? `<p class="overview bio clamp" id="bio">${esc(p.bio)}</p><button class="ghost small" id="biomore" hidden>Visa mer</button>` : ''}</div></div>
+    <section class="section"><h2>I biblioteket <span class="muted small">${p.items.length} ${p.items.length === 1 ? 'titel' : 'titlar'}</span></h2>
+    <div class="grid">${p.items.map(i => `<div>${card(i)}<div class="role">${esc(roleText(i))}</div></div>`).join('')}</div></section>`;
+  const bio = $('#bio');
+  if (bio && bio.scrollHeight > bio.clientHeight + 4) {
+    $('#biomore').hidden = false;
+    $('#biomore').onclick = (e) => { const closed = bio.classList.toggle('clamp'); e.currentTarget.textContent = closed ? 'Visa mer' : 'Visa mindre'; };
+  }
+};
+
+// ---------- Trailers ----------
+function trailerBtns(it) {
+  const local = (it.trailers || []).map(t => `<button class="ghost" data-trailer="${+t.id}">▶ ${esc(t.name)}</button>`).join('');
+  // YouTube öppnas i ny flik (CSP tillåter inte inbäddning)
+  const yt = it.youtube ? `<a class="btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(it.youtube)}" target="_blank" rel="noopener noreferrer">Trailer (YouTube)</a>` : '';
+  return local + yt;
+}
+function bindTrailers(it) {
+  $$('[data-trailer]').forEach(b => b.onclick = () => playTrailer(+b.dataset.trailer, it.title));
+}
+function playTrailer(id, title) {
+  const d = document.createElement('dialog');
+  d.className = 'wide trailer';
+  d.innerHTML = `<h2>${esc(title)} – trailer</h2><video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="ghost" id="tclose">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  const v = $('video', d);
+  v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)');
+  const leave = onLeave(() => { if (d.open) d.close(); });
+  d.onclose = () => { leaveFns.delete(leave); v.onerror = null; stopVideo(v); d.remove(); };
+  $('#tclose', d).onclick = () => d.close();
+}
+
+// ---------- Årssammanfattning ----------
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+views.wrapped = async (year, uid) => {
+  year = parseInt(year) || new Date().getFullYear();
+  const w = await api(`/wrapped/${year}${uid ? '?user=' + encodeURIComponent(uid) : ''}`);
+  const h = (x) => (x || 0).toLocaleString('sv-SE', { maximumFractionDigits: 1 });
+  const yrs = [...new Set([year, new Date().getFullYear(), ...w.years])].sort((a, b) => b - a);
+  const other = w.user.id !== me.id;
+  const maxM = Math.max(1, ...w.video.months);
+  const empty = !w.video.plays && !w.music.plays && !w.books.list.length;
+  const rows = (list, f) => list.length ? `<table>${list.map((x, i) => `<tr><td class="muted">${i + 1}</td>${f(x)}</tr>`).join('')}</table>` : '<p class="muted">–</p>';
+  main.innerHTML = `<div class="toolbar"><h1>${other ? 'Året för ' + esc(w.user.name) : 'Ditt år'} – ${year}</h1>
+    <select id="wy" aria-label="År">${yrs.map(y => `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`).join('')}</select>
+    ${w.users ? `<select id="wu" aria-label="Användare">${w.users.map(u => `<option value="${+u.id}"${u.id === w.user.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : ''}</div>
+    ${empty ? `<div class="empty"><h2>Ingen statistik för ${year}</h2><p>Titta på film och serier eller lyssna på musik och ljudböcker så fylls sammanfattningen på.</p></div>` : `
+    <p class="wrap-hero">${other ? esc(w.user.name) : 'Du'} tittade och lyssnade i <b>${h(w.hours)} timmar</b> under ${year}${w.topGenre ? ` – favoritgenren var <b>${esc(w.topGenre)}</b>` : ''}.</p>
+    <div class="tiles">
+      <div class="tile"><b>${h(w.video.hours)} h</b><span>film och tv</span></div>
+      <div class="tile"><b>${w.video.movies}</b><span>filmer</span></div>
+      <div class="tile"><b>${w.video.episodes}</b><span>avsnitt</span></div>
+      <div class="tile"><b>${h(w.music.hours)} h</b><span>musik (${w.music.plays} spelningar)</span></div>
+      <div class="tile"><b>${h(w.books.hours)} h</b><span>ljudböcker</span></div>
+      <div class="tile"><b>${esc(w.topGenre || '–')}</b><span>favoritgenre</span></div>
+    </div>
+    ${w.video.titles.length ? `<section class="section"><h2>Mest sett</h2><div class="shelf">${w.video.titles.map((t, i) =>
+      `<a class="card" href="#/item/${+t.id}">${art({ id: t.id, title: t.title, kind: 'movie', poster: true })}<div class="t">${i + 1}. ${esc(t.title)}</div>
+      <div class="s">${t.plays} ${t.plays === 1 ? 'gång' : 'gånger'}</div></a>`).join('')}</div></section>` : ''}
+    ${w.video.plays ? `<div class="panel"><h2>Uppspelningar per månad</h2><div class="bars">${w.video.months.map((n, i) =>
+      `<div class="bar" title="${MONTHS[i]}: ${n}"><i style="height:${Math.max(2, n / maxM * 100)}%"></i><span>${MONTHS[i]}</span></div>`).join('')}</div></div>` : ''}
+    <div class="grid2">
+      <div class="panel"><h2>Genrer</h2>${rows(w.video.genres, g => `<td>${esc(g.name)}</td><td class="r">${g.plays}</td>`)}</div>
+      <div class="panel"><h2>Mest spelade artister</h2>${rows(w.music.artists, a => `<td><a href="#/artist/${+a.id}">${esc(a.name)}</a></td><td class="r">${a.plays} ggr</td>`)}</div>
+      <div class="panel"><h2>Mest spelade låtar</h2>${rows(w.music.tracks, t => `<td>${t.album ? `<a href="#/album/${+t.album}">${esc(t.title)}</a>` : esc(t.title)}<div class="muted small">${esc(t.artist || '')}</div></td><td class="r">${t.plays} ggr</td>`)}</div>
+      <div class="panel"><h2>Ljudböcker</h2>${rows(w.books.list, b => `<td><a href="#/book/${+b.id}">${esc(b.title)}</a><div class="muted small">${esc(b.author || '')}</div></td><td class="r">${b.finished ? 'Utläst' : 'Påbörjad'}</td>`)}</div>
+    </div>`}`;
+  const go = () => { const u = $('#wu')?.value; location.hash = `#/wrapped/${$('#wy').value}${u && +u !== me.id ? '/' + u : ''}`; };
+  $('#wy').onchange = go;
+  if ($('#wu')) $('#wu').onchange = go;
 };
 
 // ---------- Profiler: "Vem tittar?" ----------
@@ -448,6 +549,9 @@ views.account = async () => {
     <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut.</p>
     <div class="row" style="margin-top:12px"><button class="primary">Byt lösenord</button></div></form>
   </div>
+  <div class="panel"><h2>Årssammanfattning</h2>
+    <p class="muted small">Det du har sett och lyssnat på mest under året: titlar, timmar, favoritgenre, musik och ljudböcker.</p>
+    <div class="row"><a class="btn" href="#/wrapped/${new Date().getFullYear()}">Visa ${new Date().getFullYear()}</a></div></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
       <div class="row"><button class="ghost" id="newrc">Skapa nya reservkoder</button><button class="danger" id="off">Stäng av</button></div>`
@@ -1007,7 +1111,7 @@ views.stats = async () => {
   const maxDay = Math.max(1, ...S.days.map(d => d.n));
   const modeName = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' };
   main.innerHTML = `
-  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span></div>
+  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span><a class="btn small" href="#/wrapped/${new Date().getFullYear()}">Årssammanfattning</a></div>
   <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now"><div class="spin"></div></div></div>
   <div class="tiles">
     <div class="tile"><b>${L.movies}</b><span>filmer</span></div><div class="tile"><b>${L.shows}</b><span>serier</span></div>
