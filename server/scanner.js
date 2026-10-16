@@ -153,6 +153,7 @@ async function scanLibrary(lib) {
   const known = new Map(all(`SELECT id,path,size,mtime FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
   if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
   const seen = new Set();
+  const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
   // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
   // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.
   const pending = []; let flushed = Date.now();
@@ -192,9 +193,9 @@ async function scanLibrary(lib) {
         pending.push(() => {
           if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
             showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-          else run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+          else newEpisodes.push(Number(run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
-            st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+            st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now()).lastInsertRowid));
           // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
           run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
           run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
@@ -217,6 +218,8 @@ async function scanLibrary(lib) {
     for (const r of missing) removeImages(r.id);
   }
   await metadata(lib);
+  // Efter metadata så att notisen får avsnittens riktiga namn
+  if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
   await thumbnails(lib);
   await chapters(lib);
   await autoSubtitles(lib);
