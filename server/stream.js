@@ -286,6 +286,8 @@ export function hlsParams(d, o, token) {
   const p = new URLSearchParams({ mode: d.mode, q: d.q, audio: d.audio, am: d.audioMode, burn: d.burn, tm: d.tonemap ? '1' : '0', fmt: d.fmt, tag: d.tag || '',
     pid: crypto.randomBytes(4).toString('hex') });
   if (d.hdr) p.set('vr', d.hdr === 'hlg' ? 'HLG' : 'PQ');
+  // Anpassningsbar kvalitet: mastern listar även lägre steg (bara vid omkodning med automatisk kvalitet)
+  if (d.abr && d.mode === 'transcode') p.set('abr', '1');
   if (o.hlsSubs) p.set('hlssubs', '1');
   if (token) p.set('t', token);
   return p;
@@ -298,33 +300,73 @@ function readParams(q) {
     fmt: q.get('fmt') === 'fmp4' ? 'fmp4' : 'ts', tag: ['hvc1', 'dvh1'].includes(q.get('tag')) ? q.get('tag') : '',
     burn: /^e\d+$/.test(q.get('burn') || '') ? q.get('burn') : '', tonemap: q.get('tm') === '1', hlsSubs: q.get('hlssubs') === '1',
     vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : '',
-    pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : ''
+    pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1'
   };
 }
 const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
 const withT = (p, q) => { const t = q.get('t'); if (t) p.set('t', t); return p; };
 
+// ---------------- anpassningsbar kvalitet (ABR) ----------------
+// Lägre steg som spelaren får växla ner till. Varje steg är en egen omkodningssession (q ingår i nyckeln)
+// och omkodas först när spelaren faktiskt hämtar dess segment. Segmentgränserna (fasta SEG s) och
+// tidsstämplarna (output_ts_offset) är identiska mellan stegen, så bytena blir sömlösa.
+const ABR_STEPS = ['1080', '720', '480'];
+const audioKbps = (d) => d.audioMode === 'eac3' ? 640 : d.audioMode === 'copy' ? 640 : 192;
+/** Varianter för mastern: [{ q, h, w, bw }] – vald kvalitet först, sedan lägre steg (≤ källans höjd och ≤ vald kvalitet) */
+export function abrVariants(it, d) {
+  const v = videoOf(it);
+  const srcH = v?.height || 0;
+  const size = (q) => {
+    const Q = QUALITIES[q];
+    const h = Q.h && (!srcH || srcH > Q.h) ? Q.h : srcH || Q.h || 720;
+    const w = v?.width && v?.height ? Math.round(v.width * h / v.height / 2) * 2 : Math.round(h * 16 / 9 / 2) * 2;
+    const vk = Q.br || (h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000);
+    // BANDWIDTH är toppvärdet: maxrate + marginal för buffert och muxning + ljud
+    return { q, h, w, bw: Math.round((vk * 1.1 + audioKbps(d)) * 1000) };
+  };
+  const top = size(d.q);
+  const out = [top];
+  if (!(d.abr && d.mode === 'transcode')) return out;
+  for (const q of ABR_STEPS) if (QUALITIES[q].h < top.h && (!srcH || QUALITIES[q].h <= srcH)) out.push(size(q));
+  return out;
+}
+
 export function serveMaster(res, it, query) {
   const d = normParams(readParams(query));
+  if (d.abr && d.mode === 'transcode') return serveAbrMaster(res, it, query, d);
   const v = videoOf(it);
   const Q = QUALITIES[d.q];
   const h = Q.h && v?.height > Q.h ? Q.h : v?.height || 720;
   const w = v?.width && v?.height ? Math.round(v.width * h / v.height / 2) * 2 : Math.round(h * 16 / 9);
   const bw = (Q.br || (d.mode === 'remux' ? Math.max(4000, Math.round((it.size * 8 / (it.duration || 1)) / 1000)) : h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000)) * 1000;
   const params = new URLSearchParams(query); params.delete('hlssubs');
-  let m = '#EXTM3U\n#EXT-X-VERSION:4\n';
-  let subsAttr = '';
-  if (d.hlsSubs) {
-    const subs = subtitlesOf(it).filter(s => !s.bitmap);
-    for (const s of subs) {
-      const sp = withT(new URLSearchParams(), query);
-      m += `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${m3uAttr(s.label || s.id)}",LANGUAGE="${m3uAttr(s.lang || 'und')}",AUTOSELECT=${s.forced ? 'YES' : 'NO'},DEFAULT=NO,FORCED=${s.forced ? 'YES' : 'NO'},URI="subs-${s.id}.m3u8?${sp}"\n`;
-    }
-    if (subs.length) subsAttr = ',SUBTITLES="subs"';
-  }
+  const subs = subsMedia(it, query, d);
+  let m = '#EXTM3U\n#EXT-X-VERSION:4\n' + subs.m;
   // VIDEO-RANGE talar om för Apple-enheter att strömmen är HDR (krävs för att HDR-läget ska slås på)
   const vr = d.mode === 'remux' && d.vr ? `,VIDEO-RANGE=${d.vr}` : '';
-  m += `#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${w}x${h}${vr}${subsAttr}\nindex.m3u8?${params}\n`;
+  m += `#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${w}x${h}${vr}${subs.attr}\nindex.m3u8?${params}\n`;
+  send(res, 200, m, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+}
+
+function subsMedia(it, query, d) {
+  let m = '', attr = '';
+  if (!d.hlsSubs) return { m, attr };
+  const subs = subtitlesOf(it).filter(s => !s.bitmap);
+  for (const s of subs) {
+    const sp = withT(new URLSearchParams(), query);
+    m += `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${m3uAttr(s.label || s.id)}",LANGUAGE="${m3uAttr(s.lang || 'und')}",AUTOSELECT=${s.forced ? 'YES' : 'NO'},DEFAULT=NO,FORCED=${s.forced ? 'YES' : 'NO'},URI="subs-${s.id}.m3u8?${sp}"\n`;
+  }
+  if (subs.length) attr = ',SUBTITLES="subs"';
+  return { m, attr };
+}
+// Flera varianter: vald kvalitet först (Apple-enheter startar på första varianten), sedan fallande
+function serveAbrMaster(res, it, query, d) {
+  const subs = subsMedia(it, query, d);
+  let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + subs.m;
+  for (const x of abrVariants(it, d)) {
+    const params = new URLSearchParams(query); params.delete('hlssubs'); params.set('q', x.q);
+    m += `#EXT-X-STREAM-INF:BANDWIDTH=${x.bw},RESOLUTION=${x.w}x${x.h}${subs.attr}\nindex.m3u8?${params}\n`;
+  }
   send(res, 200, m, { 'Content-Type': 'application/vnd.apple.mpegurl' });
 }
 
@@ -518,6 +560,11 @@ function ensureCapacity(s, userId) {
     return [...sessions.values()].filter(x => x !== s && x.proc && x.d.mode === 'remux').length < 16;
   }
   const lim = limits();
+  // ABR: spelaren har bytt kvalitetssteg i samma uppspelning (samma pid) – det gamla steget behövs inte längre.
+  // Steg som någon fortfarande väntar på lämnas kvar (annars kan två steg turas om att stoppa varandra).
+  for (const x of sessions.values()) {
+    if (x !== s && x.proc && x.d.mode === 'transcode' && s.d.pid && x.d.pid === s.d.pid && x.user === s.user && x.item === s.item && !x.waiting) stopProc(x);
+  }
   const active = [...sessions.values()].filter(x => x !== s && x.proc && x.d.mode === 'transcode');
   // Användarens äldsta omkodningar stoppas först (t.ex. vid byte av kvalitet eller enhet)
   const mine = active.filter(x => x.key.startsWith(userId + '-')).sort((a, b) => a.last - b.last);
@@ -531,7 +578,7 @@ function sessionFor(it, query, userId) {
   const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
-    s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now() };
+    s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0 };
     fs.mkdirSync(s.dir, { recursive: true });
     sessions.set(key, s);
   }
@@ -569,6 +616,16 @@ export async function serveSegment(req, res, it, n, query, userId) {
   s.total = total;
   if (!(n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
   if (!complete(s, n)) {
+    s.waiting++;
+    try { const r = await awaitSegment(req, res, it, s, n, userId); if (r !== true) return; }
+    finally { s.waiting--; }
+  }
+  throttle(s, n);
+  sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
+}
+/** Väntar tills segment n är klart (startar ffmpeg vid behov). Allt annat än true = ett felsvar har skickats. */
+async function awaitSegment(req, res, it, s, n, userId) {
+  {
     resume(s);
     const hi = s.proc ? highestFile(s) : -1;
     const covered = s.proc && n >= s.start && n <= Math.max(hi, s.start) + 4;
@@ -590,8 +647,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
       await new Promise(r => setTimeout(r, 120));
     }
   }
-  throttle(s, n);
-  sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
+  return true;
 }
 function sendSegment(req, res, file, type) {
   let st; try { st = fs.statSync(file); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }

@@ -69,11 +69,11 @@ function deviceName(ua = '') {
 // ---------------- statistik ----------------
 export function stats() {
   const lib = get(`SELECT
-    (SELECT COUNT(*) FROM items WHERE kind='movie') AS movies,
+    (SELECT COUNT(*) FROM items WHERE kind='movie' AND version_of IS NULL) AS movies,
     (SELECT COUNT(*) FROM items WHERE kind='show') AS shows,
     (SELECT COUNT(*) FROM items WHERE kind='episode') AS episodes,
     (SELECT COALESCE(SUM(size),0) FROM items WHERE path IS NOT NULL) AS bytes,
-    (SELECT COALESCE(SUM(duration),0) FROM items WHERE path IS NOT NULL) AS seconds`);
+    (SELECT COALESCE(SUM(duration),0) FROM items WHERE path IS NOT NULL AND version_of IS NULL) AS seconds`);
   const since = now() - 30 * 86400;
   const users = all(`SELECT u.name, COUNT(p.id) AS plays,
       (SELECT COALESCE(SUM(i.duration),0) FROM progress g JOIN items i ON i.id=g.item_id WHERE g.user_id=u.id AND g.watched=1 AND g.updated > ?) AS watched_seconds
