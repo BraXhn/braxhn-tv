@@ -300,3 +300,6 @@ dialog.wide{width:min(760px,94vw)}
 /* Rader som går att välja med tangentbord/fjärrkontroll (keyClick) */
 [role=button]{cursor:pointer}
 [role=button]:focus-visible{outline:2px solid var(--accent,#ffc857);outline-offset:-2px}
+/* Timeshift i live-TV: röd "Live" vid direktsändningen, annars en knapp tillbaka dit */
+#player .pbar .liveind{background:rgba(20,22,30,.85);border:1px solid #fff3;color:#fff;font-weight:700}
+#player .pbar .liveind.on{background:#c62828;border-color:#c62828}

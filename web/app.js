@@ -684,6 +684,8 @@ async function playLive(ch) {
     <div class="pbar"><button class="ghost small" id="lclose">← Tillbaka</button><span class="title">${esc(ch.number ? ch.number + ' · ' : '')}${esc(ch.name)}</span>
       <span class="muted small" id="lnow">${ch.now ? esc(ch.now.title) + ' · ' + hhmm(ch.now.start) + '–' + hhmm(ch.now.stop) : ''}</span>
       <span class="muted small" id="lstat">Startar kanalen…</span>
+      <button class="ghost small" id="lback" title="Spola tillbaka 30 sekunder" hidden>⏪ 30 s</button><button class="ghost small" id="lfwd" title="Spola fram 30 sekunder" hidden>30 s ⏩</button>
+      <button class="small liveind" id="llive" hidden>● Live</button>
       ${ch.now ? `<button class="ghost small" id="lrec">⏺ Spela in</button>` : ''}</div>`;
   overlayOpen(el);
   const v = $('#lvid', el), stat = $('#lstat', el);
@@ -702,7 +704,9 @@ async function playLive(ch) {
     else {
       const Hls = await loadHls();
       if (!cur()) return;
-      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
+      // Timeshift: servern sparar upp till några timmar bakåt. Spelaren hoppar inte själv tillbaka till live
+      // (liveMaxLatencyDurationCount är oändlig som standard) och håller bara en kort buffert bakåt i minnet.
+      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, backBufferLength: 90, xhrSetup: (x) => { x.withCredentials = true; } });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || !cur() || lp.hls !== hls) return;
         if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
@@ -711,28 +715,74 @@ async function playLive(ch) {
       });
       hls.loadSource(r.url); hls.attachMedia(v);
     }
-    v.addEventListener('playing', () => setStat('Live'), { once: true });
+    v.addEventListener('playing', () => { setStat(''); liveControls(lp); }, { once: true });
     v.play().catch(() => {});
   } catch (e) { setStat(e.message); }
+}
+// Timeshift i livespelaren: spola i det sparade fönstret och "Live" som hoppar till direktsändningen när man ligger efter
+function liveControls(lp) {
+  const { v, el } = lp, btn = $('#llive', el), back = $('#lback', el), fwd = $('#lfwd', el);
+  if (!btn || LP !== lp) return;
+  const range = () => { const s = v.seekable; return s.length ? { start: s.start(0), end: s.end(s.length - 1) } : null; };
+  // Direktsändningens punkt: hls.js räknar fram den, Safari ger slutet av det spolbara fönstret
+  const edge = () => { const h = lp.hls?.liveSyncPosition; if (h != null && isFinite(h)) return h; const r = range(); return r ? r.end : null; };
+  const seekTo = (t) => { const r = range(), e = edge(); if (!r || e == null) return; v.currentTime = Math.max(r.start + 0.5, Math.min(e, t)); };
+  btn.onclick = () => { const e = edge(); if (e != null) v.currentTime = e; v.play().catch(() => {}); };
+  back.onclick = () => seekTo(v.currentTime - 30);
+  fwd.onclick = () => seekTo(v.currentTime + 30);
+  const update = () => {
+    if (LP !== lp) return clearInterval(lp.tick);
+    const r = range(), e = edge();
+    const canSeek = !!r && r.end - r.start > 20;
+    back.hidden = fwd.hidden = !canSeek; btn.hidden = !r;
+    const behind = e == null ? 0 : e - v.currentTime;
+    const atLive = behind < 10 && !v.paused;
+    btn.classList.toggle('on', atLive);
+    btn.textContent = atLive ? '● Live' : `Gå till live (−${fmtTime(Math.max(0, behind))})`;
+    fwd.disabled = behind < 10;
+  };
+  lp.tick = setInterval(update, 1000);
+  update();
 }
 function closeLive(lp = LP) {
   if (!lp || LP !== lp) return;
   LP = null;
+  clearInterval(lp.tick);
   if (lp.hls) { lp.hls.destroy(); lp.hls = null; }
   stopVideo(lp.v);
   overlayClose(lp.el);
   musicSession();
 }
-async function playRec(r) {
+async function playRec(r, cs = {}) {
   const u = await api(`/dvr/recordings/${r.id}/play`, { method: 'POST' }); // avbryts om man hunnit lämna sidan
   closeAllPlayers();
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
-  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span></div>`;
+  const ads = Array.isArray(r.commercials) ? r.commercials : [];
+  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
+    ${ads.length ? `<label class="small"><input type="checkbox" id="rauto"> Hoppa över reklam automatiskt</label>` : ''}</div>
+    <button class="skip" id="rskip" hidden>Hoppa över reklam ⏭</button>`;
   overlayOpen(el);
   const rp = RP = { el, v: $('#rvid', el) };
   videoSession(rp.v);
   $('#rclose', el).onclick = () => closeRec(rp);
+  if (ads.length) recCommercials(rp, ads, cs.autoSkip);
+}
+// Reklamavbrott i inspelningar: knappen visas inne i ett avbrott, eller hoppas över automatiskt (val per användare i webbläsaren)
+function recCommercials(rp, ads, autoDefault) {
+  const { v, el } = rp, b = $('#rskip', el), auto = $('#rauto', el);
+  const key = 'comskipAuto.' + (me?.id ?? '');
+  auto.checked = !!store.get(key, !!autoDefault);
+  auto.onchange = () => store.set(key, auto.checked);
+  const skipped = new Set(); // ett avbrott hoppas bara över automatiskt en gång (spolar man tillbaka in i det får man titta)
+  v.addEventListener('timeupdate', () => {
+    if (RP !== rp) return;
+    const t = v.currentTime, i = ads.findIndex(a => t >= a.start && t < a.end - 1);
+    if (i < 0) { b.hidden = true; return; }
+    if (auto.checked && !skipped.has(i)) { skipped.add(i); v.currentTime = ads[i].end; toast('Reklam överhoppad'); b.hidden = true; return; }
+    b.hidden = false;
+    b.onclick = () => { v.currentTime = ads[i].end; b.hidden = true; };
+  });
 }
 function closeRec(rp = RP) {
   if (!rp || RP !== rp) return;
@@ -813,8 +863,8 @@ views.dvr = async () => {
   const st = { scheduled: 'Bokad', recording: '⏺ Spelar in', processing: 'Bearbetas…', done: '', failed: 'Misslyckades' };
   main.innerHTML = `<div class="toolbar"><h1>Inspelningar</h1><a class="btn ghost" href="#/guide">📅 TV-guide</a><a class="btn ghost" href="#/live">Live-TV</a></div>
     ${D.done.filter(r => r.status === 'done').length ? `<section class="section"><h2>Inspelat</h2><div class="reclist">${D.done.filter(r => r.status === 'done').map(r => `<div class="rec">
-      <div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${dayName(r.start)} ${hhmm(r.start)} · ${fmtDur(r.stop - r.start)}${r.size ? ' · ' + (r.size / 1e9).toFixed(1) + ' GB' : ''}${r.error ? ' · ' + esc(r.error) : ''}</div></div>
-      <div class="row"><button class="primary small" data-rplay="${r.id}">▶ Spela</button><button class="ghost small" data-rdel="${r.id}">Ta bort</button></div></div>`).join('')}</div></section>` : ''}
+      <div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${dayName(r.start)} ${hhmm(r.start)} · ${fmtDur(r.stop - r.start)}${r.size ? ' · ' + (r.size / 1e9).toFixed(1) + ' GB' : ''}${r.commercials?.length ? ` · ${r.commercials.length} reklamavbrott` : ''}${['pending', 'running'].includes(r.commercials_status) ? ' · letar reklam…' : ''}${r.error ? ' · ' + esc(r.error) : ''}</div></div>
+      <div class="row"><button class="primary small" data-rplay="${r.id}">▶ Spela</button>${me.adminHere && D.comskip?.enabled ? `<button class="ghost small" data-rcs="${r.id}" title="Analysera reklamavbrott igen">Leta reklam</button>` : ''}<button class="ghost small" data-rdel="${r.id}">Ta bort</button></div></div>`).join('')}</div></section>` : ''}
     <section class="section"><h2>Kommande</h2>${D.scheduled.length ? `<table>${D.scheduled.map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}–${hhmm(r.stop)}</td><td><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</td><td class="muted">${esc(r.channel_name || '')}</td>
       <td>${st[r.status]}</td><td class="r">${r.status === 'recording' ? `<button class="ghost small" data-rstop="${r.id}">Stoppa</button>` : `<button class="ghost small" data-rdel="${r.id}">Avboka</button>`}</td></tr>`).join('')}</table>` : '<p class="muted">Inga bokade inspelningar. Välj ett program i TV-guiden.</p>'}</section>
     ${D.rules.length ? `<section class="section"><h2>Serieinspelningar</h2><table>${D.rules.map(r => `<tr><td><b>${esc(r.title)}</b></td><td class="muted">${esc(r.channel_name || 'Alla kanaler')}${r.new_only ? ' · bara nya' : ''}${r.keep ? ` · sparar ${r.keep}` : ''}</td><td>${r.upcoming} kommande</td><td class="r"><button class="ghost small" data-rule="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
@@ -822,11 +872,12 @@ views.dvr = async () => {
     ${D.dir ? `<p class="muted small">Inspelningar sparas i <code>${esc(D.dir)}</code>.</p>` : ''}`;
   $$('[data-rdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort?')) { try { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); } catch (e) { toast(e.message); } } });
   $$('[data-rstop]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); later(route, 1500); }));
+  $$('[data-rcs]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rcs}/commercials`, { method: 'POST' }); toast('Letar reklamavbrott i bakgrunden'); later(route, 1500); }));
   $$('[data-rule]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } }));
   $$('[data-rplay]').forEach(b => b.onclick = act(async () => {
     if (b.disabled) return;
     b.disabled = true;
-    try { await playRec(D.done.find(x => x.id === +b.dataset.rplay)); } finally { b.disabled = false; }
+    try { await playRec(D.done.find(x => x.id === +b.dataset.rplay), D.comskip || {}); } finally { b.disabled = false; }
   }));
 };
 
@@ -1117,6 +1168,10 @@ views.admin = async () => {
     <form id="ltset" class="row" style="margin-top:12px;align-items:flex-end"><div style="flex:1;min-width:160px"><label>Inspelningsmapp</label><input id="lsd" value="${esc(LT.settings.dvrDir)}"></div>
       <div><label>Starta före (s)</label><input id="lsb" type="number" min="0" value="${LT.settings.padBefore}" style="width:90px"></div><div><label>Sluta efter (s)</label><input id="lsa" type="number" min="0" value="${LT.settings.padAfter}" style="width:90px"></div>
       <div><label>Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
+      <div><label title="Hur långt bakåt man kan pausa och spola i live-TV (0 = av)">Timeshift (min)</label><input id="lsts" type="number" min="0" max="720" value="${LT.settings.timeshiftMinutes ?? 120}" style="width:90px"></div>
+      <div><label title="Högsta diskanvändning för timeshift, alla kanaler tillsammans">Timeshift max (GB)</label><input id="lstg" type="number" min="0.5" step="0.5" value="${LT.settings.timeshiftMaxGb ?? 20}" style="width:90px"></div>
+      <label class="small"><input type="checkbox" id="lscs" ${LT.settings.comskip ? 'checked' : ''}> Leta reklamavbrott i inspelningar</label>
+      <label class="small"><input type="checkbox" id="lsca" ${LT.settings.comskipAutoSkip ? 'checked' : ''}> Hoppa över reklam automatiskt (standard)</label>
       <button class="ghost">Spara</button></form>
   </div>
   <div class="panel"><h2>Sonarr, Radarr och Trakt</h2>
@@ -1250,7 +1305,8 @@ views.admin = async () => {
   $$('[data-chfav]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } })));
   $$('[data-chhide]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } })));
   $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
-  $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value } }); toast('Sparat'); } catch (er) { toast(er.message); } };
+  $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value,
+    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked } }); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
   $('#whnew').onclick = act(async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
   for (const k of ['radarr', 'sonarr']) {
