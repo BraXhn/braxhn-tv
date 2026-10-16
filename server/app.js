@@ -40,6 +40,10 @@ import * as wrapped from './wrapped.js';
 import * as ver from './versions.js';
 import * as screen from './screentime.js';
 import * as follows from './follows.js';
+import * as diskmon from './diskmon.js';
+import * as metrics from './metrics.js';
+import * as dlna from './dlna.js';
+import * as mediaImport from './mediaimport.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
@@ -1553,7 +1557,7 @@ route('DELETE', '/api/me/trakt', user, (c) => { trakt.disconnect(c.user.id); sen
 auditHooks.push(notifier.onAudit);
 route('GET', '/api/notify', admin, (c) => send(c.res, 200, { kind: getSetting('notify_kind', process.env.NOTIFY_KIND || 'none'), url: getSetting('notify_url', process.env.NOTIFY_URL || ''),
   user: getSetting('notify_user', process.env.NOTIFY_USER || ''), tokenSet: !!getSetting('notify_token', process.env.NOTIFY_TOKEN || ''),
-  events: getSetting('notify_events', 'security,cert,backup,update,dvr,request').split(',').filter(Boolean), kinds: notifier.KINDS, allEvents: notifier.EVENTS, recent: notifier.sent.slice(-10).reverse() }));
+  events: getSetting('notify_events', notifier.DEFAULT_EVENTS).split(',').filter(Boolean), kinds: notifier.KINDS, allEvents: notifier.EVENTS, recent: notifier.sent.slice(-10).reverse() }));
 route('PUT', '/api/notify', admin, async (c) => {
   const b = await readJson(c.req);
   if (b.kind != null) { if (!notifier.KINDS.includes(b.kind)) return fail(c.res, 400, 'Okänd typ'); setSetting('notify_kind', b.kind); }
@@ -1590,7 +1594,7 @@ route('POST', '/api/activity/:key/stop', admin, (c) => {
   audit('stream_stopped', { ...ctx(c), detail: `${s.user}: ${s.itemId}` });
   send(c.res, 200, { ok: true });
 });
-route('GET', '/api/stats', admin, (c) => send(c.res, 200, { ...act.stats(), active: act.listActive().length, transcodes: st.activeTranscodes().length, watching: act.watchingCount() }));
+route('GET', '/api/stats', admin, (c) => send(c.res, 200, { ...act.stats(), active: act.listActive().length, transcodes: st.activeTranscodes().length, watching: act.watchingCount(), disk: diskmon.snapshot() }));
 route('GET', '/api/backups', admin, (c) => send(c.res, 200, { dir: act.BACKUP_DIR, enabled: getSetting('backup_enabled', '1') === '1', keep: +getSetting('backup_keep', '14'), files: act.listBackups() }));
 route('POST', '/api/backups', admin, (c) => {
   try { const name = act.backupNow(); audit('backup_created', { ...ctx(c), detail: name }); send(c.res, 200, { name }); }
@@ -1695,6 +1699,8 @@ route('GET', '/api/security-check', admin, (c) => {
   else add('ok', 'Servern körs utan root-rättigheter', '');
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
   if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
+  items.push(...diskmon.checkItems());
+  if (dlna.enabled()) add('info', 'DLNA är påslaget', 'Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning' + (dlna.maxAge() != null ? ` (titlar upp till ${dlna.maxAge()} år).` : '.'));
   send(c.res, 200, items);
 });
 
@@ -1852,6 +1858,59 @@ route('GET', '/api/offline/sync', user, (c) => {
   send(c.res, 200, { ...plan, items: itemsByIds(c.user.id, ids) }); // itemsByIds tillämpar profilens åldersgräns
 });
 
+// ---------- Drift: diskutrymme, Prometheus, DLNA och import från Plex/Jellyfin ----------
+const opsInfo = () => {
+  const th = diskmon.thresholds();
+  return {
+    disk: diskmon.snapshot(), diskMinPct: th.pct, diskMinGb: th.gb,
+    metrics: { enabled: metrics.enabled(), fromEnv: metrics.fromEnv() },
+    dlna: { enabled: dlna.enabled(), name: dlna.friendlyName(), maxAge: getSetting('dlna_max_age', ''), effectiveMaxAge: dlna.maxAge(),
+      running: dlna.state.running, error: dlna.state.error, addresses: dlna.state.addresses },
+    users: all('SELECT id, name, parent_id FROM users ORDER BY COALESCE(parent_id, id), id')
+  };
+};
+route('GET', '/api/ops', admin, (c) => send(c.res, 200, opsInfo()));
+route('PUT', '/api/ops', admin, async (c) => {
+  const b = await readJson(c.req);
+  let token = null;
+  if ((b.dlnaEnabled != null || b.dlnaMaxAge != null) && !isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
+  if (b.dlnaMaxAge != null) {
+    const v = String(b.dlnaMaxAge).trim();
+    if (v !== '' && !/^\d{1,2}$/.test(v)) return fail(c.res, 400, 'Åldersgränsen ska vara ett tal, t.ex. 15 (tomt = som huvudkontot)');
+    setSetting('dlna_max_age', v);
+  }
+  const disk = b.diskMinPct != null || b.diskMinGb != null;
+  if (b.diskMinPct != null) setSetting('disk_min_pct', Math.max(0, Math.min(50, parseFloat(b.diskMinPct) || 0)));
+  if (b.diskMinGb != null) setSetting('disk_min_gb', Math.max(0, Math.min(100000, parseFloat(b.diskMinGb) || 0)));
+  if (b.metricsToken === 'new') token = metrics.newToken();
+  else if (b.metricsToken === 'off') metrics.disable();
+  if (b.dlnaEnabled != null) setSetting('dlna_enabled', b.dlnaEnabled ? '1' : '0');
+  if (typeof b.dlnaName === 'string') setSetting('dlna_name', b.dlnaName.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) || 'BraXhn TV');
+  dlna.apply();
+  if (disk) await diskmon.check();
+  audit('settings_changed', { ...ctx(c), detail: 'drift: ' + Object.keys(b).join(', ') });
+  send(c.res, 200, { ...opsInfo(), token });
+});
+route('POST', '/api/ops/disk/check', admin, async (c) => send(c.res, 200, await diskmon.check()));
+route('POST', '/api/import/users', admin, async (c) => {
+  const b = await readJson(c.req);
+  try { send(c.res, 200, await mediaImport.jellyfinUsers({ url: b.url, apiKey: b.apiKey })); } catch (e) { fail(c.res, e.status || 502, e.message); }
+});
+route('POST', '/api/import/preview', admin, async (c) => {
+  const b = await readJson(c.req);
+  try { send(c.res, 200, await mediaImport.preview({ source: b.source, url: b.url, token: b.token, apiKey: b.apiKey, user: b.user, pathMap: b.pathMap })); }
+  catch (e) { e.users ? send(c.res, 400, { error: e.message, users: e.users }) : fail(c.res, e.status || 502, e.message); }
+});
+route('POST', '/api/import/run', admin, async (c) => {
+  const b = await readJson(c.req);
+  const r = mediaImport.runImport(b.id, b.users, { overwrite: !!b.overwrite });
+  for (const uid of b.users || []) invalidateProfile(+uid);
+  audit('history_imported', { ...ctx(c), detail: `${r.source}: ${r.watched} sedda, ${r.progress} påbörjade, ${r.users} användare` });
+  send(c.res, 200, r);
+});
+diskmon.start();
+setTimeout(() => { try { dlna.apply(); } catch (e) { console.warn('[dlna]', e.message); } }, 1000).unref();
+
 // ---------- statiska filer ----------
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK och reserv-CDN för hls.js/QR)
 const CSP = ["default-src 'self'", "script-src 'self' https://www.gstatic.com",
@@ -1900,6 +1959,9 @@ export async function handle(req, res) {
     const ka = acme.challenges.get(url.pathname.slice(28));
     return ka ? send(res, 200, ka, { 'Content-Type': 'text/plain' }) : fail(res, 404, 'Finns inte');
   }
+  // Prometheus (egen token) och DLNA (bara betrodda nät, utan inloggning) ligger utanför /api/
+  if (url.pathname === '/metrics') return metrics.serve(req, res);
+  if (url.pathname.startsWith('/dlna/')) return dlna.handle(req, res, url, { trusted: isTrusted(req) });
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
   // Chromecast-mottagare och andra enheter hämtar media från annan origin
   if (url.pathname.startsWith('/api/stream/')) {
