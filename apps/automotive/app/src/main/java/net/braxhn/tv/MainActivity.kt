@@ -336,6 +336,8 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     Text(listOfNotNull(it.year?.toString(), if (!it.isShow) formatDuration(it.duration) else it.episodes?.let { n -> "$n avsnitt" },
                         it.rating?.let { r -> "★ %.1f".format(r) }, it.hdr?.uppercase()).joinToString("  ·  "), color = Color.Gray)
                     it.overview?.let { o -> Text(o, color = Color(0xFFCFD3DD), maxLines = 6, overflow = TextOverflow.Ellipsis) }
+                    // Rollista: regi/skapare och de första skådespelarna
+                    castLine(it.cast)?.let { c -> Text(c, color = Color.Gray, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
                     if (!it.isShow) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
