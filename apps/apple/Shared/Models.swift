@@ -86,6 +86,7 @@ struct MediaItem: Decodable, Identifiable, Hashable {
     let nextId: Int?
     let prevId: Int?
     let height: Int?
+    let cast: [CastMember]?
 
     static func == (a: MediaItem, b: MediaItem) -> Bool { a.id == b.id && a.position == b.position && a.watched == b.watched }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -108,6 +109,25 @@ struct MediaItem: Decodable, Identifiable, Hashable {
 }
 
 /// "Nästa avsnitt" i serievyn – innehåller bara det vi behöver för att starta uppspelning.
+struct CastMember: Decodable, Hashable {
+    let id: Int
+    let name: String
+    let role: String?
+    let character: String?
+}
+
+/// Rollistan som en textrad, t.ex. "Regi: X · Medverkande: A, B, C" (nil om den saknas)
+func castLine(_ cast: [CastMember]?) -> String? {
+    guard let cast = cast, !cast.isEmpty else { return nil }
+    var lead: [String] = []
+    for c in cast where (c.role ?? "cast") != "cast" && !lead.contains(c.name) { lead.append(c.name) }
+    let actors = cast.filter { ($0.role ?? "cast") == "cast" }.prefix(8).map { $0.name }
+    var parts: [String] = []
+    if !lead.isEmpty { parts.append((cast.contains { $0.role == "creator" } ? "Skapad av: " : "Regi: ") + lead.joined(separator: ", ")) }
+    if !actors.isEmpty { parts.append("Medverkande: " + actors.joined(separator: ", ")) }
+    return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
+}
+
 struct MediaItemRef: Decodable, Hashable {
     let id: Int
     let season: Int?
