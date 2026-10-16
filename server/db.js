@@ -152,6 +152,11 @@ addCol('items', 'abs_episode', 'INTEGER');
 addCol('items', 'sub_auto', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'chapters', 'TEXT');
 addCol('items', 'src_name', 'TEXT'); // seriens namn enligt mappen/filen (TMDB kan byta titel)
+// Lyssningsfunktioner – jämn ljudnivå: ReplayGain i dB mot -18 LUFS, toppvärde (linjärt) och källa ('tag', 'mätt', 'fel'; NULL = inte kontrollerat)
+addCol('tracks', 'rg_track', 'REAL');
+addCol('tracks', 'rg_album', 'REAL');
+addCol('tracks', 'rg_peak', 'REAL');
+addCol('tracks', 'loudness', 'TEXT');
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

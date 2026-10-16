@@ -471,6 +471,7 @@ views.account = async () => {
     ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
       <div class="row"><button class="ghost" id="trsync">Synka nu</button><button class="danger" id="troff">Koppla från</button></div>`
     : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
+  <div class="panel" id="listenprefs"></div>
   <div class="panel"><h2>Inloggade enheter</h2>
     <table><tr><th>Enhet</th><th>IP</th><th>Senast aktiv</th><th></th></tr>
     ${sess.map(s => `<tr><td>${esc(device(s.ua))}${s.current ? ' <span class="ok-badge">Den här</span>' : ''}</td><td class="muted">${esc(s.ip || '–')}</td><td class="muted">${fmtDate(s.last_seen)}</td>
@@ -483,6 +484,7 @@ views.account = async () => {
     catch (er) { toast(er.message); }
   };
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
+  renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });
@@ -1828,6 +1830,7 @@ views.music = async (lid, tab) => {
     const d = await api(`/music/${lid}/home`);
     body = `<p class="muted">${d.stats.artists} artister · ${d.stats.albums} album · ${d.stats.tracks} låtar</p>
       ${d.recentlyPlayed.length ? `<section class="section"><h2>Spelat nyligen</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
+      ${d.smart?.length ? `<section class="section"><h2>Smarta listor</h2><div class="shelf">${d.smart.map(x => smartCard(lid, x)).join('')}</div></section>` : ''}
       <section class="section"><h2>Nytt i biblioteket</h2><div class="shelf">${d.recentAlbums.map(albumCard).join('') || '<p class="muted">Inga album ännu.</p>'}</div></section>
       ${d.favorites.length ? `<section class="section"><h2>Favoriter <button class="ghost small" id="playfav">▶ Spela</button> <button class="ghost small" id="shufav">⤨ Blanda</button></h2>${trackRows(d.favorites, { showCover: true })}</section>` : ''}`;
     main.innerHTML = musicHeader(lid, tabs, tab) + body;
@@ -1923,6 +1926,7 @@ function stopAudio() {
   if (!M.audio) return;
   if (M.spoken) spokenSave();
   M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++;
+  setSleep(0); showLyrics(false);
   stopVideo(M.audio);
   const bar = $('#mbar'); if (bar) bar.hidden = true;
   document.body.classList.remove('hasbar');
@@ -1934,27 +1938,31 @@ function ensureBar() {
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
     <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev">⏮</button><button class="primary" id="mplay">⏸</button><button class="ghost small" id="mnext">⏭</button>
-      <button class="ghost small" id="mrep" title="Upprepa">🔁</button></div>
+      <button class="ghost small" id="mrep" title="Upprepa">🔁</button><button class="ghost small" id="msleep" title="Sovtimer">☾</button><button class="ghost small" id="mlyr" title="Låttext">Text</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
     <div class="mright"><select id="mspeed" title="Hastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq">Kö</button><button class="ghost small" id="mx" title="Stäng">✕</button></div>`;
   document.body.append(bar);
   const a = M.audio = $('#maudio');
   a.volume = store.get('mvol', 1);
+  ensureLyricsPanel();
   a.ontimeupdate = () => {
     if (M.spoken) return spokenTick();
+    lyricsTick();
     // Omkodad ström som startats om vid spolning börjar på 0 – lägg till startpositionen
     const t = a.currentTime + (M.offset || 0);
     $('#mcurt').textContent = fmtTime(t); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
   a.onended = () => M.spoken ? spokenEnded() : nextTrack(true);
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
-  a.onplay = () => { $('#mplay').textContent = '⏸'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
+  a.onplay = () => { if (NORM.ctx?.state === 'suspended') NORM.ctx.resume().catch(() => {}); $('#mplay').textContent = '⏸'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
   a.onpause = () => { $('#mplay').textContent = '▶'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; if (M.spoken) spokenSave(); };
   a.onerror = () => toast('Kunde inte spela låten');
   $('#mplay').onclick = () => a.paused ? a.play() : a.pause();
-  $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + 30) : nextTrack(false);
-  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - 15); if (a.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
+  $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
+  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (a.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
   $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); };
-  $('#mvol').oninput = (e) => { a.volume = +e.target.value; store.set('mvol', a.volume); };
+  $('#mvol').oninput = (e) => { store.set('mvol', +e.target.value); applyVolume(); };
+  $('#msleep').onclick = sleepDialog;
+  $('#mlyr').onclick = toggleLyrics;
   $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
   $('#mx').onclick = stopAudio;
   $('#mq').onclick = showQueue;
@@ -1976,17 +1984,21 @@ function musicSession() {
   if (!a) return setSession({});
   setSession({ play: () => a.play().catch(() => {}), pause: () => a.pause(), nexttrack: () => nextTrack(false), previoustrack: () => $('#mprev')?.click(),
     seekto: (d) => seekTo(d.seekTime),
-    seekbackward: () => M.spoken ? spokenSeek(spokenPos() - 15) : (a.currentTime -= 10),
-    seekforward: () => M.spoken ? spokenSeek(spokenPos() + 30) : (a.currentTime += 10) });
+    seekbackward: () => M.spoken ? spokenSeek(spokenPos() - LPREFS.skipBack) : (a.currentTime -= 10),
+    seekforward: () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : (a.currentTime += 10) });
 }
 // ---------- tal: ljudböcker och poddar (flera filer, global position, hastighet, sparad position) ----------
 function setBarMode(spoken) {
-  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken;
-  $('#mprev').textContent = spoken ? '↺15' : '⏮'; $('#mnext').textContent = spoken ? '30↻' : '⏭';
-  $('#mprev').title = spoken ? '15 sekunder bakåt' : 'Föregående'; $('#mnext').title = spoken ? '30 sekunder framåt' : 'Nästa';
+  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken;
+  const b = LPREFS.skipBack, f = LPREFS.skipForward;
+  $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
+  $('#mprev').title = spoken ? `${b} sekunder bakåt` : 'Föregående'; $('#mnext').title = spoken ? `${f} sekunder framåt` : 'Nästa';
+  if (spoken) showLyrics(false);
+  applyVolume();
 }
 function playSpoken(s) {
   ensureBar();
+  loadListenPrefs();
   closeAllPlayers();
   if (M.spoken) spokenSave();
   M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title };
@@ -2038,7 +2050,7 @@ function spokenSave(final) {
 function spokenEnded() {
   const s = M.spoken, i = s.files.indexOf(M.sfile);
   if (i >= 0 && i + 1 < s.files.length) spokenSeek(s.files[i + 1].offset + 0.01);
-  else { spokenSave(true); toast(s.kind === 'book' ? 'Boken är slut' : 'Avsnittet är slut'); }
+  else { spokenSave(true); setSleep(0); toast(s.kind === 'book' ? 'Boken är slut' : 'Avsnittet är slut'); }
 }
 window.addEventListener('pagehide', () => { if (M.spoken) spokenSave(); });
 function seekTo(t) {
@@ -2054,6 +2066,8 @@ function playQueue(tracks, i) {
   if (M.spoken) { spokenSave(); M.spoken = null; }
   setBarMode(false);
   closeAllPlayers();
+  ensureGainNode(); // i användarens klick – annars får ljudsammanhanget inte starta
+  loadListenPrefs();
   M.queue = tracks; loadTrack(i);
 }
 async function loadTrack(i) {
@@ -2063,6 +2077,8 @@ async function loadTrack(i) {
   bar.hidden = false; document.body.classList.add('hasbar');
   M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
   M.offset = 0; M.transcoded = false; // inte föregående spårs (eller bokens) värden
+  applyVolume(); // spårets egen ljudnivå
+  loadLyrics();
   a.src = M.url;
   a.play().catch(() => {});
   fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
@@ -2075,6 +2091,8 @@ async function loadTrack(i) {
   fetch(`/api/music/tracks/${t.id}/played`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
 }
 function nextTrack(auto) {
+  // Sovtimer "när låten tar slut": stanna i stället för att gå vidare
+  if (auto && SLEEP.end) { M.audio.pause(); setSleep(0); return; }
   if (M.idx + 1 < M.queue.length) loadTrack(M.idx + 1);
   else if (M.repeat) loadTrack(0);
   else if (auto) { M.audio.pause(); }
@@ -2087,6 +2105,189 @@ function showQueue() {
   $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
 }
+
+// ================= LYSSNING: inställningar, jämn ljudnivå, sovtimer, låttexter och smarta listor =================
+let LPREFS = { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, choices: { skipBack: [5, 10, 15, 30, 45, 60], skipForward: [10, 15, 30, 45, 60, 90] } };
+// Hämtas när uppspelning startar (kan ha ändrats i en annan app eller profil)
+function loadListenPrefs() {
+  return api('/me/listening', { bg: true }).then(p => {
+    LPREFS = p;
+    if (M.audio) { if (M.spoken) setBarMode(true); else applyVolume(); }
+    return p;
+  }).catch(() => LPREFS);
+}
+async function renderListenPrefs(box) {
+  const gen = routeGen;
+  const p = await api('/me/listening');
+  if (gen !== routeGen || !box.isConnected) return;
+  const opts = (list, v) => list.map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${n} sekunder</option>`).join('');
+  box.innerHTML = `<h2>Lyssning</h2>
+    <label class="row"><input type="checkbox" id="lpnorm" ${p.normalize ? 'checked' : ''} style="width:auto"> Jämn ljudnivå i musik</label>
+    <p class="muted small" style="margin:4px 0 12px">Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.</p>
+    <div class="row"><div><label>Hopp bakåt (ljudböcker och poddar)</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
+      <div><label>Hopp framåt</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
+    <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> Hoppa över tystnad i poddar</label>
+    <p class="muted small" style="margin:4px 0 0">Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.</p>`;
+  const save = act(async () => {
+    LPREFS = await api('/me/listening', { method: 'PUT', body: { normalize: $('#lpnorm').checked, skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked }, bg: true });
+    if (M.audio) { if (LPREFS.normalize && M.cur && !M.spoken) ensureGainNode(); if (M.spoken) setBarMode(true); else applyVolume(); }
+    toast('Sparat');
+  });
+  for (const id of ['#lpnorm', '#lpback', '#lpfwd', '#lpsil']) $(id, box).onchange = save;
+}
+
+// ---------- jämn ljudnivå ----------
+// Web Audio (GainNode) kan även höja tysta låtar. iOS-Safari pausar Web Audio när skärmen låses, så där används den inte
+// (och där går det inte heller att ändra volymen – normaliseringen gör då ingenting).
+const NORM = { ctx: null, node: null, failed: false };
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function ensureGainNode() {
+  if (NORM.node || NORM.failed || !LPREFS.normalize || !M.audio) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC || isIOS()) { NORM.failed = true; return; }
+  try {
+    const ctx = new AC(), src = ctx.createMediaElementSource(M.audio), node = ctx.createGain();
+    src.connect(node); node.connect(ctx.destination);
+    NORM.ctx = ctx; NORM.node = node;
+  } catch { NORM.failed = true; }
+}
+/** Spårets förstärkning (linjär) mot referensen -18 LUFS; aldrig så mycket att toppen klipps, högst +12 dB. */
+function trackGain() {
+  const t = M.cur;
+  if (M.spoken || !LPREFS.normalize || !t || t.gain == null) return 1;
+  let g = 10 ** (t.gain / 20);
+  if (t.peak > 0) g = Math.min(g, 1 / t.peak);
+  return Math.min(g, 4);
+}
+/** Volym = reglaget × (bara dämpning om Web Audio saknas) × sovtimerns nedtoning */
+function applyVolume() {
+  const a = M.audio; if (!a) return;
+  const g = trackGain(), vol = +store.get('mvol', 1), fade = M.fade ?? 1;
+  if (NORM.node) { NORM.node.gain.value = g; a.volume = Math.max(0, Math.min(1, vol * fade)); }
+  else a.volume = Math.max(0, Math.min(1, vol * Math.min(1, g) * fade));
+}
+
+// ---------- sovtimer ----------
+const SLEEP = { until: 0, end: false, timer: null };
+const SLEEP_FADE = 10; // sekunder nedtoning före paus
+function setSleep(v) { // v: 0 = av, antal minuter eller 'end' (när låten/kapitlet/avsnittet tar slut)
+  clearInterval(SLEEP.timer); SLEEP.timer = null;
+  SLEEP.end = v === 'end';
+  SLEEP.until = typeof v === 'number' && v > 0 ? Date.now() + v * 60e3 : 0;
+  M.fade = 1; applyVolume();
+  if (SLEEP.end || SLEEP.until) SLEEP.timer = setInterval(sleepTick, 250);
+  sleepLabel();
+}
+function sleepLeft() {
+  const a = M.audio;
+  if (!SLEEP.end) return (SLEEP.until - Date.now()) / 1000;
+  const rate = a.playbackRate || 1;
+  if (M.spoken) {
+    const s = M.spoken, t = spokenPos();
+    let end = s.duration || 0;
+    if (s.kind === 'book' && (s.chapters || []).length > 1) { const ch = s.chapters.filter(c => c.start <= t).pop(); if (ch?.end) end = end ? Math.min(end, ch.end) : ch.end; }
+    return end ? (end - t) / rate : Infinity;
+  }
+  const d = M.cur?.duration || a.duration;
+  return d ? (d - (a.currentTime + (M.offset || 0))) / rate : Infinity;
+}
+function sleepTick() {
+  const a = M.audio;
+  if (!a || (!M.cur && !M.spoken)) return setSleep(0);
+  const left = sleepLeft();
+  M.fade = left < SLEEP_FADE ? Math.max(0, left / SLEEP_FADE) : 1;
+  applyVolume();
+  // Pausen sparar positionen (ljudböcker/poddar) via onpause
+  if (left <= 0.3) { a.pause(); setSleep(0); toast('Sovtimern pausade uppspelningen'); return; }
+  sleepLabel(left);
+}
+function sleepLabel(left) {
+  const b = $('#msleep'); if (!b) return;
+  b.classList.toggle('on', !!(SLEEP.until || SLEEP.end));
+  b.textContent = SLEEP.until ? `☾ ${Math.max(1, Math.ceil((left ?? sleepLeft()) / 60))} min` : SLEEP.end ? '☾ slut' : '☾';
+}
+function sleepDialog() {
+  const what = M.spoken ? (M.spoken.kind === 'book' ? 'kapitlet' : 'avsnittet') : 'låten';
+  const d = document.createElement('dialog');
+  d.innerHTML = `<h2>Sovtimer</h2><p class="muted small">Ljudet tonas ner och pausas – positionen i ljudböcker och poddar sparas.</p>
+    <div class="plpick">${[15, 30, 45, 60].map(m => `<button class="ghost" data-sl="${m}">${m} minuter</button>`).join('')}
+    <button class="ghost" data-sl="end">När ${what} tar slut</button>${SLEEP.until || SLEEP.end ? '<button class="ghost" data-sl="0">Stäng av sovtimern</button>' : ''}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  const close = () => { d.close(); d.remove(); };
+  $('#cl', d).onclick = close;
+  $$('[data-sl]', d).forEach(b => b.onclick = () => {
+    const v = b.dataset.sl;
+    setSleep(v === 'end' ? 'end' : +v);
+    if (v !== '0') toast(v === 'end' ? `Pausar när ${what} tar slut` : `Pausar om ${v} minuter`);
+    close();
+  });
+}
+
+// ---------- låttexter ----------
+const LY = { open: false, data: null, tid: null, idx: -1, seq: 0 };
+function ensureLyricsPanel() {
+  if ($('#lyrics')) return;
+  const p = document.createElement('div'); p.id = 'lyrics'; p.hidden = true;
+  p.innerHTML = `<div class="lyhead"><b id="lytitle"></b><button class="ghost small" id="lyx" title="Stäng">✕</button></div><div id="lybody"></div>`;
+  document.body.append(p);
+  $('#lyx').onclick = () => showLyrics(false);
+}
+function showLyrics(on) {
+  LY.open = on;
+  const p = $('#lyrics'); if (p) p.hidden = !on;
+  $('#mlyr')?.classList.toggle('on', on);
+  if (on) { LY.tid = null; loadLyrics(); }
+}
+const toggleLyrics = () => showLyrics(!LY.open);
+async function loadLyrics() {
+  const t = M.cur;
+  if (!LY.open || !t?.id || M.spoken || LY.tid === t.id) return;
+  LY.tid = t.id; LY.data = null; LY.idx = -1;
+  const seq = ++LY.seq;
+  $('#lytitle').textContent = t.title;
+  $('#lybody').innerHTML = '<div class="spin"></div>';
+  let d;
+  try { d = await api(`/music/tracks/${t.id}/lyrics`, { bg: true }); } catch { d = { lines: [] }; }
+  if (seq !== LY.seq) return; // en annan låt hann starta
+  LY.data = d;
+  $('#lybody').innerHTML = d.lines.length ? d.lines.map((l, i) => `<p data-ly="${i}" class="${d.synced ? 'sync' : ''}">${esc(l.text) || '&nbsp;'}</p>`).join('')
+    : '<p class="muted">Ingen text hittades. Lägg en .lrc-fil med samma namn bredvid ljudfilen, eller bädda in texten i filens taggar.</p>';
+  if (d.synced) $$('[data-ly]', $('#lybody')).forEach(p => keyClick(p).onclick = () => seekTo(d.lines[+p.dataset.ly].t));
+  lyricsTick();
+}
+function lyricsTick() {
+  const d = LY.data;
+  if (!LY.open || !d?.synced || M.spoken) return;
+  const t = M.audio.currentTime + (M.offset || 0) + 0.2;
+  let lo = 0, hi = d.lines.length - 1, i = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (d.lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (i === LY.idx) return;
+  LY.idx = i;
+  const box = $('#lybody');
+  box.querySelector('.on')?.classList.remove('on');
+  const el = i >= 0 ? box.querySelector(`[data-ly="${i}"]`) : null;
+  if (el) { el.classList.add('on'); box.scrollTo({ top: el.offsetTop - box.clientHeight / 2 + el.clientHeight / 2, behavior: 'smooth' }); }
+}
+
+// ---------- smarta spellistor ----------
+function smartCard(lid, x) {
+  const c = x.covers || [];
+  const art = c.length >= 4 ? `<div class="cover smartmosaic">${c.slice(0, 4).map(id => `<img loading="lazy" src="/api/music/cover/${+id}" alt="" data-fb="1">`).join('')}</div>`
+    : cover(c[0] || x.id, !!c.length);
+  return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(x.name)}</div><div class="s">${x.count} låtar</div></a>`;
+}
+views.smart = async (lid, sid) => {
+  const p = await api(`/music/${encodeURIComponent(lid)}/smart/${encodeURIComponent(sid)}`);
+  main.innerHTML = `<div class="mhero"><div class="cover big plcover">✦</div><div><div class="muted small">SMART LISTA</div><h1>${esc(p.name)}</h1>
+    <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span><span>Uppdateras automatiskt</span></div>
+    <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="ap">+ Spellista</button></div></div></div>
+    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : '<p class="muted">Listan är tom just nu.</p>'}`;
+  bindTracks(p.trackList);
+  $('#pp').onclick = () => playQueue(p.trackList, 0);
+  $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
+  $('#ap').onclick = act(() => addToPlaylist(p.trackList.map(t => t.id)));
+};
 
 // ---------- routing ----------
 async function loadLibs() {
