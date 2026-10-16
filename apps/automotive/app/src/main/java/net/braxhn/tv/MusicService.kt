@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
@@ -13,15 +14,20 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
@@ -34,7 +40,7 @@ import java.util.concurrent.ConcurrentHashMap
 // ---- musikmodeller (matchar /api/music) ----
 @Serializable data class MAlbum(val id: Int, val title: String, val year: Int? = null, val cover: Boolean = false, val artist: String? = null, val artistId: Int? = null, val tracks: Int? = null)
 @Serializable data class MTrack(val id: Int, val title: String, val track: Int? = null, val duration: Double? = null, val albumId: Int? = null,
-                                val album: String? = null, val cover: Boolean = false, val artist: String? = null)
+                                val album: String? = null, val cover: Boolean = false, val artist: String? = null, val gain: Double? = null)
 @Serializable data class MAlbumDetail(val id: Int, val title: String, val artist: String? = null, val cover: Boolean = false, val trackList: List<MTrack> = emptyList())
 @Serializable data class MArtist(val id: Int, val name: String, val albums: Int? = null)
 @Serializable data class MArtistDetail(val id: Int, val name: String, val albums: List<MAlbum> = emptyList(), val popular: List<MTrack> = emptyList())
@@ -49,13 +55,16 @@ import java.util.concurrent.ConcurrentHashMap
                              val position: Double = 0.0, val played: Boolean = false, val published: Long? = null)
 @Serializable data class PList(val podcasts: List<PPod> = emptyList(), val latest: List<PEp> = emptyList())
 @Serializable data class PDetail(val id: Int, val title: String? = null, val image: Boolean = false, val episodes: List<PEp> = emptyList())
-@Serializable data class MHome(val recentAlbums: List<MAlbum> = emptyList(), val recentlyPlayed: List<MAlbum> = emptyList(), val favorites: List<MTrack> = emptyList())
+@Serializable data class MHome(val recentAlbums: List<MAlbum> = emptyList(), val recentlyPlayed: List<MAlbum> = emptyList(), val favorites: List<MTrack> = emptyList(),
+                               val smart: List<MSmart> = emptyList())
+@Serializable data class MSmart(val id: String, val name: String, val count: Int = 0)
+@Serializable data class MSmartDetail(val id: String, val name: String? = null, val trackList: List<MTrack> = emptyList())
 
 /**
  * Musik i bilen. Android Automotive visar den här tjänsten i bilens egen mediaspelare – till skillnad
  * från video får musik användas under körning. Fungerar även med Android Auto/Bluetooth-kontroller.
  *
- * Bläddringsträd: root → Spelat nyligen / Nytt / Album / Artister / Spellistor / Favoriter
+ * Bläddringsträd: root → Spelat nyligen / Nytt / Smarta listor / Album / Artister / Spellistor / Favoriter
  * Spår får id "t:<spår>:<sammanhang>" så att hela albumet/listan köas när man väljer en låt.
  */
 @OptIn(UnstableApi::class)
@@ -68,6 +77,19 @@ class MusicService : MediaLibraryService() {
     @Volatile private var libsAt = 0L
     /** Ljudbok som spelas: filernas startpositioner (för att räkna global position och spara den) */
     @Volatile private var currentBook: BBook? = null
+
+    private var exo: ExoPlayer? = null
+    /** Spårens gain (dB mot -18 LUFS) för jämn ljudnivå – fylls när spår listas */
+    private val gains = ConcurrentHashMap<Int, Double>()
+    /** Volym för aktuellt spår (jämn ljudnivå, bara dämpning) och sovtimerns nedtoning */
+    private var baseVolume = 1f
+    private var fade = 1f
+    /** Sovtimer: 0 = av, >0 = minuter, -1 = när låten/filen/avsnittet tar slut */
+    private var sleepMode = 0
+    private var sleepDeadline = 0L
+    private var sleepShownMin = -1
+    private var sleepJob: Job? = null
+    private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
 
     /** Bläddringsträdet cachas en kort stund – bilens mediaspelare frågar ofta efter samma sida */
     private class Cached(val at: Long, val items: List<MediaItem>)
@@ -86,7 +108,22 @@ class MusicService : MediaLibraryService() {
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
-        session = MediaLibrarySession.Builder(this, player, Callback()).build()
+        exo = player
+        // Hopp bakåt/framåt enligt lyssningsinställningarna (läses vid varje hopp – kan ändras medan tjänsten lever)
+        val skipping = object : ForwardingPlayer(player) {
+            override fun seekBack() = seekBy(-Api.skipBack * 1000L)
+            override fun seekForward() = seekBy(Api.skipForward * 1000L)
+            override fun getSeekBackIncrement(): Long = Api.skipBack * 1000L
+            override fun getSeekForwardIncrement(): Long = Api.skipForward * 1000L
+            private fun seekBy(ms: Long) {
+                var t = player.currentPosition + ms
+                val d = player.duration
+                if (d != C.TIME_UNSET && d > 0) t = t.coerceAtMost(d)
+                player.seekTo(t.coerceAtLeast(0L))
+            }
+        }
+        session = MediaLibrarySession.Builder(this, skipping, Callback()).build()
+        session?.setCustomLayout(ImmutableList.of(sleepButton()))
         // Spara position för ljudböcker och poddar var 15:e sekund och vid paus
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (!isPlaying) saveSpoken(player) }
@@ -94,6 +131,10 @@ class MusicService : MediaLibraryService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val p = mediaItem?.mediaId?.split(":") ?: return
                 val tid = if (p[0] == "t") p.getOrNull(1)?.toIntOrNull() else null
+                // Jämn ljudnivå för musik (ExoPlayer kan bara dämpa), hoppa över tystnad bara i poddar
+                baseVolume = if (tid != null && Api.normalize) gainVolume(gains[tid]) else 1f
+                player.setVolume(baseVolume * fade)
+                player.setSkipSilenceEnabled(p[0] == "pe" && Api.skipSilence)
                 if (tid != null) Api.appScope.launch { runCatching { Api.post("/api/music/tracks/$tid/played") } }
             }
             // Byte av fil/avsnitt: spara slutpositionen för det föregående
@@ -106,6 +147,69 @@ class MusicService : MediaLibraryService() {
         scope.launch(Dispatchers.Main) { while (true) { delay(15000); if (player.isPlaying) saveSpoken(player) } }
         // Ny inloggning: läs om bibliotek och bläddringsträd
         scope.launch { Api.token.collect { libsLoaded = false; childCache.clear() } }
+    }
+
+    // ---------- jämn ljudnivå och sovtimer ----------
+    private fun gainVolume(gain: Double?): Float {
+        if (gain == null || gain.isNaN()) return 1f
+        return Math.pow(10.0, gain / 20.0).coerceIn(0.05, 1.0).toFloat()
+    }
+
+    private fun setFade(f: Float) {
+        fade = f
+        exo?.setVolume(baseVolume * fade)
+    }
+
+    private fun sleepButton(): CommandButton {
+        val name = when {
+            sleepMode > 0 -> "Sovtimer: ${sleepShownMin.coerceAtLeast(1)} min"
+            sleepMode < 0 -> "Sovtimer: vid slutet"
+            else -> "Sovtimer"
+        }
+        return CommandButton.Builder()
+            .setDisplayName(name)
+            .setIconResId(if (sleepMode == 0) R.drawable.ic_sleep else R.drawable.ic_sleep_on)
+            .setSessionCommand(sleepCommand)
+            .build()
+    }
+
+    private fun updateSleepButton() { session?.setCustomLayout(ImmutableList.of(sleepButton())) }
+
+    /** Av → 15 → 30 → 45 → 60 min → när låten/avsnittet tar slut → Av */
+    private fun cycleSleep() = setSleep(when { sleepMode == 0 -> 15; sleepMode in 1..45 -> sleepMode + 15; sleepMode >= 60 -> -1; else -> 0 })
+
+    private fun setSleep(mode: Int) {
+        sleepJob?.cancel()
+        sleepJob = null
+        sleepMode = mode
+        sleepDeadline = if (mode > 0) System.currentTimeMillis() + mode * 60_000L else 0L
+        sleepShownMin = mode
+        setFade(1f)
+        // Exakt paus i slutet av spåret (annars går spelaren vidare till nästa)
+        exo?.setPauseAtEndOfMediaItems(mode < 0)
+        if (mode != 0) sleepJob = scope.launch(Dispatchers.Main) {
+            while (isActive) { sleepTick(); delay(250) }
+        }
+        updateSleepButton()
+    }
+
+    private fun sleepTick() {
+        val p = exo ?: return
+        val left = if (sleepMode > 0) (sleepDeadline - System.currentTimeMillis()) / 1000.0 else {
+            val d = p.duration
+            if (d == C.TIME_UNSET || d <= 0) return
+            (d - p.currentPosition) / 1000.0 / p.playbackParameters.speed.coerceAtLeast(0.1f)
+        }
+        setFade(if (left < SLEEP_FADE) (left / SLEEP_FADE).coerceIn(0.0, 1.0).toFloat() else 1f)
+        if (left <= 0.3) {
+            p.pause() // sparar positionen via onIsPlayingChanged
+            setSleep(0)
+            return
+        }
+        if (sleepMode > 0) {
+            val m = Math.ceil(left / 60.0).toInt()
+            if (m != sleepShownMin) { sleepShownMin = m; updateSleepButton() }
+        }
     }
 
     private fun saveSpoken(player: Player) {
@@ -131,6 +235,7 @@ class MusicService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
     override fun onDestroy() {
+        sleepJob?.cancel()
         session?.let { saveSpoken(it.player) }
         session?.run { player.release(); release() }
         session = null
@@ -149,7 +254,8 @@ class MusicService : MediaLibraryService() {
         MediaItem.Builder().setMediaId(id).setMediaMetadata(
             MediaMetadata.Builder().setTitle(title).setSubtitle(sub).setArtworkUri(art).setIsBrowsable(true).setIsPlayable(false).setMediaType(type).build()
         ).build()
-    private fun track(t: MTrack, ctx: String) = MediaItem.Builder()
+    private fun track(t: MTrack, ctx: String): MediaItem { t.gain?.let { gains[t.id] = it }; return trackItem(t, ctx) }
+    private fun trackItem(t: MTrack, ctx: String) = MediaItem.Builder()
         .setMediaId("t:${t.id}:$ctx")
         .setUri(trackUri(t.id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(t.title).setArtist(t.artist).setAlbumTitle(t.album)
@@ -162,6 +268,7 @@ class MusicService : MediaLibraryService() {
         // Bildtokenen förnyas av Api när den är äldre än ett dygn (gäller 7 dygn)
         Api.refreshImageToken()
         if (libsLoaded && System.currentTimeMillis() - libsAt < LIBS_TTL) return
+        Api.refreshListenPrefs()
         val l: List<Library> = Api.get("/api/libraries")
         libId = l.firstOrNull { it.type == "music" }?.id
         bookLibId = l.firstOrNull { it.type == "audiobook" }?.id
@@ -203,6 +310,7 @@ class MusicService : MediaLibraryService() {
             "pl" -> Api.get<MPlaylistDetail>("/api/music/playlists/$id").trackList
             "ar" -> Api.get<MArtistDetail>("/api/music/artists/$id").popular
             "fav" -> lib()?.let { Api.get<MHome>("/api/music/$it/home").favorites } ?: emptyList()
+            "sm" -> lib()?.let { Api.get<MSmartDetail>("/api/music/$it/smart/$id").trackList } ?: emptyList()
             else -> emptyList()
         }
     }
@@ -232,6 +340,7 @@ class MusicService : MediaLibraryService() {
         if (parent == ROOT) return listOfNotNull(
             l?.let { folder("recent", "Spelat nyligen", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
             l?.let { folder("new", "Nytt", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
+            l?.let { folder("smart", "Smarta listor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS) },
             l?.let { folder("albums", "Album", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
             l?.let { folder("artists", "Artister", type = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS) },
             l?.let { folder("playlists", "Spellistor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS) },
@@ -247,6 +356,8 @@ class MusicService : MediaLibraryService() {
             parent == "artists" -> Api.get<List<MArtist>>("/api/music/$l/artists").map { folder("ar:${it.id}", it.name, "${it.albums ?: 0} album", null, MediaMetadata.MEDIA_TYPE_ARTIST) }
             parent == "playlists" -> Api.get<List<MPlaylist>>("/api/music/playlists").map { folder("pl:${it.id}", it.name, "${it.tracks ?: 0} låtar", null, MediaMetadata.MEDIA_TYPE_PLAYLIST) }
             parent == "favorites" -> tracksOf("fav").map { track(it, "fav") }
+            parent == "smart" -> Api.get<MHome>("/api/music/$l/home").smart.map { folder("sm:${it.id}", it.name, "${it.count} låtar", null, MediaMetadata.MEDIA_TYPE_PLAYLIST) }
+            parent.startsWith("sm:") -> { val id = parent.removePrefix("sm:"); tracksOf("sm-$id").map { track(it, "sm-$id") } }
             parent.startsWith("al:") -> { val id = parent.removePrefix("al:"); tracksOf("al-$id").map { track(it, "al-$id") } }
             parent.startsWith("pl:") -> { val id = parent.removePrefix("pl:"); tracksOf("pl-$id").map { track(it, "pl-$id") } }
             parent.startsWith("ar:") -> {
@@ -258,6 +369,21 @@ class MusicService : MediaLibraryService() {
     }
 
     private inner class Callback : MediaLibrarySession.Callback {
+        /** Sovtimerns knapp (visas i bilens mediaspelare och i aviseringen) kräver ett eget sessionskommando */
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            val r = super.onConnect(session, controller)
+            if (!r.isAccepted) return r
+            return MediaSession.ConnectionResult.accept(r.availableSessionCommands.buildUpon().add(sleepCommand).build(), r.availablePlayerCommands)
+        }
+
+        override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == CMD_SLEEP) {
+                cycleSleep()
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
+        }
+
         override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> =
             Futures.immediateFuture(LibraryResult.ofItem(folder(ROOT, "BraXhn TV"), params))
 
@@ -361,6 +487,8 @@ class MusicService : MediaLibraryService() {
 
     companion object {
         const val ROOT = "root"
+        private const val CMD_SLEEP = "net.braxhn.tv.SLEEP"
+        private const val SLEEP_FADE = 10.0
         private const val CACHE_TTL = 60_000L
         private const val LIBS_TTL = 12 * 60 * 60 * 1000L
     }
