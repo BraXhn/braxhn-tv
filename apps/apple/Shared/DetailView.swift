@@ -146,6 +146,7 @@ struct ItemDetailView: View {
                 }
             }
             if let o = it.overview { Text(o).font(.body).foregroundStyle(.secondary) }
+            if let c = castLine(it.cast) { Text(c).font(.callout).foregroundStyle(.secondary) }
         }
         .padding(.horizontal)
     }
@@ -163,6 +164,7 @@ struct ItemDetailView: View {
                 .buttonStyle(.borderedProminent)
             }
             if let o = it.overview { Text(o).foregroundStyle(.secondary) }
+            if let c = castLine(it.cast) { Text(c).font(.callout).foregroundStyle(.secondary) }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     ForEach(seasons, id: \.self) { s in

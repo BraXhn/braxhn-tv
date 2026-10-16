@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
+import * as people from './people.js';
+import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -142,7 +144,9 @@ function backfillSrcNames(lib) {
 
 async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
-  const { files, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
+  const { files: found, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
+  // Trailers ("Film (2020)-trailer.mkv", mappen trailers/) blir inte egna titlar – de kopplas till titeln efteråt
+  const files = found.filter(f => !isTrailerFile(f)), trailerFiles = found.filter(isTrailerFile);
   if (!rootOk) {
     // Mappen saknas/går inte att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
     scanWarning(deletionBlocked({ name: lib.name, rootOk }));
@@ -216,7 +220,9 @@ async function scanLibrary(lib) {
     });
     for (const r of missing) removeImages(r.id);
   }
+  await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
   await metadata(lib);
+  if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   await thumbnails(lib);
   await chapters(lib);
   await autoSubtitles(lib);
@@ -226,6 +232,12 @@ async function scanLibrary(lib) {
   for (const it of kf) { status.done++; await hooks.keyframes?.(it); if (status.done % 200 === 0) await new Promise(setImmediate); }
   if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }
   if (hooks.trickplay) await hooks.trickplay(lib, status);
+}
+/** Serien som en mapp i seriebiblioteket hör till (för trailers i seriens mapp) */
+function showIdOfFolder(lib, folder) {
+  const y = folder.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
+  const key = y ? showKey(clean(y[1]), +y[2]) : showKey(clean(folder), null);
+  return get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, key)?.id || null;
 }
 // Kopplas in från stream.js / intro.js för att undvika cirkulära importer
 export const hooks = {};
@@ -304,7 +316,7 @@ export async function refreshItem(item, tmdbId = null) {
       id = s.results?.[0]?.id;
     }
     if (!id) return false;
-    const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates' });
+    const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos', ...people.videoLangs() });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
     const certs = (d.release_dates?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: (r.release_dates || []).map(x => x.certification).find(Boolean) }));
@@ -315,6 +327,7 @@ export async function refreshItem(item, tmdbId = null) {
       d.title || item.title, sortTitle(d.title || item.title), parseInt(d.release_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop,
       JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, item.id);
+    saveExtras(item, d);
     return true;
   }
   if (item.kind === 'show') {
@@ -324,7 +337,7 @@ export async function refreshItem(item, tmdbId = null) {
       id = s.results?.[0]?.id;
     }
     if (!id) return false;
-    const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings' });
+    const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos', ...people.videoLangs() });
     const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
     run('UPDATE items SET genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age) WHERE id=?', JSON.stringify((d.genres || []).map(g => g.name)), cert, age, item.id);
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
@@ -332,6 +345,7 @@ export async function refreshItem(item, tmdbId = null) {
     run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1 WHERE id=?`,
       d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
+    saveExtras(item, d);
     remapAbsolute(item, d.seasons || []);
     const seasons = all(`SELECT DISTINCT season FROM items WHERE parent_id=?`, item.id).map(r => r.season);
     for (const sn of seasons) {
@@ -347,6 +361,13 @@ export async function refreshItem(item, tmdbId = null) {
     return true;
   }
   return false;
+}
+
+// Rollista och YouTube-trailer ur samma TMDB-svar (fel här ska inte stoppa resten av metadatan)
+function saveTrailerKey(item, d) { run('UPDATE items SET trailer_yt=? WHERE id=?', pickYoutube(d.videos), item.id); }
+function saveExtras(item, d) {
+  try { people.saveCredits(item.id, people.extractCredits(d, item.kind)); saveTrailerKey(item, d); }
+  catch (e) { console.warn('[meta] rollista/trailer:', item.title, e.message); }
 }
 
 /** Anime: absolut avsnittsnummer → säsong/avsnitt enligt TMDB:s säsongsindelning */
