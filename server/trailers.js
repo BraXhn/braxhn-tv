@@ -28,9 +28,10 @@ export function pickOwner(file, movies) {
   const names = movies.map(x => ({ id: x.id, n: norm(stem(x.path)) }));
   const exact = names.find(x => x.n === nb);
   if (exact) return exact.id;
+  // Flera filer kan höra till samma film (versioner har samma id) – entydigt om alla pekar på samma film
+  const one = (list) => { const ids = new Set(list.map(x => x.id)); return ids.size === 1 ? list[0].id : null; };
   const pref = nb ? names.filter(x => nb.startsWith(x.n) || x.n.startsWith(nb)) : [];
-  if (pref.length === 1) return pref[0].id;
-  return movies.length === 1 ? movies[0].id : null;
+  return one(pref) ?? one(movies);
 }
 
 /**
