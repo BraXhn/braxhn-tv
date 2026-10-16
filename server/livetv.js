@@ -10,6 +10,7 @@ import { Readable } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { TRANSCODE, liveEncoder } from './stream.js';
 import { send, fail, streamFile } from './util.js';
+import { listSize, rewritePlaylist, enforceCap, SEG_RE, segNum } from './timeshift.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS tuners(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN('hdhr','m3u')), name TEXT NOT NULL, url TEXT NOT NULL,
   epg_url TEXT, tuner_count INTEGER NOT NULL DEFAULT 2, device_auth TEXT, enabled INTEGER NOT NULL DEFAULT 1, last_refresh INTEGER, error TEXT);
@@ -457,7 +458,7 @@ export const tunersInUse = () => Object.fromEntries([...inUse].map(([k, v]) => [
 // ---------- live-HLS ----------
 const LIVE = path.join(TRANSCODE, 'live');
 const starting = new Map(); // channelId → Promise (pågående start)
-const sessions = new Map(); // channelId → { proc, dir, last, viewers:Set, tunerId, started, error }
+const sessions = new Map(); // channelId → { proc, dir, last, tunerId, key, started, error, minSeg }
 export const httpOpts = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'] : [];
 export const SAFE_LIVE = ['-protocol_whitelist', 'http,https,tcp,tls,udp,rtp,crypto,hls,httpproxy'];
 
@@ -466,7 +467,7 @@ function startLive(ch) {
   const started = Date.now();
   const key = `live-${ch.id}-${started}`;
   if (!acquireTuner(ch.tuner_id, key)) throw Object.assign(new Error('Alla tuners används just nu (live-TV eller inspelningar)'), { status: 409 });
-  const s = { proc: null, dir: path.join(LIVE, `${ch.id}-${started}`), last: started, tunerId: ch.tuner_id, key, started, error: null };
+  const s = { proc: null, dir: path.join(LIVE, `${ch.id}-${started}`), last: started, tunerId: ch.tuner_id, key, started, error: null, minSeg: 0 };
   try {
     fs.rmSync(s.dir, { recursive: true, force: true }); fs.mkdirSync(s.dir, { recursive: true });
     const transcode = getSetting('live_transcode', 'auto'); // auto | always
@@ -476,7 +477,9 @@ function startLive(ch) {
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
       ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a:0?',
       ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
-      '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '8', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
+      '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4',
+      // Timeshift: ffmpeg håller hela fönstret bakåt i spellistan och tar själv bort äldre segment (disktaket i timeshift.js)
+      '-hls_list_size', String(listSize()), '-hls_delete_threshold', '3', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
       '-hls_segment_filename', path.join(s.dir, 'seg-%05d.ts'), path.join(s.dir, 'live.m3u8')];
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '', ended = false;
@@ -500,7 +503,16 @@ function stopLive(chId) {
   releaseTuner(s.tunerId, s.key);
   fs.rm(s.dir, { recursive: true, force: true }, () => {});
 }
-setInterval(() => { for (const [id, s] of sessions) if (Date.now() - s.last > 45000) stopLive(id); }, 10000).unref();
+/** Idle-städning: strömmar som ingen hämtat något från på maxIdleMs stängs och tunern släpps (även med timeshift) */
+export function sweepIdle(maxIdleMs = 45000) {
+  for (const [id, s] of [...sessions]) if (Date.now() - s.last > maxIdleMs) stopLive(id);
+}
+/** Disktak för timeshift-segmenten (se timeshift.js) */
+export const enforceTimeshiftCap = (opts) => enforceCap([...sessions.values()], opts);
+setInterval(() => {
+  sweepIdle();
+  try { enforceTimeshiftCap(); } catch (e) { console.warn('[livetv] timeshift:', e.message); }
+}, 10000).unref();
 // Rester från tidigare körningar
 try { fs.rmSync(LIVE, { recursive: true, force: true }); } catch {}
 
@@ -545,19 +557,18 @@ export async function servePlaylist(res, chId, token = null) {
   const f = path.join(s.dir, 'live.m3u8');
   for (let i = 0; i < 100 && !fs.existsSync(f); i++) { if (s.error || !s.proc) break; await new Promise(r => setTimeout(r, 200)); }
   if (!fs.existsSync(f)) { const e = s.error; stopLive(ch.id); return fail(res, 502, 'Kanalen kunde inte startas' + (e ? ': ' + e : '')); }
-  let m = fs.readFileSync(f, 'utf8');
   // Appar och Chromecast skickar inte cookies – token följer med till segmenten
-  if (token) m = m.replace(/^(seg-\d{5}\.ts)$/gm, `$1?t=${encodeURIComponent(token)}`);
+  const m = rewritePlaylist(fs.readFileSync(f, 'utf8'), { minSeg: s.minSeg, token });
   send(res, 200, m, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
 }
 export function serveSegment(req, res, chId, name) {
   const s = sessions.get(+chId);
-  if (!s || !/^seg-\d{5}\.ts$/.test(name)) return fail(res, 404, 'Finns inte');
+  if (!s || !SEG_RE.test(name) || segNum(name) < s.minSeg) return fail(res, 404, 'Finns inte');
   s.last = Date.now();
   const f = path.join(s.dir, name);
   fs.stat(f, (err, st) => {
     if (err) return fail(res, 404, 'Finns inte');
-    // streamFile använder pipeline: ett segment som hinner raderas (delete_segments) eller en avbruten
+    // streamFile använder pipeline: ett segment som hinner raderas (delete_segments/disktaket) eller en avbruten
     // hämtning får inte krascha servern eller lämna filen öppen
     streamFile(req, res, f, st.size, { 'Content-Type': 'video/mp2t', 'Cache-Control': 'no-store' }, { ranges: false });
   });

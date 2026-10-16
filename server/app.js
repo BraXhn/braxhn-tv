@@ -27,6 +27,8 @@ import * as books from './audiobooks.js';
 import * as pods from './podcasts.js';
 import * as live from './livetv.js';
 import * as dvr from './dvr.js';
+import * as comskip from './comskip.js';
+import * as timeshift from './timeshift.js';
 import * as streaming from './streaming.js';
 import { checkManifest } from './verify.js';
 
@@ -1256,7 +1258,7 @@ route('POST', '/api/live/:cid/play', user, (c) => {
 route('GET', '/api/live/:cid/live.m3u8', liveStream, async (c) => { if (liveOk(c)) await live.servePlaylist(c.res, +c.p.cid, c.q.get('t')); });
 route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => { if (liveOk(c)) live.serveSegment(c.req, c.res, +c.p.cid, `seg-${c.p.n}.ts`); });
 // DVR
-route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null }); });
+route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
 route('POST', '/api/dvr/program', user, async (c) => {
   if (!liveOk(c)) return;
   const { programId, series, newOnly, keep } = await readJson(c.req);
@@ -1310,7 +1312,8 @@ route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(
 route('GET', '/api/live/tuners', admin, (c) => send(c.res, 200, {
   tuners: all('SELECT id, kind, name, url, epg_url, tuner_count, enabled, last_refresh, error, (SELECT COUNT(*) FROM channels WHERE tuner_id=tuners.id) AS channels FROM tuners'),
   inUse: live.tunersInUse(), guide: live.guideState, channels: live.channelList(true),
-  settings: { dvrDir: dvr.dvrDir(), padBefore: +getSetting('dvr_pad_before', '60'), padAfter: +getSetting('dvr_pad_after', '180'), liveTranscode: getSetting('live_transcode', 'auto'), keepTs: getSetting('dvr_keep_ts', '0') === '1' }
+  settings: { dvrDir: dvr.dvrDir(), padBefore: +getSetting('dvr_pad_before', '60'), padAfter: +getSetting('dvr_pad_after', '180'), liveTranscode: getSetting('live_transcode', 'auto'), keepTs: getSetting('dvr_keep_ts', '0') === '1',
+    timeshiftMinutes: timeshift.timeshiftMinutes(), timeshiftMaxGb: timeshift.timeshiftMaxGb(), comskip: comskip.enabled(), comskipAutoSkip: comskip.autoSkipDefault() }
 }));
 route('POST', '/api/live/discover', admin, async (c) => send(c.res, 200, { found: await live.discoverHdhr() }));
 route('POST', '/api/live/tuners', admin, async (c) => {
@@ -1346,6 +1349,18 @@ route('PUT', '/api/live/settings', admin, async (c) => {
   if (b.padAfter != null) setSetting('dvr_pad_after', Math.max(0, Math.min(3600, parseInt(b.padAfter) || 0)));
   if (['auto', 'always'].includes(b.liveTranscode)) setSetting('live_transcode', b.liveTranscode);
   if (b.keepTs != null) setSetting('dvr_keep_ts', b.keepTs ? '1' : '0');
+  // Timeshift (gäller nya live-strömmar) och reklamavbrott
+  if (b.timeshiftMinutes != null && b.timeshiftMinutes !== '') setSetting('live_timeshift_minutes', Math.max(0, Math.min(720, parseInt(b.timeshiftMinutes) || 0)));
+  if (b.timeshiftMaxGb != null && b.timeshiftMaxGb !== '') setSetting('live_timeshift_max_gb', Math.max(0.5, Math.min(2000, parseFloat(b.timeshiftMaxGb) || 20)));
+  if (b.comskip != null) { setSetting('dvr_comskip', b.comskip ? '1' : '0'); if (b.comskip) comskip.resume(); }
+  if (b.comskipAutoSkip != null) setSetting('dvr_comskip_autoskip', b.comskipAutoSkip ? '1' : '0');
+  send(c.res, 200, { ok: true });
+});
+// ---------- Reklamavbrott i inspelningar ----------
+// Analysera om en inspelning (t.ex. efter ändrade inställningar); resultatet syns i /api/dvr
+route('POST', '/api/dvr/recordings/:rid/commercials', admin, (c) => {
+  const r = get("SELECT id FROM recordings WHERE id=? AND status='done'", +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!comskip.enqueue(r.id)) return fail(c.res, 400, 'Reklamanalysen är avstängd');
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/live/guide/refresh', admin, async (c) => { try { await live.refreshGuide(); dvr.applyRules(); send(c.res, 200, live.guideState); } catch (e) { fail(c.res, 502, e.message); } });
