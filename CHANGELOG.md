@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: containern startade inte (avslutades direkt utan begriplig logg) när omkodningsmappen var en monterad volym – nu töms bara innehållet
+- Unraid-mallen har fått *Port i containern*, så att servern kan köras med egen IP-adress (Custom: br0) på t.ex. port 80
 - Anpassningsbar kvalitet (ABR): vid omkodning med automatisk kvalitet kan spelaren växla ner till 720p/480p när nätet blir sämre
 - Flera versioner av samma film (t.ex. 4K och 1080p) visas som en film; servern väljer bästa versionen per enhet och webben har en versionsväljare
 - Rollista och personsidor från TMDB, och sökning på personer; apparna visar rollistan i detaljvyn
