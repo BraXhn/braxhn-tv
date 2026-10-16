@@ -27,8 +27,16 @@ import * as books from './audiobooks.js';
 import * as pods from './podcasts.js';
 import * as live from './livetv.js';
 import * as dvr from './dvr.js';
+import * as comskip from './comskip.js';
+import * as timeshift from './timeshift.js';
 import * as streaming from './streaming.js';
 import { checkManifest } from './verify.js';
+import { tmdb } from './scanner.js';
+import { streamFile } from './util.js';
+import * as people from './people.js';
+import * as trailers from './trailers.js';
+import * as wrapped from './wrapped.js';
+import * as ver from './versions.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
@@ -82,7 +90,9 @@ function allowedFor(uid, it) {
   const max = maxAgeOf(uid);
   if (max == null || !it) return true;
   let age = it.age;
-  if (age == null && it.parent_id) age = get('SELECT age FROM items WHERE id=?', it.parent_id)?.age;
+  // Avsnitt ärver seriens och filmversioner huvudradens åldersgräns
+  const from = it.parent_id || it.version_of;
+  if (age == null && from) age = get('SELECT age FROM items WHERE id=?', from)?.age;
   return age == null ? allowUnrated() : age <= max;
 }
 /** Åldersfilter för SQL (alias i = titeln, s = ev. serie) */
@@ -90,13 +100,15 @@ function ageFilter(uid) {
   const max = maxAgeOf(uid);
   return max == null ? { sql: '', params: [] } : { sql: ` AND COALESCE(i.age, s.age, ?) <= ?`, params: [allowUnrated() ? max : 999, max] };
 }
-/** slim: utan beskrivning (för stora listor där den inte visas) */
-const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false } = {}) => {
+// Filmversioner (version_of) listas aldrig – bara huvudraden syns i listor, sök och rekommendationer
+const MAIN_ONLY = ' AND i.version_of IS NULL';
+/** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
+const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
   const age = ageFilter(uid);
-  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };
-const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1)[0];
+const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1, 0, { versions: true })[0];
 
 function insideMedia(p) {
   try { const r = fs.realpathSync(p); return r === MEDIA_ROOT || r.startsWith(MEDIA_ROOT + path.sep) ? r : null; }
@@ -372,7 +384,7 @@ route('POST', '/api/acme/obtain', admin, (c) => {
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
   WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
-  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show')) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)));
+  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)));
 route('POST', '/api/libraries', admin, async (c) => {
   const { name, type, path: p, anime } = await readJson(c.req);
   const real = insideMedia(String(p || ''));
@@ -439,7 +451,7 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
   const out = { library: lib, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
   if (c.q.has('limit') || c.q.has('offset')) {
     const age = ageFilter(c.user.id);
-    out.total = get(`SELECT COUNT(*) AS n FROM (SELECT ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where.join(' AND ')})${age.sql})`, c.user.id, ...params, ...age.params).n;
+    out.total = get(`SELECT COUNT(*) AS n FROM (SELECT ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where.join(' AND ')})${MAIN_ONLY}${age.sql})`, c.user.id, ...params, ...age.params).n;
     out.offset = offset; out.limit = limit;
   }
   send(c.res, 200, out);
@@ -451,11 +463,18 @@ route('GET', '/api/search', user, (c) => {
     `CASE i.kind WHEN 'movie' THEN 0 WHEN 'show' THEN 0 ELSE 1 END, i.sort_title`, 60));
 });
 route('GET', '/api/items/:id', user, (c) => {
-  const uid = c.user.id, it = get('SELECT * FROM items WHERE id=?', c.p.id);
-  if (!it) return fail(c.res, 404, 'Finns inte');
+  const uid = c.user.id, row = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!row) return fail(c.res, 404, 'Finns inte');
+  // En filmversion visas som filmen (huvudraden) med just den versionens filinformation
+  const it = ver.mainOf(row);
   if (!allowedFor(uid, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const out = oneItem(uid, it.id);
+  const versions = it.kind === 'movie' ? ver.versionsOf(it) : [it];
+  const wanted = row.version_of ? row.id : +c.q.get('version') || it.id;
+  const file = versions.find(v => v.id === wanted) || it;
+  if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
   out.inWatchlist = !!get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, it.kind === 'episode' ? it.parent_id : it.id);
+  Object.assign(out, titleExtras(c.user, it)); // rollista och trailers
   if (it.collection_id) {
     const col = get('SELECT * FROM collections WHERE id=?', it.collection_id);
     if (col) out.collectionInfo = { id: col.id, name: col.name, items: listItems(uid, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 50) };
@@ -466,9 +485,9 @@ route('GET', '/api/items/:id', user, (c) => {
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
   } else {
     Object.assign(out, {
-      file: path.basename(it.path), size: it.size, container: it.container, vcodec: it.vcodec, acodec: it.acodec,
-      width: it.width, height: it.height, chapters: chaptersOf(it),
-      audio: st.streamsOf(it).filter(s => s.type === 'audio'), subtitles: st.subtitlesOf(it).map(({ file, ...s }) => s)
+      file: path.basename(file.path), size: file.size, container: file.container, vcodec: file.vcodec, acodec: file.acodec,
+      width: file.width, height: file.height, hdr: file.hdr || null, chapters: chaptersOf(file),
+      audio: st.streamsOf(file).filter(s => s.type === 'audio'), subtitles: st.subtitlesOf(file).map(({ file, ...s }) => s)
     });
     if (it.kind === 'episode') {
       const sib = all(`SELECT id FROM items WHERE parent_id=? ORDER BY season, episode`, it.parent_id).map(r => r.id);
@@ -480,8 +499,10 @@ route('GET', '/api/items/:id', user, (c) => {
 });
 route('POST', '/api/items/:id/progress', user, async (c) => {
   const { position, duration } = await readJson(c.req);
-  const it = get('SELECT id, kind, parent_id, age, duration, title, tmdb_id, season, episode FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
+  let it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
+  // Framsteg gäller filmen oavsett vilken version som spelades
+  if (it.version_of) it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode FROM items WHERE id=?', it.version_of) || it;
   if (!allowedFor(c.user.id, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const dur = it.duration || +duration || 0;
   const rawPos = Math.max(0, +position || 0);
@@ -503,8 +524,9 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
   const { watched } = await readJson(c.req);
-  const it = get('SELECT id,kind FROM items WHERE id=?', c.p.id);
-  if (!it) return fail(c.res, 404, 'Finns inte');
+  const row = get('SELECT id,kind,version_of FROM items WHERE id=?', c.p.id);
+  if (!row) return fail(c.res, 404, 'Finns inte');
+  const it = row.version_of ? { id: row.version_of, kind: row.kind } : row; // sedd gäller filmen, inte filen
   const ids = it.kind === 'show' ? all('SELECT id FROM items WHERE parent_id=?', it.id).map(r => r.id) : [it.id];
   const season = c.q.get('season');
   const targets = season != null && it.kind === 'show'
@@ -691,9 +713,9 @@ route('GET', '/api/watchlist', user, (c) => send(c.res, 200,
   listItems(c.user.id, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 500)));
 route('POST', '/api/items/:id/watchlist', user, async (c) => {
   const { add } = await readJson(c.req);
-  let it = get('SELECT id, kind, parent_id, age FROM items WHERE id=?', c.p.id);
+  let it = get('SELECT id, kind, parent_id, version_of, age FROM items WHERE id=?', c.p.id);
   if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
-  const id = it.kind === 'episode' ? it.parent_id : it.id; // avsnitt → hela serien
+  const id = it.kind === 'episode' ? it.parent_id : ver.mainIdOf(it); // avsnitt → hela serien, version → filmen
   if (add === false) run('DELETE FROM watchlist WHERE user_id=? AND item_id=?', c.user.id, id);
   else run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now());
   invalidateProfile(c.user.id);
@@ -702,12 +724,12 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
 
 // ---------- Samlingar ----------
 route('GET', '/api/collections', user, (c) => {
-  const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie'
+  const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie' AND i.version_of IS NULL
     GROUP BY c.id HAVING n >= 2 ORDER BY c.name`);
   // dölj samlingar där profilen inte får se något (en fråga för alla samlingar)
   const age = ageFilter(c.user.id);
   const visible = new Set(all(`SELECT DISTINCT i.collection_id AS id FROM items i LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.collection_id IS NOT NULL${age.sql}`, ...age.params).map(r => r.id));
+    WHERE i.collection_id IS NOT NULL${MAIN_ONLY}${age.sql}`, ...age.params).map(r => r.id));
   send(c.res, 200, cols.filter(col => visible.has(col.id)).map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
     count: col.n, years: [col.y0, col.y1], visible: true })));
 });
@@ -830,7 +852,7 @@ function recommend(uid, limit) {
     WHERE q.user_id=? AND (q.watched=1 OR q.position > 0)`, uid).map(r => r.id));
   for (const r of all('SELECT item_id FROM watchlist WHERE user_id=?', uid)) seen.add(r.item_id);
   const cands = all(`SELECT i.id, i.genres, i.rating FROM items i LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'${age.sql} ORDER BY i.added DESC`, ...age.params)
+    WHERE i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'${MAIN_ONLY}${age.sql} ORDER BY i.added DESC`, ...age.params)
     .filter(r => !seen.has(r.id)).slice(0, 3000);
   const total = Object.values(w).reduce((a, b) => a + b, 0);
   const top = cands.map(r => { const g = parseGenres(r.genres); return { id: r.id, score: g.reduce((a, x) => a + (w[x] || 0) / total, 0) / Math.sqrt(g.length || 1) + (r.rating || 6) / 50 }; })
@@ -842,7 +864,7 @@ function similarTo(uid, it, limit) {
   if (!g.length) return [];
   const age = ageFilter(uid);
   const cands = all(`SELECT i.id, i.genres, i.collection_id FROM items i LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.kind=? AND i.id != ? AND i.genres IS NOT NULL${age.sql} ORDER BY i.rating DESC LIMIT 2000`, it.kind, it.id, ...age.params);
+    WHERE i.kind=? AND i.id != ? AND i.genres IS NOT NULL${MAIN_ONLY}${age.sql} ORDER BY i.rating DESC LIMIT 2000`, it.kind, it.id, ...age.params);
   const top = cands.map(x => { const xg = parseGenres(x.genres); return { id: x.id, s: xg.filter(y => g.includes(y)).length / Math.max(g.length, xg.length) + (x.collection_id && x.collection_id === it.collection_id ? 1 : 0) }; })
     .filter(o => o.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, limit).map(o => o.id);
   return itemsByIds(uid, top);
@@ -872,8 +894,14 @@ route('GET', '/api/collection-image/:cid/:type', img, (c) => {
 route('GET', '/api/image/:id/:type', img, (c) => {
   if (!['poster', 'backdrop', 'thumb'].includes(c.p.type)) return fail(c.res, 404, '');
   const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
-  fs.readFile(f, (e, data) => e ? fail(c.res, 404, 'Ingen bild')
-    : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
+  const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' });
+  fs.readFile(f, (e, data) => {
+    if (!e) return ok(data);
+    // Filmversioner har ingen egen affisch – använd filmens (t.ex. när Chromecast fått en token för versionen)
+    const main = c.p.type !== 'thumb' && get('SELECT version_of FROM items WHERE id=?', +c.p.id)?.version_of;
+    if (!main) return fail(c.res, 404, 'Ingen bild');
+    fs.readFile(path.join(IMAGES, `${main}-${c.p.type}.jpg`), (e2, d2) => e2 ? fail(c.res, 404, 'Ingen bild') : ok(d2));
+  });
 });
 
 // Uppspelning
@@ -882,22 +910,32 @@ const mediaItem = (c) => {
   if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
   if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
   if (c.req.url.includes('/api/stream/')) {
-    if (act.isStopped(c.user.id, it.id)) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
-    act.touch(c.user.id, it.id);
+    // "Spelas nu" och admins stopp gäller filmen (huvudraden), även när en annan version strömmas
+    if (act.isStopped(c.user.id, ver.mainIdOf(it))) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
+    act.touch(c.user.id, ver.mainIdOf(it));
   }
   return it;
 };
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
 route('GET', '/api/items/:id/playback', user, (c) => {
-  const it = mediaItem(c); if (!it) return;
-  if (act.isStopped(c.user.id, it.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
-  const o = st.parseCaps(c.q);
+  const row = mediaItem(c); if (!row) return;
+  const main = ver.mainOf(row);
+  if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
+  let o = st.parseCaps(c.q);
   const remote = !isLocalReq(c.req);
   // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv)
   const auto = !c.q.get('q') || c.q.get('q') === 'auto';
   if (remote && auto) o.q = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
   o.maxBitrate = st.QUALITIES[o.q]?.br || null;
+  // Flera versioner: klientens val (version=<id>) eller den som passar klienten bäst
+  const versions = ver.versionsOf(main);
+  const asked = versions.find(v => v.id === (+c.q.get('version') || (row.version_of ? row.id : 0)));
+  const it = asked || ver.chooseVersion(versions, o, st.decide, st.QUALITIES[o.q]?.h || null);
+  // Spårval utan angiven version kan komma från huvudfilens spårlista (appar) – översätt till den valda filen
+  if (!asked) o = ver.mapTracks(o, main, it, st.streamsOf, st.subtitlesOf);
   const d = st.decide(it, o);
+  // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
+  d.abr = auto && d.mode === 'transcode';
   // Token i URL behövs för appar, Chromecast och AirPlay (de skickar inte webbläsarens cookie)
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;
@@ -907,8 +945,8 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${st.hlsParams(d, o, token)}`;
   // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning
   const info = c.q.get('info') === '1';
-  if (it.duration && !info) trakt.scrobble(c.user.id, it, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
-  if (!info) act.startPlay({ user: c.user, item: it, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
+  if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
+  if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
@@ -919,6 +957,7 @@ route('GET', '/api/items/:id/playback', user, (c) => {
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
     audioSelected: d.audio ?? null,
+    ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
 });
@@ -932,7 +971,13 @@ route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = 
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
 route('GET', '/api/stream/:id/subs/:sid', media, (c) => { const it = mediaItem(c); if (it) st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q); });
-route('POST', '/api/stream/:id/stop', user, (c) => { st.stopUserSessions(+c.p.id, c.user.id); send(c.res, 200, { ok: true }); });
+route('POST', '/api/stream/:id/stop', user, (c) => {
+  // Klienten anger filmen; omkodningen kan gälla vilken version som helst av den
+  const row = get('SELECT * FROM items WHERE id=?', +c.p.id);
+  const ids = row ? ver.versionsOf(ver.mainOf(row)).map(v => v.id) : [+c.p.id];
+  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id);
+  send(c.res, 200, { ok: true });
+});
 
 // Undertexter från OpenSubtitles
 route('GET', '/api/items/:id/subsearch', user, async (c) => {
@@ -1256,7 +1301,7 @@ route('POST', '/api/live/:cid/play', user, (c) => {
 route('GET', '/api/live/:cid/live.m3u8', liveStream, async (c) => { if (liveOk(c)) await live.servePlaylist(c.res, +c.p.cid, c.q.get('t')); });
 route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => { if (liveOk(c)) live.serveSegment(c.req, c.res, +c.p.cid, `seg-${c.p.n}.ts`); });
 // DVR
-route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null }); });
+route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
 route('POST', '/api/dvr/program', user, async (c) => {
   if (!liveOk(c)) return;
   const { programId, series, newOnly, keep } = await readJson(c.req);
@@ -1310,7 +1355,8 @@ route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(
 route('GET', '/api/live/tuners', admin, (c) => send(c.res, 200, {
   tuners: all('SELECT id, kind, name, url, epg_url, tuner_count, enabled, last_refresh, error, (SELECT COUNT(*) FROM channels WHERE tuner_id=tuners.id) AS channels FROM tuners'),
   inUse: live.tunersInUse(), guide: live.guideState, channels: live.channelList(true),
-  settings: { dvrDir: dvr.dvrDir(), padBefore: +getSetting('dvr_pad_before', '60'), padAfter: +getSetting('dvr_pad_after', '180'), liveTranscode: getSetting('live_transcode', 'auto'), keepTs: getSetting('dvr_keep_ts', '0') === '1' }
+  settings: { dvrDir: dvr.dvrDir(), padBefore: +getSetting('dvr_pad_before', '60'), padAfter: +getSetting('dvr_pad_after', '180'), liveTranscode: getSetting('live_transcode', 'auto'), keepTs: getSetting('dvr_keep_ts', '0') === '1',
+    timeshiftMinutes: timeshift.timeshiftMinutes(), timeshiftMaxGb: timeshift.timeshiftMaxGb(), comskip: comskip.enabled(), comskipAutoSkip: comskip.autoSkipDefault() }
 }));
 route('POST', '/api/live/discover', admin, async (c) => send(c.res, 200, { found: await live.discoverHdhr() }));
 route('POST', '/api/live/tuners', admin, async (c) => {
@@ -1346,6 +1392,18 @@ route('PUT', '/api/live/settings', admin, async (c) => {
   if (b.padAfter != null) setSetting('dvr_pad_after', Math.max(0, Math.min(3600, parseInt(b.padAfter) || 0)));
   if (['auto', 'always'].includes(b.liveTranscode)) setSetting('live_transcode', b.liveTranscode);
   if (b.keepTs != null) setSetting('dvr_keep_ts', b.keepTs ? '1' : '0');
+  // Timeshift (gäller nya live-strömmar) och reklamavbrott
+  if (b.timeshiftMinutes != null && b.timeshiftMinutes !== '') setSetting('live_timeshift_minutes', Math.max(0, Math.min(720, parseInt(b.timeshiftMinutes) || 0)));
+  if (b.timeshiftMaxGb != null && b.timeshiftMaxGb !== '') setSetting('live_timeshift_max_gb', Math.max(0.5, Math.min(2000, parseFloat(b.timeshiftMaxGb) || 20)));
+  if (b.comskip != null) { setSetting('dvr_comskip', b.comskip ? '1' : '0'); if (b.comskip) comskip.resume(); }
+  if (b.comskipAutoSkip != null) setSetting('dvr_comskip_autoskip', b.comskipAutoSkip ? '1' : '0');
+  send(c.res, 200, { ok: true });
+});
+// ---------- Reklamavbrott i inspelningar ----------
+// Analysera om en inspelning (t.ex. efter ändrade inställningar); resultatet syns i /api/dvr
+route('POST', '/api/dvr/recordings/:rid/commercials', admin, (c) => {
+  const r = get("SELECT id FROM recordings WHERE id=? AND status='done'", +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!comskip.enqueue(r.id)) return fail(c.res, 400, 'Reklamanalysen är avstängd');
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/live/guide/refresh', admin, async (c) => { try { await live.refreshGuide(); dvr.applyRules(); send(c.res, 200, live.guideState); } catch (e) { fail(c.res, 502, e.message); } });
@@ -1369,7 +1427,7 @@ route('GET', '/api/requests/search', user, async (c) => {
     const res = await tmdbSearch(kind, String(c.q.get('q') || '').slice(0, 100), null);
     const mine = streaming.myProviders().length > 0;
     send(c.res, 200, await Promise.all(res.map(async r => {
-      const lib = get('SELECT id FROM items WHERE tmdb_id=? AND kind=?', r.id, kind);
+      const lib = get('SELECT id FROM items WHERE tmdb_id=? AND kind=? AND version_of IS NULL', r.id, kind);
       const rq = get('SELECT status FROM requests WHERE tmdb_id=? AND kind=?', r.id, kind);
       // Finns den redan på en tjänst ni har? Då behöver den inte laddas ner.
       const streams = mine && !lib ? (await streaming.providersFor(kind, r.id, r.title).catch(() => null))?.onMine || [] : [];
@@ -1488,8 +1546,12 @@ route('GET', '/api/activity', admin, (c) => send(c.res, 200, act.listActive()));
 route('POST', '/api/activity/:key/stop', admin, (c) => {
   const s = act.stopPlay(c.p.key);
   if (!s) return fail(c.res, 404, 'Uppspelningen finns inte längre');
-  st.stopUserSessions(s.itemId, s.userId);
-  run("DELETE FROM sessions WHERE user_id=? AND kind='media' AND scope_item=?", s.userId, s.itemId);
+  // Alla versioner av filmen (strömmen kan gälla en annan fil än huvudraden)
+  const main = get('SELECT * FROM items WHERE id=?', s.itemId);
+  for (const id of main ? ver.versionsOf(main).map(v => v.id) : [s.itemId]) {
+    st.stopUserSessions(id, s.userId);
+    run("DELETE FROM sessions WHERE user_id=? AND kind='media' AND scope_item=?", s.userId, id);
+  }
   audit('stream_stopped', { ...ctx(c), detail: `${s.user}: ${s.itemId}` });
   send(c.res, 200, { ok: true });
 });
@@ -1599,6 +1661,69 @@ route('GET', '/api/security-check', admin, (c) => {
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
   if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
   send(c.res, 200, items);
+});
+
+// ---------- Skådespelare, trailers och årssammanfattning ----------
+const TRAILER_SCOPE = 6.5e9;
+/** Rollista (avsnitt visar seriens), lokala trailers och YouTube-trailer (inte för barnprofiler – länken leder ut från appen) */
+function titleExtras(u, it) {
+  const ep = it.kind === 'episode';
+  return { cast: people.castOf(ep ? it.parent_id : it.id), trailers: ep ? [] : trailers.trailersOf(it.id),
+    youtube: !ep && u.max_age == null && trailers.youtubeOk(it.trailer_yt) ? it.trailer_yt : null };
+}
+route('GET', '/api/search/people', user, (c) => {
+  const q = String(c.q.get('q') || '').trim().slice(0, 100);
+  send(c.res, 200, q.length < 2 ? [] : people.searchPeople(q, ageFilter(c.user.id), 20));
+});
+route('GET', '/api/people/:pid', user, async (c) => {
+  const pid = +c.p.pid;
+  if (!people.personRow(pid)) return fail(c.res, 404, 'Finns inte');
+  // Bara titlar som finns i biblioteket och som profilen får se; utan sådana visas inte personen alls
+  const items = listItems(c.user.id, `i.kind IN ('movie','show') AND i.id IN (SELECT item_id FROM item_people WHERE person_id=?)`, [pid],
+    'i.year IS NULL, i.year DESC, i.sort_title', 300, 0, { slim: true });
+  if (!items.length) return fail(c.res, 404, 'Finns inte');
+  const roles = people.rolesOf(pid);
+  const info = await people.person(pid, tmdb, hasTmdb());
+  send(c.res, 200, { ...info, items: items.map(i => ({ ...i, roles: roles.get(i.id) || [] })) });
+});
+route('GET', '/api/people/:pid/image', img, async (c) => {
+  const f = await people.personImage(+c.p.pid);
+  if (!f) return fail(c.res, 404, 'Ingen bild');
+  fs.readFile(f, (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+});
+// Lokala trailers spelas direkt (som filen är). Mediatoken gäller bara den trailern.
+const trailerStream = { auth: true, media: true, scope: (p) => TRAILER_SCOPE + (+p.tid) };
+const trailerFor = (c) => {
+  const t = trailers.trailerRow(+c.p.tid);
+  const it = t && get('SELECT * FROM items WHERE id=?', t.item_id);
+  if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
+  if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
+  return t;
+};
+const serveTrailer = (c) => {
+  const t = trailerFor(c); if (!t) return;
+  fs.stat(t.path, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Filen finns inte längre')
+    : streamFile(c.req, c.res, t.path, s.size, { 'Content-Type': MIME[path.extname(t.path).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' }));
+};
+route('GET', '/api/trailers/:tid/stream', trailerStream, serveTrailer);
+route('HEAD', '/api/trailers/:tid/stream', trailerStream, serveTrailer);
+// För appar och Chromecast: färdig URL med kortlivad token (webben använder kakan)
+route('GET', '/api/trailers/:tid/play', user, (c) => {
+  const t = trailerFor(c); if (!t) return;
+  const token = c.user.via !== 'cookie' ? createSession(c.user.id, 'media', { item: TRAILER_SCOPE + t.id, ip: clientIp(c.req) }) : null;
+  send(c.res, 200, { url: `/api/trailers/${t.id}/stream${token ? '?t=' + token : ''}`, mime: MIME[path.extname(t.path).toLowerCase()] || 'video/mp4' });
+});
+// Årssammanfattning: den egna, eller (administratör på betrott nät) någon annans
+route('GET', '/api/wrapped/:year', user, (c) => {
+  const year = parseInt(c.p.year);
+  if (!(year >= 2000 && year <= 2100)) return fail(c.res, 400, 'Ogiltigt år');
+  const adminOk = !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req));
+  const uid = c.q.get('user') ? +c.q.get('user') : c.user.id;
+  if (uid !== c.user.id && !adminOk) return fail(c.res, 403, 'Du kan bara se din egen sammanfattning');
+  const u = get('SELECT id, name FROM users WHERE id=?', uid);
+  if (!u) return fail(c.res, 404, 'Användaren finns inte');
+  send(c.res, 200, { ...wrapped.wrapped(uid, year), user: u, years: wrapped.years(uid),
+    users: adminOk ? all('SELECT id, name FROM users ORDER BY name COLLATE NOCASE') : undefined });
 });
 
 // ---------- statiska filer ----------

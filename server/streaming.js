@@ -63,5 +63,5 @@ export async function discover(kind, providerIds, page = 1, genre = null) {
   return { page: d.page, pages: Math.min(d.total_pages || 0, 50), results: (d.results || []).map(r => ({
     id: r.id, kind: kind === 'show' ? 'show' : 'movie', title: r.title || r.name, year: parseInt(r.release_date || r.first_air_date) || null,
     overview: (r.overview || '').slice(0, 400), poster: r.poster_path ? `https://image.tmdb.org/t/p/w342${r.poster_path}` : null, rating: r.vote_average || null,
-    inLibrary: get('SELECT id FROM items WHERE tmdb_id=? AND kind=?', r.id, kind === 'show' ? 'show' : 'movie')?.id || null })) };
+    inLibrary: get('SELECT id FROM items WHERE tmdb_id=? AND kind=? AND version_of IS NULL', r.id, kind === 'show' ? 'show' : 'movie')?.id || null })) };
 }

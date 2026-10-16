@@ -200,12 +200,14 @@ views.lib = async (id) => {
 views.search = async (q) => {
   q = decodeURIComponent(q || '');
   if ($('#q').value !== q && document.activeElement !== $('#q')) $('#q').value = q;
-  const r = q.length >= 1 ? await api('/search?q=' + encodeURIComponent(q)) : [];
+  const [r, ppl] = q.length >= 1 ? await Promise.all([api('/search?q=' + encodeURIComponent(q)),
+    api('/search/people?q=' + encodeURIComponent(q)).catch(e => { if (e?.aborted) throw e; return []; })]) : [[], []];
   const top = r.filter(i => i.kind !== 'episode'), eps = r.filter(i => i.kind === 'episode');
   main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1></div>
     ${top.length ? `<section class="section"><h2>Filmer och serier</h2><div class="grid">${top.map(i => card(i)).join('')}</div></section>` : ''}
+    ${ppl.length ? `<section class="section"><h2>Personer</h2><div class="shelf people">${ppl.map(p => personCard(p, `${p.titles} ${p.titles === 1 ? 'titel' : 'titlar'}`)).join('')}</div></section>` : ''}
     ${eps.length ? `<section class="section"><h2>Avsnitt</h2><div class="grid">${eps.map(i => card(i, true)).join('')}</div></section>` : ''}
-    ${!r.length ? '<div class="empty">Inga träffar.</div>' : ''}`;
+    ${!r.length && !ppl.length ? '<div class="empty">Inga träffar.</div>' : ''}`;
 };
 
 function heroHtml(it, extra = '') {
@@ -221,18 +223,23 @@ function heroHtml(it, extra = '') {
 }
 
 views.item = async (id) => {
-  const it = await api('/items/' + id);
+  // Flera versioner (t.ex. 4K och 1080p): valet sparas per film i webbläsaren, annars väljer servern
+  const chosen = store.get('version.' + id, '');
+  const it = await api('/items/' + id + (chosen ? '?version=' + encodeURIComponent(chosen) : ''));
   if (it.kind === 'show') return showView(it);
+  const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = it.position > 30;
   const actions = `<div class="row">
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
-    <a class="btn" href="/api/stream/${it.id}/download" download>Ladda ner</a>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
+    <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
-  main.innerHTML = heroHtml(it, back + actions) + `<div class="tech">
+  const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
+    <select id="ver"><option value="">Automatiskt</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
+  main.innerHTML = heroHtml(it, back + actions + versions) + `<div class="tech">
     <span>Fil</span><b>${esc(it.file)}</b><span>Storlek</span><b>${fmtSize(it.size)}</b>
     <span>Video</span><b>${esc(it.vcodec || '–')} ${it.width ? it.width + '×' + it.height : ''}</b>
     <span>Ljud</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
@@ -244,16 +251,25 @@ views.item = async (id) => {
     <span>Uppspelning</span><b id="pbinfo">…</b></div>
     <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">Sök undertexter online</button>
     ${me.is_admin && it.kind === 'episode' ? '<button class="ghost small" id="markers">Justera intro/eftertexter</button>' : ''}</div>`;
-  api(`/items/${it.id}/playback?${capsQuery()}&info=1`).then(p => {
+  if ($('#ver')) {
+    $('#ver').value = verSel;
+    $('#ver').onchange = (e) => { store.set('version.' + it.id, e.target.value); route(); };
+  }
+  api(`/items/${it.id}/playback?${capsQuery(verSel ? { version: verSel } : {})}&info=1`).then(p => {
     const m = { direct: 'Direktuppspelning', remux: 'Remux', transcode: 'Omkodning' }[p.mode];
     if ($('#pbinfo')) $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
+    // Visa vilken version servern valde automatiskt
+    const auto = !verSel && p.versions && p.versions.find(v => v.id === p.version);
+    if (auto && $('#ver')) $('#ver').options[0].textContent = 'Automatiskt (' + auto.label + ')';
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   bindWatchlist(it);
+  bindTrailers(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it));
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
-  $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play));
+  $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play, verSel ? { version: verSel } : {}));
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) {
     $('#refresh').onclick = () => refreshMeta(it);
@@ -269,7 +285,7 @@ function showView(it) {
   const nx = it.next;
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
     `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
@@ -288,6 +304,8 @@ function showView(it) {
   };
   renderEps();
   bindWatchlist(it);
+  bindTrailers(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it));
   main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
   $$('#tabs button').forEach(b => b.onclick = () => {
     cur = +b.dataset.s; store.set('season.' + it.id, cur);
@@ -322,6 +340,101 @@ views.collection = async (id) => {
     <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;
   const first = c.items.find(i => !i.watched);
   if (first) $('#playfirst').onclick = (e) => startPlay(e.currentTarget, first.id, first.position || 0);
+};
+
+// ---------- Skådespelare och personsidor ----------
+const ROLE_NAME = { director: 'Regi', creator: 'Skapare' };
+const initials = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+function personArt(p) {
+  const h = hue(p.name);
+  return `<div class="art"><div class="ph" style="--h1:hsl(${h} 30% 34%);--h2:hsl(${(h + 40) % 360} 35% 18%)">${esc(initials(p.name))}</div>
+    ${p.image ? `<img loading="lazy" src="/api/people/${+p.id}/image" alt="" data-fb="1">` : ''}</div>`;
+}
+const personCard = (p, sub = '') => `<a class="card pcard" href="#/person/${+p.id}">${personArt(p)}<div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></a>`;
+function castShelf(it) {
+  if (!it.cast?.length) return '';
+  return `<section class="section"><h2>Rollista</h2><div class="shelf people">${it.cast.map(p => personCard(p, p.role === 'cast' ? p.character || '' : ROLE_NAME[p.role] || '')).join('')}</div></section>`;
+}
+const fmtDay = (d) => { const t = new Date(d + 'T12:00:00'); return isNaN(t) ? d : t.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' }); };
+views.person = async (id) => {
+  const p = await api('/people/' + encodeURIComponent(id));
+  const age = p.birthday ? Math.floor(((p.deathday ? new Date(p.deathday) : new Date()) - new Date(p.birthday)) / 31557600000) : null;
+  const life = [p.birthday ? `Född ${fmtDay(p.birthday)}${!p.deathday && age ? ` (${age} år)` : ''}` : '', p.birthplace || '',
+    p.deathday ? `Död ${fmtDay(p.deathday)}${age ? ` (${age} år)` : ''}` : ''].filter(Boolean);
+  const roleText = (i) => i.roles.map(r => r.role === 'cast' ? (r.character || 'Medverkar') : ROLE_NAME[r.role] || r.role).join(', ');
+  main.innerHTML = `<div class="person-head"><div class="card pcard">${personArt(p)}</div>
+    <div><h1>${esc(p.name)}</h1><div class="meta">${life.map(x => `<span>${esc(x)}</span>`).join('')}</div>
+    ${p.bio ? `<p class="overview bio clamp" id="bio">${esc(p.bio)}</p><button class="ghost small" id="biomore" hidden>Visa mer</button>` : ''}</div></div>
+    <section class="section"><h2>I biblioteket <span class="muted small">${p.items.length} ${p.items.length === 1 ? 'titel' : 'titlar'}</span></h2>
+    <div class="grid">${p.items.map(i => `<div>${card(i)}<div class="role">${esc(roleText(i))}</div></div>`).join('')}</div></section>`;
+  const bio = $('#bio');
+  if (bio && bio.scrollHeight > bio.clientHeight + 4) {
+    $('#biomore').hidden = false;
+    $('#biomore').onclick = (e) => { const closed = bio.classList.toggle('clamp'); e.currentTarget.textContent = closed ? 'Visa mer' : 'Visa mindre'; };
+  }
+};
+
+// ---------- Trailers ----------
+function trailerBtns(it) {
+  const local = (it.trailers || []).map(t => `<button class="ghost" data-trailer="${+t.id}">▶ ${esc(t.name)}</button>`).join('');
+  // YouTube öppnas i ny flik (CSP tillåter inte inbäddning)
+  const yt = it.youtube ? `<a class="btn" href="https://www.youtube.com/watch?v=${encodeURIComponent(it.youtube)}" target="_blank" rel="noopener noreferrer">Trailer (YouTube)</a>` : '';
+  return local + yt;
+}
+function bindTrailers(it) {
+  $$('[data-trailer]').forEach(b => b.onclick = () => playTrailer(+b.dataset.trailer, it.title));
+}
+function playTrailer(id, title) {
+  const d = document.createElement('dialog');
+  d.className = 'wide trailer';
+  d.innerHTML = `<h2>${esc(title)} – trailer</h2><video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="ghost" id="tclose">Stäng</button></div>`;
+  document.body.append(d); d.showModal();
+  const v = $('video', d);
+  v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)');
+  const leave = onLeave(() => { if (d.open) d.close(); });
+  d.onclose = () => { leaveFns.delete(leave); v.onerror = null; stopVideo(v); d.remove(); };
+  $('#tclose', d).onclick = () => d.close();
+}
+
+// ---------- Årssammanfattning ----------
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+views.wrapped = async (year, uid) => {
+  year = parseInt(year) || new Date().getFullYear();
+  const w = await api(`/wrapped/${year}${uid ? '?user=' + encodeURIComponent(uid) : ''}`);
+  const h = (x) => (x || 0).toLocaleString('sv-SE', { maximumFractionDigits: 1 });
+  const yrs = [...new Set([year, new Date().getFullYear(), ...w.years])].sort((a, b) => b - a);
+  const other = w.user.id !== me.id;
+  const maxM = Math.max(1, ...w.video.months);
+  const empty = !w.video.plays && !w.music.plays && !w.books.list.length;
+  const rows = (list, f) => list.length ? `<table>${list.map((x, i) => `<tr><td class="muted">${i + 1}</td>${f(x)}</tr>`).join('')}</table>` : '<p class="muted">–</p>';
+  main.innerHTML = `<div class="toolbar"><h1>${other ? 'Året för ' + esc(w.user.name) : 'Ditt år'} – ${year}</h1>
+    <select id="wy" aria-label="År">${yrs.map(y => `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`).join('')}</select>
+    ${w.users ? `<select id="wu" aria-label="Användare">${w.users.map(u => `<option value="${+u.id}"${u.id === w.user.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : ''}</div>
+    ${empty ? `<div class="empty"><h2>Ingen statistik för ${year}</h2><p>Titta på film och serier eller lyssna på musik och ljudböcker så fylls sammanfattningen på.</p></div>` : `
+    <p class="wrap-hero">${other ? esc(w.user.name) : 'Du'} tittade och lyssnade i <b>${h(w.hours)} timmar</b> under ${year}${w.topGenre ? ` – favoritgenren var <b>${esc(w.topGenre)}</b>` : ''}.</p>
+    <div class="tiles">
+      <div class="tile"><b>${h(w.video.hours)} h</b><span>film och tv</span></div>
+      <div class="tile"><b>${w.video.movies}</b><span>filmer</span></div>
+      <div class="tile"><b>${w.video.episodes}</b><span>avsnitt</span></div>
+      <div class="tile"><b>${h(w.music.hours)} h</b><span>musik (${w.music.plays} spelningar)</span></div>
+      <div class="tile"><b>${h(w.books.hours)} h</b><span>ljudböcker</span></div>
+      <div class="tile"><b>${esc(w.topGenre || '–')}</b><span>favoritgenre</span></div>
+    </div>
+    ${w.video.titles.length ? `<section class="section"><h2>Mest sett</h2><div class="shelf">${w.video.titles.map((t, i) =>
+      `<a class="card" href="#/item/${+t.id}">${art({ id: t.id, title: t.title, kind: 'movie', poster: true })}<div class="t">${i + 1}. ${esc(t.title)}</div>
+      <div class="s">${t.plays} ${t.plays === 1 ? 'gång' : 'gånger'}</div></a>`).join('')}</div></section>` : ''}
+    ${w.video.plays ? `<div class="panel"><h2>Uppspelningar per månad</h2><div class="bars">${w.video.months.map((n, i) =>
+      `<div class="bar" title="${MONTHS[i]}: ${n}"><i style="height:${Math.max(2, n / maxM * 100)}%"></i><span>${MONTHS[i]}</span></div>`).join('')}</div></div>` : ''}
+    <div class="grid2">
+      <div class="panel"><h2>Genrer</h2>${rows(w.video.genres, g => `<td>${esc(g.name)}</td><td class="r">${g.plays}</td>`)}</div>
+      <div class="panel"><h2>Mest spelade artister</h2>${rows(w.music.artists, a => `<td><a href="#/artist/${+a.id}">${esc(a.name)}</a></td><td class="r">${a.plays} ggr</td>`)}</div>
+      <div class="panel"><h2>Mest spelade låtar</h2>${rows(w.music.tracks, t => `<td>${t.album ? `<a href="#/album/${+t.album}">${esc(t.title)}</a>` : esc(t.title)}<div class="muted small">${esc(t.artist || '')}</div></td><td class="r">${t.plays} ggr</td>`)}</div>
+      <div class="panel"><h2>Ljudböcker</h2>${rows(w.books.list, b => `<td><a href="#/book/${+b.id}">${esc(b.title)}</a><div class="muted small">${esc(b.author || '')}</div></td><td class="r">${b.finished ? 'Utläst' : 'Påbörjad'}</td>`)}</div>
+    </div>`}`;
+  const go = () => { const u = $('#wu')?.value; location.hash = `#/wrapped/${$('#wy').value}${u && +u !== me.id ? '/' + u : ''}`; };
+  $('#wy').onchange = go;
+  if ($('#wu')) $('#wu').onchange = go;
 };
 
 // ---------- Profiler: "Vem tittar?" ----------
@@ -448,6 +561,9 @@ views.account = async () => {
     <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut.</p>
     <div class="row" style="margin-top:12px"><button class="primary">Byt lösenord</button></div></form>
   </div>
+  <div class="panel"><h2>Årssammanfattning</h2>
+    <p class="muted small">Det du har sett och lyssnat på mest under året: titlar, timmar, favoritgenre, musik och ljudböcker.</p>
+    <div class="row"><a class="btn" href="#/wrapped/${new Date().getFullYear()}">Visa ${new Date().getFullYear()}</a></div></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
       <div class="row"><button class="ghost" id="newrc">Skapa nya reservkoder</button><button class="danger" id="off">Stäng av</button></div>`
@@ -684,6 +800,8 @@ async function playLive(ch) {
     <div class="pbar"><button class="ghost small" id="lclose">← Tillbaka</button><span class="title">${esc(ch.number ? ch.number + ' · ' : '')}${esc(ch.name)}</span>
       <span class="muted small" id="lnow">${ch.now ? esc(ch.now.title) + ' · ' + hhmm(ch.now.start) + '–' + hhmm(ch.now.stop) : ''}</span>
       <span class="muted small" id="lstat">Startar kanalen…</span>
+      <button class="ghost small" id="lback" title="Spola tillbaka 30 sekunder" hidden>⏪ 30 s</button><button class="ghost small" id="lfwd" title="Spola fram 30 sekunder" hidden>30 s ⏩</button>
+      <button class="small liveind" id="llive" hidden>● Live</button>
       ${ch.now ? `<button class="ghost small" id="lrec">⏺ Spela in</button>` : ''}</div>`;
   overlayOpen(el);
   const v = $('#lvid', el), stat = $('#lstat', el);
@@ -702,7 +820,9 @@ async function playLive(ch) {
     else {
       const Hls = await loadHls();
       if (!cur()) return;
-      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
+      // Timeshift: servern sparar upp till några timmar bakåt. Spelaren hoppar inte själv tillbaka till live
+      // (liveMaxLatencyDurationCount är oändlig som standard) och håller bara en kort buffert bakåt i minnet.
+      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, backBufferLength: 90, xhrSetup: (x) => { x.withCredentials = true; } });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || !cur() || lp.hls !== hls) return;
         if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
@@ -711,28 +831,74 @@ async function playLive(ch) {
       });
       hls.loadSource(r.url); hls.attachMedia(v);
     }
-    v.addEventListener('playing', () => setStat('Live'), { once: true });
+    v.addEventListener('playing', () => { setStat(''); liveControls(lp); }, { once: true });
     v.play().catch(() => {});
   } catch (e) { setStat(e.message); }
+}
+// Timeshift i livespelaren: spola i det sparade fönstret och "Live" som hoppar till direktsändningen när man ligger efter
+function liveControls(lp) {
+  const { v, el } = lp, btn = $('#llive', el), back = $('#lback', el), fwd = $('#lfwd', el);
+  if (!btn || LP !== lp) return;
+  const range = () => { const s = v.seekable; return s.length ? { start: s.start(0), end: s.end(s.length - 1) } : null; };
+  // Direktsändningens punkt: hls.js räknar fram den, Safari ger slutet av det spolbara fönstret
+  const edge = () => { const h = lp.hls?.liveSyncPosition; if (h != null && isFinite(h)) return h; const r = range(); return r ? r.end : null; };
+  const seekTo = (t) => { const r = range(), e = edge(); if (!r || e == null) return; v.currentTime = Math.max(r.start + 0.5, Math.min(e, t)); };
+  btn.onclick = () => { const e = edge(); if (e != null) v.currentTime = e; v.play().catch(() => {}); };
+  back.onclick = () => seekTo(v.currentTime - 30);
+  fwd.onclick = () => seekTo(v.currentTime + 30);
+  const update = () => {
+    if (LP !== lp) return clearInterval(lp.tick);
+    const r = range(), e = edge();
+    const canSeek = !!r && r.end - r.start > 20;
+    back.hidden = fwd.hidden = !canSeek; btn.hidden = !r;
+    const behind = e == null ? 0 : e - v.currentTime;
+    const atLive = behind < 10 && !v.paused;
+    btn.classList.toggle('on', atLive);
+    btn.textContent = atLive ? '● Live' : `Gå till live (−${fmtTime(Math.max(0, behind))})`;
+    fwd.disabled = behind < 10;
+  };
+  lp.tick = setInterval(update, 1000);
+  update();
 }
 function closeLive(lp = LP) {
   if (!lp || LP !== lp) return;
   LP = null;
+  clearInterval(lp.tick);
   if (lp.hls) { lp.hls.destroy(); lp.hls = null; }
   stopVideo(lp.v);
   overlayClose(lp.el);
   musicSession();
 }
-async function playRec(r) {
+async function playRec(r, cs = {}) {
   const u = await api(`/dvr/recordings/${r.id}/play`, { method: 'POST' }); // avbryts om man hunnit lämna sidan
   closeAllPlayers();
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
-  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span></div>`;
+  const ads = Array.isArray(r.commercials) ? r.commercials : [];
+  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
+    ${ads.length ? `<label class="small"><input type="checkbox" id="rauto"> Hoppa över reklam automatiskt</label>` : ''}</div>
+    <button class="skip" id="rskip" hidden>Hoppa över reklam ⏭</button>`;
   overlayOpen(el);
   const rp = RP = { el, v: $('#rvid', el) };
   videoSession(rp.v);
   $('#rclose', el).onclick = () => closeRec(rp);
+  if (ads.length) recCommercials(rp, ads, cs.autoSkip);
+}
+// Reklamavbrott i inspelningar: knappen visas inne i ett avbrott, eller hoppas över automatiskt (val per användare i webbläsaren)
+function recCommercials(rp, ads, autoDefault) {
+  const { v, el } = rp, b = $('#rskip', el), auto = $('#rauto', el);
+  const key = 'comskipAuto.' + (me?.id ?? '');
+  auto.checked = !!store.get(key, !!autoDefault);
+  auto.onchange = () => store.set(key, auto.checked);
+  const skipped = new Set(); // ett avbrott hoppas bara över automatiskt en gång (spolar man tillbaka in i det får man titta)
+  v.addEventListener('timeupdate', () => {
+    if (RP !== rp) return;
+    const t = v.currentTime, i = ads.findIndex(a => t >= a.start && t < a.end - 1);
+    if (i < 0) { b.hidden = true; return; }
+    if (auto.checked && !skipped.has(i)) { skipped.add(i); v.currentTime = ads[i].end; toast('Reklam överhoppad'); b.hidden = true; return; }
+    b.hidden = false;
+    b.onclick = () => { v.currentTime = ads[i].end; b.hidden = true; };
+  });
 }
 function closeRec(rp = RP) {
   if (!rp || RP !== rp) return;
@@ -813,8 +979,8 @@ views.dvr = async () => {
   const st = { scheduled: 'Bokad', recording: '⏺ Spelar in', processing: 'Bearbetas…', done: '', failed: 'Misslyckades' };
   main.innerHTML = `<div class="toolbar"><h1>Inspelningar</h1><a class="btn ghost" href="#/guide">📅 TV-guide</a><a class="btn ghost" href="#/live">Live-TV</a></div>
     ${D.done.filter(r => r.status === 'done').length ? `<section class="section"><h2>Inspelat</h2><div class="reclist">${D.done.filter(r => r.status === 'done').map(r => `<div class="rec">
-      <div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${dayName(r.start)} ${hhmm(r.start)} · ${fmtDur(r.stop - r.start)}${r.size ? ' · ' + (r.size / 1e9).toFixed(1) + ' GB' : ''}${r.error ? ' · ' + esc(r.error) : ''}</div></div>
-      <div class="row"><button class="primary small" data-rplay="${r.id}">▶ Spela</button><button class="ghost small" data-rdel="${r.id}">Ta bort</button></div></div>`).join('')}</div></section>` : ''}
+      <div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${dayName(r.start)} ${hhmm(r.start)} · ${fmtDur(r.stop - r.start)}${r.size ? ' · ' + (r.size / 1e9).toFixed(1) + ' GB' : ''}${r.commercials?.length ? ` · ${r.commercials.length} reklamavbrott` : ''}${['pending', 'running'].includes(r.commercials_status) ? ' · letar reklam…' : ''}${r.error ? ' · ' + esc(r.error) : ''}</div></div>
+      <div class="row"><button class="primary small" data-rplay="${r.id}">▶ Spela</button>${me.adminHere && D.comskip?.enabled ? `<button class="ghost small" data-rcs="${r.id}" title="Analysera reklamavbrott igen">Leta reklam</button>` : ''}<button class="ghost small" data-rdel="${r.id}">Ta bort</button></div></div>`).join('')}</div></section>` : ''}
     <section class="section"><h2>Kommande</h2>${D.scheduled.length ? `<table>${D.scheduled.map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}–${hhmm(r.stop)}</td><td><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</td><td class="muted">${esc(r.channel_name || '')}</td>
       <td>${st[r.status]}</td><td class="r">${r.status === 'recording' ? `<button class="ghost small" data-rstop="${r.id}">Stoppa</button>` : `<button class="ghost small" data-rdel="${r.id}">Avboka</button>`}</td></tr>`).join('')}</table>` : '<p class="muted">Inga bokade inspelningar. Välj ett program i TV-guiden.</p>'}</section>
     ${D.rules.length ? `<section class="section"><h2>Serieinspelningar</h2><table>${D.rules.map(r => `<tr><td><b>${esc(r.title)}</b></td><td class="muted">${esc(r.channel_name || 'Alla kanaler')}${r.new_only ? ' · bara nya' : ''}${r.keep ? ` · sparar ${r.keep}` : ''}</td><td>${r.upcoming} kommande</td><td class="r"><button class="ghost small" data-rule="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
@@ -822,11 +988,12 @@ views.dvr = async () => {
     ${D.dir ? `<p class="muted small">Inspelningar sparas i <code>${esc(D.dir)}</code>.</p>` : ''}`;
   $$('[data-rdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort?')) { try { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); } catch (e) { toast(e.message); } } });
   $$('[data-rstop]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); later(route, 1500); }));
+  $$('[data-rcs]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rcs}/commercials`, { method: 'POST' }); toast('Letar reklamavbrott i bakgrunden'); later(route, 1500); }));
   $$('[data-rule]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } }));
   $$('[data-rplay]').forEach(b => b.onclick = act(async () => {
     if (b.disabled) return;
     b.disabled = true;
-    try { await playRec(D.done.find(x => x.id === +b.dataset.rplay)); } finally { b.disabled = false; }
+    try { await playRec(D.done.find(x => x.id === +b.dataset.rplay), D.comskip || {}); } finally { b.disabled = false; }
   }));
 };
 
@@ -956,7 +1123,7 @@ views.stats = async () => {
   const maxDay = Math.max(1, ...S.days.map(d => d.n));
   const modeName = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' };
   main.innerHTML = `
-  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span></div>
+  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span><a class="btn small" href="#/wrapped/${new Date().getFullYear()}">Årssammanfattning</a></div>
   <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now"><div class="spin"></div></div></div>
   <div class="tiles">
     <div class="tile"><b>${L.movies}</b><span>filmer</span></div><div class="tile"><b>${L.shows}</b><span>serier</span></div>
@@ -1117,6 +1284,10 @@ views.admin = async () => {
     <form id="ltset" class="row" style="margin-top:12px;align-items:flex-end"><div style="flex:1;min-width:160px"><label>Inspelningsmapp</label><input id="lsd" value="${esc(LT.settings.dvrDir)}"></div>
       <div><label>Starta före (s)</label><input id="lsb" type="number" min="0" value="${LT.settings.padBefore}" style="width:90px"></div><div><label>Sluta efter (s)</label><input id="lsa" type="number" min="0" value="${LT.settings.padAfter}" style="width:90px"></div>
       <div><label>Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
+      <div><label title="Hur långt bakåt man kan pausa och spola i live-TV (0 = av)">Timeshift (min)</label><input id="lsts" type="number" min="0" max="720" value="${LT.settings.timeshiftMinutes ?? 120}" style="width:90px"></div>
+      <div><label title="Högsta diskanvändning för timeshift, alla kanaler tillsammans">Timeshift max (GB)</label><input id="lstg" type="number" min="0.5" step="0.5" value="${LT.settings.timeshiftMaxGb ?? 20}" style="width:90px"></div>
+      <label class="small"><input type="checkbox" id="lscs" ${LT.settings.comskip ? 'checked' : ''}> Leta reklamavbrott i inspelningar</label>
+      <label class="small"><input type="checkbox" id="lsca" ${LT.settings.comskipAutoSkip ? 'checked' : ''}> Hoppa över reklam automatiskt (standard)</label>
       <button class="ghost">Spara</button></form>
   </div>
   <div class="panel"><h2>Sonarr, Radarr och Trakt</h2>
@@ -1250,7 +1421,8 @@ views.admin = async () => {
   $$('[data-chfav]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } })));
   $$('[data-chhide]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } })));
   $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
-  $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value } }); toast('Sparat'); } catch (er) { toast(er.message); } };
+  $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value,
+    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked } }); toast('Sparat'); } catch (er) { toast(er.message); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
   $('#whnew').onclick = act(async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
   for (const k of ['radarr', 'sonarr']) {
@@ -1413,14 +1585,15 @@ async function castItem(it, position) {
   try { await ctx.requestSession(); } catch { return; }
   const sess = ctx.getCurrentSession(); if (!sess) return;
   // Default Media Receiver: H.264/VP8/VP9 + AAC/MP3/Opus i MP4/WebM eller HLS
-  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || '') }), { bg: true });
+  const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || ''),
+    ...(it.version ? { version: it.version } : {}) }), { bg: true });
   const origin = status.publicUrl || location.origin;
   const mi = new chrome.cast.media.MediaInfo(origin + p.url, p.mime);
   mi.streamType = chrome.cast.media.StreamType.BUFFERED;
   if (p.mode !== 'direct') { mi.hlsSegmentFormat = chrome.cast.media.HlsSegmentFormat.TS; mi.hlsVideoSegmentFormat = chrome.cast.media.HlsVideoSegmentFormat.MPEG2_TS; }
   mi.metadata = new chrome.cast.media.GenericMediaMetadata();
   mi.metadata.title = it.kind === 'episode' ? `${it.showTitle} – ${sxe(it)} ${it.title}` : it.title;
-  if (it.thumb || it.poster) mi.metadata.images = [new chrome.cast.Image(`${origin}/api/image/${it.id}/${it.poster ? 'poster' : 'thumb'}?t=${p.token}`)];
+  if (it.thumb || it.poster) mi.metadata.images = [new chrome.cast.Image(`${origin}/api/image/${p.version || it.id}/${it.poster ? 'poster' : 'thumb'}?t=${p.token}`)];
   mi.tracks = p.subtitles.map((s, i) => {
     const t = new chrome.cast.media.Track(i + 1, chrome.cast.media.TrackType.TEXT);
     t.trackContentId = origin + s.url; t.trackContentType = 'text/vtt'; t.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
@@ -1451,7 +1624,16 @@ function startPlay(b, ...args) {
 async function play(id, start = 0, opts = {}) {
   const seq = ++playSeq;
   let it;
-  try { it = await api('/items/' + id, { bg: true }); }
+  try {
+    // Flera versioner: hämta spårlistan (ljud/undertexter) för den version som faktiskt spelas
+    const want = opts.version || store.get('version.' + id, '');
+    it = await api('/items/' + id + (want ? '?version=' + encodeURIComponent(want) : ''), { bg: true });
+    if (it.versions && !it.versions.some(v => String(v.id) === String(want))) {
+      const q = store.get('quality', 'auto');
+      const p = await api(`/items/${id}/playback?${capsQuery({ q: q === 'auto' ? '' : q })}&info=1`, { bg: true });
+      if (p.version && p.version !== it.version) it = await api(`/items/${id}?version=${p.version}`, { bg: true });
+    }
+  }
   catch (e) { if (seq === playSeq) toast(e.message); return; }
   if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
   const partyId = opts.party || (P && P.party) || null;
@@ -1614,6 +1796,7 @@ async function load(start) {
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
   const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap ? sub.id : '' };
+  if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   let pb;
@@ -1632,7 +1815,13 @@ async function load(start) {
     catch { if (live()) toast('Kunde inte ladda HLS-spelaren'); return; }
     if (!live()) return;
     if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
-    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, xhrSetup: (x) => { x.withCredentials = true; } });
+    // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
+    // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner
+    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: 6e6, xhrSetup: (x) => { x.withCredentials = true; } });
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
+      const l = hls.levels?.[d.level];
+      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
+    });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || cur.hls !== hls || !live()) return;
       if (d.type === 'networkError') hls.startLoad(); else if (d.type === 'mediaError') hls.recoverMediaError(); else toast('Uppspelningsfel: ' + d.details);

@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
-import { liveEncoder } from './stream.js';
-import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts } from './livetv.js';
+import { liveEncoder, activeTranscodes } from './stream.js';
+import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts, activeLive } from './livetv.js';
+import * as comskip from './comskip.js';
 import { notify } from './notify.js';
 import { fail, streamFile } from './util.js';
 
@@ -211,6 +212,7 @@ function postProcess(id, ts) {
           run("UPDATE recordings SET status='done', file=?, size=? WHERE id=?", mp4, st.size, id);
           const rec = get('SELECT * FROM recordings WHERE id=?', id);
           notify('dvr', 'Inspelning klar', `${rec.title}${rec.subtitle ? ' – ' + rec.subtitle : ''} (${rec.channel_name}) finns att titta på.`, { priority: 2 });
+          comskip.enqueue(id); // reklamavbrott letas i bakgrunden
           enforceKeep(rec.rule_id);
         } catch (e) { retry = false; console.warn('[dvr] efterbearbetning:', e.message); }
         finally { if (!retry) resolve(); }
@@ -251,6 +253,7 @@ export function removeRecording(id) {
   if (r.status === 'failed') { run('DELETE FROM recordings WHERE id=?', id); return; } // inget spelades in – inget att komma ihåg
   // Markera först, så att avslutande processer ser att den är borttagen (ingen felnotis, ingen efterbearbetning)
   run("UPDATE recordings SET status='deleted', file=NULL, size=NULL, error=NULL WHERE id=?", id);
+  comskip.forget(id);
   const a = active.get(id);
   if (a) try { a.proc.kill('SIGINT'); } catch {}
   const c = converting.get(id);
@@ -287,6 +290,9 @@ function tick() {
 }
 setInterval(tick, 5000).unref();
 setInterval(() => { try { applyRules(); } catch (e) { console.warn('[dvr] regler:', e.message); } }, 3600e3).unref();
+// Reklamanalysen väntar medan inspelningar konverteras eller servern kodar om flera strömmar
+comskip.setBusyCheck(() => converting.size > 0 || activeTranscodes().length + activeLive().length >= 2);
+setTimeout(() => { try { comskip.resume(); } catch (e) { console.warn('[dvr] reklamanalys:', e.message); } }, 20000).unref();
 // Avbrutna inspelningar vid omstart
 for (const r of all("SELECT * FROM recordings WHERE status IN ('recording','processing')")) {
   // Det som hann spelas in innan omstarten tas till vara
@@ -298,6 +304,7 @@ for (const r of all("SELECT * FROM recordings WHERE status IN ('recording','proc
  *  Inspelningarna efterbearbetas vid nästa start. Väntar högst timeoutMs. */
 export async function shutdown(timeoutMs = 5000) {
   shuttingDown = true;
+  comskip.stop(); // görs om vid nästa start
   const procs = [...active.values()].map(a => a.proc);
   for (const p of procs) try { p.kill('SIGINT'); } catch {}
   for (const p of converting.values()) try { p.kill('SIGKILL'); } catch {}
@@ -309,9 +316,14 @@ export async function shutdown(timeoutMs = 5000) {
 }
 
 // ---------- API-hjälp ----------
+/** Reklamavbrott på klara inspelningar: commercials = [{ start, end }] i sekunder, commercials_status = pending|running|done|failed|null */
+function withCommercials(rows) {
+  const info = comskip.infoFor(rows.filter(r => r.status === 'done').map(r => r.id));
+  return rows.map(r => { const c = info.get(r.id); return { ...r, commercials: c?.status === 'done' ? c.segments : [], commercials_status: c?.status || null }; });
+}
 export const list = () => ({
   scheduled: all("SELECT * FROM recordings WHERE status IN ('scheduled','recording') ORDER BY start"),
-  done: all("SELECT * FROM recordings WHERE status IN ('done','processing','failed') ORDER BY start DESC LIMIT 500"),
+  done: withCommercials(all("SELECT * FROM recordings WHERE status IN ('done','processing','failed') ORDER BY start DESC LIMIT 500")),
   rules: all('SELECT r.*, c.name AS channel_name, (SELECT COUNT(*) FROM recordings x WHERE x.rule_id=r.id AND x.status=\'scheduled\') AS upcoming FROM dvr_rules r LEFT JOIN channels c ON c.id=r.channel_id ORDER BY r.title')
 });
 export const removeRule = (id) => { run("DELETE FROM recordings WHERE rule_id=? AND status IN ('scheduled','cancelled')", id); run('DELETE FROM dvr_rules WHERE id=?', id); };

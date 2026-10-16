@@ -134,7 +134,7 @@ export async function sync(userId) {
     let imported = 0;
     const local = all(`SELECT i.id, i.kind, i.tmdb_id, i.title, i.year, i.season, i.episode, i.parent_id, s.tmdb_id AS show_tmdb, s.title AS show_title, s.year AS show_year,
       COALESCE(p.watched,0) AS w, p.updated AS watched_updated FROM items i LEFT JOIN items s ON s.id=i.parent_id
-      LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.kind IN ('movie','episode')`, userId);
+      LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.kind IN ('movie','episode') AND i.version_of IS NULL`, userId);
     const toExport = [], toImport = [];
     for (const it of local) {
       const key = it.kind === 'movie' ? it.tmdb_id : it.show_tmdb ? `${it.show_tmdb}:${it.season}:${it.episode}` : null;
