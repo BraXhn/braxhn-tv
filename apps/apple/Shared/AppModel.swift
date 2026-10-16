@@ -96,6 +96,11 @@ final class AppModel: ObservableObject {
         try await request(path, method: "POST", body: body)
     }
 
+    @discardableResult
+    func put(_ path: String, _ body: [String: Any] = [:]) async throws -> Data {
+        try await request(path, method: "PUT", body: body)
+    }
+
     // MARK: Inloggning
 
     func login(server s: String, name: String, password: String, code: String? = nil) async throws {

@@ -14,6 +14,7 @@ import { detectMarkers } from './intro.js';
 import * as act from './activity.js';
 import * as trick from './trickplay.js';
 import * as music from './music.js';
+import * as listen from './listening.js';
 import * as party from './party.js';
 import * as offline from './offline.js';
 import * as acme from './acme.js';
@@ -588,7 +589,7 @@ route('PUT', '/api/items/:id', admin, async (c) => {
 
 // ---------- Musik ----------
 const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget musikbibliotek'); return l; };
-route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id) }); });
+route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id) }); });
 route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
 route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.artists(l.id)); });
 route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.searchMusic(String(c.q.get('q') || '').slice(0, 100), c.user.id)); });
@@ -656,6 +657,20 @@ route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
+
+// ---------- Lyssning: smarta spellistor, låttexter och lyssningsinställningar ----------
+route('GET', '/api/music/:lib/smart', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, listen.smartLists(l.id, c.user.id)); });
+route('GET', '/api/music/:lib/smart/:sid', user, (c) => {
+  const l = musicLib(c); if (!l) return;
+  const trackList = listen.smartTracks(l.id, c.user.id, c.p.sid);
+  trackList ? send(c.res, 200, { id: c.p.sid, name: listen.smartName(c.p.sid), trackList }) : fail(c.res, 404, 'Listan finns inte');
+});
+route('GET', '/api/music/tracks/:tid/lyrics', user, async (c) => { const t = trackRow(c); if (t) send(c.res, 200, await listen.lyricsFor(t)); });
+route('GET', '/api/me/listening', user, (c) => send(c.res, 200, listen.getPrefs(c.user.id)));
+route('PUT', '/api/me/listening', user, async (c) => {
+  const b = await readJson(c.req);
+  try { send(c.res, 200, listen.setPrefs(c.user.id, b && typeof b === 'object' ? b : {})); } catch (e) { fail(c.res, 400, e.message); }
+});
 
 
 

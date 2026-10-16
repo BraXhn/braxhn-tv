@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.put
 
 val Accent = Color(0xFFFF6B4A)
 val Bg = Color(0xFF0D0F14)
@@ -280,6 +281,22 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     val scope = rememberCoroutineScope()
     var quality by remember { mutableStateOf(Api.quality) }
     var lang by remember { mutableStateOf(Api.subtitleLang) }
+    // Lyssning (sparas per användare på servern och gäller även bilens mediaspelare)
+    var skipBack by remember { mutableStateOf(Api.skipBack) }
+    var skipForward by remember { mutableStateOf(Api.skipForward) }
+    var skipSilence by remember { mutableStateOf(Api.skipSilence) }
+    var normalize by remember { mutableStateOf(Api.normalize) }
+    var listenError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        Api.refreshListenPrefs()
+        skipBack = Api.skipBack; skipForward = Api.skipForward; skipSilence = Api.skipSilence; normalize = Api.normalize
+    }
+    fun saveListen(body: kotlinx.serialization.json.JsonObject) {
+        scope.launch {
+            listenError = runCatching { Api.saveListenPrefs(body) }.exceptionOrNull()?.message
+            skipBack = Api.skipBack; skipForward = Api.skipForward; skipSilence = Api.skipSilence; normalize = Api.normalize
+        }
+    }
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Inställningar", fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         item { Text("Server: ${Api.server.value}", color = Color.Gray) }
@@ -290,6 +307,33 @@ fun SettingsScreen(push: (Screen) -> Unit) {
         item { Text("Undertexter som standard", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item {
             FlowRowCompat(listOf("" to "Inga", "sv" to "Svenska", "en" to "Engelska", "no" to "Norska", "da" to "Danska", "fi" to "Finska"), lang) { lang = it; Api.subtitleLang = it }
+        }
+        item { Text("Lyssning", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { Text("Hopp bakåt (ljudböcker och poddar)", color = Color.Gray) }
+        item {
+            FlowRowCompat(Api.skipBackChoices.map { it.toString() to "$it s" }, skipBack.toString()) { v ->
+                saveListen(kotlinx.serialization.json.buildJsonObject { put("skipBack", v.toInt()) })
+            }
+        }
+        item { Text("Hopp framåt", color = Color.Gray) }
+        item {
+            FlowRowCompat(Api.skipForwardChoices.map { it.toString() to "$it s" }, skipForward.toString()) { v ->
+                saveListen(kotlinx.serialization.json.buildJsonObject { put("skipForward", v.toInt()) })
+            }
+        }
+        item {
+            FlowRowCompat(listOf("on" to "Hoppa över tystnad i poddar", "off" to "Spela tystnad"), if (skipSilence) "on" else "off") { v ->
+                saveListen(kotlinx.serialization.json.buildJsonObject { put("skipSilence", v == "on") })
+            }
+        }
+        item {
+            FlowRowCompat(listOf("on" to "Jämn ljudnivå i musik", "off" to "Originalnivå"), if (normalize) "on" else "off") { v ->
+                saveListen(kotlinx.serialization.json.buildJsonObject { put("normalize", v == "on") })
+            }
+        }
+        item {
+            Text(listenError ?: "Sovtimern finns som knapp (måne) i bilens mediaspelare och i aviseringen: 15/30/45/60 min eller när låten/avsnittet tar slut.",
+                color = if (listenError != null) Color(0xFFFF5D6C) else Color.Gray, fontSize = 13.sp)
         }
         item {
             Button(onClick = { scope.launch { Api.logout() } }, colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Color(0xFFFF5D6C)),
