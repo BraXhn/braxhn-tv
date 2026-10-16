@@ -70,7 +70,7 @@ function itemAllowed(id, kinds) {
 function libCount(l) {
   const a = ageSql();
   if (l.type === 'music') return get('SELECT COUNT(*) AS n FROM albums WHERE library_id=?', l.id).n;
-  return get(`SELECT COUNT(*) AS n FROM items i LEFT JOIN items s ON s.id=i.parent_id WHERE i.library_id=? AND i.kind=?${a.sql}`, l.id, l.type === 'movie' ? 'movie' : 'show', ...a.params).n;
+  return get(`SELECT COUNT(*) AS n FROM items i LEFT JOIN items s ON s.id=i.parent_id WHERE i.library_id=? AND i.kind=? AND i.version_of IS NULL${a.sql}`, l.id, l.type === 'movie' ? 'movie' : 'show', ...a.params).n;
 }
 
 function container(id, parent, title, count, cls = 'object.container.storageFolder', extra = '') {
@@ -129,7 +129,7 @@ export function children(id, base, start = 0, count = 0) {
       return { nodes: rows.map(r => albumNode(r, base)), total: libCount(l) };
     }
     const kind = l.type === 'movie' ? 'movie' : 'show';
-    const rows = all(`${ITEM_SQL} WHERE i.library_id=? AND i.kind=?${a.sql} ORDER BY i.sort_title, i.title LIMIT ? OFFSET ?`, l.id, kind, ...a.params, lim, off);
+    const rows = all(`${ITEM_SQL} WHERE i.library_id=? AND i.kind=? AND i.version_of IS NULL${a.sql} ORDER BY i.sort_title, i.title LIMIT ? OFFSET ?`, l.id, kind, ...a.params, lim, off);
     return { nodes: rows.map(r => kind === 'movie' ? videoItem(r, id, base) : showNode(r, base)), total: libCount(l) };
   }
   if ((m = /^S(\d+)$/.exec(id))) {
