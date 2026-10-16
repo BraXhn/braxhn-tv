@@ -501,7 +501,7 @@ export function scan(libId = null) {
   queue = queue.then(async () => {
     queued.delete(key);
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
-    status.running = true; status.warnings = [];
+    status.running = true; status.started = now(); status.warnings = [];
     try {
       for (const l of libs) {
         // Ett fel i ett bibliotek ska inte hoppa över resten
