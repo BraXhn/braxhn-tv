@@ -381,6 +381,7 @@ struct SettingsView: View {
                     Button { model.subtitleLang = o.key } label: { HStack { Text(o.name); Spacer(); if model.subtitleLang == o.key { Image(systemName: "checkmark") } } }
                 }
             }
+            ListenSettingsSection()
             Section {
                 Button("Logga ut", role: .destructive) { model.logout() }
             }
