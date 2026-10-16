@@ -239,6 +239,18 @@ body.hasbar main{padding-bottom:110px}
 #mbar .mright{display:flex;gap:8px;align-items:center;justify-content:flex-end}
 #mbar #mvol{width:100px;padding:0}
 #mbar #mrep.on{border-color:var(--accent)}
+/* Lyssning: sovtimer, låttext och smarta listor */
+#mbar #msleep.on,#mbar #mlyr.on{border-color:var(--accent);color:var(--accent)}
+#lyrics{position:fixed;right:20px;bottom:96px;z-index:39;width:min(420px,calc(100vw - 40px));max-height:min(60vh,560px);display:flex;flex-direction:column;
+  background:rgba(21,24,33,.97);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+#lyrics .lyhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+#lyrics .lyhead b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lybody{overflow:auto;padding:14px 16px 40px;position:relative}
+#lybody p{margin:0 0 10px;line-height:1.45;white-space:pre-wrap}
+#lybody p.sync{color:var(--dim);cursor:pointer;font-size:17px;font-weight:600;transition:color .2s}
+#lybody p.sync.on{color:var(--text)}
+.cover.smartmosaic{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.cover.smartmosaic img{position:static;width:100%;height:100%}
 @media (max-width:760px){
   #mbar{grid-template-columns:1fr auto;padding:8px 12px}
   #mbar .mright{display:none}

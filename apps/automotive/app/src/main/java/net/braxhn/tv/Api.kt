@@ -22,6 +22,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
+@Serializable data class ListenPrefs(val normalize: Boolean = true, val skipBack: Int = 15, val skipForward: Int = 30, val skipSilence: Boolean = false)
+
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
@@ -123,6 +125,31 @@ object Api {
     var subtitleLang: String
         get() = prefs.getString("sublang", "") ?: ""
         set(v) { prefs.edit().putString("sublang", v).apply() }
+
+    // ---- lyssningsinställningar (sparas per användare på servern, cachas här för musiktjänsten) ----
+    val skipBackChoices = listOf(5, 10, 15, 30, 45, 60)
+    val skipForwardChoices = listOf(10, 15, 30, 45, 60, 90)
+    val skipBack: Int get() = prefs.getInt("skipBack", 15).takeIf { it in skipBackChoices } ?: 15
+    val skipForward: Int get() = prefs.getInt("skipForward", 30).takeIf { it in skipForwardChoices } ?: 30
+    val skipSilence: Boolean get() = prefs.getBoolean("skipSilence", false)
+    val normalize: Boolean get() = prefs.getBoolean("normalize", true)
+
+    private fun storeListenPrefs(p: ListenPrefs) {
+        prefs.edit().putInt("skipBack", p.skipBack).putInt("skipForward", p.skipForward)
+            .putBoolean("skipSilence", p.skipSilence).putBoolean("normalize", p.normalize).apply()
+    }
+
+    /** Läser lyssningsinställningarna från servern (tyst vid fel – de cachade värdena gäller då). */
+    suspend fun refreshListenPrefs() {
+        if (token.value == null) return
+        runCatching { get<ListenPrefs>("/api/me/listening") }.getOrNull()?.let { storeListenPrefs(it) }
+    }
+
+    /** Sparar ändrade lyssningsinställningar på servern och lokalt. */
+    suspend fun saveListenPrefs(body: JsonObject) {
+        val p = json.decodeFromString<ListenPrefs>(request("/api/me/listening", "PUT", body = body))
+        storeListenPrefs(p)
+    }
 
     fun init(c: Context) {
         ctx = c.applicationContext

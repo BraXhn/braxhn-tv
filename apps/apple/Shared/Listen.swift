@@ -116,16 +116,22 @@ final class SpokenPlayer: ObservableObject {
         }
     }
 
+    /// Hoppintervallen på låsskärmen följer lyssningsinställningarna
+    func refreshSkipIntervals() {
+        let cc = MPRemoteCommandCenter.shared()
+        cc.skipBackwardCommand.preferredIntervals = [NSNumber(value: ListenSettings.shared.skipBack)]
+        cc.skipForwardCommand.preferredIntervals = [NSNumber(value: ListenSettings.shared.skipForward)]
+    }
+
     /// Kommandon på låsskärmen – registreras när tal spelas (musikspelaren registrerar sina egna)
     private func installCommands() {
         let cc = MPRemoteCommandCenter.shared()
-        cc.skipBackwardCommand.preferredIntervals = [15]
-        cc.skipForwardCommand.preferredIntervals = [30]
+        refreshSkipIntervals()
         cc.skipBackwardCommand.removeTarget(nil)
         cc.skipForwardCommand.removeTarget(nil)
         cc.changePlaybackPositionCommand.removeTarget(nil)
-        cc.skipBackwardCommand.addTarget { [weak self] _ in Task { @MainActor in self?.skip(-15) }; return .success }
-        cc.skipForwardCommand.addTarget { [weak self] _ in Task { @MainActor in self?.skip(30) }; return .success }
+        cc.skipBackwardCommand.addTarget { [weak self] _ in Task { @MainActor in self?.skip(-Double(ListenSettings.shared.skipBack)) }; return .success }
+        cc.skipForwardCommand.addTarget { [weak self] _ in Task { @MainActor in self?.skip(Double(ListenSettings.shared.skipForward)) }; return .success }
         cc.changePlaybackPositionCommand.addTarget { [weak self] e in
             if let e = e as? MPChangePlaybackPositionCommandEvent { let t = e.positionTime; Task { @MainActor in self?.seek(t) } }
             return .success
@@ -143,6 +149,7 @@ final class SpokenPlayer: ObservableObject {
 
     func play(book id: Int, model: AppModel, from start: Double? = nil) async {
         self.model = model
+        Task { await ListenSettings.shared.refresh(model) }
         do {
             let b: Book = try await model.get("/api/audiobooks/book/\(id)/play", [URLQueryItem(name: "a", value: "mp3,aac,flac,alac")])
             let t = Track(kind: .book, id: b.id, title: b.title, subtitle: b.author ?? "", artPath: b.cover ? "/api/audiobooks/cover/\(b.id)" : nil,
@@ -154,6 +161,7 @@ final class SpokenPlayer: ObservableObject {
 
     func play(episode e: Episode, model: AppModel) async {
         self.model = model
+        Task { await ListenSettings.shared.refresh(model) }
         guard let u: PlayURL = try? await model.get("/api/podcasts/episodes/\(e.id)/play") else { return }
         let t = Track(kind: .podcast, id: e.id, title: e.title, subtitle: e.podcastTitle ?? "", artPath: "/api/podcasts/\(e.podcast)/image",
                       duration: e.duration ?? 0, files: [BookFile(id: e.id, idx: 0, offset: 0, duration: e.duration, url: u.url)], chapters: [])
@@ -277,6 +285,30 @@ final class SpokenPlayer: ObservableObject {
         player.playImmediately(atRate: speed); playing = true; updateNowPlaying()
     }
     func pause() { player.pause(); playing = false; save(); updateNowPlaying() }
+
+    /// Sovtimern: tona ner (0…1)
+    func setFade(_ f: Float) { player.volume = f }
+
+    /// Aktuell position direkt från spelaren (position uppdateras bara en gång per sekund)
+    private var livePosition: Double {
+        guard let tr = track, tr.files.indices.contains(fileIndex) else { return position }
+        let s = player.currentTime().seconds
+        return s.isFinite ? tr.files[fileIndex].offset + s : position
+    }
+
+    /// Sekunder (i verklig tid) kvar av kapitlet (ljudbok) eller avsnittet – för sovtimern
+    func remainingInSection() -> Double? {
+        guard let tr = track else { return nil }
+        let p = livePosition
+        var end = tr.duration
+        if tr.chapters.count > 1, let c = tr.chapters.last(where: { $0.start <= p }) { end = end > 0 ? min(end, c.end) : c.end }
+        if end <= 0, tr.files.indices.contains(fileIndex) {
+            let d = player.currentItem?.duration.seconds ?? .nan
+            if d.isFinite && d > 0 { end = tr.files[fileIndex].offset + d }
+        }
+        guard end > 0 else { return nil }
+        return (end - p) / Double(max(speed, 0.1))
+    }
     /// Pausar utan att ta över låsskärmen (när musik eller video startar)
     func yieldFocus() {
         guard playing else { return }
@@ -562,6 +594,7 @@ struct PodcastView: View {
 struct SpokenMiniPlayer: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var sp = SpokenPlayer.shared
+    @ObservedObject private var ls = ListenSettings.shared
     var body: some View {
         if let t = sp.track {
             HStack(spacing: 12) {
@@ -571,15 +604,16 @@ struct SpokenMiniPlayer: View {
                     Text(sp.chapter?.title ?? t.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Button { sp.skip(-15) } label: { Image(systemName: "gobackward.15") }
+                Button { sp.skip(-Double(ls.skipBack)) } label: { Image(systemName: "gobackward.\(ls.skipBack)") }
                 Button { sp.toggle() } label: { Image(systemName: sp.playing ? "pause.fill" : "play.fill").font(.title2) }
-                Button { sp.skip(30) } label: { Image(systemName: "goforward.30") }
+                Button { sp.skip(Double(ls.skipForward)) } label: { Image(systemName: "goforward.\(ls.skipForward)") }
                 // Hastighet: tryck för att stega 1× → 1,25× → 1,5× → 1,75× → 2× → 0,75×
                 Button {
                     let steps: [Float] = [0.75, 1, 1.25, 1.5, 1.75, 2]
                     let i = steps.firstIndex { $0 >= sp.speed - 0.01 } ?? 0
                     sp.speed = steps[(i + 1) % steps.count]
                 } label: { Text(speedLabel(sp.speed)).font(.caption.bold()).frame(minWidth: 40) }
+                Button { SleepTimer.shared.cycle() } label: { SleepLabel() }
                 Button { sp.stop() } label: { Image(systemName: "xmark") }
             }
             .buttonStyle(.plain)

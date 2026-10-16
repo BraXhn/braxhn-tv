@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
 import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { send, fail, listFiles, deletionBlocked, underFailed, streamFile } from './util.js';
+import { parseReplayGain, scheduleLoudness } from './listening.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -103,13 +104,18 @@ export async function scanMusic(lib, status) {
     const trackNo = parseInt(String(t.track || t.tracknumber || '').split('/')[0]) || fp.track;
     const discNo = parseInt(String(t.disc || t.discnumber || '').split('/')[0]) || 1;
     const title = String(t.title || fp.title).slice(0, 300);
-    if (k) run(`UPDATE tracks SET album_id=?,artist_id=?,title=?,track_no=?,disc_no=?,duration=?,size=?,mtime=?,codec=?,bitrate=?,sample_rate=?,channels=? WHERE id=?`,
-      alId, trackArtist, title, trackNo, discNo, info.duration, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, k.id);
-    else run(`INSERT INTO tracks(library_id,album_id,artist_id,title,track_no,disc_no,duration,path,size,mtime,codec,bitrate,sample_rate,channels,added)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, alId, trackArtist, title, trackNo, discNo, info.duration, f, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, now());
+    // Jämn ljudnivå: ReplayGain-taggar om de finns, annars mäts spåret senare i bakgrunden (loudness=NULL)
+    const rg = parseReplayGain(t), loud = rg.track != null || rg.album != null ? 'tag' : null;
+    if (k) run(`UPDATE tracks SET album_id=?,artist_id=?,title=?,track_no=?,disc_no=?,duration=?,size=?,mtime=?,codec=?,bitrate=?,sample_rate=?,channels=?,
+      rg_track=?,rg_album=?,rg_peak=?,loudness=? WHERE id=?`,
+      alId, trackArtist, title, trackNo, discNo, info.duration, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, rg.track, rg.album, rg.peak, loud, k.id);
+    else run(`INSERT INTO tracks(library_id,album_id,artist_id,title,track_no,disc_no,duration,path,size,mtime,codec,bitrate,sample_rate,channels,added,rg_track,rg_album,rg_peak,loudness)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, alId, trackArtist, title, trackNo, discNo, info.duration, f, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, now(),
+      rg.track, rg.album, rg.peak, loud);
     const al = get('SELECT cover FROM albums WHERE id=?', alId);
     if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
   }
+  scheduleLoudness(); // jämn ljudnivå mäts i bakgrunden, skanningen väntar inte
   const missing = [...known.values()].filter(r => !seen.has(r.path) && !underFailed(r.path, failed));
   const blocked = deletionBlocked({ name: lib.name, rootOk, files: files.length, known: known.size, missing: missing.length,
     allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
@@ -131,10 +137,12 @@ const ALBUM_SQL = `SELECT al.id, al.title, al.year, al.genre, al.cover, al.added
   (SELECT COUNT(*) FROM tracks t WHERE t.album_id=al.id) AS tracks, (SELECT SUM(duration) FROM tracks t WHERE t.album_id=al.id) AS duration
   FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id`;
 const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
-export const TRACK_SQL = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id
-  FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id`;
+export const TRACK_SQL = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
+  t.rg_track, t.rg_album, t.rg_peak FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id`;
 export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
-  albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined });
+  albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined,
+  // Jämn ljudnivå: dB mot -18 LUFS (spårets värde, annars albumets) och toppvärde (linjärt) – null om okänt
+  gain: t.rg_track ?? t.rg_album ?? null, albumGain: t.rg_album ?? null, peak: t.rg_peak ?? null });
 
 export function albums(libId, sort = 'title', limit = 5000) {
   const order = { title: 'al.sort_title', added: 'al.added DESC', year: 'al.year DESC, al.sort_title', artist: 'ar.sort_name, al.year' }[sort] || 'al.sort_title';

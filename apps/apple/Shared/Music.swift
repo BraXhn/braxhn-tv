@@ -23,6 +23,9 @@ struct MTrack: Decodable, Identifiable, Hashable {
     let album: String?
     let cover: Bool
     let artist: String?
+    /// Jämn ljudnivå: dB mot -18 LUFS och toppvärde (saknas på äldre servrar)
+    let gain: Double?
+    let peak: Double?
 }
 
 struct MAlbumDetail: Decodable {
@@ -38,6 +41,20 @@ struct MHome: Decodable {
     let recentAlbums: [MAlbum]
     let recentlyPlayed: [MAlbum]
     let favorites: [MTrack]
+    let smart: [MSmart]?
+}
+
+/// Smarta spellistor (byggs av servern per användare)
+struct MSmart: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let count: Int
+}
+
+struct MSmartDetail: Decodable {
+    let id: String
+    let name: String?
+    let trackList: [MTrack]
 }
 
 struct PlayURL: Decodable { let url: String }
@@ -80,6 +97,9 @@ final class MusicPlayer: ObservableObject {
     private var endObserver: NSObjectProtocol?
     /// Ökas för varje laddning – en långsam laddning får inte vinna över en senare (snabba "nästa")
     private var loadGen = 0
+    /// Spårets volym (jämn ljudnivå, bara dämpning) och sovtimerns nedtoning
+    private var gainVolume: Float = 1
+    private var fade: Float = 1
 
     private init() {
         player.allowsExternalPlayback = true
@@ -88,8 +108,8 @@ final class MusicPlayer: ObservableObject {
         cc.playCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.resume() } else { self?.resume() } }; return .success }
         cc.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.pause() } else { self?.pause() } }; return .success }
         cc.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.toggle() } else { self?.toggle() } }; return .success }
-        cc.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(30) } else { self?.next() } }; return .success }
-        cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(-15) } else { self?.previous() } }; return .success }
+        cc.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(Double(ListenSettings.shared.skipForward)) } else { self?.next() } }; return .success }
+        cc.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in if AudioFocus.spokenHasControls { SpokenPlayer.shared.skip(-Double(ListenSettings.shared.skipBack)) } else { self?.previous() } }; return .success }
     }
 
     func play(_ tracks: [MTrack], at i: Int, model: AppModel) {
@@ -118,8 +138,10 @@ final class MusicPlayer: ObservableObject {
             let item = AVPlayerItem(url: url)
             if let e = endObserver { NotificationCenter.default.removeObserver(e) }
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.next() }
+                Task { @MainActor [weak self] in self?.trackEnded() }
             }
+            gainVolume = ListenSettings.shared.volume(gain: t.gain)
+            player.volume = gainVolume * fade
             player.replaceCurrentItem(with: item)
             player.play()
             playing = true
@@ -139,6 +161,20 @@ final class MusicPlayer: ObservableObject {
 
     func toggle() { playing ? pause() : resume() }
     func pause() { player.pause(); playing = false; updateNowPlaying() }
+    /// Sovtimern: tona ner (0…1)
+    func setFade(_ f: Float) { fade = f; player.volume = gainVolume * fade }
+    /// Sekunder kvar av låten (för sovtimern "när låten tar slut")
+    func remainingInTrack() -> Double? {
+        guard let t = current else { return nil }
+        let d = player.currentItem?.duration.seconds ?? .nan
+        let total = d.isFinite && d > 0 ? d : (t.duration ?? 0)
+        let now = player.currentTime().seconds
+        guard total > 0, now.isFinite else { return nil }
+        return total - now
+    }
+    private func trackEnded() {
+        if SleepTimer.shared.mode == .endOfItem { pause(); SleepTimer.shared.set(.off) } else { next() }
+    }
     func resume() {
         guard current != nil else { return }
         AudioFocus.willPlay(.music)
@@ -216,6 +252,7 @@ struct MusicView: View {
                 if libs.isEmpty && error == nil { Text("Inget musikbibliotek ännu – lägg till ett under Administration i webben.").foregroundStyle(.secondary).padding() }
                 if let h = home {
                     if !h.recentlyPlayed.isEmpty { albumRow("Spelat nyligen", h.recentlyPlayed) }
+                    if let s = h.smart, !s.isEmpty, let lib = libs.first { smartRow(s, lib: lib.id) }
                     if !h.recentAlbums.isEmpty { albumRow("Nytt", h.recentAlbums) }
                     if !h.favorites.isEmpty {
                         HStack { Text("Favoriter").font(.title3.bold()); Spacer()
@@ -249,6 +286,37 @@ struct MusicView: View {
         }
     }
 
+    private func smartRow(_ list: [MSmart], lib: Int) -> some View {
+        VStack(alignment: .leading) {
+            Text("Smarta listor").font(.title3.bold()).padding(.horizontal)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 16) {
+                    ForEach(list) { s in
+                        Button { Task { await playSmart(s, lib: lib) } } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Image(systemName: "sparkles").font(.title2).foregroundStyle(accent)
+                                Text(s.name).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                                Text("\(s.count) låtar").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .frame(width: size, alignment: .leading)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .cardButton()
+                    }
+                }.padding(.horizontal)
+                #if os(tvOS)
+                    .padding(.vertical, 30)
+                #endif
+            }
+        }
+    }
+
+    private func playSmart(_ s: MSmart, lib: Int) async {
+        guard let d: MSmartDetail = try? await model.get("/api/music/\(lib)/smart/\(s.id)"), !d.trackList.isEmpty else { return }
+        MusicPlayer.shared.play(d.trackList, at: 0, model: model)
+    }
+
     private func albumLink(_ a: MAlbum) -> some View {
         NavigationLink(value: a) {
             VStack(alignment: .leading, spacing: 4) {
@@ -261,6 +329,7 @@ struct MusicView: View {
     }
 
     private func load() async {
+        await ListenSettings.shared.refresh(model)
         do {
             await model.refreshImageToken()
             let l: [Library] = try await model.get("/api/libraries")
@@ -326,6 +395,7 @@ struct MiniPlayer: View {
                 Button { mp.previous() } label: { Image(systemName: "backward.fill") }
                 Button { mp.toggle() } label: { Image(systemName: mp.playing ? "pause.fill" : "play.fill").font(.title2) }
                 Button { mp.next() } label: { Image(systemName: "forward.fill") }
+                Button { SleepTimer.shared.cycle() } label: { SleepLabel() }
                 Button { mp.stop() } label: { Image(systemName: "xmark") }
             }
             .buttonStyle(.plain)
