@@ -152,6 +152,9 @@ addCol('items', 'abs_episode', 'INTEGER');
 addCol('items', 'sub_auto', 'INTEGER NOT NULL DEFAULT 0');
 addCol('items', 'chapters', 'TEXT');
 addCol('items', 'src_name', 'TEXT'); // seriens namn enligt mappen/filen (TMDB kan byta titel)
+// Flera versioner av samma film: versionen pekar på huvudraden (NULL = huvudrad / vanlig titel)
+addCol('items', 'version_of', 'INTEGER REFERENCES items(id) ON DELETE SET NULL');
+db.exec('CREATE INDEX IF NOT EXISTS items_version ON items(version_of)');
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

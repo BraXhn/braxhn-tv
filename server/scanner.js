@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
+import { groupVersions, promoteVersions, moveImages } from './versions.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -208,14 +209,20 @@ async function scanLibrary(lib) {
     allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
   if (blocked) scanWarning(blocked);
   else if (missing.length) {
+    let moves = [];
     tx(() => {
+      // Huvudfilen till en film med flera versioner försvann: en kvarvarande version tar över (med framsteg)
+      if (lib.type === 'movie') moves = promoteVersions(missing.map(r => r.id));
       for (const r of missing) run('DELETE FROM items WHERE id=?', r.id);
       for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
         run('DELETE FROM items WHERE id=?', s.id); missing.push(s);
       }
     });
+    moveImages(moves);
     for (const r of missing) removeImages(r.id);
   }
+  // Filmfiler med samma titel och år blir versioner av samma film
+  groupVersions(lib, parseMovie);
   await metadata(lib);
   await thumbnails(lib);
   await chapters(lib);
@@ -428,7 +435,8 @@ async function autoSubtitles(lib) {
 
 async function metadata(lib) {
   if (!tmdbKey()) return;
-  const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0`, lib.id);
+  // Versioner av en film delar huvudradens metadata och hämtas inte var för sig
+  const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0 AND version_of IS NULL`, lib.id);
   status.phase = 'Hämtar metadata'; status.done = 0; status.total = todo.length;
   for (const it of todo) {
     status.done++;
