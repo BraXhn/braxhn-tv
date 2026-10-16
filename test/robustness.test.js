@@ -183,3 +183,17 @@ test('HLS: varje uppspelning får ett eget sessions-id (två enheter på samma k
   assert.match(a, /^[0-9a-f]{8}$/);
   assert.notEqual(a, b);
 });
+
+test('start: omkodningsmappen töms men tas inte bort (den är ofta en monterad volym)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const dir = path.join(ROOT, 'tc-mount');
+  fs.mkdirSync(path.join(dir, 'gammal-session'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'gammal-session', 'seg_00001.ts'), 'x');
+  const born = fs.statSync(dir).birthtimeMs;
+  await new Promise(r => setTimeout(r, 50));
+  const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', "await import('./server/stream.js'); process.exit(0)"],
+    { env: { ...process.env, TRANSCODE_DIR: dir, CONFIG_DIR: path.join(ROOT, 'config-tc') }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.statSync(dir).birthtimeMs, born, 'mappen själv ska finnas kvar (inte raderas och skapas om)');
+  assert.deepEqual(fs.readdirSync(dir), []);
+});

@@ -73,6 +73,8 @@ GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv:latest`) vid 
 3. Peka **Media** på din mediamapp och klicka **Apply**.
 4. Öppna `http://SERVERNS-IP:8420`, skapa administratörskontot och lägg till bibliotek under **Administration**.
 
+**Egen IP-adress (Custom: br0):** välj *Network Type* `Custom: br0` och ange gärna en fast IP-adress under *Fixed IP address*. Portmappningen gäller inte då, så servern nås på containerns egen adress och porten i **Port i containern** (standard 8420). För port 80: sätt **Port i containern** till `80` och **WebUI-port** till `80`. Adressen blir då `http://CONTAINERNS-IP/`. Unraid-servern själv kan inte nå en br0-container (det är en egenskap hos macvlan) – testa från en annan dator eller telefon.
+
 **Uppdatera:** klicka *Check for updates* i Docker-fliken, sedan *apply update*.
 
 **Bygga själv i stället:** klona repot på servern och kör `bash install.sh`. Det bygger `braxhn-tv:local` lokalt och installerar mallen.

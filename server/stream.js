@@ -14,8 +14,14 @@ const SEG = 6; // målängd per HLS-segment i sekunder
 export const SAFE_IN = ['-protocol_whitelist', 'file,pipe'];
 const m3uAttr = (v) => String(v ?? '').replace(/["\r\n,]/g, ' ').slice(0, 80);
 export const TRANSCODE = process.env.TRANSCODE_DIR || path.join(os.tmpdir(), 'braxhn-tv-transcode');
-fs.rmSync(TRANSCODE, { recursive: true, force: true });
+// Rensa gamla sessioner från förra körningen – bara innehållet: mappen är ofta en monterad volym
+// (/transcode i Docker) som användaren inte får ta bort, och ett fel här får aldrig stoppa starten
 fs.mkdirSync(TRANSCODE, { recursive: true });
+try {
+  for (const f of fs.readdirSync(TRANSCODE)) {
+    try { fs.rmSync(path.join(TRANSCODE, f), { recursive: true, force: true }); } catch (e) { console.warn('[hls] kunde inte rensa', f, e.message); }
+  }
+} catch (e) { console.warn('[hls] kunde inte läsa omkodningsmappen', TRANSCODE, e.message); }
 const HW = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi | nvenc | qsv
 const VAAPI_DEV = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
 const TONEMAP = process.env.TONEMAP || 'hable'; // hable | mobius | reinhard | bt2390

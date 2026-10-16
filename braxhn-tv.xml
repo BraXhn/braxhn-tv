@@ -22,6 +22,7 @@
   <DonateLink/>
   <Requires/>
   <Config Name="WebUI-port" Target="8420" Default="8420" Mode="tcp" Description="Port för webbgränssnittet" Type="Port" Display="always" Required="true" Mask="false">8420</Config>
+  <Config Name="Port i containern" Target="PORT" Default="8420" Mode="" Description="Porten servern lyssnar på i containern. Med bridge: låt vara 8420 och välj port ovan. Med Custom: br0 (egen IP-adress) gäller inte portmappningen – ange porten här i stället, t.ex. 80, och ändra WebUI-porten ovan till samma." Type="Variable" Display="always" Required="false" Mask="false">8420</Config>
   <Config Name="HTTPS-port" Target="8443" Default="8443" Mode="tcp" Description="Inbyggd HTTPS. Startar när ett certifikat finns – hämta gratis från Let's Encrypt under Administration (vidarebefordra då WAN 80 till WebUI-porten och 443 hit). Behövs inte om du kör Nginx Proxy Manager." Type="Port" Display="advanced" Required="false" Mask="false">8443</Config>
   <Config Name="Konfiguration" Target="/config" Default="/mnt/user/appdata/braxhn-tv" Mode="rw" Description="Databas, bilder och inställningar" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/braxhn-tv</Config>
   <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="ro" Description="Mappen med dina filmer och serier (skrivskyddad). Biblioteken väljs sedan i webbgränssnittet." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
