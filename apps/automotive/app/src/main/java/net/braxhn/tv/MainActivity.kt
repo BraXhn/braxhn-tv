@@ -56,6 +56,12 @@ sealed class Screen {
 }
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        // Automatisk offline-synk när appen öppnas eller kommer tillbaka till förgrunden
+        Downloads.autoSync()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -229,6 +235,7 @@ fun HomeScreen(push: (Screen) -> Unit) {
                     }
                 }
             }
+            if (h.forYou.isNotEmpty()) item { Shelf("Nytt för dig", h.forYou, true, push) }
             if (h.continueWatching.isNotEmpty()) item { Shelf("Fortsätt titta", h.continueWatching, true, push) }
             items(h.rows.filter { it.items.isNotEmpty() }, key = { "${it.library.id}:${it.title}" }) { r -> Shelf(r.title, r.items, false, push) }
         }

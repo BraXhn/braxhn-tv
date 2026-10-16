@@ -51,7 +51,7 @@ function checkedLookup(host, opts, cb) {
     if (opts?.all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family);
   }, cb);
 }
-function request(url, headers, timeout, signal) {
+function request(url, headers, timeout, signal, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason || new Error('Tidsgränsen överskreds'));
     const u = new URL(url);
@@ -60,12 +60,12 @@ function request(url, headers, timeout, signal) {
     const host = u.hostname.replace(/^\[|\]$/g, '');
     if (net.isIP(host) && blockedIp(host) && !allowPrivate()) return reject(new Error('Adressen pekar på ett lokalt nätverk och tillåts inte'));
     const mod = u.protocol === 'https:' ? https : http;
-    const req = mod.request(u, { method: 'GET', headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: checkedLookup, timeout, signal }, (res) => {
+    const req = mod.request(u, { method, headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: checkedLookup, timeout, signal }, (res) => {
       resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return Array.isArray(v) ? v[0] : v ?? null; } }, body: res });
     });
     req.on('timeout', () => req.destroy(new Error('Tidsgränsen överskreds')));
     req.on('error', (e) => reject(e.code === 'EBLOCKED' ? new Error(e.message) : e.name === 'AbortError' ? new Error('Tidsgränsen överskreds') : e));
-    req.end();
+    req.end(body ?? undefined);
   });
 }
 /** Hämtning som följer omdirigeringar själv och kontrollerar varje steg. Svaret har status/ok/headers.get/body (ström). */
@@ -78,6 +78,12 @@ export async function safeFetch(u, { headers = {}, timeout = 30000, signal } = {
     return { r, url };
   }
   throw new Error('För många omdirigeringar');
+}
+/** POST till en användarangiven adress (t.ex. personlig ntfy/webhook) med samma skydd – följer inga omdirigeringar. */
+export async function safePost(u, body, { headers = {}, timeout = 15000 } = {}) {
+  const r = await request(String(u), { 'Content-Length': String(Buffer.byteLength(body)), ...headers }, timeout, AbortSignal.timeout(timeout + 5000), 'POST', body);
+  const text = (await readLimited(r, 64 << 10).catch(() => Buffer.alloc(0))).toString('utf8');
+  return { status: r.status, ok: r.ok, text };
 }
 export async function readLimited(r, max) {
   const chunks = []; let n = 0;

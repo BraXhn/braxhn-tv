@@ -125,7 +125,9 @@ struct HomeRow: Decodable, Identifiable {
 struct HomeResponse: Decodable {
     let continueWatching: [MediaItem]
     let rows: [HomeRow]
-    enum CodingKeys: String, CodingKey { case continueWatching = "continue", rows }
+    /// Nya avsnitt av serier man följer (saknas hos äldre servrar)
+    let forYou: [MediaItem]?
+    enum CodingKeys: String, CodingKey { case continueWatching = "continue", rows, forYou }
 }
 
 struct LibraryItems: Decodable {

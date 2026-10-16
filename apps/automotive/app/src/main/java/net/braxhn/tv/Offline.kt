@@ -2,6 +2,8 @@ package net.braxhn.tv
 
 import android.app.DownloadManager
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -13,9 +15,13 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Serializable data class OfflineStatus(val status: String, val progress: Int? = null, val url: String? = null, val size: Long? = null, val error: String? = null)
 @Serializable data class DownloadRecord(val id: Int, val title: String, val subtitle: String, val file: String, val size: Long = 0)
+/** Serverns plan för automatisk offline-synk (GET /api/offline/sync) */
+@Serializable data class SyncPlan(val enabled: Boolean = false, val quality: String = "720", val wifiOnly: Boolean = true,
+    val items: List<MediaItem> = emptyList(), val remove: List<Int> = emptyList())
 /** Nedladdning som lämnats till DownloadManager – sparas så att bevakningen kan fortsätta efter omstart av appen */
 @Serializable data class PendingDownload(val id: Int, val dlId: Long, val title: String, val subtitle: String, val file: String)
 
@@ -127,5 +133,45 @@ object Downloads {
         localFile(id)?.delete()
         records.update { list -> list.filter { it.id != id } }
         save()
+    }
+
+    // ---------- automatisk synk ----------
+    private val syncing = AtomicBoolean(false)
+    /** Avsnitt som synken själv laddat ner – bara de tas bort automatiskt */
+    private fun autoIds(): MutableSet<Int> = (prefs.getStringSet("auto", emptySet()) ?: emptySet()).mapNotNull { it.toIntOrNull() }.toMutableSet()
+    private fun saveAutoIds(ids: Set<Int>) { prefs.edit().putStringSet("auto", ids.map { it.toString() }.toSet()).apply() }
+
+    private fun unmetered(): Boolean {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    /** Servern anger vilka avsnitt som ska finnas offline (nästa osedda i följda serier). Saknade laddas ner,
+     *  sedda tas bort – men bara de som synken själv laddat ner. Körs i bakgrunden; fel ignoreras. */
+    fun autoSync() {
+        if (!::ctx.isInitialized || Api.token.value == null || !syncing.compareAndSet(false, true)) return
+        Api.appScope.launch {
+            try { syncNow() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { android.util.Log.w("BraXhnTV", "Automatisk synk misslyckades: ${e.message}") }
+            finally { syncing.set(false) }
+        }
+    }
+
+    private suspend fun syncNow() {
+        // Glöm avsnitt som inte längre finns (borttagna för hand eller misslyckade) – de kan laddas ner igen
+        val auto = autoIds().filter { localFile(it) != null || active.value.containsKey(it) }.toMutableSet()
+        val plan: SyncPlan = Api.get("/api/offline/sync", mapOf("have" to auto.sorted().joinToString(",")))
+        for (id in plan.remove) if (id in auto && localFile(id) != null) { remove(id); auto.remove(id) }
+        saveAutoIds(auto)
+        if (!plan.enabled || plan.items.isEmpty()) return
+        if (plan.wifiOnly && !unmetered()) return
+        for (item in plan.items) {
+            if (localFile(item.id) != null || active.value.containsKey(item.id)) continue
+            auto.add(item.id)
+            saveAutoIds(auto)
+            start(item, plan.quality)
+        }
     }
 }

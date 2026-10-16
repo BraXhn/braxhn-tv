@@ -40,7 +40,7 @@ async function api(path, opts = {}) {
   const data = r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text();
   if (r.status === 401 && !path.startsWith('/login')) { me = null; location.hash = '#/login'; throw new Error('Inte inloggad'); }
   if (!bg && gen !== routeGen) throw abortErr(); // användaren har gått vidare – resultatet ska inte användas
-  if (!r.ok) throw new Error(data?.error || `Fel ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(data?.error || `Fel ${r.status}`), { code: data?.code, data });
   return data;
 }
 // Rader och mappar som bara har onclick: gör dem nåbara med tangentbord och fjärrkontroll (Tab/D-pad + Enter)
@@ -171,6 +171,7 @@ views.home = async () => {
     html = `<div class="empty"><h2>Inga bibliotek ännu</h2><p>${me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.'}</p>
       ${me.is_admin ? '<a class="btn primary" href="#/admin">Lägg till bibliotek</a>' : ''}</div>`;
   }
+  if (d.forYou?.length) html += `<section class="section"><h2>Nytt för dig <span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">Markera som sedda</a></h2><div class="shelf wide">${d.forYou.map(i => card(i, true)).join('')}</div></section>`;
   if (d.continue.length) html += `<section class="section"><h2>Fortsätt titta</h2><div class="shelf wide">${d.continue.map(i => card(i, true)).join('')}</div></section>`;
   html += shelf('Min lista', d.watchlist, false, '<a href="#/watchlist">Visa alla</a>');
   html += shelf('Rekommenderat för dig', d.recommended);
@@ -183,6 +184,7 @@ views.home = async () => {
     if (s.running) later(route, 3000);
   }
   main.innerHTML = html;
+  if ($('#fyclear')) $('#fyclear').onclick = act(async (e) => { e.preventDefault(); await api('/foryou/seen', { method: 'POST', body: {} }); route(); });
 };
 
 views.lib = async (id) => {
@@ -270,6 +272,8 @@ function showView(it) {
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>
+    <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
+    <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
     `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
@@ -288,6 +292,7 @@ function showView(it) {
   };
   renderEps();
   bindWatchlist(it);
+  bindFollow(it);
   main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
   $$('#tabs button').forEach(b => b.onclick = () => {
     cur = +b.dataset.s; store.set('season.' + it.id, cur);
@@ -511,12 +516,13 @@ views.account = async () => {
     const P2 = await api('/profiles');
     $('#proflist').innerHTML = `<table>${P2.profiles.map(p => `<tr><td>${esc(p.name)}${p.owner ? ' <span class="muted small">(huvudkonto)</span>' : ''}</td>
       <td class="muted small">${p.kid ? (p.maxAge === 0 ? 'Barntillåten' : 'max ' + p.maxAge + ' år') : 'Vuxen'}${p.hasPin ? ' · PIN' : ''}</td>
-      <td class="r"><button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
+      <td class="r">${p.owner ? '' : `<button class="ghost small" data-pst="${p.id}">Skärmtid</button>`}<button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
       ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">Ta bort</button>`}</td></tr>`).join('')}</table>`;
     $$('[data-ppin]').forEach(b => b.onclick = async () => {
       const pin = prompt('Ny PIN (4–8 siffror). Lämna tomt för att ta bort PIN:'); if (pin === null) return;
       try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toast(e.message); }
     });
+    $$('[data-pst]').forEach(b => b.onclick = act(() => screenDialog(P2.profiles.find(p => p.id === +b.dataset.pst))));
     $$('[data-pdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort profilen och dess tittarhistorik?')) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } }));
     $('#addprof').onsubmit = async (e) => {
       e.preventDefault();
@@ -550,6 +556,7 @@ views.account = async () => {
     const password = prompt('Ange ditt lösenord:'); if (!password) return;
     try { const r = await api('/me/2fa/recovery', { method: 'POST', body: { password } }); showCodes(r.recoveryCodes); } catch (e) { toast(e.message); }
   };
+  await accountExtras();
 };
 
 
@@ -705,7 +712,8 @@ async function playLive(ch) {
       const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, xhrSetup: (x) => { x.withCredentials = true; } });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || !cur() || lp.hls !== hls) return;
-        if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
+        if (d.response?.code === 403) { hls.destroy(); lp.hls = null; if (screenSt?.limited) { closeLive(lp); timeUp(); } else setStat('Uppspelningen nekades'); }
+        else if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
         else if (d.type === 'networkError') setTimeout(() => { if (cur() && lp.hls === hls) hls.startLoad(); }, 1500);
         else if (d.type === 'mediaError') hls.recoverMediaError();
       });
@@ -732,6 +740,7 @@ async function playRec(r) {
   overlayOpen(el);
   const rp = RP = { el, v: $('#rvid', el) };
   videoSession(rp.v);
+  screenPing(rp.v, 'r:' + r.id, () => RP === rp, () => closeRec(rp));
   $('#rclose', el).onclick = () => closeRec(rp);
 }
 function closeRec(rp = RP) {
@@ -1617,7 +1626,8 @@ async function load(start) {
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   let pb;
-  try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); } catch (e) { if (live()) toast(e.message); return; }
+  try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
+  catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toast(e.message); } return; }
   if (!live()) return;
   cur.pb = pb;
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
@@ -1688,7 +1698,10 @@ function sendProgress(final = false) {
   const body = JSON.stringify({ position: v.currentTime, duration: cur.it.duration || v.duration });
   if (final && navigator.sendBeacon) navigator.sendBeacon(`/api/items/${cur.it.id}/progress`, new Blob([body], { type: 'application/json' }));
   else fetch(`/api/items/${cur.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-    .then(r => r.json()).then(d => { if (d.stop && P === cur) { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }).catch(() => {});
+    .then(r => r.json()).then(d => {
+      if (d.screenTime) screenBadge(d.screenTime);
+      if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }
+    }).catch(() => {});
 }
 
 function onEnded() {
@@ -2033,7 +2046,8 @@ function spokenSave(final) {
   const position = final ? s.duration : spokenPos();
   if (!final && position < 5) return;
   const url = s.kind === 'book' ? `/api/audiobooks/book/${s.id}/progress` : `/api/podcasts/episodes/${s.id}/progress`;
-  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position, speed: s.speed }), keepalive: true }).catch(() => {});
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position, speed: s.speed }), keepalive: true })
+    .then(r => r.json()).then(d => { if (d.screenTime) screenBadge(d.screenTime); if (d.stop && M.spoken === s && !M.audio.paused) { M.audio.pause(); toast(d.screenTime?.message || 'Tiden är slut för idag'); } }).catch(() => {});
 }
 function spokenEnded() {
   const s = M.spoken, i = s.files.indexOf(M.sfile);
@@ -2088,6 +2102,140 @@ function showQueue() {
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
 }
 
+// ---------- skärmtid, följda serier och automatisk nedladdning ----------
+Object.assign(EVENTS, { screentime_changed: 'Skärmtid ändrad', screentime_extra: 'Extra skärmtid' });
+let screenSt = null;
+const fmtMin = (s) => { const m = Math.max(0, Math.round((s || 0) / 60)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+const screenText = (s) => !s ? 'Ingen skärmtid är inställd.' : `Idag har ${fmtMin(s.used)} använts${s.daily != null ? ` av ${s.daily + s.extra} min` : ''}${s.extra ? ` (varav ${s.extra} min extra)` : ''}.${s.from || s.until ? ` Tillåten tid: ${s.from || '00:00'}–${s.until || '24:00'}.` : ''} ${s.allowed ? (s.left != null ? `Kvar just nu: ${fmtMin(s.left)}.` : '') : s.message}`;
+/** Märke i menyraden med kvarvarande tid (bara för profiler med skärmtid) */
+function screenBadge(s) {
+  screenSt = s || null;
+  let b = $('#stbadge');
+  if (!s?.limited) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('a'); b.id = 'stbadge'; b.href = '#/timeup'; b.className = 'stbadge'; $('.usermenu').before(b); }
+  b.textContent = s.allowed ? (s.left != null ? `⏱ ${fmtMin(s.left)} kvar` : '⏱ Skärmtid') : '🌙 Slut för idag';
+  b.title = screenText(s);
+  b.classList.toggle('low', !s.allowed || (s.left != null && s.left < 600));
+}
+function refreshScreen() {
+  if (!me || !(me.screenTime || me.kid || screenSt)) return;
+  api('/screentime', { bg: true }).then(screenBadge).catch(() => {});
+}
+function timeUp() { if (location.hash === '#/timeup') route(); else location.hash = '#/timeup'; }
+views.timeup = async () => {
+  const s = await api('/screentime');
+  screenBadge(s);
+  if (!s.limited) { main.innerHTML = '<div class="empty"><h2>Ingen skärmtid är inställd</h2><p><a class="btn" href="#/">Till startsidan</a></p></div>'; return; }
+  if (s.allowed) {
+    main.innerHTML = `<div class="timeup"><div class="big">⏱</div><h1>${s.left != null ? `${fmtMin(s.left)} kvar idag` : 'Du kan titta'}</h1>
+      <p class="muted">${esc(screenText(s))}</p><a class="btn primary" href="#/">Till startsidan</a></div>`;
+    return;
+  }
+  main.innerHTML = `<div class="timeup"><div class="big">🌙</div><h1>${s.reason === 'limit' ? 'Tiden är slut för idag' : 'Det är inte tittartid just nu'}</h1>
+    <p>${esc(s.message)}</p><p class="muted">${s.reason === 'limit' ? 'I morgon finns ny tid. ' : ''}Ljudböcker och musik ${s.audio ? 'räknas också in' : 'går fortfarande att lyssna på'}.</p>
+    <a class="btn" href="#/">Till startsidan</a></div>`;
+  later(route, 60000); // en vuxen kan ge extra tid – kolla igen om en minut
+};
+/** Rapportera tittande för spelare som inte annars rapporterar (inspelningar). stop() stänger spelaren. */
+function screenPing(v, key, alive, stop) {
+  if (!screenSt?.limited) return;
+  let last = 0;
+  v.addEventListener('timeupdate', () => {
+    if (!alive() || v.paused || Date.now() - last < 10000) return;
+    last = Date.now();
+    api('/screentime/ping', { method: 'POST', body: { key, position: v.currentTime }, bg: true }).then(d => {
+      if (d.screenTime) screenBadge(d.screenTime);
+      if (d.stop && alive()) { stop(); timeUp(); }
+    }).catch(() => {});
+  });
+}
+/** Huvudkontot ställer in skärmtid för en profil */
+async function screenDialog(p) {
+  if (!p) return;
+  const D0 = await api('/screentime/' + p.id, { bg: true });
+  const r = D0.rules || {};
+  const DAYS = [[1, 'Måndag'], [2, 'Tisdag'], [3, 'Onsdag'], [4, 'Torsdag'], [5, 'Fredag'], [6, 'Lördag'], [0, 'Söndag']];
+  const v = (x) => x == null ? '' : esc(String(x));
+  const dlg = document.createElement('dialog'); dlg.className = 'wide';
+  dlg.innerHTML = `<h2>Skärmtid – ${esc(p.name)}</h2>
+    <p class="muted small" id="stnow">${esc(screenText(D0.status))}</p>
+    <div class="row" style="align-items:flex-end"><div><label>Max minuter per dag</label><input id="std" type="number" min="0" max="1440" value="${v(r.daily)}" placeholder="Ingen gräns" style="width:150px"></div>
+      <div><label>Tillåtet från</label><input id="stf" type="time" value="${v(r.from)}"></div><div><label>Till</label><input id="stu" type="time" value="${v(r.until)}"></div></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="sta" ${r.audio ? 'checked' : ''}> Gäller även ljud (musik, ljudböcker och poddar)</label>
+    <details style="margin-top:12px"><summary>Andra tider vissa veckodagar</summary><p class="muted small">Tomma fält = samma som ovan.</p>
+      <table><tr><th></th><th>Minuter</th><th>Från</th><th>Till</th></tr>${DAYS.map(([i, n]) => { const o = r.days?.[i] || {};
+        return `<tr><td>${n}</td><td><input data-dd="${i}" type="number" min="0" max="1440" value="${v(o.daily)}" style="width:90px"></td><td><input data-df="${i}" type="time" value="${v(o.from)}"></td><td><input data-du="${i}" type="time" value="${v(o.until)}"></td></tr>`; }).join('')}</table></details>
+    <h3 style="font-size:15px;margin:16px 0 6px">Extra tid idag</h3>
+    <div class="row"><button class="ghost small" data-ex="15">+15 min</button><button class="ghost small" data-ex="30">+30 min</button><button class="ghost small" data-ex="60">+1 timme</button>
+      <button class="ghost small" data-ex="-15">−15 min</button><button class="ghost small" data-exr="1">Nollställ dagens tid</button></div>
+    <p class="muted small">Tiden räknas när film, serier, live-TV eller inspelningar spelas (inte när de är pausade) på alla enheter, och två samtidiga strömmar räknas inte dubbelt. När tiden är slut stoppas uppspelningen. Klockslagen följer serverns tid. Extra tid förlänger även dagens sluttid. Nedladdat i appen som ses utan nät räknas inte.</p>
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="ghost" id="stc">Stäng</button><button class="danger" id="stoff">Ingen gräns</button><button class="primary" id="sts">Spara</button></div>`;
+  document.body.append(dlg); dlg.showModal();
+  dlg.addEventListener('close', () => dlg.remove());
+  const close = () => dlg.close();
+  $('#stc', dlg).onclick = close;
+  const save = async (body) => { const res = await api('/screentime/' + p.id, { method: 'PUT', body, bg: true }); toast(res.rules ? 'Skärmtiden är sparad' : `${p.name} har ingen skärmtid`); close(); };
+  $('#sts', dlg).onclick = act(() => save({ daily: $('#std', dlg).value, from: $('#stf', dlg).value, until: $('#stu', dlg).value, audio: $('#sta', dlg).checked,
+    days: Object.fromEntries(DAYS.map(([i]) => [i, { daily: $(`[data-dd="${i}"]`, dlg).value, from: $(`[data-df="${i}"]`, dlg).value, until: $(`[data-du="${i}"]`, dlg).value }])) }));
+  $('#stoff', dlg).onclick = act(() => save({}));
+  $$('[data-ex],[data-exr]', dlg).forEach(b => b.onclick = act(async () => {
+    const res = await api(`/screentime/${p.id}/extra`, { method: 'POST', body: b.dataset.exr ? { reset: true } : { minutes: +b.dataset.ex }, bg: true });
+    $('#stnow', dlg).textContent = screenText(res.status); toast('Sparat');
+  }));
+}
+function bindFollow(it) {
+  const b = $('#follow'), sel = $('#fsync'); if (!b) return;
+  if (sel) sel.value = it.sync == null ? '' : String(it.sync);
+  b.onclick = act(async () => {
+    const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: !it.following } });
+    it.following = r.following; it.sync = r.sync;
+    b.textContent = it.following ? '🔔 Följer' : '🔕 Följ';
+    if (sel) sel.hidden = !it.following;
+    toast(it.following ? `Du följer ${it.title} – nya avsnitt visas under Nytt för dig` : `Du följer inte längre ${it.title}`);
+  });
+  if (sel) sel.onchange = act(async () => { const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: true, sync: sel.value } }); it.sync = r.sync; toast('Sparat'); });
+}
+/** Paneler under Mitt konto: följda serier, personliga notiser och automatisk nedladdning i appen */
+async function accountExtras() {
+  let N, S, F;
+  try { [N, S, F] = await Promise.all([api('/me/notify'), api('/me/offline-sync'), api('/follows')]); }
+  catch (e) { if (e.aborted) throw e; return; }
+  main.insertAdjacentHTML('beforeend', `
+  <div class="panel"><h2>Serier jag följer</h2>
+    <p class="muted small">Nya avsnitt av serier du följer visas under <b>Nytt för dig</b> på startsidan. Du följer en serie med knappen Följ på serien, och automatiskt när du lägger den i Min lista eller ser klart ett avsnitt. Slutar du följa en serie följs den inte automatiskt igen.</p>
+    ${F.length ? `<table>${F.map(f => `<tr><td><a href="#/item/${f.id}">${esc(f.title)}</a></td><td class="muted small">${f.sync == null ? '' : f.sync === 0 ? 'Laddas inte ner i appen' : `Håll ${f.sync} nedladdade i appen`}</td>
+      <td class="r"><button class="ghost small" data-unf="${f.id}">Sluta följa</button></td></tr>`).join('')}</table>` : '<p class="muted">Du följer inga serier ännu.</p>'}</div>
+  ${N.allowed ? `<div class="panel"><h2>Notiser om nya avsnitt</h2>
+    <p class="muted small">Få en notis i mobilen när nya avsnitt av serier du följer kommer – flera avsnitt samlas i en notis. Använd t.ex. appen <b>ntfy</b> (adress som https://ntfy.sh/ett-hemligt-ämne) eller en egen webhook som tar emot JSON. Adressen måste gå att nå via internet; adresser i hemnätet tillåts inte.</p>
+    <div class="row" style="align-items:flex-end"><div><label>Typ</label><select id="nk"><option value="none">Av</option><option value="ntfy">ntfy</option><option value="webhook">Webhook (JSON)</option></select></div>
+      <div style="flex:1;min-width:220px"><label>Adress</label><input id="nu" value="${esc(N.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne" maxlength="500"></div>
+      <div><label>Token (valfri)</label><input id="nt" type="password" autocomplete="off" placeholder="${N.hasToken ? '(sparad)' : ''}"></div></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="nsave">Spara</button><button class="ghost" id="ntest" ${N.kind === 'none' ? 'disabled' : ''}>Skicka testnotis</button></div></div>` : ''}
+  <div class="panel"><h2>Automatisk nedladdning i appen</h2>
+    <p class="muted small">iPhone/iPad- och Android-appen håller de närmaste osedda avsnitten nedladdade, så att de finns när du saknar nät. Appen synkar när den öppnas och tar bort avsnitt som den själv laddat ner när du har sett dem. Per serie kan du ändra antalet på seriens sida.</p>
+    <div class="row" style="align-items:flex-end">
+      <div><label>Avsnitt per serie</label><select id="sc"><option value="0">Av</option>${[1, 2, 3, 5, 10].map(n => `<option value="${n}">${n}</option>`).join('')}</select></div>
+      <div><label>Vilka serier</label><select id="ss"><option value="follows">Serier jag följer</option><option value="continue">Fortsätt titta (senaste 30 dagarna)</option></select></div>
+      <div><label>Kvalitet</label><select id="sq"><option value="480">480p (minst)</option><option value="720">720p</option><option value="1080">1080p</option><option value="orig">Original</option></select></div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="sw"> Bara på Wi-Fi</label></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="ssave">Spara</button></div></div>`);
+  $$('[data-unf]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.unf}/follow`, { method: 'POST', body: { follow: false } }); route(); }));
+  if ($('#nk')) {
+    $('#nk').value = N.kind;
+    $('#nsave').onclick = act(async () => {
+      const t = $('#nt').value;
+      const r = await api('/me/notify', { method: 'PUT', body: { kind: $('#nk').value, url: $('#nu').value, ...(t ? { token: t } : {}) } });
+      $('#ntest').disabled = r.kind === 'none'; $('#nt').value = ''; $('#nt').placeholder = r.hasToken ? '(sparad)' : ''; toast('Sparat');
+    });
+    $('#ntest').onclick = act(async () => { await api('/me/notify/test', { method: 'POST' }); toast('Testnotisen skickades'); });
+  }
+  $('#sc').value = String(S.count); $('#ss').value = S.scope; $('#sq').value = S.quality; $('#sw').checked = S.wifiOnly;
+  $('#ssave').onclick = act(async () => {
+    await api('/me/offline-sync', { method: 'PUT', body: { count: +$('#sc').value, scope: $('#ss').value, quality: $('#sq').value, wifiOnly: $('#sw').checked } });
+    toast('Sparat – appen synkar nästa gång den öppnas');
+  });
+}
+
 // ---------- routing ----------
 async function loadLibs() {
   libs = await api('/libraries');
@@ -2106,6 +2254,7 @@ async function boot() {
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
   $$('[data-requests]').forEach(e => e.hidden = me.kid);
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
+  screenBadge(me.screenTime);
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();
   return true;
@@ -2125,6 +2274,7 @@ async function route() {
   // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
   $('#top').hidden = !me || name === 'login' || name === 'profiles';
   main.innerHTML = '<div class="spin"></div>';
+  if (me && name !== 'timeup') refreshScreen();
   try { await v(arg, arg2); if (gen !== routeGen) return; window.scrollTo(0, 0); fillWatch(); }
   catch (e) { if (gen !== routeGen || e?.aborted) return; if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
 }
