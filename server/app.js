@@ -9,6 +9,7 @@ import { ipKey, hashPw, checkPw, dummyCheck, weakPassword, createSession, cookie
   clearFails, auditHooks, newTotpSecret, totpUri, verifyTotp, newRecoveryCodes, useRecoveryCode, audit, require2faRemote, clearCookies } from './auth.js';
 import { scan, status as scanStatus, refreshItem, extractThumb, removeImages, hooks, tmdbSearch, autoSubs, readChapters, tvdbOf, hasTmdb } from './scanner.js';
 import * as st from './stream.js';
+import * as pgs from './pgs.js';
 import * as os from './opensubtitles.js';
 import { detectMarkers } from './intro.js';
 import * as act from './activity.js';
@@ -1002,17 +1003,22 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (c.q.get('info') !== '1' && (c.q.get('cast') === '1' || c.user.via !== 'cookie')) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
-  const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${st.hlsParams(d, o, token)}`;
+  const hp = d.mode === 'direct' ? null : st.hlsParams(d, o, token);
+  const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${hp}`;
   // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning
   const info = c.q.get('info') === '1';
+  // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först)
+  if (hp && !info && !d.abr) st.prewarm(it, hp, c.user.id, Math.max(0, +c.q.get('start') || 0));
   if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
+  // Bildundertexter (PGS) som webbspelaren ritar själv – appar använder inbränning via sub=
+  const imageSubs = st.subtitlesOf(it).filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}${tq}` }));
   send(c.res, 200, {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
-    duration: it.duration, subtitles: subs, token, remote, quality: d.q,
+    duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,
     intro: it.intro_end ? { start: it.intro_start || 0, end: it.intro_end } : null, credits: it.credits_start || null,
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
@@ -1031,6 +1037,19 @@ route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = 
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
 route('GET', '/api/stream/:id/subs/:sid', media, (c) => { const it = mediaItem(c); if (it) st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q); });
+const pgsSub = (it, sid) => st.subtitlesOf(it).find(s => s.id === sid && s.pgs);
+route('GET', '/api/stream/:id/pgs/:sid', media, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const sub = pgsSub(it, c.p.sid); if (!sub) return fail(c.res, 404, 'Undertext saknas');
+  pgs.serveIndex(c.res, it, sub);
+});
+route('GET', '/api/stream/:id/pgs/:sid/:n', media, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const sub = pgsSub(it, c.p.sid); if (!sub) return fail(c.res, 404, 'Undertext saknas');
+  const n = c.p.n.replace(/\.png$/, '');
+  if (!/^\d{1,6}$/.test(n)) return fail(c.res, 400, 'Ogiltig bild');
+  pgs.serveImage(c.req, c.res, it, sub, +n);
+});
 route('POST', '/api/stream/:id/stop', user, (c) => {
   // Klienten anger filmen; omkodningen kan gälla vilken version som helst av den
   const row = get('SELECT * FROM items WHERE id=?', +c.p.id);

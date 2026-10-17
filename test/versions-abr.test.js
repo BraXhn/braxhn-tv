@@ -220,7 +220,8 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
     assert.equal(h, +m[3]);
   }
   assert.ok(Math.abs(starts[0] - starts[1]) < 0.05, `starttider ${starts}`);
-  assert.ok(Math.abs(starts[0] - 6) < 0.05, `segment 1 börjar vid 6 s (${starts[0]})`);
+  // Omkodning börjar med korta segment: 0, 2, 4, 6, 12 …
+  assert.ok(Math.abs(starts[0] - 2) < 0.05, `segment 1 börjar vid 2 s (${starts[0]})`);
 });
 
 t('huvudfilen försvinner: en kvarvarande version tar över med framsteg kvar', async () => {

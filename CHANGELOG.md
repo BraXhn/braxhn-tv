@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- Snabbare start: nyckelbilderna läses ur filens eget index (MKV/MP4) på någon sekund i stället för att hela filen läses, så att filmer kan skickas utan omkodning direkt första gången. ffmpeg startas redan när man trycker Spela, och omkodning börjar med korta segment (2 s)
+- Blu-ray-undertexter (PGS) visas som bilder i webbspelaren i stället för att brännas in – strömmen startar inte om och behöver inte omkodas när undertexten väljs
+- Vid NVIDIA/Intel/AMD-omkodning avkodas videon också på grafikkortet (`HW_DECODE=0` stänger av)
+- Unraid: ny mall `braxhn-tv-nvidia.xml` med `--runtime=nvidia` och NVIDIA-variablerna färdiga; den vanliga mallen har fält för NVIDIA och `/dev/dri`
 - Rättat: alla omkodningar misslyckades när HWACCEL=nvenc var satt utan NVIDIA-drivrutin i containern (`Cannot load libcuda.so.1`). Servern provar nu hårdvaruomkodaren vid start och går automatiskt över till processorn om den inte fungerar; säkerhetskontrollen visar varför
 - Serier med lösare filnamn känns igen: "Byggare Bob 026 - Titel", "Kaspar2", "Lille Luj Disc3", "Turesdvd2", "Sunes.Jul.Volym.2-8". Avsnitt utan nummer i en seriemapp numreras i namnordning
 - Filmer som inte analyserats än startar utan omkodning: nyckelbilderna tas fram direkt när man trycker på Spela (före bakgrundsanalysen, högst 25 s väntan), och bakgrundsanalysen indexerar nyckelbilder före miniatyrer m.m.

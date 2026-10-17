@@ -265,7 +265,15 @@ Alla enheter på hemnätet kan se och spela upp det som DLNA visar **utan inlogg
 |---|---|
 | Intel iGPU | `HWACCEL=vaapi` eller `qsv`, plus enheten `/dev/dri`. Tonmappning görs då på GPU:n med VAAPI. |
 | AMD | `HWACCEL=vaapi` och `/dev/dri`. |
-| NVIDIA | Pluginen *Nvidia-Driver*, `HWACCEL=nvenc`, `--runtime=nvidia` och `NVIDIA_VISIBLE_DEVICES=all`. Tonmappningen görs med processor. |
+| NVIDIA | Installera pluginen *Nvidia-Driver* och starta om. Använd sedan mallen **braxhn-tv-nvidia** (se nedan) – den har redan `HWACCEL=nvenc`, `--runtime=nvidia`, `NVIDIA_VISIBLE_DEVICES=all` och `NVIDIA_DRIVER_CAPABILITIES=all`. Tonmappningen görs med processor. |
+
+Mall för NVIDIA:
+```bash
+wget -O /boot/config/plugins/dockerMan/templates-user/my-braxhn-tv-nvidia.xml https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/braxhn-tv-nvidia.xml
+```
+Har du redan containern från den vanliga mallen: välj **Edit**, sätt *Hårdvaruomkodning* till `nvenc`, slå på *Avancerad vy*, lägg till ` --runtime=nvidia` sist under *Extra Parameters* och fyll i *NVIDIA: grafikkort* (`all`).
+
+Videon avkodas också på grafikkortet (nvenc/vaapi), vilket gör 4K-HEVC mycket lättare. Fungerar hårdvaran inte går servern automatiskt över till processorn, och *Administration → Säkerhet* visar felet.
 
 Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av 4K HDR med processor är tungt, så använd en GPU om du har mycket HDR-material.
 
@@ -276,6 +284,7 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `PORT` / `HTTPS_PORT` | 8420 / 8443 | Webbportar |
 | `MEDIA_ROOT` | /media | Bibliotek måste ligga här |
 | `HWACCEL` | none | none, vaapi, qsv eller nvenc |
+| `HW_DECODE` | 1 | 0 = avkoda med processorn även när grafikkortet kodar |
 | `TONEMAP` | hable | hable, mobius eller reinhard |
 | `PUBLIC_URL` | – | Publik adress, t.ex. https://tv.dindomän.se |
 | `REMOTE_QUALITY` | 1080 | Maxkvalitet utanför hemmet |
@@ -337,6 +346,9 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Timeshift och reklam | Lång live-lista mot en simulerad direktsändning, disktak och städning; reklamavbrott hittades i en syntetisk fil med lockbeten. |
 | Lyssning | ReplayGain/R128-taggar, ebur128-mätning, LRC-tolkning, smarta listor och inställningar. |
 | Skärmtid, följ serier, offline-synk | Räkning utan dubbelräkning, nekade uppspelningar, notiser och synkplan (serversidan). |
+| Snabb start | Nyckelbilder ur MKV-index och MP4-tabeller stämde exakt med ffprobe; omkodning med korta startsegment (2 s) delades på rätt ställen. |
+| Bildundertexter (PGS) | En syntetisk PGS-ström i MKV tolkades till bilder med rätt tider och position. **Otestat:** riktiga Blu-ray-rippar och iPhone. |
+| NVIDIA/Intel-avkodning | **Otestat** (ingen GPU i testmiljön); automatisk återgång till processorn testades med `HWACCEL=nvenc` utan drivrutin. |
 | Drift | Diskövervakning, import mot simulerade Plex- och Jellyfin-servrar, `/metrics` och DLNA:s SOAP/DIDL samt spärr mot andra nät. |
 
 **Inte testat här:**

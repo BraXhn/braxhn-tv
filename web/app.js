@@ -1813,7 +1813,7 @@ async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <button class="skip" id="pskip" hidden></button><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+    <button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
       <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
       ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
@@ -1852,8 +1852,9 @@ async function play(id, start = 0, opts = {}) {
   q('#ps').onchange = (e) => {
     const prev = it.subtitles.find(x => x.id === cur.sub), s = it.subtitles.find(x => x.id === e.target.value);
     cur.sub = e.target.value; store.set('sublang', s?.lang || ''); cur.offset = 0;
-    // Bildundertexter bränns in av servern => ny ström. Textundertexter byts direkt.
-    if (s?.bitmap || prev?.bitmap) reload(); else setSubs();
+    // Bildundertexter som inte är PGS bränns in av servern => ny ström. Text och PGS byts direkt.
+    const burns = (x) => x?.bitmap && !x.pgs;
+    if (burns(s) || burns(prev)) reload(); else setSubs();
   };
   if (q('#ps2')) q('#ps2').onchange = (e) => { cur.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === cur.sub2)?.lang || ''); setSubs(); };
   if (q('#pchap')) q('#pchap').onclick = (e) => {
@@ -2035,11 +2036,12 @@ async function load(start) {
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
-  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap ? sub.id : '' };
+  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap && !sub.pgs ? sub.id : '' };
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
+  if (start > 0) extra.start = String(Math.floor(start)); // servern förbereder rätt segment direkt
   let pb;
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
   const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
@@ -2107,17 +2109,72 @@ function setSubs() {
     }; };
     t2.addEventListener('load', on); setTimeout(on, 50);
   }
-  const sub = P.pb?.subtitles.find(s => s.id === P.sub);
+  const img = P.pb?.imageSubs?.find(s => s.id === P.sub);
+  pgsShow(img);
+  const sub = P.pb?.subtitles.find(s => s.id === P.sub) || img;
   $('#poff', el).hidden = !sub;
   if (!sub && !s2) return;
   $('#poffv', el).textContent = (P.offset > 0 ? '+' : '') + P.offset.toFixed(1).replace('.', ',') + ' s';
-  if (!sub) return;
+  if (!sub || img) return;
   const t = document.createElement('track');
   const url = sub.url + (sub.url.includes('?') ? '&' : '?') + (P.offset ? 'offset=' + P.offset : '');
   Object.assign(t, { kind: 'subtitles', src: url, default: true, label: sub.label, srclang: sub.lang || 'und' });
   v.append(t);
   t.addEventListener('load', () => { t.track.mode = 'showing'; });
   setTimeout(() => { if (t.track) t.track.mode = 'showing'; }, 50);
+}
+
+// ---------------- bildundertexter (PGS) ----------------
+// Servern tolkar Blu-ray-undertexten till bilder med tider; spelaren lägger rätt bild över videon.
+// Medan servern fortfarande läser filen hämtas listan igen var 5:e sekund.
+function pgsShow(sub) {
+  const cur = P; if (!cur) return;
+  const v = $('#vid', cur.el), box = $('#pgs', cur.el);
+  if (cur.pgs) { clearTimeout(cur.pgs.timer); v.removeEventListener('timeupdate', cur.pgs.draw); v.removeEventListener('seeked', cur.pgs.draw); window.removeEventListener('resize', cur.pgs.draw); }
+  box.innerHTML = ''; cur.pgs = null;
+  if (!sub) return;
+  const g = cur.pgs = { sub, data: null, shown: null, timer: null };
+  const live = () => P === cur && cur.pgs === g;
+  const base = sub.url.split('?')[0], qs = sub.url.includes('?') ? '?' + sub.url.split('?')[1] : '';
+  const imgUrl = (n) => `${base}/${n}.png${qs}`;
+  const find = (t) => {
+    const c = g.data?.cues; if (!c?.length) return -1;
+    let lo = 0, hi = c.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m].s <= t) lo = m; else hi = m - 1; }
+    const x = c[lo];
+    return x.s <= t && t < (x.e ?? x.s + 5) ? lo : -1;
+  };
+  g.draw = () => {
+    if (!live() || !g.data) return;
+    const k = find(v.currentTime - (cur.offset || 0));
+    // Bildens yta i elementet (videon skalas in med svarta kanter)
+    const W = g.data.w || v.videoWidth, H = g.data.h || v.videoHeight;
+    const key = k + ':' + v.clientWidth + 'x' + v.clientHeight;
+    if (key === g.shown) return;
+    g.shown = key;
+    if (k < 0 || !W || !H) { box.innerHTML = ''; return; }
+    const ar = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : W / H;
+    let dw = v.clientWidth, dh = dw / ar;
+    if (dh > v.clientHeight) { dh = v.clientHeight; dw = dh * ar; }
+    const ox = (v.clientWidth - dw) / 2, oy = (v.clientHeight - dh) / 2, sx = dw / W, sy = dh / H;
+    box.innerHTML = g.data.cues[k].i.map(([x, y, w, h, n]) =>
+      `<img alt="" src="${esc(imgUrl(n))}" style="left:${(ox + x * sx).toFixed(1)}px;top:${(oy + y * sy).toFixed(1)}px;width:${(w * sx).toFixed(1)}px;height:${(h * sy).toFixed(1)}px">`).join('');
+    // Hämta de närmaste bilderna i förväg
+    for (const c of g.data.cues.slice(k + 1, k + 3)) for (const it of c.i) new Image().src = imgUrl(it[4]);
+  };
+  v.addEventListener('timeupdate', g.draw); v.addEventListener('seeked', g.draw); window.addEventListener('resize', g.draw);
+  const poll = async () => {
+    try {
+      const r = await fetch(sub.url, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      if (!live()) return;
+      g.data = d; g.shown = null; g.draw();
+      if (d.error) toast('Undertexten kunde inte läsas');
+      else if (!d.done) g.timer = setTimeout(poll, 5000);
+    } catch { if (live()) g.timer = setTimeout(poll, 10000); }
+  };
+  poll();
 }
 
 function sendProgress(final = false) {
