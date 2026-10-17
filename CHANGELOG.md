@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- Granskning av dataskydd: en omdöpt eller uppgraderad fil (t.ex. 720p → 1080p via Sonarr/Radarr) behåller nu framsteg, sett-markering och Min lista; omdöpta musikfiler behåller spellistor, favoriter och historik; onumrerade avsnitt behåller sitt nummer; säkerhetskopior och cachefiler skrivs atomiskt (en avbruten kopia kan inte längre tränga undan en hel); återställning godtar bara en BraXhn-databas
+- Granskning av säkerhet: skadliga mediefiler kan inte längre låsa servern via undertext- eller nyckelbildstolken; barnprofiler kan inte hämta bilder från titlar över åldersgränsen; ogiltiga adresser ger 400/404 i stället för internt fel
 - Snabbare start: nyckelbilderna läses ur filens eget index (MKV/MP4) på någon sekund i stället för att hela filen läses, så att filmer kan skickas utan omkodning direkt första gången. ffmpeg startas redan när man trycker Spela, och omkodning börjar med korta segment (2 s)
 - Blu-ray-undertexter (PGS) visas som bilder i webbspelaren i stället för att brännas in – strömmen startar inte om och behöver inte omkodas när undertexten väljs
 - Vid NVIDIA/Intel/AMD-omkodning avkodas videon också på grafikkortet (`HW_DECODE=0` stänger av)
