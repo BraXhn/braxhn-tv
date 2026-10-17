@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BraXhn TV">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#1a0f2e"/>
+    </linearGradient>
+    <linearGradient id="rail" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff7a1a"/><stop offset=".55" stop-color="#ff3d7f"/><stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <linearGradient id="srv" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1e2a44"/><stop offset="1" stop-color="#121a2e"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="r"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <!-- horisont och rutnät -->
+    <g stroke="#7c5cff" stroke-opacity=".18" stroke-width="2">
+      <line x1="0" y1="232" x2="512" y2="232"/>
+      <line x1="256" y1="232" x2="-120" y2="512"/><line x1="256" y1="232" x2="632" y2="512"/>
+      <line x1="256" y1="232" x2="100" y2="512"/><line x1="256" y1="232" x2="412" y2="512"/>
+    </g>
+    <!-- järnvägen: två räls som möts i horisonten och bildar en play-triangel -->
+    <g filter="url(#glow)">
+      <path d="M152 512 L256 244 L360 512" fill="none" stroke="url(#rail)" stroke-width="16" stroke-linejoin="round"/>
+      <!-- syllar, tätare mot horisonten -->
+      <g stroke="#ffb46b" stroke-linecap="round">
+        <line x1="150" y1="478" x2="362" y2="478" stroke-width="10"/>
+        <line x1="173" y1="420" x2="339" y2="420" stroke-width="8"/>
+        <line x1="193" y1="370" x2="319" y2="370" stroke-width="7"/>
+        <line x1="210" y1="328" x2="302" y2="328" stroke-width="6"/>
+        <line x1="224" y1="294" x2="288" y2="294" stroke-width="5"/>
+        <line x1="236" y1="266" x2="276" y2="266" stroke-width="4"/>
+      </g>
+    </g>
+    <!-- linuxservern vid horisonten: rackenhet med lysdioder och terminalprompt -->
+    <g transform="translate(140 86)">
+      <rect x="0" y="0" width="232" height="120" rx="16" fill="url(#srv)" stroke="#3a4a72" stroke-width="3"/>
+      <g fill="none" stroke="#2a3a5e" stroke-width="2"><line x1="14" y1="40" x2="218" y2="40"/><line x1="14" y1="80" x2="218" y2="80"/></g>
+      <g filter="url(#glow)">
+        <circle cx="30" cy="20" r="6" fill="#39ff9f"/><circle cx="50" cy="20" r="6" fill="#39ff9f"/><circle cx="70" cy="20" r="6" fill="#ffb020"/>
+        <circle cx="30" cy="60" r="6" fill="#39ff9f"/><circle cx="50" cy="60" r="6" fill="#00e5ff"/>
+        <circle cx="30" cy="100" r="6" fill="#00e5ff"/><circle cx="50" cy="100" r="6" fill="#39ff9f"/>
+        <path d="M126 46 L150 62 L126 78" fill="none" stroke="#00e5ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><rect x="158" y="70" width="34" height="8" rx="3" fill="#00e5ff"/>
+      </g>
+      <g fill="#3a4a72"><rect x="150" y="14" width="56" height="10" rx="3"/><rect x="150" y="94" width="56" height="10" rx="3"/></g>
+    </g>
+  </g>
+</svg>
