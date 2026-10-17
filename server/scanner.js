@@ -7,7 +7,7 @@ import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
-import { groupVersions, promoteVersions, moveImages } from './versions.js';
+import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
 import { findBest, stripTrailingQuality } from './match.js';
 
 const pexec = promisify(execFile);
@@ -210,6 +210,34 @@ function backfillSrcNames(lib) {
   });
 }
 
+/** Anropas i skannerns transaktion innan försvunna rader tas bort. En fil som bytt namn blir en ny rad – utan detta
+ *  skulle framsteg, sedd-markering och Min lista försvinna vid varje uppgradering. Filmer: samma titel+år (den nya
+ *  raden blir en version, så att promoteVersions flyttar metadata och framsteg). Avsnitt: samma serie, säsong och
+ *  riktiga avsnittsnummer i filnamnet (onumrerade avsnitt matchas aldrig – numret är bara namnordningen). */
+function adoptRenamed(lib, missing, known) {
+  const fresh = all('SELECT id, path, version_of FROM items WHERE library_id=? AND path IS NOT NULL', lib.id).filter(r => !known.has(r.path));
+  if (!fresh.length) return;
+  const keyOf = (file) => {
+    if (lib.type === 'movie') return versionKey(parseMovie(file));
+    const p = parseEpisode(path.relative(lib.path, file));
+    return p && p.episode != null ? `${showKey(p.show, p.year).toLowerCase()}\u0000${p.season}\u0000${p.episode}` : null;
+  };
+  const byKey = new Map();
+  for (const r of fresh) {
+    if (r.version_of != null) continue;
+    const k = keyOf(r.path);
+    if (k && !byKey.has(k)) byKey.set(k, r);
+  }
+  for (const old of missing) {
+    if (old.version_of != null) continue; // en version: framsteget sitter redan på huvudraden
+    const k = keyOf(old.path), nu = k && byKey.get(k);
+    if (!nu) continue;
+    byKey.delete(k);
+    if (lib.type === 'movie') run('UPDATE items SET version_of=? WHERE id=?', old.id, nu.id);
+    else mergeInto(old.id, nu.id);
+  }
+}
+
 async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
   const { files: found, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
@@ -217,15 +245,19 @@ async function scanLibrary(lib) {
   const trailerFiles = found.filter(isTrailerFile);
   // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
   const files = await discMainOnly(found.filter(f => !isTrailerFile(f)));
-  // Onumrerade avsnitt numreras i namnordning per mapp, efter mappens högsta riktiga avsnittsnummer
+  // Onumrerade avsnitt numreras i namnordning per mapp, efter mappens högsta riktiga avsnittsnummer.
+  // Filer som redan finns behåller sitt nummer – annars får två avsnitt samma nummer (eller byter nummer)
+  // när en ny fil läggs till mitt i namnordningen.
   const dirEps = new Map();
   const unnumberedIndex = (f) => {
     const dir = path.dirname(f);
     if (!dirEps.has(dir)) {
       const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(path.relative(lib.path, x))]).filter(([, p]) => p);
-      const max = Math.max(0, ...eps.filter(([, p]) => p.episode != null).map(([, p]) => p.episode));
-      dirEps.set(dir, new Map(eps.filter(([, p]) => p.episode == null).map(([x]) => x).sort((a, b) => a.localeCompare(b, 'sv'))
-        .map((x, i) => [x, max + i + 1])));
+      const loose = eps.filter(([, p]) => p.episode == null).map(([x]) => x).sort((a, b) => a.localeCompare(b, 'sv'));
+      const nums = new Map(loose.filter(x => known.get(x)?.episode != null).map(x => [x, known.get(x).episode]));
+      let next = Math.max(0, ...eps.filter(([, p]) => p.episode != null).map(([, p]) => p.episode), ...nums.values());
+      for (const x of loose) if (!nums.has(x)) nums.set(x, ++next);
+      dirEps.set(dir, nums);
     }
     return dirEps.get(dir).get(f);
   };
@@ -236,7 +268,7 @@ async function scanLibrary(lib) {
   }
   for (const d of failed) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
-  const known = new Map(all(`SELECT id,path,size,mtime FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
+  const known = new Map(all(`SELECT id,path,size,mtime,episode,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
   if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
   const seen = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
@@ -304,6 +336,8 @@ async function scanLibrary(lib) {
   else if (missing.length) {
     let moves = [];
     tx(() => {
+      // Omdöpt eller utbytt fil (t.ex. Sonarr/Radarr som byter 720p mot 1080p): den nya filen tar över framsteg och Min lista
+      adoptRenamed(lib, missing, known);
       // Huvudfilen till en film med flera versioner försvann: en kvarvarande version tar över (med framsteg)
       if (lib.type === 'movie') moves = promoteVersions(missing.map(r => r.id));
       for (const r of missing) run('DELETE FROM items WHERE id=?', r.id);

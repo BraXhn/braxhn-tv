@@ -943,6 +943,8 @@ route('GET', '/api/collection-image/:cid/:type', img, (c) => {
 });
 route('GET', '/api/image/:id/:type', img, (c) => {
   if (!['poster', 'backdrop', 'thumb'].includes(c.p.type)) return fail(c.res, 404, '');
+  // Begränsade profiler (barn) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen) från titlar över gränsen
+  if (maxAgeOf(c.user.id) != null && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
   const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
   const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' });
   fs.readFile(f, (e, data) => {
@@ -1975,6 +1977,7 @@ function serveStatic(req, res, pathname) {
   let f;
   try { f = path.normalize(path.join(WEB, decodeURIComponent(pathname))); } catch { return fail(res, 400, ''); }
   if (f !== WEB && !f.startsWith(WEB + path.sep)) return fail(res, 403, '');
+  if (f.includes('\0')) return fail(res, 400, ''); // fs kastar annars ett undantag (500 och fellogg)
   fs.stat(f, (e, s) => {
     if (e || s.isDirectory()) {
       // Saknade filer med filändelse (t.ex. /vendor/x.js) ger 404 i stället för startsidan

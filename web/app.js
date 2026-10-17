@@ -1853,8 +1853,7 @@ async function play(id, start = 0, opts = {}) {
     const prev = it.subtitles.find(x => x.id === cur.sub), s = it.subtitles.find(x => x.id === e.target.value);
     cur.sub = e.target.value; store.set('sublang', s?.lang || ''); cur.offset = 0;
     // Bildundertexter som inte är PGS bränns in av servern => ny ström. Text och PGS byts direkt.
-    const burns = (x) => x?.bitmap && !x.pgs;
-    if (burns(s) || burns(prev)) reload(); else setSubs();
+    if (subBurns(s) || subBurns(prev)) reload(); else setSubs();
   };
   if (q('#ps2')) q('#ps2').onchange = (e) => { cur.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === cur.sub2)?.lang || ''); setSubs(); };
   if (q('#pchap')) q('#pchap').onclick = (e) => {
@@ -2036,12 +2035,14 @@ async function load(start) {
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
-  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: sub?.bitmap && !sub.pgs ? sub.id : '' };
+  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
-  if (start > 0) extra.start = String(Math.floor(start)); // servern förbereder rätt segment direkt
+  // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
+  // sedan, så en förstart mitt i filmen skulle bara stoppas och startas om
+  if (start > 0 && !extra.nhls) extra.start = String(Math.floor(start));
   let pb;
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
   const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
@@ -2109,7 +2110,7 @@ function setSubs() {
     }; };
     t2.addEventListener('load', on); setTimeout(on, 50);
   }
-  const img = P.pb?.imageSubs?.find(s => s.id === P.sub);
+  const img = pgsOverlay() ? P.pb?.imageSubs?.find(s => s.id === P.sub) : null;
   pgsShow(img);
   const sub = P.pb?.subtitles.find(s => s.id === P.sub) || img;
   $('#poff', el).hidden = !sub;
@@ -2127,11 +2128,24 @@ function setSubs() {
 // ---------------- bildundertexter (PGS) ----------------
 // Servern tolkar Blu-ray-undertexten till bilder med tider; spelaren lägger rätt bild över videon.
 // Medan servern fortfarande läser filen hämtas listan igen var 5:e sekund.
+// iPhone saknar helskärm för element (bara videon själv kan bli helskärm) – där syns ingen bild ovanpå videon,
+// så PGS bränns in av servern som tidigare.
+const pgsOverlay = () => !!document.documentElement.requestFullscreen;
+const subBurns = (x) => !!x?.bitmap && !(x.pgs && pgsOverlay());
+function pgsStop(cur) {
+  if (!cur?.pgs) return;
+  const v = $('#vid', cur.el), g = cur.pgs;
+  clearTimeout(g.timer);
+  v?.removeEventListener('timeupdate', g.draw); v?.removeEventListener('seeked', g.draw); window.removeEventListener('resize', g.draw);
+  const box = $('#pgs', cur.el); if (box) box.innerHTML = '';
+  cur.pgs = null;
+}
 function pgsShow(sub) {
   const cur = P; if (!cur) return;
   const v = $('#vid', cur.el), box = $('#pgs', cur.el);
-  if (cur.pgs) { clearTimeout(cur.pgs.timer); v.removeEventListener('timeupdate', cur.pgs.draw); v.removeEventListener('seeked', cur.pgs.draw); window.removeEventListener('resize', cur.pgs.draw); }
-  box.innerHTML = ''; cur.pgs = null;
+  // Samma spår (t.ex. ändrad förskjutning): rita om utan att hämta listan igen
+  if (sub && cur.pgs?.sub.url === sub.url) { cur.pgs.shown = null; cur.pgs.draw(); return; }
+  pgsStop(cur);
   if (!sub) return;
   const g = cur.pgs = { sub, data: null, shown: null, timer: null };
   const live = () => P === cur && cur.pgs === g;
@@ -2156,9 +2170,14 @@ function pgsShow(sub) {
     const ar = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : W / H;
     let dw = v.clientWidth, dh = dw / ar;
     if (dh > v.clientHeight) { dh = v.clientHeight; dw = dh * ar; }
-    const ox = (v.clientWidth - dw) / 2, oy = (v.clientHeight - dh) / 2, sx = dw / W, sy = dh / H;
+    // Likformig skala; PGS-ytan centreras på bilden. En beskuren film (1920×800 med undertext för 1920×1080)
+    // får då texten i den svarta kanten som på en TV, i stället för att bilderna trycks ihop på höjden.
+    // Beskuren på höjden (bredare bild) => skala efter bredden, annars efter höjden. Bilder utanför elementet flyttas in.
+    const sc = W / H <= ar + 0.01 ? dw / W : dh / H;
+    const ox = (v.clientWidth - W * sc) / 2, oy = (v.clientHeight - H * sc) / 2;
+    const clamp = (a, lo, hi) => Math.max(lo, Math.min(a, hi));
     box.innerHTML = g.data.cues[k].i.map(([x, y, w, h, n]) =>
-      `<img alt="" src="${esc(imgUrl(n))}" style="left:${(ox + x * sx).toFixed(1)}px;top:${(oy + y * sy).toFixed(1)}px;width:${(w * sx).toFixed(1)}px;height:${(h * sy).toFixed(1)}px">`).join('');
+      `<img alt="" src="${esc(imgUrl(n))}" style="left:${clamp(ox + x * sc, 0, v.clientWidth - w * sc).toFixed(1)}px;top:${clamp(oy + y * sc, 0, v.clientHeight - h * sc).toFixed(1)}px;width:${(w * sc).toFixed(1)}px;height:${(h * sc).toFixed(1)}px">`).join('');
     // Hämta de närmaste bilderna i förväg
     for (const c of g.data.cues.slice(k + 1, k + 3)) for (const it of c.i) new Image().src = imgUrl(it[4]);
   };
@@ -2258,6 +2277,7 @@ function closePlayer(refresh = true) {
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   const el = P.el, v = $('#vid', el), id = P.it.id;
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
+  pgsStop(P);
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);

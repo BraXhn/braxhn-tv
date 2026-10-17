@@ -268,3 +268,36 @@ test('nyckelbilder: den som trycker på Spela går före bakgrundsanalysen', asy
   assert.ok(Date.now() - t0 < 5000);
   await Promise.all(bg);
 });
+
+test('skanning: omdöpt fil behåller framsteg, onumrerade avsnitt byter inte nummer', async () => {
+  const uid = Number(D.run("INSERT INTO users(name,pass,created) VALUES('omdop','x',0)").lastInsertRowid);
+  const watched = (id) => D.get('SELECT watched FROM progress WHERE user_id=? AND item_id=?', uid, id)?.watched;
+  const mark = (id) => D.run('INSERT INTO progress(user_id,item_id,position,watched,updated) VALUES(?,?,0,1,1)', uid, id);
+  // Film: Radarr byter 720p mot 1080p
+  const fdir = path.join(MEDIA, 'Omdöpt-film');
+  touch(path.join(fdir, 'Delta (2004) 720p.mkv'));
+  const flib = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('OF','movie',?)", fdir).lastInsertRowid);
+  await sc.scan(flib);
+  const m = D.get("SELECT id FROM items WHERE library_id=? AND kind='movie'", flib).id;
+  mark(m); D.run('INSERT INTO watchlist(user_id,item_id,added) VALUES(?,?,1)', uid, m);
+  fs.renameSync(path.join(fdir, 'Delta (2004) 720p.mkv'), path.join(fdir, 'Delta (2004) 1080p.mkv'));
+  await sc.scan(flib);
+  const m2 = D.get("SELECT id FROM items WHERE library_id=? AND kind='movie'", flib).id;
+  assert.notEqual(m2, m);
+  assert.equal(watched(m2), 1, 'sedd-markeringen följer med den nya filen');
+  assert.ok(D.get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, m2));
+  // Avsnitt: Sonarr byter fil; onumrerade avsnitt får en ny fil mitt i namnordningen
+  const sdir = path.join(MEDIA, 'Omdöpt-serie');
+  touch(path.join(sdir, 'Epsilon', 'Epsilon.S01E01.720p.mkv'));
+  touch(path.join(sdir, 'Zeta', 'Alfa.mkv')); touch(path.join(sdir, 'Zeta', 'Gamma.mkv'));
+  const slib = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('OS','show',?)", sdir).lastInsertRowid);
+  await sc.scan(slib);
+  const e = D.get("SELECT id FROM items WHERE path LIKE '%Epsilon.S01E01.720p%'").id; mark(e);
+  const num = (n) => D.get('SELECT episode FROM items WHERE path=?', path.join(sdir, 'Zeta', n)).episode;
+  assert.deepEqual([num('Alfa.mkv'), num('Gamma.mkv')], [1, 2]);
+  fs.renameSync(path.join(sdir, 'Epsilon', 'Epsilon.S01E01.720p.mkv'), path.join(sdir, 'Epsilon', 'Epsilon.S01E01.1080p.mkv'));
+  touch(path.join(sdir, 'Zeta', 'Beta.mkv'));
+  await sc.scan(slib);
+  assert.equal(watched(D.get("SELECT id FROM items WHERE path LIKE '%Epsilon.S01E01.1080p%'").id), 1);
+  assert.deepEqual([num('Alfa.mkv'), num('Gamma.mkv'), num('Beta.mkv')], [1, 2, 3], 'befintliga avsnitt behåller numret');
+});

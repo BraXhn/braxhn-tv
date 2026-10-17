@@ -124,6 +124,13 @@ export async function listFiles(root, accept, skip = () => false) {
   return { files, rootOk, failed };
 }
 
+/** Skriv en fil atomiskt (temporär fil + rename): ett avbrott mitt i lämnar aldrig en halv fil som läses som giltig */
+export function writeAtomic(file, data) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  try { fs.writeFileSync(tmp, data); fs.renameSync(tmp, file); }
+  catch (e) { fs.rmSync(tmp, { force: true }); throw e; }
+}
+
 /**
  * Får skannern ta bort försvunna filer ur databasen? Skydd mot att ett helt bibliotek töms när
  * t.ex. en NAS inte är monterad. missing = sökvägar som finns i databasen men inte hittades.

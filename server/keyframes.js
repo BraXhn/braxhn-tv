@@ -154,7 +154,8 @@ export function parseMoov(moov) {
       for (let j = 0; j < n; j++, sample++, dts += delta) {
         let off = 0;
         if (ctt && ci < ctt.n) {
-          off = ctt.v1 ? ctts.readInt32BE(12 + ci * 8) : ctts.readUInt32BE(12 + ci * 8);
+          // Med tecken även i version 0 (som ffmpeg) – vissa kodare skriver negativa förskjutningar där
+          off = ctts.readInt32BE(12 + ci * 8);
           if (--cleft === 0 && ++ci < ctt.n) cleft = ctts.readUInt32BE(8 + ci * 8);
         }
         if (!sync || sync.has(sample)) out.push((dts + off - shift) / ts + empty);
@@ -194,6 +195,12 @@ async function check(file, kf, duration) {
     const s = await sample(file, at, 12);
     // Stickprovets första nyckelbild kan ligga före intervallet (sökningen landar på närmaste föregående)
     for (const t of s) { if (has(t)) any = true; else complete = false; }
+    // Omvänt: en tid i listan mellan stickprovets nyckelbilder som inte är en nyckelbild betyder att indexet
+    // pekar fel – då skulle segmentgränserna (även för H.264, som annars klarar ett urval) inte stämma
+    if (s.length >= 2) {
+      const lo = Math.min(...s), hi = Math.max(...s);
+      for (const t of kf) if (t > lo + 0.002 && t < hi - 0.002 && !s.some(x => Math.abs(x - t) <= 0.002)) return { ok: false, complete: false };
+    }
   }
   return { ok: any, complete };
 }

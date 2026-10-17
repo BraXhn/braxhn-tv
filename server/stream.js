@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
-import { send, fail, MIME, streamFile } from './util.js';
+import { send, fail, MIME, streamFile, writeAtomic } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
 
@@ -139,7 +139,7 @@ function extractVtt(it, sub) {
       if (code !== 0 && !chunks.length) return no(new Error('Kunde inte läsa undertexten'));
       const vtt = Buffer.concat(chunks).toString('utf8');
       // Avbruten eller misslyckad körning: skicka det som finns men cacha inte en avkortad fil
-      if (code === 0) try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, vtt); } catch {}
+      if (code === 0) try { fs.mkdirSync(path.dirname(file), { recursive: true }); writeAtomic(file, vtt); } catch {}
       ok(vtt);
     });
   })).finally(() => subRunning.delete(key));
@@ -238,7 +238,7 @@ export function computeKeyframes(it, { priority = false } = {}) {
         kf.sort((a, b) => a - b);
       }
       for (const f of fs.readdirSync(path.join(CACHE, 'keyframes'))) if (f.startsWith(it.id + '-')) fs.rmSync(path.join(CACHE, 'keyframes', f), { force: true });
-      fs.writeFileSync(kfFile(it), JSON.stringify(kf));
+      writeAtomic(kfFile(it), JSON.stringify(kf)); // en halv fil skulle räknas som indexerad men aldrig gå att läsa
       kfRemember(it.id, it.mtime, kf);
       return kf;
     } catch (e) { console.warn('[keyframes]', it.path, e.message); return null; }
