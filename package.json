@@ -1,6 +1,6 @@
 {
   "name": "braxhn-tv",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "BraXhn TV - fri, självhostad mediaserver (inga prenumerationer, inga externa konton)",
   "type": "module",
   "private": true,

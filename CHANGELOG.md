@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.8.1
+- Förhandsbilderna för spolning skapas mycket snabbare: med filmens nyckelbilder kända hoppar ffmpeg direkt till en bild var 10:e sekund i stället för att läsa hela filen och avkoda varje nyckelbild (för en stor 4K-film från många minuter till under en minut). Två filmer bearbetas samtidigt
+
 ## 0.8.0
 - **Nytt utseende i Plex-stil** i webben: mörkare neutral bakgrund och tätare text, smal **sidomeny** med ikoner (Hem, ett val per bibliotek, Live-TV/Poddar och *Mer*; ☰ visar namnen och valet sparas), menyrad med rubrik, sidflikar (Hem, Min lista, Önskningar, Statistik), sök, aktivitet och ett **reglage för kortstorlek** (sparas i webbläsaren). På telefon ligger biblioteken som knappar under sökfältet och flikmenyn finns kvar längst ner
 - Startsidan består av **hyllor** som skrollar i sidled med ‹ › (bläddrar en sida, inaktiva vid ändarna) och fäster vid korten; piltangenter/D-pad flyttar mellan korten och raderna
