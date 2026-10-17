@@ -70,6 +70,34 @@ export function parseMovie(file) {
   return tryName(base) || tryName(folder) || { title: clean(t1.replace(JUNK, '')) || t1 || base, year: null };
 }
 
+/** Avsnitt utan SxxEyy: "Byggare Bob 026 - Jul hos Byggare Bob", "Lille Luj Disc3", "Kaspar2", "Trolltider.2",
+ *  "Sunes.Jul.Volym.2-8", "jul.i.kapernaum.1995.disc1". Numret i slutet blir avsnittet. Ligger filen i en mapp med
+ *  ett annat namn (t.ex. "julkalender/Kaspar2.mp4") blir filnamnet serien. */
+function looseEpisode(parts, base, sf) {
+  const t = base.match(/^(.*?[^\d\s._-])[\s._-]*(?:disc|disk|dvd|del|part|volym|vol|d)?[\s._-]*0*(\d{1,3})(?:-\d{1,3})?(?:[\s._]+-[\s._]+(.+))?$/i);
+  if (!t) return null;
+  // "jul.i.kapernaum.1995.disc1": skivordet och året hör inte till namnet
+  const name = clean(t[1].replace(/[\s._-]*(?:disc|disk|dvd|volym|vol)$/i, ''));
+  if (!name) return null;
+  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9åäö]+/g, '');
+  const folder = parts.length > 1 ? parts[0] : null;
+  const sameShow = folder && (norm(name).startsWith(norm(folder).slice(0, 6)) || norm(folder).startsWith(norm(name)));
+  const show = sameShow ? folder : name;
+  const y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
+  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season: sf ? +sf.match(/\d+/)[0] : 1, episode: +t[2],
+    epTitle: t[3] ? clean(t[3]) : null, absolute: !sf };
+}
+
+// Avsnitt helt utan nummer ("Chuggington/Hjälpsamma Hodge.avi"): serien är mappen, numret sätts vid skanningen
+function unnumbered(parts, base, sf) {
+  if (parts.length < 2) return null;
+  const show = parts[0].replace(/[\s._-]+(?:-[\s._]+)?(?:the\s+)?(?:complete\s+)?(?:collection|samling|samlingen|box)$/i, '') || parts[0], y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
+  const n = clean(y ? y[1] : show).toLowerCase(), t = clean(base);
+  const title = t.toLowerCase().startsWith(n) ? clean(t.slice(n.length).replace(/^[\s._-]+/, '')) || t : t;
+  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season: sf ? +sf.match(/\d+/)[0] : 1, episode: null,
+    epTitle: title, absolute: false };
+}
+
 export function parseEpisode(rel) {
   const parts = rel.split(path.sep);
   // Fansub-grupper och hash-taggar i hakparenteser, t.ex. "[SubsPlease] Show - 12 (1080p) [ABCD1234]"
@@ -82,7 +110,7 @@ export function parseEpisode(rel) {
     // Anime: "Show - 1071" eller "Show - 12v2" (absolut numrering om ingen säsongsmapp finns)
     const a = base.match(/^(.*?)[\s._]+-[\s._]+(\d{1,4})(?:v\d)?(?=$|[\s._\[(])/);
     const e = a ? null : base.match(/(?:^|[\s._-])(?:e|ep|episode|avsnitt|del)[\s._-]*(\d{1,4})/i);
-    if (!a && !e) return null;
+    if (!a && !e) return looseEpisode(parts, base, sf) || unnumbered(parts, base, sf);
     if (a) { episode = +a[2]; before = a[1]; m = { index: a[1].length, 0: base.slice(a[1].length, a.index + a[0].length) }; }
     else { episode = +e[1]; before = base.slice(0, e.index); }
     season = sf ? +sf.match(/\d+/)[0] : 1;
@@ -189,6 +217,18 @@ async function scanLibrary(lib) {
   const trailerFiles = found.filter(isTrailerFile);
   // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
   const files = await discMainOnly(found.filter(f => !isTrailerFile(f)));
+  // Onumrerade avsnitt numreras i namnordning per mapp, efter mappens högsta riktiga avsnittsnummer
+  const dirEps = new Map();
+  const unnumberedIndex = (f) => {
+    const dir = path.dirname(f);
+    if (!dirEps.has(dir)) {
+      const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(path.relative(lib.path, x))]).filter(([, p]) => p);
+      const max = Math.max(0, ...eps.filter(([, p]) => p.episode != null).map(([, p]) => p.episode));
+      dirEps.set(dir, new Map(eps.filter(([, p]) => p.episode == null).map(([x]) => x).sort((a, b) => a.localeCompare(b, 'sv'))
+        .map((x, i) => [x, max + i + 1])));
+    }
+    return dirEps.get(dir).get(f);
+  };
   if (!rootOk) {
     // Mappen saknas/går inte att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
     scanWarning(deletionBlocked({ name: lib.name, rootOk }));
@@ -240,6 +280,7 @@ async function scanLibrary(lib) {
       } else {
         const p = parseEpisode(path.relative(lib.path, f));
         if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
+        if (p.episode == null) p.episode = unnumberedIndex(f);
         const showId = showFor(lib, p.show, p.year);
         const title = p.epTitle || `Avsnitt ${p.episode}`;
         pending.push(() => {

@@ -22,7 +22,27 @@ try {
     try { fs.rmSync(path.join(TRANSCODE, f), { recursive: true, force: true }); } catch (e) { console.warn('[hls] kunde inte rensa', f, e.message); }
   }
 } catch (e) { console.warn('[hls] kunde inte läsa omkodningsmappen', TRANSCODE, e.message); }
-const HW = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi | nvenc | qsv
+const HW_WANTED = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi | nvenc | qsv
+// Hårdvaruomkodning som inte fungerar (t.ex. nvenc utan NVIDIA-drivrutin i containern: "Cannot load libcuda.so.1")
+// får aldrig stoppa uppspelningen – då används processorn i stället och adminsidan visar varför.
+let HW = HW_WANTED;
+export const hwStatus = { wanted: HW_WANTED, active: HW_WANTED, error: null };
+const HW_FAIL = /libcuda|nvenc|cuda|vaapi|va-api|qsv|libmfx|mfx|hwupload|hwaccel|Failed to (initiali[sz]e|open|create)|No (VA display|device|NVENC)|device (type|creation)|Error while opening encoder|Generic error in an external library/i;
+export function disableHw(reason) {
+  if (HW === 'none') return;
+  console.warn(`[hårdvara] ${HW} fungerar inte – använder processorn i stället. ${String(reason || '').split('\n').filter(Boolean).slice(-2).join(' ')}`);
+  hwStatus.error = String(reason || '').trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400);
+  HW = 'none'; hwStatus.active = 'none';
+}
+// Snabbtest vid start: koda två bildrutor med den valda hårdvaran
+if (HW !== 'none') {
+  const enc = { vaapi: ['-vaapi_device', process.env.VAAPI_DEVICE || '/dev/dri/renderD128', '-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi'],
+    nvenc: ['-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-c:v', 'h264_nvenc'], qsv: ['-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-vf', 'format=nv12', '-c:v', 'h264_qsv'] }[HW];
+  if (!enc) disableHw(`okänt värde HWACCEL=${HW}`);
+  else execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e, _o, stderr) => {
+    if (e) disableHw(stderr || e.message); else console.log(`[hårdvara] ${HW} fungerar`);
+  });
+}
 const VAAPI_DEV = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
 const TONEMAP = process.env.TONEMAP || 'hable'; // hable | mobius | reinhard | bt2390
 
@@ -521,6 +541,8 @@ function startFfmpeg(s, it, n) {
       s.proc = null; s.done = code === 0;
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
+    // Hårdvaran fungerar inte: nästa start (spelaren väntar och servern försöker igen) använder processorn
+    if (code && !sig && d.mode === 'transcode' && HW !== 'none' && HW_FAIL.test(err)) disableHw(err);
   });
   s.proc = p; s.paused = false; s.start = n; s.done = false; s.total = segs.length;
 }
