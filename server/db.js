@@ -39,6 +39,25 @@ if (fs.existsSync(RESTORE)) {
 }
 export const RESTORE_FILE = RESTORE;
 export const db = new DatabaseSync(DBFILE);
+// Säkerhetskopia före uppgradering: ny programversion mot en befintlig databas (schemat ändras strax nedan).
+// Sparas i backups/ som före-uppgradering-<gammal version>.db; de tre senaste behålls.
+{
+  const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  let prev = null;
+  try { prev = db.prepare("SELECT v FROM settings WHERE k='app_version'").get()?.v ?? ''; } catch {} // ny databas: ingen tabell än
+  if (prev !== null && prev !== APP_VERSION) {
+    try {
+      const dir = path.join(path.dirname(DBFILE), 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, `före-uppgradering-${(prev || 'okänd').replace(/[^\p{L}\p{N}.-]/gu, '')}-${Date.now()}.db`);
+      db.exec(`VACUUM INTO '${out.replace(/'/g, "''")}'`);
+      const old = fs.readdirSync(dir).filter(f => f.startsWith('före-uppgradering-')).map(f => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+      for (const x of old.slice(3)) fs.rmSync(path.join(dir, x.f), { force: true });
+      console.log(`[db] uppgradering ${prev || '?'} → ${APP_VERSION}: säkerhetskopia sparad som backups/${path.basename(out)}`);
+    } catch (e) { console.warn('[db] kunde inte spara säkerhetskopia före uppgradering:', e.message); }
+  }
+  globalThis.__braxhnAppVersion = APP_VERSION;
+}
 db.exec(`
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -212,6 +231,10 @@ if (ver < 5) {
   ver = 5;
 }
 if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
+// Äldre programversion mot en nyare databas (t.ex. efter återgång till en gammal image): fungerar oftast,
+// men nya kolumner och tabeller används inte – varna tydligt
+if (ver > LATEST) console.warn(`[db] Databasen kommer från en nyare version av BraXhn TV (schema ${ver} > ${LATEST}). Uppdatera imagen – eller återställ backups/före-uppgradering-*.db om du vill gå tillbaka.`);
+try { db.prepare("INSERT INTO settings(k,v) VALUES('app_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(globalThis.__braxhnAppVersion); } catch {}
 
 // Låt SQLite uppdatera statistik för frågeplaneraren (billigt; körs vid start och var 12:e timme)
 const optimize = () => { try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[db] optimize:', e.message); } };

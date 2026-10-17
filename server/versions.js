@@ -11,7 +11,8 @@ const META_COLS = 'title, sort_title, year, overview, rating, tmdb_id, meta_done
 
 /** Grupperingsnyckel: samma titel och år i samma bibliotek. Filer utan årtal grupperas aldrig (för osäkert). */
 export function versionKey(parsed) {
-  return parsed?.year && parsed.title ? `${parsed.title.toLowerCase()}\u0000${parsed.year}` : null;
+  if (parsed?.part) return null; // del 1/2 av samma film är inte versioner
+  return parsed?.year && parsed.title ? `${parsed.title.normalize('NFC').toLowerCase()}\u0000${parsed.year}` : null;
 }
 
 /** Flyttar framsteg och Min lista från en rad till en annan (sedd vinner, senaste positionen gäller) */

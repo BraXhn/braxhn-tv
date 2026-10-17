@@ -124,3 +124,18 @@ test('hårdvarufel ger en begriplig åtgärd', async () => {
   assert.match(st.hwHint('OpenEncodeSessionEx failed: out of memory (10)'), /samtidiga/);
   assert.equal(st.hwHint('något helt annat'), null);
 });
+
+test('segment långt bakom uppspelningen tas bort utan att servern tappar bort var den är', async () => {
+  const st = await import('../server/stream.js');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-trim-'));
+  const s = { dir: d, d: { fmt: 'ts' }, start: 0, hi: null };
+  const f = (k) => path.join(d, `seg_${String(k).padStart(5, '0')}.ts`);
+  for (let k = 0; k <= 60; k++) fs.writeFileSync(f(k), 'x');
+  st._segs.trimBehind(s, 50);
+  assert.ok(!fs.existsSync(f(0)) && !fs.existsSync(f(20)) && fs.existsSync(f(21)));
+  assert.equal(st._segs.highestFile(s), 60);
+  // Nästa segment ännu inte klart efter rensning av allt bakåt
+  for (let k = 21; k <= 60; k++) fs.rmSync(f(k));
+  s.hi = null; s.trimmed = 60;
+  assert.equal(st._segs.highestFile(s), 60);
+});
