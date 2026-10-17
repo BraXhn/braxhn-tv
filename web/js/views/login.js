@@ -1,5 +1,5 @@
 // Vyer: inloggning, första kontot och profilval ("Vem tittar?")
-import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, toast, views } from '../core.js';
+import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, store, toast, views } from '../core.js';
 import { closeAllPlayers } from '../player/video.js';
 import { stopAudio } from '../audio.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
@@ -18,16 +18,19 @@ views.login = async () => {
     <div id="codebox" hidden><label for="code">Kod från autentiseringsappen (eller reservkod)</label>
       <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12"></div>
     <div class="err" id="e"></div>
+    ${setup ? '' : `<label class="remember"><input type="checkbox" id="rem" ${store.get('remember', '1') === '1' ? 'checked' : ''}> Håll mig inloggad i 30 dagar</label>`}
     <button class="primary">${setup ? 'Skapa konto' : 'Logga in'}</button>
     ${!setup && passkeyOk() ? '<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>' : ''}</form>`;
   if ($('#pkl')) $('#pkl').onclick = async () => {
-    try { await passkeyLogin(); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); }
+    try { await passkeyLogin(remember()); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); }
     catch (e) { $('#e').textContent = e.name === 'NotAllowedError' ? 'Avbrutet' : e.message; }
   };
+  // "Håll mig inloggad": valet sparas till nästa gång. Utan det glömmer webbläsaren inloggningen när den stängs.
+  const remember = () => { const r = $('#rem'); if (!r) return true; store.set('remember', r.checked ? '1' : '0'); return r.checked; };
   $('#n').focus();
   $('#f').onsubmit = async (ev) => {
     ev.preventDefault();
-    const body = { name: $('#n').value, password: $('#p').value };
+    const body = { name: $('#n').value, password: $('#p').value, remember: remember() };
     if (!$('#codebox').hidden) body.code = $('#code').value.trim();
     try {
       const r = await fetch('/api' + (setup ? '/setup' : '/login'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

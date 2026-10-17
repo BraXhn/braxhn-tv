@@ -183,6 +183,8 @@ addCol('items', 'trailer_yt', 'TEXT');
 addCol('items', 'version_of', 'INTEGER REFERENCES items(id) ON DELETE SET NULL');
 // Avsnittsnummer gissat ur namnordningen (fil utan nummer) – matchas mot TMDB på titel i stället för nummer
 addCol('items', 'ep_guess', 'INTEGER NOT NULL DEFAULT 0');
+// Webbinloggning: 1 = håll inloggad i 30 dagar, 0 = bara tills webbläsaren stängs (och högst 12 h utan aktivitet)
+addCol('sessions', 'remember', 'INTEGER NOT NULL DEFAULT 1');
 db.exec('CREATE INDEX IF NOT EXISTS items_version ON items(version_of)');
 // Lyssningsfunktioner – jämn ljudnivå: ReplayGain i dB mot -18 LUFS, toppvärde (linjärt) och källa ('tag', 'mätt', 'fel'; NULL = inte kontrollerat)
 addCol('tracks', 'rg_track', 'REAL');

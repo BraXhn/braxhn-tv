@@ -422,3 +422,5 @@ td,code{overflow-wrap:anywhere}
 .grid>.card{content-visibility:auto;contain-intrinsic-size:auto 150px auto 280px}
 /* Mindre rörelse för den som valt det i systemet */
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+.remember{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:14px;color:var(--dim);cursor:pointer;text-align:left}
+.remember input{width:20px;height:20px;margin:0;accent-color:var(--accent)}

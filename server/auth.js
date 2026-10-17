@@ -58,21 +58,24 @@ export function weakPassword(pw, name = '') {
 // Token lagras som SHA-256 i databasen – ett läckt databasutdrag går inte att logga in med.
 // kind: web (cookie), app (Bearer, TV/mobil/bil), media (kortlivad, en titel, för strömmar/cast), img (bilder i appar)
 const TTL = { web: 30 * 86400, app: 365 * 86400, media: 24 * 3600, img: 7 * 86400 };
+const SHORT = 12 * 3600; // webbinloggning utan "Håll mig inloggad": utgår efter 12 h utan aktivitet
+const ttlOf = (kind, remember) => kind === 'web' && !remember ? SHORT : TTL[kind];
 export const sha = (t) => createHash('sha256').update(String(t)).digest('hex');
 
 let lastCleanup = 0;
-export function createSession(userId, kind = 'web', { item = null, ua = null, ip = null } = {}) {
+export function createSession(userId, kind = 'web', { item = null, ua = null, ip = null, remember = true } = {}) {
   const token = randomBytes(32).toString('hex');
-  run(`INSERT INTO sessions(token,user_id,created,kind,expires,scope_item,ua,ip,last_seen) VALUES(?,?,?,?,?,?,?,?,?)`,
-    sha(token), userId, now(), kind, now() + TTL[kind], item, ua ? String(ua).slice(0, 200) : null, ip, now());
+  run(`INSERT INTO sessions(token,user_id,created,kind,expires,scope_item,ua,ip,last_seen,remember) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+    sha(token), userId, now(), kind, now() + ttlOf(kind, remember), item, ua ? String(ua).slice(0, 200) : null, ip, now(), remember ? 1 : 0);
   // Rensa utgångna sessioner högst en gång per minut (inte vid varje ny session)
   if (now() - lastCleanup >= 60) { lastCleanup = now(); run('DELETE FROM sessions WHERE expires < ?', now()); }
   return token;
 }
 // Över HTTPS används __Host--prefixet (kan inte sättas av andra underdomäner)
 export const COOKIE = (secure) => secure ? '__Host-kt' : 'kt';
-export const cookieHeader = (token, secure = false) =>
-  `${COOKIE(secure)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL.web}${secure ? '; Secure' : ''}`;
+// remember = false: kaka utan Max-Age – webbläsaren glömmer den när den stängs
+export const cookieHeader = (token, secure = false, remember = true) =>
+  `${COOKIE(secure)}=${token}; Path=/; HttpOnly; SameSite=Lax${remember ? `; Max-Age=${TTL.web}` : ''}${secure ? '; Secure' : ''}`;
 export const clearCookies = () => ['kt=; Path=/; Max-Age=0', '__Host-kt=; Path=/; Max-Age=0; Secure'];
 
 /** Hämta token. Token i URL (?t=) accepteras bara för media/bild-rutter och bara för kortlivade token. */
@@ -89,14 +92,18 @@ export function userFromReq(req, query, allowQuery = false) {
   const t = tokenFromReq(req, query, allowQuery);
   if (!t || !/^[a-f0-9]{64}$/.test(t.token)) return null;
   const h = sha(t.token);
-  const u = get(`SELECT u.id,u.name,u.is_admin,u.remote_allowed,u.totp_enabled,u.parent_id,u.max_age,s.kind,s.scope_item,s.last_seen,s.rowid AS sid
+  const u = get(`SELECT u.id,u.name,u.is_admin,u.remote_allowed,u.totp_enabled,u.parent_id,u.max_age,s.kind,s.scope_item,s.last_seen,s.remember,s.rowid AS sid
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires > ?`, h, now());
   if (!u) return null;
   if (t.via === 'query' && !['media', 'img'].includes(u.kind)) return null;
   if (t.via !== 'query' && ['media', 'img'].includes(u.kind) && t.via === 'cookie') return null;
   // Glidande giltighetstid för web/app (uppdateras högst var 10:e minut)
   if (now() - (u.last_seen || 0) > 600) {
-    if (u.kind === 'web' || u.kind === 'app') run('UPDATE sessions SET last_seen=?, expires=? WHERE token=?', now(), now() + TTL[u.kind], h);
+    if (u.kind === 'web' || u.kind === 'app') {
+      run('UPDATE sessions SET last_seen=?, expires=? WHERE token=?', now(), now() + ttlOf(u.kind, u.remember), h);
+      // "Håll mig inloggad": förnya även kakan, så att 30 dagar räknas från senaste besöket (inte från inloggningen)
+      if (t.via === 'cookie' && u.kind === 'web' && u.remember) u.renewCookie = true;
+    }
     else run('UPDATE sessions SET last_seen=? WHERE token=?', now(), h);
   }
   u.token = t.token; u.tokenHash = h; u.via = t.via;

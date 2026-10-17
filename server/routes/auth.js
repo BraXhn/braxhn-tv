@@ -46,7 +46,7 @@ route('POST', '/api/setup', pub, async (c) => {
 
 route('POST', '/api/login', pub, async (c) => {
   const ip = clientIp(c.req);
-  const { name, password, app, code } = await readJson(c.req);
+  const { name, password, app, code, remember } = await readJson(c.req);
   const uname = String(name || '').trim().slice(0, 64);
   const generic = () => fail(c.res, 401, 'Fel namn eller lösenord');
   if (ipBlocked(ip)) { audit('login_denied', { ip, detail: 'ip-spärr' }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
@@ -82,7 +82,8 @@ route('POST', '/api/login', pub, async (c) => {
   const meta = { ua: c.req.headers['user-agent'], ip };
   const pwOld = weakPassword(password, u.name) ? true : false;
   if (app) return send(c.res, 200, { ok: true, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin }, weakPassword: pwOld });
-  send(c.res, 200, { ok: true, weakPassword: pwOld }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', meta), isHttps(c.req)) });
+  const keep = remember !== false; // äldre klienter skickar inget: håll inloggad som förut
+  send(c.res, 200, { ok: true, weakPassword: pwOld }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
 });
 route('POST', '/api/logout', user, (c) => {
   run('DELETE FROM sessions WHERE token=?', c.user.tokenHash);
@@ -222,7 +223,8 @@ route('POST', '/api/passkey/login', pub, async (c) => {
   audit('login_ok', { ip, user: u, detail: (b.app ? 'app' : 'webb') + ', passkey' });
   const meta = { ua: c.req.headers['user-agent'], ip };
   if (b.app) return send(c.res, 200, { ok: true, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin } });
-  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', meta), isHttps(c.req)) });
+  const keep = b.remember !== false;
+  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
 });
 // ---------- Profiler (hushåll) ----------
 const profileOut = (p, rootId) => ({ id: p.id, name: p.name, owner: p.id === rootId, kid: p.max_age != null, maxAge: p.max_age, hasPin: !!p.pin, color: p.color || null });
@@ -294,5 +296,7 @@ route('POST', '/api/profiles/switch', user, async (c) => {
   run('DELETE FROM sessions WHERE token=?', c.user.tokenHash);
   audit('profile_switched', { ip, user: t, detail: `från ${me.name}` });
   if (c.user.kind === 'app') return send(c.res, 200, { ok: true, token: createSession(t.id, 'app', meta), user: { id: t.id, name: t.name, is_admin: t.is_admin } });
-  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(t.id, 'web', meta), isHttps(c.req)) });
+  // Profilbyte behåller valet "Håll mig inloggad" från inloggningen
+  const keep = c.user.remember !== 0;
+  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(t.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
 });
