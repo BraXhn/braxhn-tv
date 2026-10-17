@@ -48,7 +48,7 @@ export function sleepDialog() {
     <div class="plpick">${[15, 30, 45, 60].map(m => `<button class="ghost" data-sl="${m}">${m} minuter</button>`).join('')}
     <button class="ghost" data-sl="end">När ${what} tar slut</button>${SLEEP.until || SLEEP.end ? '<button class="ghost" data-sl="0">Stäng av sovtimern</button>' : ''}</div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const close = () => { d.close(); d.remove(); };
   $('#cl', d).onclick = close;
   $$('[data-sl]', d).forEach(b => b.onclick = () => {

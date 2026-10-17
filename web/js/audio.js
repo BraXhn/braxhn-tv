@@ -191,7 +191,7 @@ function showQueue() {
   const d = document.createElement('dialog');
   d.innerHTML = `<h2>Kö</h2><div style="max-height:60vh;overflow:auto">${trackRows(M.queue, { showCover: true })}</div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
 }

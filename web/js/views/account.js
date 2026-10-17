@@ -27,7 +27,7 @@ function showCodes(codes) {
   d.innerHTML = `<h2>Dina reservkoder</h2><p class="muted">Spara dem säkert (t.ex. i en lösenordshanterare). Varje kod kan användas <b>en gång</b> om du tappar telefonen. De visas bara nu.</p>
     <pre style="font-size:17px;line-height:1.7;background:var(--bg3);padding:14px;border-radius:8px;columns:2">${codes.map(esc).join('\n')}</pre>
     <div class="row" style="justify-content:flex-end"><button class="ghost" id="cp">Kopiera</button><button class="primary" id="ok">Jag har sparat dem</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   $('#cp', d).onclick = () => navigator.clipboard?.writeText(codes.join('\n')).then(() => toast('Kopierat'));
   $('#ok', d).onclick = () => { d.close(); d.remove(); route(); };
 }

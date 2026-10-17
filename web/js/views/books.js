@@ -1,5 +1,5 @@
 // Vyer: ljudböcker och poddar
-import { $, $$, act, api, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, main, store, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, noLib, store, toast, views } from '../core.js';
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
 import { loadLibs, route } from '../router.js';
@@ -9,6 +9,8 @@ const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:h
 const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
   <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
 views.books = async (lid) => {
+  // Utan bibliotek-id (t.ex. #/books): första ljudboksbiblioteket, annars en hänvisning
+  if (!lid) { const l = libs.find(x => x.type === 'audiobook'); if (!l) return noLib('ljudböcker', 'Ljudböcker'); location.hash = `#/books/${l.id}`; return; }
   const sort = store.get('booksort', 'title');
   const B = await api(`/audiobooks/${lid}?sort=${sort}`);
   main.innerHTML = `<div class="toolbar"><h1>${esc(B.library.name)}</h1><span class="muted">${B.books.length} böcker</span>

@@ -36,15 +36,28 @@ window.addEventListener('unhandledrejection', (e) => { if (e.reason?.aborted) e.
 // Trasiga bilder tas bort (ersätter inline onerror, som CSP blockerar)
 document.addEventListener('error', (e) => { if (e.target?.tagName === 'IMG' && e.target.dataset.fb) e.target.remove(); }, true);
 
+// Tom vy när en sorts bibliotek saknas
+export function noLib(what, type) {
+  main.innerHTML = `<div class="empty"><h2>Inget bibliotek för ${esc(what)}</h2><p>Lägg till ett bibliotek av typen ${esc(type)} under Administration.</p></div>`;
+}
+// Sidan man var på när inloggningen gick ut – dit kommer man tillbaka efter ny inloggning
+export function rememberPage() {
+  try { if (location.hash && !/^#\/(login|profiles)/.test(location.hash)) sessionStorage.setItem('bx_after', location.hash); } catch {}
+}
+export function pageAfterLogin(fallback = '#/') {
+  try { const h = sessionStorage.getItem('bx_after'); sessionStorage.removeItem('bx_after'); return h || fallback; } catch { return fallback; }
+}
 export async function api(path, opts = {}) {
   // bg: true = anropet hör inte till den aktuella vyn (t.ex. spelaren) och avbryts inte vid navigering
   const { bg, ...rest } = opts;
   const gen = routeGen;
   const o = { headers: {}, ...rest };
   if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
-  const r = await fetch('/api' + path, o);
-  const data = r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text();
-  if (r.status === 401 && !path.startsWith('/login')) { me = null; location.hash = '#/login'; throw new Error('Inte inloggad'); }
+  let r;
+  try { r = await fetch('/api' + path, o); }
+  catch (e) { if (e?.name === 'AbortError') throw e; throw Object.assign(new Error('Servern svarar inte – kontrollera att BraXhn TV körs'), { offline: true }); }
+  const data = r.headers.get('content-type')?.includes('json') ? await r.json().catch(() => null) : await r.text();
+  if (r.status === 401 && !path.startsWith('/login')) { me = null; rememberPage(); location.hash = '#/login'; throw new Error('Inte inloggad'); }
   if (!bg && gen !== routeGen) throw abortErr(); // användaren har gått vidare – resultatet ska inte användas
   if (!r.ok) throw Object.assign(new Error(data?.error || `Fel ${r.status}`), { code: data?.code, data });
   return data;

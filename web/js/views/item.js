@@ -142,7 +142,7 @@ function playTrailer(id, title) {
   d.className = 'wide trailer';
   d.innerHTML = `<h2>${esc(title)} – trailer</h2><video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>
     <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="ghost" id="tclose">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const v = $('video', d);
   v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)');
   const leave = onLeave(() => { if (d.open) d.close(); });
@@ -163,7 +163,7 @@ function matchItem(it) {
     <div><label>År</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">Sök</button></form>
     <div id="mres" class="matchgrid"><div class="spin"></div></div>
     <div class="row" style="margin-top:14px;justify-content:space-between"><span class="muted small" id="mlock"></span><span><button class="ghost" id="munlock" hidden>Lås upp (automatisk matchning)</button> <button class="ghost" id="mclose">Stäng</button></span></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const close = () => { d.close(); d.remove(); };
   $('#mclose', d).onclick = close;
   const search = async () => {
@@ -195,7 +195,7 @@ function editItem(it) {
     <label>Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
     ${it.kind !== 'episode' ? `<label>Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}
     <div class="row" style="margin-top:18px;justify-content:flex-end"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></div></form>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   d.onclose = async () => {
     if (d.returnValue === 'ok') {
       try {
@@ -212,7 +212,7 @@ async function subSearch(it) {
   const d = document.createElement('dialog');
   d.innerHTML = `<h2>Sök undertexter</h2><p class="muted" id="ssm">Söker på OpenSubtitles…</p><div id="ssr" style="max-height:50vh;overflow:auto"></div>
     <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="ssc">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   let got = false;
   // Stängs dialogen: ladda bara om sidan om något faktiskt hämtades
   d.addEventListener('close', () => { d.remove(); if (got && !P && !LP && !RP) route(); });
@@ -238,7 +238,7 @@ function editMarkers(it) {
     <label>Eftertexter börjar</label><input id="cs" value="${t(it.credits)}">
     <div class="row" style="margin-top:18px;justify-content:space-between"><button type="button" class="ghost" id="redo">Analysera säsongen igen</button>
     <span class="row"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></span></div></form>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const sec = (v) => { v = v.trim(); if (!v) return null; return v.split(':').reduce((a, x) => a * 60 + (+x || 0), 0); };
   $('#redo', d).onclick = act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST' }); toast('Analyserar i bakgrunden'); d.close(); });
   d.onclose = act(async () => {

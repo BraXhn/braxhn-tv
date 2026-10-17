@@ -285,6 +285,8 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `MEDIA_ROOT` | /media | Bibliotek måste ligga här |
 | `HWACCEL` | none | none, vaapi, qsv eller nvenc |
 | `HW_DECODE` | 1 | 0 = avkoda med processorn även när grafikkortet kodar |
+| `TZ` | Europe/Stockholm | Tidszon för skärmtid, inspelningar och nattliga säkerhetskopior |
+| `LOG_TIME` | 1 | 0 = ingen tidsstämpel på loggraderna |
 | `TONEMAP` | hable | hable, mobius eller reinhard |
 | `PUBLIC_URL` | – | Publik adress, t.ex. https://tv.dindomän.se |
 | `REMOTE_QUALITY` | 1080 | Maxkvalitet utanför hemmet |

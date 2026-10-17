@@ -1,5 +1,5 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
-import { $, $$, act, api, esc, fmtDur, fmtTime, hue, keyClick, libs, main, routeGen, store, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtTime, hue, keyClick, libs, main, noLib, routeGen, store, toast, views } from '../core.js';
 import { M, playQueue } from '../audio.js';
 import { route } from '../router.js';
 
@@ -31,13 +31,14 @@ async function addToPlaylist(ids) {
   d.innerHTML = `<h2>Lägg till i spellista</h2><div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
     <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…"><button class="primary" id="mkpl">Skapa</button></div>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   $('#cl', d).onclick = () => { d.close(); d.remove(); };
   $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast('Tillagd'); d.close(); d.remove(); }));
   $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast('Spellista skapad'); d.close(); d.remove(); });
 }
 
 views.music = async (lid, tab) => {
+  if (!lid) { const l = libs.find(x => x.type === 'music'); if (!l) return noLib('musik', 'Musik'); location.hash = `#/music/${l.id}`; return; }
   tab = tab || store.get('mtab.' + lid, 'home');
   store.set('mtab.' + lid, tab);
   const tabs = [['home', 'Översikt'], ['albums', 'Album'], ['artists', 'Artister'], ['playlists', 'Spellistor']];

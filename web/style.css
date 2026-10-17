@@ -294,10 +294,10 @@ dialog.wide{width:min(760px,94vw)}
 .guide .grow-h,.guide .grow{height:52px;border-bottom:1px solid var(--line)}
 .guide .grow-h{display:flex;align-items:center;gap:8px;padding:0 8px;font-size:13px;white-space:nowrap;overflow:hidden}
 .guide .gscroll{flex:1;overflow-x:auto}
-.guide .gtimes{position:relative}.guide .gtimes span{position:absolute;top:6px;font-size:12px;color:var(--muted);padding-left:4px;border-left:1px solid var(--line)}
+.guide .gtimes{position:relative}.guide .gtimes span{position:absolute;top:6px;font-size:12px;color:var(--dim);padding-left:4px;border-left:1px solid var(--line)}
 .guide .grow{position:relative}
 .guide .gp{position:absolute;top:4px;bottom:4px;background:#ffffff0d;border:1px solid transparent;border-radius:6px;color:inherit;text-align:left;padding:4px 6px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;justify-content:center}
-.guide .gp b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.guide .gp span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.guide .gp b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.guide .gp span{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .guide .gp.on{background:color-mix(in srgb,var(--accent) 18%,transparent)}.guide .gp:hover,.guide .gp:focus-visible{border-color:var(--accent)}
 .guide .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--err,#ff5d6c);z-index:2;pointer-events:none}
 .reclist{display:grid;gap:8px}.rec{display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;flex-wrap:wrap}
@@ -412,3 +412,13 @@ html.standalone #top{padding-top:calc(10px + env(safe-area-inset-top))}
 /* Egen helskärm på iPhone när bildundertexter visas (videons egen helskärm skulle dölja dem) */
 #player.pfull .pbar{display:none}
 #player.pfull{background:#000}
+
+/* Tydlig fokusmarkering för tangentbord och fjärrkontroll (webbläsarens egen syns knappt mot mörk bakgrund) */
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible,.card:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+/* Tabeller med långa sökvägar får inte göra sidan bredare än skärmen på telefonen */
+td,code{overflow-wrap:anywhere}
+@media (max-width:700px){main table{display:block;overflow-x:auto}}
+/* Långa bibliotek: kort utanför skärmen ritas inte förrän man skrollar dit */
+.grid>.card{content-visibility:auto;contain-intrinsic-size:auto 150px auto 280px}
+/* Mindre rörelse för den som valt det i systemet */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}

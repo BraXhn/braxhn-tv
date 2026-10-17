@@ -60,15 +60,21 @@ async function programDialog(id) {
       ${p.recording ? (p.recording.status === 'scheduled' ? '<button class="ghost" id="pdc">Avboka</button>' : '') : '<button class="ghost" id="pdr">⏺ Spela in</button>'}
       ${p.rule ? '<span class="muted small">Serieinspelning aktiv</span>' : '<button class="ghost" id="pds">⏺⏺ Spela in serien</button>'}
       <button class="ghost" id="pdx">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const close = () => { d.close(); d.remove(); };
   $('#pdx', d).onclick = close;
   if ($('#pdw', d)) $('#pdw', d).onclick = act(async () => { close(); const D = await api('/live/channels'); const ch = D.channels.find(c => c.id === p.channel_id); if (ch) playLive(ch); });
   if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { const r = await api('/dvr/program', { method: 'POST', body: { programId: id } }); toast(r.conflict ? 'Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.' : 'Inspelning bokad'); close(); } catch (e) { toast(e.message); } };
   if ($('#pdc', d)) $('#pdc', d).onclick = act(async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); close(); });
-  if ($('#pds', d)) $('#pds', d).onclick = async () => {
-    const any = confirm(`Spela in "${p.title}" på alla kanaler? (Avbryt = bara ${p.channel_name})`);
+  // Serieinspelning: två tydliga val (tidigare confirm(), där Avbryt betydde "bara den här kanalen")
+  const series = async (any) => {
     try { await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: id, series: true, newOnly: true } }); toast('Serieinspelning skapad – bara nya avsnitt spelas in'); close(); } catch (e) { toast(e.message); }
+  };
+  if ($('#pds', d)) $('#pds', d).onclick = () => {
+    const b = $('#pds', d);
+    b.outerHTML = `<button class="ghost" id="pds1">Bara ${esc(p.channel_name)}</button><button class="ghost" id="pdsa">Alla kanaler</button>`;
+    $('#pds1', d).onclick = () => series(false); $('#pdsa', d).onclick = () => series(true);
+    $('#pds1', d).focus();
   };
 }
 views.dvr = async () => {

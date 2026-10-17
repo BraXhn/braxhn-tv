@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 0.6.0
+- Omstrukturering utan ändrad funktion: serverns routes är uppdelade per område (`server/routes/`) med säkerhetsmodellen samlad i `server/http/router.js`, och webbklienten är uppdelad i ES-moduler (`web/js/`)
+- Drift: segment långt bakom uppspelningen tas bort (en hel film hamnar inte längre i /transcode, som ofta ligger i RAM); säkerhetskopia av databasen före varje uppgradering (`backups/före-uppgradering-*.db`) och varning om en äldre version startas mot en nyare databas; containern startar snabbare (ägarbyte bara på filer som behöver det); ordnad avstängning (omkodningar stoppas, databasen stängs); tidsstämplar i loggen; hälsokontrollen frågar databasen; tidszon (`TZ`, standard Europe/Stockholm) för skärmtid, inspelningar och nattliga säkerhetskopior
+- CI: imagen röktestas (startas, hälsokontroll, integritetskontroll, ffmpeg) innan den publiceras, bygget cachas och varje version får även en `sha-`-tagg att gå tillbaka till
+- Snabbare: gzip och ETag för webbappen, JSON och bilder (biblioteket med 4 000 filmer: 1,4 MB → 95 kB), "Nästa avsnitt" på startsidan, långa bibliotek ritar bara synliga kort
+- Spelaren stängs vid utloggning, utgången inloggning och profilbyte (en barnprofil kunde annars titta vidare på en film som spelades i litet fönster); efter ny inloggning kommer man tillbaka till sidan man var på; uppspelningsfel försöks igen högst några gånger och visar sedan ett begripligt fel
+- Ingen kontakt med servern visar "Servern svarar inte" med en Försök igen-knapp; tydlig fokusmarkering för tangentbord och fjärrkontroll; stöd för "minska rörelse"; inga sidor går att skrolla i sidled på telefonen; tomma vyer för musik och ljudböcker utan bibliotek; "Spela in serien" har två tydliga knappar i stället för en fråga där Avbryt betydde något
+- Filnamn: å/ä/ö från macOS (SMB) går att söka på och slås ihop rätt, "Film cd1/cd2" blir delar i stället för versioner, dubbelavsnitt "S01E01E02" och "The 100 - 101" i en säsongsmapp tolkas rätt; inspelningar får rätt datum i filnamnet efter midnatt
 - Rättat: omkodade filmer kunde stoppa i Chrome med "formatet stöds inte" (särskilt med NVENC). Segmenten överlappade i avkodningstid på grund av B-bilder; omkodningen görs nu utan B-bilder så att segmenten passar exakt ihop
 - Snabbare start när filmen ändå måste omkodas (t.ex. vald kvalitet 1080p för en 4K-film): servern väntar inte längre upp till 10 s på nyckelbilder som inte behövs. En film som bakgrundsanalysen redan köat flyttas först i kön när någon trycker Spela
 - Omkodning av 4K med processorn använder snabbare inställningar (x264 superfast, enklare skalning)

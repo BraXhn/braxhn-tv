@@ -43,7 +43,7 @@ views.lib = async (id) => {
 };
 
 views.search = async (q) => {
-  q = decodeURIComponent(q || '');
+  try { q = decodeURIComponent(q || ''); } catch { q = q || ''; }
   if ($('#q').value !== q && document.activeElement !== $('#q')) $('#q').value = q;
   const [r, ppl] = q.length >= 1 ? await Promise.all([api('/search?q=' + encodeURIComponent(q)),
     api('/search/people?q=' + encodeURIComponent(q)).catch(e => { if (e?.aborted) throw e; return []; })]) : [[], []];
