@@ -200,3 +200,16 @@ test('förhandsbilder: hopp till en nyckelbild per intervall (även apostrof i f
   const [w, h] = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', trick.sprite(it, 1)]).toString().trim().split(',').map(Number);
   assert.equal(w, 2400); assert.equal(h, 1360);
 });
+
+test('kvalitet utanför hemmet efter uppmätt bandbredd och "Spara data"', async () => {
+  const { remoteQuality } = await import('../server/routes/playback.js');
+  assert.equal(remoteQuality('1080', 0, false), '1080');
+  assert.equal(remoteQuality('1080', 50000, false), '1080');
+  assert.equal(remoteQuality('1080', 7000, false), '720');   // 4 Mbit/s ryms i 5,25
+  assert.equal(remoteQuality('1080', 2500, false), '480');
+  assert.equal(remoteQuality('1080', 800, false), '360');
+  assert.equal(remoteQuality('720', 50000, false), '720');   // aldrig över inställningen
+  assert.equal(remoteQuality('1080', 50000, true), '480');   // spara data
+  assert.equal(remoteQuality('orig', 40000, false), 'orig');
+  assert.equal(remoteQuality('orig', 9000, false), '720');
+});

@@ -61,12 +61,12 @@ const fake = (w, h, extra = {}) => ({ id: 1, path: '/x/Film (2020).mkv', size: 1
 
 test('ABR: varianter bara vid omkodning med automatisk kvalitet, ≤ källan och ≤ vald kvalitet', () => {
   const qs = (it, d) => st.abrVariants(it, { audioMode: 'aac', ...d }).map(x => `${x.q}:${x.h}`);
-  assert.deepEqual(qs(fake(1920, 1080), { q: '1080', mode: 'transcode', abr: true }), ['1080:1080', '720:720', '480:480']);
-  assert.deepEqual(qs(fake(3840, 2160), { q: '1080', mode: 'transcode', abr: true }), ['1080:1080', '720:720', '480:480']);
-  assert.deepEqual(qs(fake(3840, 2160), { q: '2160', mode: 'transcode', abr: true }), ['2160:2160', '1080:1080', '720:720', '480:480']);
+  assert.deepEqual(qs(fake(1920, 1080), { q: '1080', mode: 'transcode', abr: true }), ['1080:1080', '720:720', '480:480', '360:360']);
+  assert.deepEqual(qs(fake(3840, 2160), { q: '1080', mode: 'transcode', abr: true }), ['1080:1080', '720:720', '480:480', '360:360']);
+  assert.deepEqual(qs(fake(3840, 2160), { q: '2160', mode: 'transcode', abr: true }), ['2160:2160', '1080:1080', '720:720', '480:480', '360:360']);
   // Källan är lägre än vald kvalitet: toppen blir källans höjd, inga steg över den
-  assert.deepEqual(qs(fake(1280, 720), { q: '1080', mode: 'transcode', abr: true }), ['1080:720', '480:480']);
-  assert.deepEqual(qs(fake(1920, 1080), { q: 'orig', mode: 'transcode', abr: true }), ['orig:1080', '720:720', '480:480']);
+  assert.deepEqual(qs(fake(1280, 720), { q: '1080', mode: 'transcode', abr: true }), ['1080:720', '480:480', '360:360']);
+  assert.deepEqual(qs(fake(1920, 1080), { q: 'orig', mode: 'transcode', abr: true }), ['orig:1080', '720:720', '480:480', '360:360']);
   // Manuell kvalitet, remux: en variant
   assert.deepEqual(qs(fake(1920, 1080), { q: '1080', mode: 'transcode', abr: false }), ['1080:1080']);
   assert.deepEqual(qs(fake(1920, 1080), { q: '1080', mode: 'remux', abr: true }), ['1080:1080']);
@@ -191,7 +191,7 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
   assert.equal((await req(home.url)).data.toString().match(/#EXT-X-STREAM-INF/g).length, 1, 'hemma: ett steg');
   const master = (await req(pb.url)).data.toString();
   const inf = [...master.matchAll(/#EXT-X-STREAM-INF:BANDWIDTH=(\d+),RESOLUTION=(\d+)x(\d+)\n(\S+)/g)];
-  assert.deepEqual(inf.map(m => +m[3]), [720, 480], master);
+  assert.deepEqual(inf.map(m => +m[3]), [720, 480, 360], master);
   assert.ok(+inf[0][1] > +inf[1][1]);
   const pids = inf.map(m => new URLSearchParams(m[4].split('?')[1]).get('pid'));
   assert.equal(pids[0], pids[1], 'samma uppspelning');
@@ -265,4 +265,16 @@ t('en ny fil med samma titel och år blir en version av befintlig film', async (
   assert.equal(e.versions.length, 2);
   assert.equal(e.position, 3, 'befintlig huvudrad (med framsteg) behålls');
   assert.ok(e.versions.some(v => v.label === 'Extra'));
+});
+
+test('ABR: med uppmätt bandbredd listas steget som ryms först (iPhone börjar på första varianten)', () => {
+  const master = (sbw) => {
+    let body = '';
+    const res = { headersSent: false, writeHead() {}, end(b) { body = String(b); }, req: { headers: {} } };
+    st.serveMaster(res, fake(1920, 1080), new URLSearchParams({ mode: 'transcode', q: '1080', am: 'aac', ab: '128', abr: '1', ...(sbw ? { sbw } : {}) }));
+    return [...body.matchAll(/[?&]q=(\w+)/g)].map(m => m[1]);
+  };
+  assert.deepEqual(master(0), ['1080', '720', '480', '360']);
+  assert.deepEqual(master('3000'), ['480', '1080', '720', '360']);
+  assert.deepEqual(master('300'), ['360', '1080', '720', '480']);
 });

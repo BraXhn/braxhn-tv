@@ -2,6 +2,7 @@
 // användarmenyn, sökfältet, flikmenyn och installation som app
 import { $, $$, api, esc, leaveFns, store, libs, main, me, nextRoute, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
 import { stopAudio } from './audio.js';
+import { measureBandwidth } from './player/caps.js';
 import { closeLive, closeRec } from './player/live.js';
 import { P, closeAllPlayers } from './player/video.js';
 import { refreshScreen, screenBadge } from './screentime.js';
@@ -58,6 +59,8 @@ export async function boot() {
   $$('[data-requests]').forEach(e => e.hidden = me.kid);
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
+  // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
+  if (st.remote) setTimeout(() => measureBandwidth(), 3000);
   if (me.adminHere) startActivity(); else stopActivity();
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();

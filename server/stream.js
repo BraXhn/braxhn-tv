@@ -393,7 +393,11 @@ export function decide(it, o) {
     else reasons.push('formatet stöds inte direkt');
   }
   if ((mode === 'remux' || mode === 'transcode') && !o.assumeKf) computeKeyframes(it).catch(() => {});
-  return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null };
+  // Utanför hemmet vid omkodning: ljudet blir AAC stereo 128 kbit/s (surround och Dolby tar 0,4–0,6 Mbit/s
+  // som behövs bättre till bilden på en mobil uppkoppling)
+  let ab = null;
+  if (o.remote && mode === 'transcode') { if (am !== 'aac') reasons.push('ljudet blir stereo för mobil uppkoppling'); am = 'aac'; ab = 128; }
+  return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
 // Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo
@@ -413,6 +417,9 @@ export function hlsParams(d, o, token) {
   if (d.hdr) p.set('vr', d.hdr === 'hlg' ? 'HLG' : 'PQ');
   // Anpassningsbar kvalitet: mastern listar även lägre steg (bara vid omkodning med automatisk kvalitet)
   if (d.abr && d.mode === 'transcode') p.set('abr', '1');
+  if (d.ab) p.set('ab', String(d.ab));
+  // Uppmätt bandbredd (kbit/s): mastern listar steget som passar först (Apple-enheter börjar på första varianten)
+  if (d.startBw) p.set('sbw', String(d.startBw));
   if (o.hlsSubs) p.set('hlssubs', '1');
   if (token) p.set('t', token);
   return p;
@@ -425,7 +432,9 @@ function readParams(q) {
     fmt: q.get('fmt') === 'fmp4' ? 'fmp4' : 'ts', tag: ['hvc1', 'dvh1'].includes(q.get('tag')) ? q.get('tag') : '',
     burn: /^e\d+$/.test(q.get('burn') || '') ? q.get('burn') : '', tonemap: q.get('tm') === '1', hlsSubs: q.get('hlssubs') === '1',
     vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : '',
-    pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1'
+    pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1',
+    ab: [96, 128, 160, 192].includes(+q.get('ab')) ? +q.get('ab') : null,
+    startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null
   };
 }
 const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
@@ -435,8 +444,8 @@ const withT = (p, q) => { const t = q.get('t'); if (t) p.set('t', t); return p; 
 // Lägre steg som spelaren får växla ner till. Varje steg är en egen omkodningssession (q ingår i nyckeln)
 // och omkodas först när spelaren faktiskt hämtar dess segment. Segmentgränserna (fasta SEG s) och
 // tidsstämplarna (output_ts_offset) är identiska mellan stegen, så bytena blir sömlösa.
-const ABR_STEPS = ['1080', '720', '480'];
-const audioKbps = (d) => d.audioMode === 'eac3' ? 640 : d.audioMode === 'copy' ? 640 : 192;
+const ABR_STEPS = ['1080', '720', '480', '360'];
+const audioKbps = (d) => d.audioMode === 'eac3' ? 640 : d.audioMode === 'copy' ? 640 : (d.ab || 192);
 /** Varianter för mastern: [{ q, h, w, bw }] – vald kvalitet först, sedan lägre steg (≤ källans höjd och ≤ vald kvalitet) */
 export function abrVariants(it, d) {
   const v = videoOf(it);
@@ -488,7 +497,14 @@ function subsMedia(it, query, d) {
 function serveAbrMaster(res, it, query, d) {
   const subs = subsMedia(it, query, d);
   let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + subs.m;
-  for (const x of abrVariants(it, d)) {
+  // Steget som ryms i den uppmätta bandbredden först – iPhone/Safari börjar på första varianten och byter
+  // annars ner först efter att ha fastnat på ett för tungt steg
+  let vs = abrVariants(it, d);
+  if (d.startBw) {
+    const fit = vs.find(x => x.bw <= d.startBw * 1000 * 0.8) || vs[vs.length - 1];
+    vs = [fit, ...vs.filter(x => x !== fit)];
+  }
+  for (const x of vs) {
     const params = new URLSearchParams(query); params.delete('hlssubs'); params.set('q', x.q);
     m += `#EXT-X-STREAM-INF:BANDWIDTH=${x.bw},RESOLUTION=${x.w}x${x.h}${subs.attr}\nindex.m3u8?${params}\n`;
   }
@@ -544,7 +560,11 @@ function videoArgs(it, d, fromStart) {
   // skjuter bara fram det första segmentet), och Chrome avbryter då uppspelningen ("formatet stöds inte").
   // Utan B-bilder är DTS = PTS och segmenten passar exakt ihop, oavsett kodare.
   const gop = ['-force_key_frames', forcedKeys(fromStart), '-bf', '0'];
-  const rate = (hwFlag) => Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : hwFlag;
+  // Med en kvalitetsgräns: kvalitetsstyrd kodning med tak (lugna scener tar mindre än taket – sparar bandbredd
+  // utanför hemmet), där kodaren stöder det; annars medelbithastighet med tak.
+  const cbr = Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : null;
+  const rate = (hwFlag, capped) => Q.br ? (capped || cbr) : hwFlag;
+  const cap = Q.br ? ['-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : [];
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
   // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare x264-läge nedan
@@ -559,13 +579,13 @@ function videoArgs(it, d, fromStart) {
     enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '22'])];
   } else if (HW === 'nvenc') {
     post = ['format=yuv420p'];
-    enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'])];
+    enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'], ['-rc', 'vbr', '-cq', '25', '-b:v', Math.round((Q.br || 0) * 0.6) + 'k', ...cap])];
   } else if (HW === 'qsv') {
     post = ['format=nv12'];
     enc = ['-c:v', 'h264_qsv', '-forced_idr', '1', ...rate(['-global_quality', '22'])];
   } else {
     post = ['format=yuv420p'];
-    enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...rate(['-crf', '21']), '-profile:v', 'high', '-sc_threshold', '0'];
+    enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...rate(['-crf', '21'], ['-crf', '23', ...cap]), '-profile:v', 'high', '-sc_threshold', '0'];
   }
   const vf = chain(post);
   const pre = HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [];
@@ -580,7 +600,7 @@ function audioArgs(d) {
   const map = d.audio !== '' ? ['-map', `0:${parseInt(d.audio)}`] : ['-map', '0:a:0?'];
   if (d.audioMode === 'copy') return [...map, '-c:a', 'copy'];
   if (d.audioMode === 'eac3') return [...map, '-c:a', 'eac3', '-b:a', '640k', '-ac', '6'];
-  return [...map, '-c:a', 'aac', '-b:a', '192k', '-ac', '2'];
+  return [...map, '-c:a', 'aac', '-b:a', (d.ab || 192) + 'k', '-ac', '2'];
 }
 
 // ---------------- HLS-sessioner ----------------

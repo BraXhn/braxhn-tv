@@ -1,7 +1,7 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, store, sxe, toast, toastErr } from '../core.js';
+import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
-import { canAirPlay, capsQuery } from './caps.js';
+import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { castItem, castReady } from './cast.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
@@ -227,6 +227,13 @@ async function load(start) {
   // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
   // sedan, så en förstart mitt i filmen skulle bara stoppas och startas om
   if (start > 0 && !extra.nhls) extra.start = String(Math.floor(start));
+  // Utanför hemmet: uppmätt uppkoppling (väntar högst 1,5 s på en ny mätning) och "Spara data" i telefonen
+  if (status.remote) {
+    const bw = lastBandwidth() || await Promise.race([measureBandwidth(), new Promise(r => setTimeout(() => r(0), 1500))]);
+    if (!live()) return;
+    if (bw) extra.bw = String(bw);
+    if (saveData()) extra.save = '1';
+  }
   let pb;
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
   const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
@@ -253,7 +260,9 @@ async function load(start) {
     // igång. Servern väntar själv upp till 90 s på ett segment.
     const slow = { maxTimeToFirstByteMs: 60000, maxLoadTimeMs: 180000, timeoutRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 4000 },
       errorRetry: { maxNumRetry: 4, retryDelayMs: 1000, maxRetryDelayMs: 8000 } };
-    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: 6e6,
+    // capLevelToPlayerSize: hämta inte 1080p till en telefonskärm; startgissningen från mätningen ovan
+    const est = lastBandwidth() ? lastBandwidth() * 1000 * 0.8 : 6e6;
+    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: est, capLevelToPlayerSize: true,
       fragLoadPolicy: { default: slow }, xhrSetup: (x) => { x.withCredentials = true; } });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
