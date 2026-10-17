@@ -1,6 +1,9 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: appikonerna (hemskärmen på telefonen, iPhone/Apple TV/Android-apparna) var tomma/svarta – de är omritade. Ta bort webbappen från hemskärmen och lägg till den igen för att få den nya ikonen
+- Avsnitt utan nummer i filnamnet matchas mot TMDB på titel (över alla säsonger, även specialavsnitt) i stället för att få fel avsnitts namn; titlar som skrivits över återställs vid nästa skanning. Serier som inte hittades försöker igen när avsnitt tillkommer och en gång i veckan
+- Snabbare start: stickproven som kontrollerar filens index körs samtidigt, och spelaren väntar högst 10 s på nyckelbilder. Loggen visar för varje uppspelning vad som valdes, hur lång tid beslutet tog, när första segmentet var klart och om servern inte hinner med
 - Granskning av dataskydd: en omdöpt eller uppgraderad fil (t.ex. 720p → 1080p via Sonarr/Radarr) behåller nu framsteg, sett-markering och Min lista; omdöpta musikfiler behåller spellistor, favoriter och historik; onumrerade avsnitt behåller sitt nummer; säkerhetskopior och cachefiler skrivs atomiskt (en avbruten kopia kan inte längre tränga undan en hel); återställning godtar bara en BraXhn-databas
 - Granskning av säkerhet: skadliga mediefiler kan inte längre låsa servern via undertext- eller nyckelbildstolken; barnprofiler kan inte hämta bilder från titlar över åldersgränsen; ogiltiga adresser ger 400/404 i stället för internt fel
 - Snabbare start: nyckelbilderna läses ur filens eget index (MKV/MP4) på någon sekund i stället för att hela filen läses, så att filmer kan skickas utan omkodning direkt första gången. ffmpeg startas redan när man trycker Spela, och omkodning börjar med korta segment (2 s)

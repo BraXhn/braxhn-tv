@@ -8,7 +8,7 @@ import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
-import { findBest, stripTrailingQuality } from './match.js';
+import { findBest, stripTrailingQuality, similarity, GOOD } from './match.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -238,8 +238,27 @@ function adoptRenamed(lib, missing, known) {
   }
 }
 
+// En gång per bibliotek: avsnitt utan nummer i filnamnet som skannats innan numret märktes som gissat.
+// Deras titel kan ha skrivits över av fel TMDB-avsnitt (matchat på det gissade numret) – återställ den.
+function markGuessedEpisodes(lib) {
+  if (lib.type === 'movie' || getSetting(`ep_guess_v1_${lib.id}`, '0') === '1') return;
+  const fix = [];
+  for (const e of all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND ep_guess=0 AND path IS NOT NULL`, lib.id)) {
+    const p = parseEpisode(path.relative(lib.path, e.path));
+    if (p && p.episode == null) fix.push([e, p]);
+  }
+  tx(() => {
+    for (const [e, p] of fix) {
+      run('UPDATE items SET ep_guess=1, title=?, sort_title=? WHERE id=?', p.epTitle, sortTitle(p.epTitle), e.id);
+      run("UPDATE items SET meta_done=0 WHERE id=? AND meta_done IN (1,2)", e.parent_id);
+    }
+  });
+  setSetting(`ep_guess_v1_${lib.id}`, '1');
+}
+
 async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
+  markGuessedEpisodes(lib);
   const { files: found, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
   // Trailers ("Film (2020)-trailer.mkv", mappen trailers/) blir inte egna titlar – de kopplas till titeln efteråt
   const trailerFiles = found.filter(isTrailerFile);
@@ -268,7 +287,7 @@ async function scanLibrary(lib) {
   }
   for (const d of failed) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
-  const known = new Map(all(`SELECT id,path,size,mtime,episode,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
+  const known = new Map(all(`SELECT id,path,size,mtime,episode,ep_guess,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
   if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
   const seen = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
@@ -312,17 +331,22 @@ async function scanLibrary(lib) {
       } else {
         const p = parseEpisode(path.relative(lib.path, f));
         if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
-        if (p.episode == null) p.episode = unnumberedIndex(f);
+        const guess = p.episode == null ? 1 : 0;
+        if (guess) p.episode = unnumberedIndex(f);
         const showId = showFor(lib, p.show, p.year);
         const title = p.epTitle || `Avsnitt ${p.episode}`;
         pending.push(() => {
-          if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
-            showId, p.season, p.episode, p.absolute ? p.episode : null, st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-          else newEpisodes.push(Number(run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, f,
+          // Ett gissat nummer som redan matchats mot TMDB på titel (annan säsong) behålls
+          if (k && guess && k.ep_guess === 2) run(`UPDATE items SET parent_id=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
+            showId, st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+          else if (k) run(`UPDATE items SET parent_id=?,season=?,episode=?,abs_episode=?,ep_guess=?,size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
+            showId, p.season, p.episode, p.absolute ? p.episode : null, guess, st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
+          else newEpisodes.push(Number(run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,abs_episode,ep_guess,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'episode', showId, title, sortTitle(title), p.season, p.episode, p.absolute ? p.episode : null, guess, f,
             st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now()).lastInsertRowid));
-          // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger)
-          run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
+          // Hämta om seriens metadata så att nya avsnitt får namn (och absolut numrering mappas till säsonger).
+          // Även serier som inte hittades förut får ett nytt försök när avsnitt tillkommer.
+          run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 OR (meta_done=2 AND match_locked=0) THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
           run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
         });
       }
@@ -483,20 +507,57 @@ export async function refreshItem(item, tmdbId = null) {
       d.overview || null, d.vote_average || null, id, poster, backdrop, item.id);
     saveExtras(item, d);
     remapAbsolute(item, d.seasons || []);
-    const seasons = all(`SELECT DISTINCT season FROM items WHERE parent_id=?`, item.id).map(r => r.season);
-    for (const sn of seasons) {
-      let sd; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch { continue; }
-      for (const ep of sd.episodes || []) {
-        const e = get(`SELECT id,thumb FROM items WHERE parent_id=? AND season=? AND episode=?`, item.id, sn, ep.episode_number);
-        if (!e) continue;
-        const still = e.thumb ? 0 : await image(ep.still_path, 'w300', e.id, 'thumb');
-        run(`UPDATE items SET title=COALESCE(?,title),sort_title=COALESCE(?,sort_title),overview=?,rating=?,thumb=MAX(thumb,?),meta_done=1 WHERE id=?`,
-          ep.name || null, ep.name ? sortTitle(ep.name) : null, ep.overview || null, ep.vote_average || null, still, e.id);
-      }
-    }
+    await matchEpisodes(item, id, d.seasons || []);
     return true;
   }
   return false;
+}
+
+// TMDB "Avsnitt 12" / "Episode 12" = ingen riktig titel (översättning saknas)
+const placeholder = (name) => !name || /^(avsnitt|episode|afsnit|episodi|folge|épisode)\s*\d+$/i.test(name.trim());
+/** Avsnitt → TMDB: först på säsong/avsnittsnummer, sedan på titel för avsnitt utan nummer i filnamnet
+ *  (eller med ett nummer som TMDB inte har). Titeln jämförs mot alla säsonger, även specialavsnitt. */
+async function matchEpisodes(item, id, tmdbSeasons) {
+  const local = all('SELECT id, season, episode, title, thumb, ep_guess FROM items WHERE parent_id=?', item.id);
+  const cache = new Map();
+  const season = async (sn) => {
+    if (!cache.has(sn)) { let sd = null; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch {} cache.set(sn, sd?.episodes || []); }
+    return cache.get(sn);
+  };
+  const apply = async (e, ep) => {
+    const still = e.thumb ? 0 : await image(ep.still_path, 'w300', e.id, 'thumb');
+    const name = placeholder(ep.name) ? null : ep.name;
+    run(`UPDATE items SET title=COALESCE(?,title),sort_title=COALESCE(?,sort_title),overview=?,rating=?,thumb=MAX(thumb,?),meta_done=1 WHERE id=?`,
+      name, name ? sortTitle(name) : null, ep.overview || null, ep.vote_average || null, still, e.id);
+  };
+  const done = new Set();
+  for (const sn of new Set(local.filter(e => !e.ep_guess).map(e => e.season))) {
+    for (const ep of await season(sn)) {
+      const e = local.find(x => !x.ep_guess && x.season === sn && x.episode === ep.episode_number);
+      if (e) { await apply(e, ep); done.add(e.id); }
+    }
+  }
+  const rest = local.filter(e => !done.has(e.id) && e.title && !/^Avsnitt \d+$/.test(e.title));
+  if (!rest.length) return;
+  const cand = [];
+  for (const s of tmdbSeasons) for (const ep of await season(s.season_number)) if (!placeholder(ep.name)) cand.push({ ...ep, season: s.season_number });
+  // Platser som redan har en fil (utom de som matchas nu) får inte ges bort
+  const taken = new Set(local.filter(e => !rest.includes(e)).map(e => e.season + ':' + e.episode));
+  const picks = [];
+  for (const e of rest) {
+    let best = null, bs = 0;
+    for (const ep of cand) { const sc = similarity(e.title, ep.name); if (sc > bs) { bs = sc; best = ep; } }
+    if (best && bs >= GOOD) picks.push({ e, ep: best, score: bs });
+  }
+  // Säkraste träffarna först; två filer kan inte bli samma avsnitt
+  picks.sort((a, b) => b.score - a.score);
+  for (const { e, ep } of picks) {
+    const k = ep.season + ':' + ep.episode_number;
+    if (taken.has(k)) continue;
+    taken.add(k);
+    run('UPDATE items SET season=?, episode=?, abs_episode=NULL, ep_guess=CASE WHEN ep_guess=0 THEN 0 ELSE 2 END WHERE id=?', ep.season, ep.episode_number, e.id);
+    await apply(e, ep);
+  }
 }
 
 // Rollista och YouTube-trailer ur samma TMDB-svar (fel här ska inte stoppa resten av metadatan)
@@ -589,6 +650,11 @@ async function metadata(lib) {
   if (getSetting('match_v2', '0') !== '1') {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
     setSetting('match_v2', '1');
+  }
+  // Titlar som inte hittades försöker igen en gång i veckan (TMDB fylls på, och tolkningen av filnamn förbättras)
+  if (Date.now() - +getSetting('meta_retry_at', '0') > 7 * 86400e3) {
+    run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
+    setSetting('meta_retry_at', String(Date.now()));
   }
   // Versioner av en film delar huvudradens metadata och hämtas inte var för sig
   const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0 AND version_of IS NULL`, lib.id);
