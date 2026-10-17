@@ -78,7 +78,7 @@ test('refreshItem sparar rollista och YouTube-trailer från samma anrop', async 
   const id = item('movie', 'Matrix', { year: 1999 });
   mockTmdb((u) => {
     if (u.hostname === 'image.tmdb.org') return new Response('nej', { status: 404 });
-    if (u.pathname === '/3/search/movie') return { results: [{ id: 603 }] };
+    if (u.pathname === '/3/search/movie') return { results: [{ id: 603, title: 'Matrix', original_title: 'The Matrix', release_date: '1999-03-30' }] };
     if (u.pathname === '/3/movie/603') return MOVIE;
     return new Response('{}', { status: 404 });
   });

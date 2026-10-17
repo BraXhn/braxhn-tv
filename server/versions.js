@@ -38,10 +38,22 @@ function mergeInto(fromId, toId) {
  */
 export function groupVersions(lib, parse) {
   if (lib.type !== 'movie') return 0;
-  const rows = all(`SELECT id, path, version_of FROM items WHERE library_id=? AND kind='movie' AND path IS NOT NULL ORDER BY id`, lib.id);
+  const rows = all(`SELECT id, path, year, version_of, tmdb_id, meta_done, match_locked FROM items WHERE library_id=? AND kind='movie' AND path IS NOT NULL ORDER BY id`, lib.id);
+  // Två filer är samma film om de har samma titel+år i filnamnet ELLER matchats till samma TMDB-film
+  // (t.ex. svensk och engelsk titel, eller en fil utan årtal). Unionfind över båda nycklarna.
+  const parent = new Map(rows.map(r => [r.id, r.id]));
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const owner = new Map();
+  const link = (key, id) => { if (!key) return; const o = owner.get(key); if (o == null) owner.set(key, id); else parent.set(find(id), find(o)); };
+  for (const r of rows) {
+    const p = parse(r.path);
+    link(versionKey(p), r.id);
+    // Samma TMDB-film – men bara om filnamnets årtal (om det finns) stämmer med filmens: skydd mot äldre felmatchningar
+    if (r.tmdb_id && r.meta_done === 1 && (!p?.year || !r.year || Math.abs(p.year - r.year) <= 1)) link(`tmdb:${r.tmdb_id}`, r.id);
+  }
   const groups = new Map();
   for (const r of rows) {
-    const k = versionKey(parse(r.path)) ?? `#${r.id}`;
+    const k = find(r.id);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
@@ -54,7 +66,9 @@ export function groupVersions(lib, parse) {
         continue;
       }
       const mains = g.filter(r => r.version_of == null);
-      const main = mains.find(m => g.some(r => r.version_of === m.id)) || mains[0] || g[0];
+      // Huvudrad: den som redan har versioner, annars en med metadata (helst handmatchad), annars den äldsta
+      const main = mains.find(m => g.some(r => r.version_of === m.id)) || mains.find(m => m.match_locked && m.meta_done === 1)
+        || mains.find(m => m.meta_done === 1 && m.tmdb_id) || mains[0] || g[0];
       if (main.version_of != null) { run('UPDATE items SET version_of=NULL, meta_done=0 WHERE id=?', main.id); changed++; }
       for (const r of g) {
         if (r === main || r.version_of === main.id) continue;
