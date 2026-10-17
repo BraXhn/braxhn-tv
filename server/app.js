@@ -968,11 +968,18 @@ const mediaItem = (c) => {
   return it;
 };
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
-route('GET', '/api/items/:id/playback', user, (c) => {
+route('GET', '/api/items/:id/playback', user, async (c) => {
   const row = mediaItem(c); if (!row) return;
   const main = ver.mainOf(row);
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   if (c.q.get('info') !== '1' && screenBlock(c)) return;
+  // Ej analyserad film: ta fram nyckelbilderna nu (före bakgrundsanalysen) så att den kan skickas utan
+  // omkodning. Vänta högst 25 s – annars omkodas den den här gången och nästa gång går det direkt.
+  if (c.q.get('info') !== '1' && c.q.get('force') !== 'transcode') {
+    const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v)).slice(0, 2);
+    if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 25000))]);
+    if (c.res.writableEnded || c.req.destroyed) return;
+  }
   let o = st.parseCaps(c.q);
   const remote = !isLocalReq(c.req);
   // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv)

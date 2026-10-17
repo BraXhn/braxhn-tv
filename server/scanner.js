@@ -288,13 +288,15 @@ async function scanLibrary(lib) {
 /** Tunga analyser (minuter–timmar för stora bibliotek). Körs i en egen bakgrundskö så att skanning
  *  och metadata aldrig behöver vänta på dem. Allt styrs av flaggor i databasen och kan avbrytas och tas upp igen. */
 async function analyzeLibrary(lib, st) {
+  // Nyckelbilderna först: utan dem kan filmer inte skickas utan omkodning (remux), vilket är det som gör
+  // att stora filmer startar. Miniatyrer, kapitel m.m. kommer efteråt.
+  st.phase = 'Indexerar nyckelbilder (för remux)';
+  const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL ORDER BY added DESC`, lib.id);
+  st.done = 0; st.total = kf.length;
+  for (const it of kf) { st.done++; await hooks.keyframes?.(it); if (st.done % 200 === 0) await new Promise(setImmediate); }
   await thumbnails(lib, st);
   await chapters(lib, st);
   await autoSubtitles(lib, st);
-  st.phase = 'Indexerar nyckelbilder (för remux)';
-  const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
-  st.done = 0; st.total = kf.length;
-  for (const it of kf) { st.done++; await hooks.keyframes?.(it); if (st.done % 200 === 0) await new Promise(setImmediate); }
   if (lib.type === 'show' && hooks.markers) { st.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, st); }
   if (hooks.trickplay) await hooks.trickplay(lib, st);
 }
