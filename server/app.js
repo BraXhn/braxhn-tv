@@ -1017,7 +1017,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
   // Bildundertexter (PGS) som webbspelaren ritar själv – appar använder inbränning via sub=
-  const imageSubs = st.subtitlesOf(it).filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}${tq}` }));
+  const imageSubs = st.subtitlesOf(it).filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
   send(c.res, 200, {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
     duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,

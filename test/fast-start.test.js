@@ -104,3 +104,15 @@ test('PGS: spår i MKV läses i bakgrunden och visas som bilder', async () => {
   const c = pgs.job({ ...it }, sub);
   assert.equal(c.done, true); assert.equal(c.cues.length, 1);
 });
+
+test('fientliga filer: MP4 som utlovar miljontals bilder låser inte servern', async () => {
+  const box = (t, ...b) => { const body = Buffer.concat(b); const h = Buffer.alloc(8); h.writeUInt32BE(8 + body.length); h.write(t, 4, 'latin1'); return Buffer.concat([h, body]); };
+  const u32 = (...v) => { const b = Buffer.alloc(4 * v.length); v.forEach((x, i) => b.writeUInt32BE(x >>> 0, i * 4)); return b; };
+  const moov = box('moov', box('trak', box('mdia', box('hdlr', u32(0, 0), Buffer.from('vide'), Buffer.alloc(12)), box('mdhd', u32(0, 0, 0, 1000, 0)),
+    box('minf', box('stbl', box('stts', u32(0, 1, 4_999_999, 1)))))));
+  const f = path.join(dir, 'bomb.mp4');
+  fs.writeFileSync(f, Buffer.concat([box('ftyp', Buffer.from('isom'), u32(0)), moov]));
+  const t0 = Date.now();
+  assert.equal(await kfm.fastKeyframes(f, 100), null);
+  assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+});

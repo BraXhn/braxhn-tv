@@ -149,10 +149,19 @@ const jobs = new Map();
 let active = 0; const waiting = [];
 const keyOf = (it, sid) => `${it.id}-${it.mtime}-${sid}`;
 
+// De senast använda färdiga spåren hålls i minnet (varje bild skulle annars läsa om hela tidslistan)
+const loaded = new Map();
 function load(key) {
+  const m = loaded.get(key);
+  if (m) { loaded.delete(key); loaded.set(key, m); return m; }
   try {
     const j = JSON.parse(fs.readFileSync(path.join(DIR, key + '.json'), 'utf8'));
-    if (fs.statSync(path.join(DIR, key + '.bin')).size >= (j.bytes || 0)) return { ...j, done: true, bin: path.join(DIR, key + '.bin') };
+    if (fs.statSync(path.join(DIR, key + '.bin')).size >= (j.bytes || 0)) {
+      const r = { ...j, done: true, bin: path.join(DIR, key + '.bin') };
+      loaded.set(key, r);
+      if (loaded.size > 8) loaded.delete(loaded.keys().next().value);
+      return r;
+    }
   } catch {}
   return null;
 }
@@ -165,15 +174,20 @@ export function job(it, sub) {
   if (cached) return cached;
   fs.mkdirSync(DIR, { recursive: true });
   // Gamla cachefiler för samma titel och spår (filen har ändrats) tas bort
-  try { for (const f of fs.readdirSync(DIR)) if (f.startsWith(`${it.id}-`) && f.endsWith(`-${sub.id}.json`) || f.startsWith(`${it.id}-`) && f.endsWith(`-${sub.id}.bin`)) fs.rmSync(path.join(DIR, f), { force: true }); } catch {}
+  // (även halvfärdiga rester efter en omstart mitt i ett jobb)
+  try {
+    for (const f of fs.readdirSync(DIR)) {
+      if (f.startsWith(`${it.id}-`) && /^(.+)\.(json|bin|bin\.part|json\.tmp)$/.exec(f)?.[1].endsWith(`-${sub.id}`)) fs.rmSync(path.join(DIR, f), { force: true });
+    }
+  } catch {}
   const bin = path.join(DIR, key + '.bin.part');
   const j = { key, w: 0, h: 0, cues: [], images: [], bytes: 0, upto: 0, done: false, error: null, bin, last: Date.now() };
   jobs.set(key, j);
-  const fd = fs.openSync(bin, 'w');
+  let fd = null; // öppnas först när jobbet faktiskt startar (inte medan det står i kö)
   const finish = (ok, err) => {
     if (j.done) return;
     j.done = true; j.error = err || null;
-    try { fs.closeSync(fd); } catch {}
+    if (fd != null) try { fs.closeSync(fd); } catch {}
     if (ok) {
       try {
         fs.renameSync(bin, path.join(DIR, key + '.bin'));
@@ -182,8 +196,10 @@ export function job(it, sub) {
         fs.renameSync(path.join(DIR, key + '.json.tmp'), path.join(DIR, key + '.json'));
       } catch (e) { console.warn('[pgs] kunde inte spara', e.message); }
     }
-    // Kvar i minnet en stund så att spelaren hinner läsa slutet; sedan från cachen (eller nytt försök)
-    setTimeout(() => { if (jobs.get(key) === j) jobs.delete(key); if (!ok) fs.rmSync(bin, { force: true }); }, 120000).unref();
+    // Kvar i minnet en stund så att spelaren hinner läsa slutet; sedan från cachen. Ett misslyckat spår
+    // (trasigt eller över gränserna) försöks inte igen förrän efter 30 min – det kostar en hel genomläsning.
+    if (!ok) { fs.rmSync(bin, { force: true }); j.cues = []; j.images = []; }
+    setTimeout(() => { if (jobs.get(key) === j) jobs.delete(key); }, ok ? 120000 : j.idle ? 0 : 30 * 60e3).unref();
   };
   const parser = new PgsParser({
     onClear: (pts) => { const last = j.cues[j.cues.length - 1]; if (last && last.e == null && pts >= last.s) last.e = pts; },
@@ -200,6 +216,7 @@ export function job(it, sub) {
   });
   const run = () => {
     active++;
+    try { fd = fs.openSync(bin, 'w'); } catch (e) { active--; waiting.shift()?.(); return finish(false, 'Kunde inte skriva undertextcachen'); }
     const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-i', it.path,
       '-map', '0:' + sub.id.slice(1), '-c', 'copy', '-f', 'sup', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
     let err = '';
@@ -208,7 +225,7 @@ export function job(it, sub) {
       try { parser.push(c); j.w = parser.w || j.w; j.h = parser.h || j.h; j.upto = parser.upto; }
       catch (e) { console.warn('[pgs] tolkning:', e.message); p.kill('SIGKILL'); }
       // Ingen tittar längre – avbryt (jobbet startas om nästa gång)
-      if (Date.now() - j.last > 10 * 60e3) p.kill('SIGKILL');
+      if (Date.now() - j.last > 10 * 60e3) { j.idle = true; p.kill('SIGKILL'); }
     });
     const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 60e3);
     const done = (ok, e) => { clearTimeout(timer); active--; waiting.shift()?.(); finish(ok, e); };
