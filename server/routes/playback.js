@@ -14,6 +14,7 @@ import * as trakt from '../trakt.js';
 import * as ver from '../versions.js';
 import { route, user, media, admin } from '../http/router.js';
 import { mediaItem, screenBlock, chaptersOf } from '../http/context.js';
+import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
 route('GET', '/api/items/:id/offline', user, (c) => {
@@ -33,6 +34,24 @@ route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaIte
 route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
 // ---------- Uppspelning ----------
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
+// Högsta kvalitetssteg som ryms i den uppmätta bandbredden (med marginal för variationer i mobilnätet),
+// aldrig över inställd maxkvalitet utanför hemmet. save: "Spara data" i telefonen → högst 480p.
+const STEPS = ['1080', '720', '480', '360'];
+export function remoteQuality(max, bw, save) {
+  let cap = st.QUALITIES[max] ? max : '1080';
+  if (save && (cap === 'orig' || +cap > 480)) cap = '480';
+  if (!bw) return cap;
+  const budget = bw * 0.75;
+  if (cap === 'orig' && budget >= 20000) return 'orig';
+  return STEPS.filter(x => cap === 'orig' || +x <= +cap).find(x => st.QUALITIES[x].br * 1.15 + 128 <= budget) || '360';
+}
+// Hastighetsmätning för spelaren utanför hemmet: slumpdata (går inte att komprimera), aldrig cachad
+const NOISE = crypto.randomBytes(4 << 20);
+route('GET', '/api/speedtest', user, (c) => {
+  const kb = Math.max(16, Math.min(4096, parseInt(c.q.get('kb')) || 512));
+  c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': kb * 1024, 'Cache-Control': 'no-store' });
+  c.res.end(c.req.method === 'HEAD' ? undefined : NOISE.subarray(0, kb * 1024));
+});
 route('GET', '/api/items/:id/playback', user, async (c) => {
   const row = mediaItem(c); if (!row) return;
   const main = ver.mainOf(row);
@@ -53,9 +72,12 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   }
   let o = st.parseCaps(c.q);
   const remote = !isLocalReq(c.req);
-  // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv)
+  o.remote = remote;
+  // Utanför hemmet: begränsa kvaliteten automatiskt (om klienten inte valt själv) – efter inställningen och,
+  // om klienten mätt sin uppkoppling (bw, kbit/s) eller sparar data (save=1), efter vad som faktiskt ryms
   const auto = !c.q.get('q') || c.q.get('q') === 'auto';
-  if (remote && auto) o.q = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
+  const bw = Math.max(0, Math.min(1e6, parseInt(c.q.get('bw')) || 0));
+  if (remote && auto) o.q = remoteQuality(getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), bw, c.q.get('save') === '1');
   o.maxBitrate = st.QUALITIES[o.q]?.br || null;
   // Flera versioner: klientens val (version=<id>) eller den som passar klienten bäst
   const versions = ver.versionsOf(main);
@@ -67,6 +89,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
   // Bara utanför hemmet: hemma räcker bandbredden, och byten mellan steg startar om omkodningen i onödan
   d.abr = auto && remote && d.mode === 'transcode';
+  if (d.abr && bw) d.startBw = bw;
   // Token i URL behövs för appar, Chromecast och AirPlay (de skickar inte webbläsarens cookie)
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;

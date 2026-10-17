@@ -19,6 +19,8 @@ route('GET', '/api/health', pub, (c) => {
 route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   // Avslöja inte för utomstående att servern är nyinstallerad
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',
+  // Utanför hemmet: webbspelaren mäter då uppkopplingen och anpassar kvaliteten
+  remote: c.user ? !isPrivate(clientIp(c.req)) : undefined,
   publicUrl: getSetting('public_url', process.env.PUBLIC_URL || '') || null,
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,

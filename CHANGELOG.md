@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- Strömning utanför hemmet: webbspelaren mäter uppkopplingen (i förväg och vid start, högst 1,5 s) och servern väljer kvalitet efter vad som ryms – aldrig över inställd maxkvalitet. "Spara data" i telefonen ger högst 480p
+- Anpassningsbar kvalitet har fått ett 360p-steg, och steget som ryms i uppkopplingen listas först (iPhone börjar på första varianten i stället för att fastna på ett för tungt steg). Spelaren hämtar aldrig högre upplösning än skärmen visar
+- Omkodning med kvalitetsgräns kodar kvalitetsstyrt med tak (x264 CRF, NVENC VBR) i stället för fast bithastighet: lugna scener tar mindre bandbredd med samma bild
+- Utanför hemmet blir ljudet AAC stereo 128 kbit/s vid omkodning (surround/Dolby tog 0,4–0,6 Mbit/s av uppkopplingen)
 
 ## 0.8.2
 - Rättat: efter en uppdatering kunde webbläsaren visa den nya sidan med den gamla stilmallen (cachad i en timme), så att layouten blev helt trasig. Stilmall och startmodul har nu versionsnummer i adressen, och appens filer kontrolleras mot servern vid varje besök (ETag – oförändrade filer laddas inte om)

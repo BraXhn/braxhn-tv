@@ -22,6 +22,35 @@ export function capsQuery(extra = {}) {
 }
 export const canAirPlay = () => !!window.WebKitPlaybackTargetAvailabilityEvent;
 
+// ---------- uppkopplingen utanför hemmet ----------
+// Spelaren mäter hur snabbt servern kan skicka hit (hemmets uppladdning × mobilnätet) och servern väljer
+// kvalitet och startsteg efter det. Mätningen sparas i 10 minuter; den görs bara utanför hemmet.
+const net = { kbps: 0, at: 0, running: null };
+export const lastBandwidth = () => (Date.now() - net.at < 10 * 60e3 ? net.kbps : 0);
+export const saveData = () => !!navigator.connection?.saveData;
+async function sample(kb) {
+  const t0 = performance.now();
+  const r = await fetch(`/api/speedtest?kb=${kb}&n=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+  if (!r.ok) throw new Error();
+  const b = await r.arrayBuffer();
+  return { bytes: b.byteLength, ms: Math.max(1, performance.now() - t0) };
+}
+export function measureBandwidth() {
+  if (lastBandwidth()) return Promise.resolve(net.kbps);
+  if (net.running) return net.running;
+  net.running = (async () => {
+    try {
+      // Litet prov först (svarstiden väger tungt); går det snabbt mäts ett större för ett säkrare värde
+      let s = await sample(256);
+      if (s.ms < 600) s = await sample(2048);
+      net.kbps = Math.round(s.bytes * 8 / s.ms); // byte/ms × 8 = kbit/s
+      net.at = Date.now();
+    } catch { net.kbps = 0; }
+    return net.kbps;
+  })().finally(() => { net.running = null; });
+  return net.running;
+}
+
 // ================= MUSIK =================
 let ACAPS = null;
 export function audioCaps() {
