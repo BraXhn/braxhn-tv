@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream';
 import { send, fail, MIME, streamFile, writeAtomic } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
+import { SubReader, vttParser } from './subreader.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
@@ -132,9 +133,11 @@ async function subSlot(fn) {
   try { return await fn(); } finally { subActive--; subWait.shift()?.(); }
 }
 const subRunning = new Map();
+const subKey = (it, sub) => `${it.id}-${it.mtime}-${sub.id}${sub.file ? '-' + (fs.statSync(sub.file).mtimeMs | 0) : ''}`;
+const subCacheFile = (it, sub) => path.join(CACHE, 'subs', subKey(it, sub) + '.vtt');
 function extractVtt(it, sub) {
-  const key = `${it.id}-${it.mtime}-${sub.id}${sub.file ? '-' + (fs.statSync(sub.file).mtimeMs | 0) : ''}`;
-  const file = path.join(CACHE, 'subs', key + '.vtt');
+  const key = subKey(it, sub);
+  const file = subCacheFile(it, sub);
   if (fs.existsSync(file)) return fs.promises.readFile(file, 'utf8');
   if (subRunning.has(key)) return subRunning.get(key);
   const pr = subSlot(() => new Promise((ok, no) => {
@@ -161,6 +164,37 @@ function extractVtt(it, sub) {
   subRunning.set(key, pr);
   return pr;
 }
+// Inbäddad textundertext som läses där tittaren är (webbspelaren frågar igen tills allt är läst – se subreader.js)
+const liveSubs = new Map();
+const vttTime = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`; };
+const cuesToVtt = (cues) => 'WEBVTT\n\n' + cues.map(c => `${vttTime(c.s)} --> ${vttTime(c.e)}${c.settings ? ' ' + c.settings : ''}\n${c.text}`).join('\n\n') + '\n';
+function liveVtt(it, sub, t) {
+  const key = subKey(it, sub);
+  let j = liveSubs.get(key);
+  if (!j) {
+    j = { cues: [], done: false, error: null };
+    const forget = (ms) => setTimeout(() => { if (liveSubs.get(key) === j) liveSubs.delete(key); }, ms).unref();
+    j.reader = new SubReader({
+      file: it.path, stream: +sub.id.slice(1), format: 'webvtt', duration: it.duration || 0,
+      parser: () => vttParser((c) => {
+        // Sorterat på starttid; två läsningar som överlappar ger samma cue två gånger
+        let lo = 0, hi = j.cues.length;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (j.cues[m].s < c.s) lo = m + 1; else hi = m; }
+        for (let k = lo; k < j.cues.length && j.cues[k].s === c.s; k++) if (j.cues[k].text === c.text) return;
+        j.cues.splice(lo, 0, c);
+      }),
+      onComplete: () => {
+        j.done = true;
+        try { fs.mkdirSync(path.join(CACHE, 'subs'), { recursive: true }); writeAtomic(subCacheFile(it, sub), cuesToVtt(j.cues)); } catch {}
+        forget(120e3);
+      },
+      onError: (msg) => { j.done = true; j.error = msg || 'Kunde inte läsa undertexten'; console.warn('[undertext]', it.path, j.error); forget(30 * 60e3); }
+    });
+    liveSubs.set(key, j);
+  }
+  j.reader.want(t);
+  return j;
+}
 function shiftVtt(vtt, offset) {
   if (!offset) return vtt;
   const fmt = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`; };
@@ -173,10 +207,20 @@ export async function serveSubtitle(req, res, it, sid, query) {
   if (!sub || sub.bitmap) return fail(res, 404, 'Undertext saknas');
   const offset = Math.max(-600, Math.min(600, parseFloat(query.get('offset') || '0') || 0));
   let vtt;
+  // Webbspelaren (live=1): ett inbäddat spår som inte lästs än läses där tittaren är (pos) och skickas i
+  // omgångar – annars syns inget förrän hela filen lästs, vilket tar minuter för en stor film
+  if (query.get('live') === '1' && !sub.file && !fs.existsSync(subCacheFile(it, sub))) {
+    const pos = Math.max(0, +query.get('pos') || 0);
+    const j = liveVtt(it, sub, pos);
+    // Vänta en kort stund tills läsningen nått tittaren (oftast under en sekund) så att första svaret har text
+    for (let k = 0; k < 25 && !j.done && !j.reader.covers(pos + 15) && !req.destroyed; k++) await new Promise(r => setTimeout(r, 100));
+    if (j.error && !j.cues.length) return fail(res, 500, 'Kunde inte läsa undertexten');
+    return send(res, 200, shiftVtt(cuesToVtt(j.cues), offset), { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'X-Undertext-Klar': j.done ? '1' : '0' });
+  }
   try { vtt = shiftVtt(await extractVtt(it, sub), offset); } catch (e) { return fail(res, 500, e.message); }
   // Apple kräver tidsmappning mot MPEG-TS för undertexter i HLS
   if (query.get('hls') === '1') vtt = vtt.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n');
-  send(res, 200, vtt, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=600' });
+  send(res, 200, vtt, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=600', 'X-Undertext-Klar': '1' });
 }
 // Äldre svenska .srt-filer är ofta Windows-1252 – kolla om innehållet är giltig UTF-8
 function guessCharenc(file) {

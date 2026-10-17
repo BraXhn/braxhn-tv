@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { spawn } from 'node:child_process';
 import { CACHE } from './db.js';
 import { send, fail } from './util.js';
+import { SubReader } from './subreader.js';
 
 const DIR = path.join(CACHE, 'pgs');
 
@@ -146,7 +146,6 @@ export class PgsParser {
 // ---------------- jobb och cache ----------------
 // Ett jobb per fil och spår. Färdiga jobb sparas som <nyckel>.json (tidslista) + <nyckel>.bin (bilderna).
 const jobs = new Map();
-let active = 0; const waiting = [];
 const keyOf = (it, sid) => `${it.id}-${it.mtime}-${sid}`;
 
 // De senast använda färdiga spåren hålls i minnet (varje bild skulle annars läsa om hela tidslistan)
@@ -181,13 +180,14 @@ export function job(it, sub) {
     }
   } catch {}
   const bin = path.join(DIR, key + '.bin.part');
-  const j = { key, w: 0, h: 0, cues: [], images: [], bytes: 0, upto: 0, done: false, error: null, bin, last: Date.now() };
+  const j = { key, w: 0, h: 0, cues: [], images: [], bytes: 0, upto: 0, done: false, error: null, bin, last: Date.now(), reader: null };
+  let fd;
+  try { fd = fs.openSync(bin, 'w'); } catch { j.done = true; j.error = 'Kunde inte skriva undertextcachen'; return j; }
   jobs.set(key, j);
-  let fd = null; // öppnas först när jobbet faktiskt startar (inte medan det står i kö)
   const finish = (ok, err) => {
     if (j.done) return;
     j.done = true; j.error = err || null;
-    if (fd != null) try { fs.closeSync(fd); } catch {}
+    try { fs.closeSync(fd); } catch {}
     if (ok) {
       try {
         fs.renameSync(bin, path.join(DIR, key + '.bin'));
@@ -198,52 +198,52 @@ export function job(it, sub) {
     }
     // Kvar i minnet en stund så att spelaren hinner läsa slutet; sedan från cachen. Ett misslyckat spår
     // (trasigt eller över gränserna) försöks inte igen förrän efter 30 min – det kostar en hel genomläsning.
-    if (!ok) { fs.rmSync(bin, { force: true }); j.cues = []; j.images = []; }
-    setTimeout(() => { if (jobs.get(key) === j) jobs.delete(key); }, ok ? 120000 : j.idle ? 0 : 30 * 60e3).unref();
+    if (!ok) { console.warn('[pgs]', it.path, err); fs.rmSync(bin, { force: true }); j.cues = []; j.images = []; }
+    setTimeout(() => { if (jobs.get(key) === j) jobs.delete(key); }, ok ? 120000 : 30 * 60e3).unref();
   };
-  const parser = new PgsParser({
-    onClear: (pts) => { const last = j.cues[j.cues.length - 1]; if (last && last.e == null && pts >= last.s) last.e = pts; },
-    onCue: (c) => {
-      const last = j.cues[j.cues.length - 1];
-      if (last && last.e == null) last.e = c.s;
-      const items = c.items.map(x => {
-        fs.writeSync(fd, x.png);
-        j.images.push([j.bytes, x.png.length]); j.bytes += x.png.length;
-        return [x.x, x.y, x.w, x.h, j.images.length - 1];
+  // Visningarna hålls sorterade på starttid: läsningen börjar där tittaren är och fyller i resten efteråt
+  const insert = (cue) => {
+    let lo = 0, hi = j.cues.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (j.cues[m].s < cue.s) lo = m + 1; else hi = m; }
+    if (j.cues[lo]?.s === cue.s) return j.cues[lo]; // redan läst (två läsningar överlappar)
+    j.cues.splice(lo, 0, cue);
+    return cue;
+  };
+  j.reader = new SubReader({
+    file: it.path, stream: +sub.id.slice(1), format: 'sup', duration: it.duration || 0,
+    parser: () => {
+      let open = null; // den här körningens visning som ännu inte tagits bort
+      const p = new PgsParser({
+        onClear: (pts) => { if (open && open.e == null && pts >= open.s) open.e = pts; open = null; },
+        onCue: (c) => {
+          if (open && open.e == null) open.e = c.s;
+          const s = Math.round(c.s * 1000) / 1000;
+          const found = j.cues.find(x => x.s === s);
+          if (found) { open = found; return; }
+          const items = c.items.map(x => {
+            fs.writeSync(fd, x.png);
+            j.images.push([j.bytes, x.png.length]); j.bytes += x.png.length;
+            return [x.x, x.y, x.w, x.h, j.images.length - 1];
+          });
+          open = insert({ s, e: null, i: items });
+        }
       });
-      j.cues.push({ s: Math.round(c.s * 1000) / 1000, e: null, i: items });
-    }
+      return {
+        push(c) { p.push(c); j.w = p.w || j.w; j.h = p.h || j.h; j.upto = Math.max(j.upto, p.upto); },
+        end() { if (open && open.e == null) open.e = open.s + 5; open = null; }
+      };
+    },
+    onComplete: () => finish(true),
+    onError: (msg) => finish(false, 'Kunde inte läsa undertexten' + (msg ? ` (${msg.split('\n')[0].slice(0, 120)})` : ''))
   });
-  const run = () => {
-    active++;
-    try { fd = fs.openSync(bin, 'w'); } catch (e) { active--; waiting.shift()?.(); return finish(false, 'Kunde inte skriva undertextcachen'); }
-    const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-i', it.path,
-      '-map', '0:' + sub.id.slice(1), '-c', 'copy', '-f', 'sup', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let err = '';
-    p.stderr.on('data', c => { err = (err + c).slice(-1000); });
-    p.stdout.on('data', (c) => {
-      try { parser.push(c); j.w = parser.w || j.w; j.h = parser.h || j.h; j.upto = parser.upto; }
-      catch (e) { console.warn('[pgs] tolkning:', e.message); p.kill('SIGKILL'); }
-      // Ingen tittar längre – avbryt (jobbet startas om nästa gång)
-      if (Date.now() - j.last > 10 * 60e3) { j.idle = true; p.kill('SIGKILL'); }
-    });
-    const timer = setTimeout(() => p.kill('SIGKILL'), 60 * 60e3);
-    const done = (ok, e) => { clearTimeout(timer); active--; waiting.shift()?.(); finish(ok, e); };
-    p.on('error', (e) => done(false, e.message));
-    p.on('close', (code) => {
-      const last = j.cues[j.cues.length - 1];
-      if (last && last.e == null) last.e = last.s + 5;
-      if (code !== 0) console.warn('[pgs]', it.path, err.trim());
-      done(code === 0, code === 0 ? null : 'Kunde inte läsa undertexten');
-    });
-  };
-  if (active >= 2) waiting.push(run); else run();
   return j;
 }
 
 /** Tidslistan (allt som tolkats hittills). Spelaren frågar igen så länge done är false. */
-export function serveIndex(res, it, sub) {
+export async function serveIndex(res, it, sub, t = 0) {
   const j = job(it, sub);
+  j.reader?.want(t); // läs där tittaren är först
+  for (let k = 0; k < 25 && j.reader && !j.done && !j.reader.covers(t + 15); k++) await new Promise(r => setTimeout(r, 100));
   send(res, 200, { w: j.w, h: j.h, done: j.done, error: j.error, upto: j.upto, cues: j.cues },
     { 'Cache-Control': j.done ? 'private, max-age=3600' : 'no-store' });
 }

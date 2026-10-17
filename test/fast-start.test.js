@@ -90,7 +90,7 @@ test('PGS: spår i MKV läses i bakgrunden och visas som bilder', async () => {
   ff('-copyts', '-f', 'lavfi', '-i', 'testsrc2=s=160x120:r=24:d=5', '-i', supF, '-map', '0', '-map', '1', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:s', 'copy', mkv);
   const it = { id: 991, mtime: 1, path: mkv };
   const sub = { id: 'e1' };
-  let j = pgs.job(it, sub);
+  let j = pgs.job(it, sub); j.reader.want(0);
   for (let k = 0; k < 100 && !j.done; k++) await new Promise(r => setTimeout(r, 50));
   assert.equal(j.done, true); assert.equal(j.error, null);
   assert.equal(j.cues.length, 1);
@@ -138,4 +138,24 @@ test('segment långt bakom uppspelningen tas bort utan att servern tappar bort v
   for (let k = 21; k <= 60; k++) fs.rmSync(f(k));
   s.hi = null; s.trimmed = 60;
   assert.equal(st._segs.highestFile(s), 60);
+});
+
+test('undertext läses där tittaren är först, sedan resten', async () => {
+  const { SubReader, vttParser } = await import('../server/subreader.js');
+  const srt = path.join(dir, 'lang.srt'), mkv = path.join(dir, 'lang.mkv');
+  const t = (s) => `00:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')},000`;
+  fs.writeFileSync(srt, [5, 100, 200, 290].map((s, i) => `${i + 1}\n${t(s)} --> ${t(s + 2)}\nRad ${s}\n`).join('\n'));
+  ff('-f', 'lavfi', '-i', 'testsrc2=s=160x120:r=10:d=300', '-i', srt, '-map', '0', '-map', '1', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '20', '-c:s', 'srt', mkv);
+  const cues = [], order = [];
+  let complete = false;
+  const r = new SubReader({ file: mkv, stream: 1, format: 'webvtt', duration: 300,
+    parser: () => vttParser((c) => { if (!cues.some(x => x.s === c.s)) { cues.push(c); order.push(c.s); } }),
+    onComplete: () => { complete = true; }, onError: (m) => { throw new Error(m); } });
+  r.want(195);
+  for (let k = 0; k < 200 && !complete; k++) await new Promise(res => setTimeout(res, 50));
+  assert.equal(complete, true);
+  assert.deepEqual(cues.map(c => c.s).sort((a, b) => a - b), [5, 100, 200, 290]);
+  assert.equal(order[0], 200, `ordning ${order}`); // tittarens position först
+  assert.equal(cues.find(c => c.s === 200).text, 'Rad 200');
+  r.close();
 });
