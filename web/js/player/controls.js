@@ -2,7 +2,7 @@
 import { $, fmtTime, store } from '../core.js';
 import { setMini } from './overlay.js';
 import { P, closePlayer } from './video.js';
-import { ICON } from '../ui/icons.js';
+import { setIconButton } from '../ui/buttons.js';
 
 /** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
 export function bindControls(cur, v) {
@@ -10,8 +10,8 @@ export function bindControls(cur, v) {
   const chaps = it.chapters || [];
   const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
   const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
-  const sync = () => { playBtn.innerHTML = v.paused ? ICON.play : ICON.pause; el.classList.toggle('paused', v.paused); };
-  const syncVol = () => { muteBtn.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol; vol.value = v.muted ? 0 : v.volume; };
+  const sync = () => { setIconButton(playBtn, v.paused ? 'play' : 'pause', v.paused ? 'Spela (mellanslag)' : 'Pausa (mellanslag)'); el.classList.toggle('paused', v.paused); };
+  const syncVol = () => { const off = v.muted || v.volume === 0; setIconButton(muteBtn, off ? 'mute' : 'vol', off ? 'Slå på ljudet (m)' : 'Stäng av ljudet (m)'); vol.value = v.muted ? 0 : v.volume; };
   v.volume = +store.get('pvol', 1); syncVol();
   ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
   v.addEventListener('volumechange', syncVol);

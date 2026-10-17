@@ -1,12 +1,14 @@
 // Vy: administration
-import { $, $$, act, api, esc, fmtDate, keyClick, later, main, me, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDate, keyClick, later, main, me, toast, views, toastErr } from '../core.js';
 import { boot, loadLibs, route } from '../router.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
+import { confirmDialog, promptDialog } from '../ui/dialog.js';
+import { emptyState, errorState } from '../ui/states.js';
 
 views.admin = async () => {
   if (!me.is_admin) { location.hash = '#/'; return; }
-  if (!me.adminHere) { main.innerHTML = '<div class="empty"><h2>Administration är spärrad härifrån</h2><p>Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).</p></div>'; return; }
+  if (!me.adminHere) { main.innerHTML = emptyState({ icon: '🔒', title: 'Administration är spärrad härifrån', text: 'Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).' }); return; }
   const [IN, LT, L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/integrations'), api('/live/tuners'), api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
@@ -159,15 +161,15 @@ views.admin = async () => {
       const r = await api('/fs?path=' + encodeURIComponent(p));
       $('#lp').value = r.path;
       $('#fsb').innerHTML = (r.parent ? `<div data-p="${esc(r.parent)}">⬆ ..</div>` : '') + r.dirs.map(d => `<div data-p="${esc(r.path + '/' + d)}">📁 ${esc(d)}</div>`).join('')
-        || '<div class="muted">Inga undermappar</div>';
+        || '<div class="muted" role="status">Inga undermappar</div>';
       $$('#fsb [data-p]').forEach(el => keyClick(el).onclick = () => browse(el.dataset.p));
-    } catch (e) { $('#fsb').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    } catch (e) { if (!e.aborted && $('#fsb')) $('#fsb').innerHTML = errorState(e, { compact: true }); }
   };
   browse(S.mediaRoot);
   $('#addlib').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
-    catch (er) { toast(er.message); }
+    catch (er) { toastErr(er); }
   };
   $('#lt').onchange = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; };
   $('#lanimew').hidden = $('#lt').value !== 'show';
@@ -175,51 +177,52 @@ views.admin = async () => {
   $('#scanall').onclick = act(async () => { await api('/scan', { method: 'POST' }); toast('Skanning startad'); poll(); });
   $$('[data-scan]').forEach(b => b.onclick = act(async () => { await api(`/libraries/${b.dataset.scan}/scan`, { method: 'POST' }); toast('Skanning startad'); poll(); }));
   $$('[data-del]').forEach(b => b.onclick = act(async () => {
-    if (!confirm('Ta bort biblioteket? Filerna på disken påverkas inte.')) return;
+    const name = L.find(l => l.id === +b.dataset.del)?.name || 'biblioteket';
+    if (!await confirmDialog('Filerna på disken påverkas inte, men titlarna och tittarhistoriken för dem försvinner ur BraXhn TV.', { title: `Ta bort ${name}?`, okLabel: 'Ta bort', danger: true })) return;
     await api('/libraries/' + b.dataset.del, { method: 'DELETE' }); await loadLibs(); route();
   }));
   $('#adduser').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/users', { method: 'POST', body: { name: $('#un').value, password: $('#up').value, isAdmin: $('#ua').checked, remoteAllowed: $('#ur').checked } }); toast('Användare skapad'); route(); }
-    catch (er) { toast(er.message); }
+    catch (er) { toastErr(er); }
   };
-  $$('[data-udel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort användaren?')) { await api('/users/' + b.dataset.udel, { method: 'DELETE' }); route(); } }));
+  $$('[data-udel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog(`Ta bort användaren ${U.find(u => u.id === +b.dataset.udel)?.name || ''}?`, { okLabel: 'Ta bort', danger: true })) { await api('/users/' + b.dataset.udel, { method: 'DELETE' }); route(); } }));
   $$('[data-remote]').forEach(b => b.onchange = act(async () => { await api('/users/' + b.dataset.remote, { method: 'PUT', body: { remoteAllowed: b.checked } }); toast('Sparat'); }));
-  $$('[data-r2fa]').forEach(b => b.onclick = act(async () => { if (confirm('Återställ tvåstegsverifiering för användaren?')) { await api('/users/' + b.dataset.r2fa, { method: 'PUT', body: { reset2fa: true } }); route(); } }));
-  $$('[data-lout]').forEach(b => b.onclick = act(async () => { if (confirm('Logga ut användaren från alla enheter?')) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } }));
+  $$('[data-r2fa]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Återställ tvåstegsverifiering för användaren?', { okLabel: 'Återställ', danger: true })) { await api('/users/' + b.dataset.r2fa, { method: 'PUT', body: { reset2fa: true } }); route(); } }));
+  $$('[data-lout]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Logga ut användaren från alla enheter?', { okLabel: 'Logga ut' })) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } }));
   $('#secform').onsubmit = async (e) => {
     e.preventDefault();
     const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
       allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked, trickplay: $('#strick').checked, detectRecap: $('#srecap').checked };
     if (!$('#sadm').disabled) body.adminAnywhere = $('#sadm').checked;
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
-    if (body.require2faRemote && !me.totp) { if (!confirm('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?')) return; }
-    try { await api('/settings', { method: 'PUT', body }); toast('Sparat'); route(); } catch (er) { toast(er.message); }
+    if (body.require2faRemote && !me.totp) { if (!await confirmDialog('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?', { okLabel: 'Fortsätt' })) return; }
+    try { await api('/settings', { method: 'PUT', body }); toast('Sparat'); route(); } catch (er) { toastErr(er); }
   };
   $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast('Sparat'); });
   $('#upchk').onclick = act(async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? 'Kunde inte kontrollera: ' + u.error : u.available ? `Version ${u.latest} finns` : 'Du har senaste versionen'); route(); });
   const noSave = () => { const body = { kind: $('#nok').value, url: $('#nou').value, user: $('#nous').value, events: $$('[data-nev]').filter(x => x.checked).map(x => x.dataset.nev) };
     if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
-  $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
-  $('#notest').onclick = async () => { try { await noSave(); await api('/notify/test', { method: 'POST' }); toast('Testnotis skickad'); } catch (er) { toast(er.message); } };
+  $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast('Sparat'); } catch (er) { toastErr(er); } };
+  $('#notest').onclick = async () => { try { await noSave(); await api('/notify/test', { method: 'POST' }); toast('Testnotis skickad'); } catch (er) { toastErr(er); } };
   $('#ltk').onchange = () => { const h = $('#ltk').value === 'hdhr'; $('#ltul').textContent = h ? 'IP-adress till HDHomeRun' : 'Adress till M3U-listan (eller fil under /config)'; $('#ltu').placeholder = h ? '192.168.1.50' : 'https://…/playlist.m3u'; $('#ltnw').hidden = h; };
   $('#ltadd').onsubmit = async (e) => {
     e.preventDefault(); const b = $('#ltadd button'); b.disabled = true; b.textContent = 'Hämtar kanaler…';
     try { const r = await api('/live/tuners', { method: 'POST', body: { kind: $('#ltk').value, url: $('#ltu').value, epgUrl: $('#lte').value, tuners: $('#ltn').value } }); toast('Tillagd'); await boot(); route(); void r; }
-    catch (er) { toast(er.message); b.disabled = false; b.textContent = 'Lägg till'; }
+    catch (er) { toastErr(er); b.disabled = false; b.textContent = 'Lägg till'; }
   };
   $('#ltdisc').onclick = act(async () => { toast('Söker…'); const r = await api('/live/discover', { method: 'POST' }); if (r.found.length) { $('#ltk').value = 'hdhr'; $('#ltk').onchange(); $('#ltu').value = r.found[0]; toast('Hittade ' + r.found.join(', ')); } else toast('Ingen hittades – ange IP-adressen (sökning kräver host-nätverk i Docker)'); });
-  $('#ltgr').onclick = async () => { toast('Uppdaterar guiden…'); try { await api('/live/guide/refresh', { method: 'POST' }); toast('Guiden uppdaterad'); route(); } catch (er) { toast(er.message); } };
-  $$('[data-trf]').forEach(b => b.onclick = async () => { try { const r = await api(`/live/tuners/${b.dataset.trf}/refresh`, { method: 'POST' }); toast(`${r.channels} kanaler`); route(); } catch (er) { toast(er.message); } });
-  $$('[data-tdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort källan och dess kanaler?')) { await api('/live/tuners/' + b.dataset.tdel, { method: 'DELETE' }); await boot(); route(); } }));
-  $$('[data-tepg]').forEach(b => b.onclick = async () => { const u = prompt('Adress till XMLTV-guiden (tomt = ingen / HDHomeRuns egen):', LT.tuners.find(t => t.id === +b.dataset.tepg)?.epg_url || ''); if (u === null) return; try { await api('/live/tuners/' + b.dataset.tepg, { method: 'PUT', body: { epgUrl: u } }); await api(`/live/tuners/${b.dataset.tepg}/refresh`, { method: 'POST' }); toast('Sparat'); route(); } catch (er) { toast(er.message); } });
+  $('#ltgr').onclick = async () => { toast('Uppdaterar guiden…'); try { await api('/live/guide/refresh', { method: 'POST' }); toast('Guiden uppdaterad'); route(); } catch (er) { toastErr(er); } };
+  $$('[data-trf]').forEach(b => b.onclick = async () => { try { const r = await api(`/live/tuners/${b.dataset.trf}/refresh`, { method: 'POST' }); toast(`${r.channels} kanaler`); route(); } catch (er) { toastErr(er); } });
+  $$('[data-tdel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort källan och dess kanaler?', { okLabel: 'Ta bort', danger: true })) { await api('/live/tuners/' + b.dataset.tdel, { method: 'DELETE' }); await boot(); route(); } }));
+  $$('[data-tepg]').forEach(b => b.onclick = async () => { const u = await promptDialog('Adress till XMLTV-guiden', { title: 'TV-guide', inputmode: 'url', hint: 'Tomt = ingen guide (HDHomeRun använder då sin egen).', value: LT.tuners.find(t => t.id === +b.dataset.tepg)?.epg_url || '', okLabel: 'Spara' }); if (u === null) return; try { await api('/live/tuners/' + b.dataset.tepg, { method: 'PUT', body: { epgUrl: u } }); await api(`/live/tuners/${b.dataset.tepg}/refresh`, { method: 'POST' }); toast('Sparat'); route(); } catch (er) { toastErr(er); } });
   $$('[data-chfav]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chfav, { method: 'PUT', body: { favorite: b.checked } })));
   $$('[data-chhide]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } })));
-  $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = prompt('Kanalens id i XMLTV-guiden (t.ex. svt1.svt.se):', b.dataset.epgid); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
+  $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = await promptDialog('Kanalens id i XMLTV-guiden', { title: 'Guide-id', placeholder: 'svt1.svt.se', value: b.dataset.epgid, okLabel: 'Spara' }); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
   $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value,
-    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked } }); toast('Sparat'); } catch (er) { toast(er.message); } };
+    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked } }); toast('Sparat'); } catch (er) { toastErr(er); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
-  $('#whnew').onclick = act(async () => { if (!confirm('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.')) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
+  $('#whnew').onclick = act(async () => { if (!await confirmDialog('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.', { okLabel: 'Skapa ny nyckel', danger: true })) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
   for (const k of ['radarr', 'sonarr']) {
     const prof = IN[k + 'Profile'], root = IN[k + 'Root'];
     if (prof) $('#' + k + 'p').innerHTML += `<option value="${prof}" selected>Profil ${prof}</option>`;
@@ -233,17 +236,17 @@ views.admin = async () => {
       $('#' + k + 'p').innerHTML = o.profiles.map(p => `<option value="${p.id}" ${p.id === IN[k + 'Profile'] ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
       $('#' + k + 'r').innerHTML = o.roots.map(r => `<option value="${esc(r.path)}" ${r.path === IN[k + 'Root'] ? 'selected' : ''}>${esc(r.path)} (${Math.round(r.free / 1e9)} GB ledigt)</option>`).join('');
       toast('Ansluten');
-    } catch (e) { toast(e.message); }
+    } catch (e) { toastErr(e); }
   });
   $('#inform').onsubmit = async (e) => {
     e.preventDefault();
     const body = { pathMap: $('#inpm').value, requestsEnabled: $('#inre').checked, requestsAuto: $('#inra').checked, traktClientId: $('#trid').value };
     if ($('#trsec').value) body.traktSecret = $('#trsec').value;
     for (const k of ['radarr', 'sonarr']) { body[k + 'Url'] = $('#' + k + 'u').value; if ($('#' + k + 'k').value) body[k + 'Key'] = $('#' + k + 'k').value; body[k + 'Profile'] = $('#' + k + 'p').value; body[k + 'Root'] = $('#' + k + 'r').value; }
-    try { await api('/integrations', { method: 'PUT', body }); toast('Sparat'); } catch (er) { toast(er.message); }
+    try { await api('/integrations', { method: 'PUT', body }); toast('Sparat'); } catch (er) { toastErr(er); }
   };
   const acSave = () => api('/acme', { method: 'PUT', body: { domain: $('#acd').value, email: $('#ace').value, staging: $('#acs').checked, auto: $('#aca').checked } });
-  $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toast(er.message); } };
+  $('#acmeform').onsubmit = async (e) => { e.preventDefault(); try { await acSave(); toast('Sparat'); } catch (er) { toastErr(er); } };
   let cancelAc = null;
   const acPoll = async () => {
     cancelAc = null;
@@ -254,12 +257,12 @@ views.admin = async () => {
     else { $('#acgo').disabled = false; toast(a.error ? 'Certifikatet kunde inte hämtas: ' + a.error : 'Certifikatet är klart – HTTPS är igång'); if (!a.error) later(route, 1500); }
   };
   $('#acgo').onclick = async () => {
-    try { await acSave(); await api('/acme/obtain', { method: 'POST' }); $('#acgo').disabled = true; if (cancelAc) cancelAc(); cancelAc = later(acPoll, 800); } catch (er) { toast(er.message); }
+    try { await acSave(); await api('/acme/obtain', { method: 'POST' }); $('#acgo').disabled = true; if (cancelAc) cancelAc(); cancelAc = later(acPoll, 800); } catch (er) { toastErr(er); }
   };
   $$('[data-adm]').forEach(b => b.onclick = act(async () => { await api('/users/' + b.dataset.adm, { method: 'PUT', body: { isAdmin: b.dataset.v === '1' } }); route(); }));
   $$('[data-pw]').forEach(b => b.onclick = async () => {
-    const pw = prompt('Nytt lösenord (minst 10 tecken). Användaren loggas ut från alla enheter:'); if (!pw) return;
-    try { await api('/users/' + b.dataset.pw, { method: 'PUT', body: { password: pw } }); toast('Lösenord ändrat'); } catch (er) { toast(er.message); }
+    const pw = await promptDialog('Nytt lösenord', { title: `Nytt lösenord för ${U.find(u => u.id === +b.dataset.pw)?.name || 'användaren'}`, type: 'password', autocomplete: 'new-password', minlength: 10, required: true, hint: 'Minst 10 tecken. Användaren loggas ut från alla enheter.', okLabel: 'Byt lösenord' }); if (!pw) return;
+    try { await api('/users/' + b.dataset.pw, { method: 'PUT', body: { password: pw } }); toast('Lösenord ändrat'); } catch (er) { toastErr(er); }
   });
   $('#settings').onsubmit = act(async (e) => {
     e.preventDefault();
@@ -292,5 +295,5 @@ views.admin = async () => {
     } catch {}
   }
   poll();
-  adminOps().catch(e => { if (!e?.aborted) toast(e.message); });
+  adminOps().catch(e => { toastErr(e); });
 };

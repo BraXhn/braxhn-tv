@@ -7,6 +7,7 @@ import { stopVideo } from './player/overlay.js';
 import { P, closeAllPlayers } from './player/video.js';
 import { screenBadge } from './screentime.js';
 import { cover, trackRows } from './views/music.js';
+import { openDialog } from './ui/dialog.js';
 
 // ---------- musikspelare (följer med mellan sidor) ----------
 export const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false, seekSeq: 0 };
@@ -21,15 +22,16 @@ export function stopAudio() {
   document.body.classList.remove('hasbar');
   setSession({});
 }
+const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.textContent = playing ? '⏸' : '▶'; b.title = playing ? 'Pausa' : 'Spela'; b.setAttribute('aria-label', b.title); };
 function ensureBar() {
   if ($('#mbar')) return;
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
-    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev">⏮</button><button class="primary" id="mplay">⏸</button><button class="ghost small" id="mnext">⏭</button>
-      <button class="ghost small" id="mrep" title="Upprepa">🔁</button><button class="ghost small" id="msleep" title="Sovtimer">☾</button><button class="ghost small" id="mlyr" title="Låttext">Text</button></div>
+    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="Föregående" title="Föregående">⏮</button><button class="primary" id="mplay" aria-label="Pausa" title="Pausa">⏸</button><button class="ghost small" id="mnext" aria-label="Nästa" title="Nästa">⏭</button>
+      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
-    <div class="mright"><select id="mspeed" title="Hastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq">Kö</button><button class="ghost small" id="mx" title="Stäng">✕</button></div>`;
+    <div class="mright"><select id="mspeed" title="Hastighet" aria-label="Uppspelningshastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="Volym" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">Kö</button><button class="ghost small" id="mx" title="Stäng spelaren" aria-label="Stäng spelaren">✕</button></div>`;
   document.body.append(bar);
   const a = M.audio = $('#maudio');
   a.volume = store.get('mvol', 1);
@@ -42,13 +44,13 @@ function ensureBar() {
     $('#mcurt').textContent = fmtTime(t); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
   a.onended = () => M.spoken ? spokenEnded() : nextTrack(true);
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
-  a.onplay = () => { if (NORM.ctx?.state === 'suspended') NORM.ctx.resume().catch(() => {}); $('#mplay').textContent = '⏸'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
-  a.onpause = () => { $('#mplay').textContent = '▶'; if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; if (M.spoken) spokenSave(); };
-  a.onerror = () => toast('Kunde inte spela låten');
+  a.onplay = () => { if (NORM.ctx?.state === 'suspended') NORM.ctx.resume().catch(() => {}); setMplay(true); if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
+  a.onpause = () => { setMplay(false); if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; if (M.spoken) spokenSave(); };
+  a.onerror = () => toast('Kunde inte spela låten', { error: true });
   $('#mplay').onclick = () => a.paused ? a.play() : a.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
   $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (a.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
-  $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); };
+  $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); $('#mrep').setAttribute('aria-pressed', String(M.repeat)); };
   $('#mvol').oninput = (e) => { store.set('mvol', +e.target.value); applyVolume(); };
   $('#msleep').onclick = sleepDialog;
   $('#mlyr').onclick = toggleLyrics;
@@ -82,6 +84,7 @@ function setBarMode(spoken) {
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
   $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
   $('#mprev').title = spoken ? `${b} sekunder bakåt` : 'Föregående'; $('#mnext').title = spoken ? `${f} sekunder framåt` : 'Nästa';
+  $('#mprev').setAttribute('aria-label', $('#mprev').title); $('#mnext').setAttribute('aria-label', $('#mnext').title);
   if (spoken) showLyrics(false);
   applyVolume();
 }
@@ -188,12 +191,11 @@ function nextTrack(auto) {
   else if (auto) { M.audio.pause(); }
 }
 function showQueue() {
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Kö</h2><div style="max-height:60vh;overflow:auto">${trackRows(M.queue, { showCover: true })}</div>
-    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) r.classList.add('playing'); keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); d.close(); d.remove(); }; });
-  $('#cl', d).onclick = () => { d.close(); d.remove(); };
+  const h = openDialog({ title: 'Kö', closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });
+  const d = h.el;
+  $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) { r.classList.add('playing'); r.setAttribute('aria-current', 'true'); } keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); h.close(); }; });
+  // Fokus på låten som spelas (TV/fjärrkontroll: pilarna går vidare därifrån)
+  $('tr.playing', d)?.focus();
 }
 
 // ================= LYSSNING: inställningar, jämn ljudnivå, sovtimer, låttexter och smarta listor =================

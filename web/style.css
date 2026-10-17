@@ -1,6 +1,10 @@
 :root{
   --bg:#0d0f14;--bg2:#151821;--bg3:#1e2230;--line:#2a2f40;--text:#e9ebf1;--dim:#9aa1b4;
-  --accent:#ff6b4a;--accent2:#ff8a6e;--ok:#4cc38a;--err:#ff5d6c;--r:10px;
+  --accent:#ff6b4a;--accent2:#ff8a6e;--ok:#4cc38a;--err:#ff5d6c;--warn:#ffc857;--r:10px;
+  /* Designtokens för komponenterna (se docs/ui-komponenter.md) */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:40px;
+  --r-sm:8px;--r-lg:14px;--r-pill:999px;--focus:var(--accent);--touch:44px;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--overlay:rgba(0,0,0,.6);--dur:.18s;
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -140,13 +144,17 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
   display:flex;flex-direction:column;gap:10px;max-width:320px;transition:opacity .3s}
 #player .msg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.75);padding:14px 20px;border-radius:10px}
 
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--bg3);border:1px solid var(--line);
-  padding:10px 18px;border-radius:999px;transition:transform .25s;z-index:60;max-width:90vw}
-#toast.on{transform:translateX(-50%) translateY(0)}
-.empty{padding:60px 20px;text-align:center;color:var(--dim)}
-.empty h2{color:var(--text);margin-bottom:8px}
-.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:40px auto}
-@keyframes sp{to{transform:rotate(360deg)}}
+/* Toast: role=status (fel: role=alert), ev. med en knapp som "Ångra" */
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(140px);background:var(--bg3);border:1px solid var(--line);
+  padding:8px 8px 8px 18px;min-height:var(--touch);border-radius:var(--r-pill);transition:transform .25s,visibility 0s .25s;z-index:70;max-width:min(560px,92vw);
+  display:flex;align-items:center;gap:var(--sp-3);visibility:hidden;box-shadow:var(--shadow)}
+#toast span{padding:4px 10px 4px 0}
+#toast.on{transform:translateX(-50%) translateY(0);visibility:visible;transition:transform .25s}
+#toast.err{border-color:var(--err)}
+#toast.err span::before{content:"⚠ ";color:var(--err)}
+.toast-act{background:none;border:0;color:var(--accent);font-weight:700;padding:8px 12px;border-radius:var(--r-pill);min-height:36px;white-space:nowrap}
+.toast-act:hover{background:rgba(255,255,255,.06)}
+body:has(#tabbar:not([hidden])) #toast,body.hasbar #toast{bottom:calc(96px + env(safe-area-inset-bottom))}
 
 @media (max-width:760px){
   #top{padding:8px 14px;gap:10px;flex-wrap:wrap}
@@ -263,10 +271,10 @@ body.hasbar main{padding-bottom:110px}
 #userbtn.upd::after{content:'';position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--accent,#ffc857)}
 dialog.wide{width:min(760px,94vw)}
 .matchgrid{display:grid;gap:8px;max-height:60vh;overflow:auto;margin-top:12px}
-.mcard{display:flex;gap:12px;text-align:left;align-items:flex-start;background:var(--panel2,rgba(255,255,255,.04));border:1px solid transparent;border-radius:10px;padding:8px;color:inherit;cursor:pointer}
-.mcard:hover,.mcard:focus-visible{border-color:var(--accent,#ffc857)}
-.mcard.on{border-color:var(--ok,#4cc38a)}
-.mcard img,.mcard .ph{width:62px;height:93px;object-fit:cover;border-radius:6px;flex:0 0 62px;background:#222}
+.matchgrid .mcard{display:flex;gap:12px;text-align:left;align-items:flex-start;background:var(--panel2,rgba(255,255,255,.04));border:1px solid transparent;border-radius:10px;padding:8px;color:inherit;cursor:pointer}
+.matchgrid .mcard:hover,.matchgrid .mcard:focus-visible{border-color:var(--accent,#ffc857)}
+.matchgrid .mcard.on{border-color:var(--ok,#4cc38a)}
+.matchgrid .mcard img,.matchgrid .mcard .ph{width:62px;height:93px;object-fit:cover;border-radius:6px;flex:0 0 62px;background:#222}
 .pgs{position:absolute;inset:0;pointer-events:none;z-index:2;overflow:hidden}
 .pgs img{position:absolute}
 .sub2{position:absolute;top:7%;left:0;right:0;text-align:center;pointer-events:none;z-index:3}
@@ -424,3 +432,148 @@ td,code{overflow-wrap:anywhere}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .remember{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:14px;color:var(--dim);cursor:pointer;text-align:left}
 .remember input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
+
+
+/* ===================== Komponenter (web/js/ui/, se docs/ui-komponenter.md) ===================== */
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---- Dialog (ui/dialog.js) ---- */
+dialog.dlg{padding:0;border-radius:var(--r-lg);box-shadow:var(--shadow);max-height:calc(100dvh - 32px)}
+dialog.dlg[open]{display:flex;flex-direction:column}
+.dlg-in{display:flex;flex-direction:column;min-height:0;max-height:calc(100dvh - 32px)}
+.dlg-title{font-size:19px;padding:var(--sp-5) var(--sp-5) 0;overflow-wrap:anywhere}
+.dlg-body{padding:var(--sp-2) var(--sp-5) 0;overflow:auto;min-height:0}
+.dlg-body>p:first-child{margin-top:var(--sp-2)}
+.dlg-body:empty{display:none}
+.dlg-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);justify-content:flex-end;padding:var(--sp-4) var(--sp-5) var(--sp-5)}
+.field .hint{margin:var(--sp-1) 0 0;font-size:13px;color:var(--dim)}
+.scrollbox{max-height:50vh;overflow:auto}.scrollbox.tall{max-height:60vh}
+pre.codes{font-size:17px;line-height:1.7;background:var(--bg3);padding:14px;border-radius:var(--r-sm);columns:2}
+@media (prefers-reduced-motion:no-preference){dialog.dlg[open]{animation:dlg-in var(--dur) ease-out}}
+@keyframes dlg-in{from{opacity:0;transform:translateY(8px) scale(.98)}}
+@media (max-width:600px){
+  /* Telefon: dialogen som ett ark nerifrån med knapparna inom tummens räckhåll */
+  dialog.dlg{width:100vw;max-width:100vw;margin:auto 0 0;border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0}
+  .dlg-actions{padding-bottom:calc(var(--sp-5) + env(safe-area-inset-bottom))}
+  .dlg-actions button{flex:1 1 auto;justify-content:center}
+}
+
+/* ---- Tomt läge, fel och laddning (ui/states.js) ---- */
+.state{padding:var(--sp-6) var(--sp-5);text-align:center;color:var(--dim);max-width:560px;margin:0 auto}
+.state.compact{padding:var(--sp-4) var(--sp-2)}
+.state h2{color:var(--text);margin-bottom:var(--sp-2);font-size:20px}
+.state.compact h2{font-size:16px}
+.state p{margin:0 0 var(--sp-2)}
+.state-icon{font-size:40px;line-height:1;margin-bottom:var(--sp-3);opacity:.85}
+.state.compact .state-icon{font-size:26px;margin-bottom:var(--sp-2)}
+.state-act{margin-top:var(--sp-4);display:flex;justify-content:center;gap:var(--sp-2);flex-wrap:wrap}
+.state.error h2{color:var(--text)}
+.state.loading{max-width:none;padding:0;text-align:left}
+.state.loading.inline{padding:var(--sp-4);text-align:center}
+.sk{background:linear-gradient(90deg,var(--bg2) 0,var(--bg3) 40%,var(--bg2) 80%);background-size:300% 100%;border-radius:var(--r-sm);animation:sk 1.4s ease-in-out infinite}
+@keyframes sk{from{background-position:100% 0}to{background-position:-100% 0}}
+.sk-h1{height:30px;width:min(320px,60%);margin-bottom:var(--sp-5)}
+.sk-h2{height:20px;width:min(220px,50%);margin-bottom:var(--sp-3)}
+.sk-line{height:12px;margin-top:9px;width:85%}.sk-line.short{width:55%}
+.sk-card .sk-art{aspect-ratio:2/3;border-radius:var(--r)}
+.sk-card.land .sk-art{aspect-ratio:16/9}
+.sk-hero{display:flex;gap:30px;align-items:flex-end;min-height:360px;padding-top:40px}
+.sk-poster{flex:0 0 210px;aspect-ratio:2/3}
+.sk-hero-text{flex:1}.sk-btns{height:40px;width:min(360px,80%);margin-top:var(--sp-4)}
+.sk-row{display:flex;gap:var(--sp-3);align-items:center;padding:var(--sp-2) 0;border-bottom:1px solid var(--line)}
+.sk-thumb{width:44px;height:44px;flex:none}
+.sk-dots{display:inline-flex;gap:6px}
+.sk-dots i{width:8px;height:8px;border-radius:50%;background:var(--dim);animation:skd 1s ease-in-out infinite}
+.sk-dots i:nth-child(2){animation-delay:.15s}.sk-dots i:nth-child(3){animation-delay:.3s}
+@keyframes skd{50%{opacity:.25;transform:scale(.7)}}
+@media (max-width:760px){.sk-hero{flex-direction:column;align-items:flex-start;min-height:0;gap:18px}.sk-poster{flex:none;width:130px}}
+@media (prefers-reduced-motion:reduce){.sk,.sk-dots i{animation:none!important}}
+
+/* ---- Ikonknappar (ui/buttons.js) ---- */
+.iconbtn{justify-content:center;min-width:34px}
+.iconbtn svg{display:block}
+button[aria-pressed=true].iconbtn{color:var(--accent)}
+
+/* ---- Flikar (ui/tabs.js) ---- */
+.tabs button.tabbtn,.tabs a.tabbtn{background:transparent;display:inline-flex;align-items:center}
+.tabs .tabbtn.on,.tabs .tabbtn[aria-selected=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.tabs .tabbtn:hover{color:var(--text)}
+
+/* ---- Kort med menyknapp (ui/cards.js, ui/cardmenu.js) ---- */
+.card{position:relative}
+.card>.clink{display:block;-webkit-touch-callout:none}
+.card>.clink:focus-visible{outline:none}
+.card>.clink:focus-visible .art{outline:3px solid var(--focus);outline-offset:2px}
+.card:focus-within .art{transform:translateY(-3px)}
+.cmenu{position:absolute;top:6px;left:6px;z-index:2;width:34px;height:34px;border-radius:50%;border:0;padding:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(13,15,20,.78);color:#fff;font-size:20px;font-weight:700;line-height:1;opacity:0;transition:opacity var(--dur);backdrop-filter:blur(6px)}
+.card:hover .cmenu,.card:focus-within .cmenu,.cmenu[aria-expanded=true]{opacity:1}
+.cmenu:hover{background:var(--accent);color:#1a0d08}
+@media (hover:none){.cmenu{opacity:1;width:36px;height:36px}}
+@media (pointer:coarse){.cmenu::after{content:"";position:absolute;inset:-5px}}
+.card .clink{user-select:none;-webkit-user-select:none}
+
+/* ---- Meny och popover (ui/menu.js) ---- */
+.pop{position:fixed;z-index:80;background:var(--bg2);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:auto;outline:none;
+  min-width:220px;max-width:min(340px,calc(100vw - 16px));overscroll-behavior:contain}
+.pop-title{padding:var(--sp-3) var(--sp-4) var(--sp-1);font-size:13px;color:var(--dim);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-list{padding:var(--sp-1)}
+.mi{display:flex;align-items:center;gap:var(--sp-3);width:100%;text-align:left;background:none;border:0;border-radius:var(--r-sm);padding:9px 12px;color:var(--text);
+  min-height:40px;font-size:15px;text-decoration:none;cursor:pointer}
+.mi:hover,.mi:focus{background:var(--bg3);outline:none}
+.mi:focus-visible{box-shadow:inset 0 0 0 2px var(--focus)}
+.mi.danger{color:var(--err)}
+.mi[aria-disabled=true]{opacity:.45;cursor:default}
+.mi-icon{width:20px;text-align:center;flex:none;color:var(--dim)}
+.mi-label{flex:1}
+.mi-hint,.mi-sub{color:var(--dim);font-size:13px}
+.mi-sep{height:1px;background:var(--line);margin:var(--sp-1) var(--sp-2)}
+.pop-back{position:fixed;inset:0;z-index:79;display:none}
+.pop-back.on{display:block;background:var(--overlay)}
+.pop.sheet{left:0!important;right:0;bottom:0;top:auto!important;max-width:none;width:100%;border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0;max-height:80vh;
+  padding-bottom:env(safe-area-inset-bottom)}
+.pop.sheet .pop-title{text-align:center;font-size:15px;color:var(--text);padding-top:var(--sp-4)}
+.pop.sheet::before{content:"";display:block;width:40px;height:4px;border-radius:2px;background:var(--line);margin:var(--sp-2) auto 0}
+.pop.sheet .mi{min-height:var(--touch);font-size:16px}
+@media (prefers-reduced-motion:no-preference){.pop{animation:pop-in .12s ease-out}.pop.sheet{animation:sheet-in .2s ease-out}}
+@keyframes pop-in{from{opacity:0;transform:translateY(-4px)}}
+@keyframes sheet-in{from{transform:translateY(100%)}}
+.pop-body{padding:var(--sp-2) var(--sp-4) var(--sp-4)}
+
+/* ---- Aktivitet (ui/activity.js) ---- */
+.actbtn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:none;color:var(--dim);display:flex;align-items:center;justify-content:center;flex:none;padding:0}
+.actbtn:hover,.actbtn[aria-expanded=true]{color:var(--text);background:var(--bg3)}
+.actbtn svg{overflow:visible}
+.actbtn .act-track{fill:none;stroke:transparent;stroke-width:2.5}
+.actbtn .act-arc{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;transform:rotate(-90deg);transform-origin:14px 14px;transition:stroke-dasharray .4s}
+.actbtn .act-pulse{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.actbtn.busy{color:var(--text)}
+.actbtn.busy .act-track{stroke:var(--line)}
+.actbtn.indet .act-arc{animation:act-spin 1.1s linear infinite}
+@keyframes act-spin{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
+.act-count{position:absolute;top:0;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--accent);color:#1a0d08;font-size:10px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+@media (prefers-reduced-motion:reduce){.actbtn.indet .act-arc{animation:none}}
+.actpanel{width:min(380px,calc(100vw - 16px))}
+.jobgroup h3{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:var(--sp-3) 0 var(--sp-1)}
+.jobs{list-style:none;margin:0;padding:0}
+.job{padding:var(--sp-2) 0;border-bottom:1px solid var(--line)}
+.job:last-child{border-bottom:0}
+.job-head{display:flex;justify-content:space-between;gap:var(--sp-2);align-items:baseline}
+.job-head b{font-weight:600;overflow-wrap:anywhere}
+.job-head span{white-space:nowrap}
+.job-detail{margin-top:2px;overflow-wrap:anywhere}
+.prog.indet i{animation:prog-indet 1.3s ease-in-out infinite}
+@keyframes prog-indet{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+@media (prefers-reduced-motion:reduce){.prog.indet i{animation:none;width:100%!important;opacity:.4}}
+
+/* ---- Pekskärm: minst 44 px stora mål ---- */
+@media (pointer:coarse){
+  .btn,button.primary,button.ghost,button.danger,select{min-height:var(--touch)}
+  .iconbtn{min-width:var(--touch)}
+  .tabs .tabbtn{min-height:var(--touch)}
+  .menu a,.menu button{min-height:var(--touch);display:flex;align-items:center}
+}
+.pop:focus-visible{outline:none}
+.job-meta,.job-detail{color:var(--dim);font-size:13px}
+.job-n{color:var(--dim);font-weight:400}

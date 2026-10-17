@@ -1,5 +1,7 @@
 // Administration – drift: diskutrymme, import från Plex/Jellyfin, DLNA och Prometheus
 import { $, $$, act, api, esc, later, toast } from '../core.js';
+import { confirmDialog } from '../ui/dialog.js';
+import { errorState, loadingState } from '../ui/states.js';
 
 // ---------- Drift: diskutrymme, import från Plex/Jellyfin, DLNA och Prometheus ----------
 const DISK_LEVEL = { ok: ['OK', 'ok-badge'], low: ['Lite plats', 'warn-badge'], critical: ['Nästan fullt', 'warn-badge'], unknown: ['', ''] };
@@ -67,7 +69,7 @@ export async function adminOps() {
   $('#impf').onsubmit = async (e) => {
     e.preventDefault();
     const b = $('#impf button.primary'); b.disabled = true; b.textContent = 'Hämtar…';
-    $('#impres').innerHTML = '<div class="spin"></div>';
+    $('#impres').innerHTML = loadingState({ kind: 'inline', label: 'Hämtar tittarhistorik…' });
     try {
       const P = await api('/import/preview', { method: 'POST', body: { source: src(), url: $('#impu').value, token: $('#impt').value, apiKey: $('#impk').value, user: $('#impjfu').value, pathMap: $('#impm').value } });
       if (!$('#impres')) return;
@@ -89,7 +91,7 @@ export async function adminOps() {
       });
     } catch (er) {
       if (er.aborted) return;
-      if ($('#impres')) $('#impres').innerHTML = `<p class="err">${esc(er.message)}</p>`;
+      if ($('#impres')) $('#impres').innerHTML = errorState(er, { compact: true });
     } finally { b.disabled = false; b.textContent = 'Förhandsvisa'; }
   };
 
@@ -102,11 +104,11 @@ export async function adminOps() {
 
   // Prometheus
   $('#mtnew').onclick = act(async () => {
-    if (O.metrics.enabled && !O.metrics.fromEnv && !confirm('Skapa ny token? Den gamla slutar gälla.')) return;
+    if (O.metrics.enabled && !O.metrics.fromEnv && !await confirmDialog('Skapa ny token? Den gamla slutar gälla.', { okLabel: 'Skapa ny token', danger: true })) return;
     const r = await api('/ops', { method: 'PUT', body: { metricsToken: 'new' } });
     $('#mttok').innerHTML = `<p class="small" style="margin-top:10px">Ny token (visas bara nu – lägg in den i Prometheus):</p><input readonly id="mttokv" style="width:100%">
       <pre class="small muted" style="white-space:pre-wrap">scrape_configs:\n  - job_name: braxhn-tv\n    authorization:\n      credentials: &lt;token&gt;\n    static_configs:\n      - targets: ['${esc(location.host)}']</pre>`;
     $('#mttokv').value = r.token;
   });
-  if ($('#mtoff')) $('#mtoff').onclick = act(async () => { if (!confirm('Stäng av /metrics?')) return; await api('/ops', { method: 'PUT', body: { metricsToken: 'off' } }); toast('Avstängt'); await adminOps(); });
+  if ($('#mtoff')) $('#mtoff').onclick = act(async () => { if (!await confirmDialog('Stäng av /metrics?', { okLabel: 'Stäng av', danger: true })) return; await api('/ops', { method: 'PUT', body: { metricsToken: 'off' } }); toast('Avstängt'); await adminOps(); });
 }
