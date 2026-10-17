@@ -116,3 +116,11 @@ test('fientliga filer: MP4 som utlovar miljontals bilder låser inte servern', a
   assert.equal(await kfm.fastKeyframes(f, 100), null);
   assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
 });
+
+test('hårdvarufel ger en begriplig åtgärd', async () => {
+  const st = await import('../server/stream.js');
+  assert.match(st.hwHint('[h264_nvenc @ 0x1] Cannot load libcuda.so.1'), /--runtime=nvidia/);
+  assert.match(st.hwHint('Driver does not support the required nvenc API version. Required: 12.1 Found: 11.0'), /för gammal/);
+  assert.match(st.hwHint('OpenEncodeSessionEx failed: out of memory (10)'), /samtidiga/);
+  assert.equal(st.hwHint('något helt annat'), null);
+});

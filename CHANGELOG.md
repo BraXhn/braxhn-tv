@@ -1,6 +1,9 @@
 # Ändringar
 
 ## Ej utgiven
+- Snabbare start när filmen ändå måste omkodas (t.ex. vald kvalitet 1080p för en 4K-film): servern väntar inte längre upp till 10 s på nyckelbilder som inte behövs. En film som bakgrundsanalysen redan köat flyttas först i kön när någon trycker Spela
+- Omkodning av 4K med processorn använder snabbare inställningar (x264 superfast, enklare skalning)
+- Fungerar inte hårdvaruomkodningen visar loggen och Administration → Säkerhet nu en konkret åtgärd (t.ex. saknad --runtime=nvidia, för gammal drivrutin, för många samtidiga kodningar)
 - Rättat: appikonerna (hemskärmen på telefonen, iPhone/Apple TV/Android-apparna) var tomma/svarta – de är omritade. Ta bort webbappen från hemskärmen och lägg till den igen för att få den nya ikonen
 - Avsnitt utan nummer i filnamnet matchas mot TMDB på titel (över alla säsonger, även specialavsnitt) i stället för att få fel avsnitts namn; titlar som skrivits över återställs vid nästa skanning. Serier som inte hittades försöker igen när avsnitt tillkommer och en gång i veckan
 - Snabbare start: stickproven som kontrollerar filens index körs samtidigt, och spelaren väntar högst 10 s på nyckelbilder. Loggen visar för varje uppspelning vad som valdes, hur lång tid beslutet tog, när första segmentet var klart och om servern inte hinner med
