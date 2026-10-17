@@ -14,3 +14,16 @@ export const ICON = {
   mini: svg('<path d="M3 5h18v14H3zm2 2v10h14V7zm6 4h7v5h-7z"/>'),
   expand: svg('<path d="M4 4h7v2H7.4l4.3 4.3-1.4 1.4L6 7.4V11H4zm16 16h-7v-2h3.6l-4.3-4.3 1.4-1.4 4.3 4.3V13h2z"/>'),
 };
+// Ikoner för sidomenyn (Hem och biblioteken). Storleken sätts i CSS.
+const rail = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+export const RAIL_ICON = {
+  home: rail('<path d="M12 3 3 10v11h6v-6h6v6h6V10z"/>'),
+  movie: rail('<path d="M4 4h2l2 3h3L9 4h3l2 3h3l-2-3h5v16H4zm2 5v9h12V9z"/>'),
+  show: rail('<path d="M3 6h18v12H3zm2 2v8h14V8zm4 12h6v2H9zM8.6 2.6 12 5l3.4-2.4 1.1 1.6L12 7.4 7.5 4.2z"/>'),
+  kids: rail('<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM8.5 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM7.5 14a4.8 4.8 0 0 0 9 0z"/>'),
+  music: rail('<path d="M9 3v11.3A3.5 3.5 0 1 0 11 17.5V8h6V3z"/>'),
+  audiobook: rail('<path d="M5 3h11a3 3 0 0 1 3 3v15H8a3 3 0 0 1-3-3zm2 2v13a1 1 0 0 0 1 1h9V6a1 1 0 0 0-1-1zm2 2h6v2H9z"/>'),
+  podcast: rail('<path d="M12 2a7 7 0 0 1 4.5 12.4l-1.3-1.5a5 5 0 1 0-6.4 0l-1.3 1.5A7 7 0 0 1 12 2zm0 4a3 3 0 0 1 1.5 5.6V22h-3V11.6A3 3 0 0 1 12 6z"/>'),
+  live: rail('<path d="M3 7h18v13H3zm2 2v9h14V9zM7.4 2.6 12 5.5l4.6-2.9 1 1.7L13.9 7h-3.8L6.4 4.3z"/><circle cx="12" cy="13.5" r="2.5"/>'),
+  streaming: rail('<path d="M3 5h18v11H3zm2 2v7h14V7zm5 1.5 4.5 2.5-4.5 2.5zM7 18h10v2H7z"/>'),
+};

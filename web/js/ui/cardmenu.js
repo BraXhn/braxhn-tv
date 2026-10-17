@@ -5,7 +5,7 @@ import { $$, act, api, fmtTime, me, sxe, toast, toastErr } from '../core.js';
 import { play, startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { editItem, matchItem, refreshMeta } from '../views/item.js';
-import { card, cardItem, setCardItem } from './cards.js';
+import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
 import { closeMenu, contextMenu, openMenu } from './menu.js';
 
 /** Ritar om alla kort för titeln (samma titel kan finnas i flera rader) och behåller fokus */
@@ -116,12 +116,41 @@ export function cardActions(it, st, el) {
   ];
 }
 
+/** Menyns val för ett säsongskort (nya avsnitt i en säsong) */
+export function seasonActions(g, el) {
+  const admin = !!me?.adminHere, sn = g.season === 0 ? 'specialavsnitten' : `säsong ${g.season}`;
+  return [
+    { icon: '▶', label: g.next ? `${g.next.position > 0 ? 'Fortsätt' : 'Spela'} S${g.season} · A${g.next.episode}` : '', hidden: !g.next,
+      onSelect: () => startPlay(null, g.next.id, g.next.position || 0) },
+    'separator',
+    { icon: '✓', label: `Markera ${sn} som sedd`, hidden: !g.unwatched, onSelect: act(async () => {
+      await api(`/items/${g.show}/watched?season=${g.season}`, { method: 'POST', body: { watched: true }, bg: true });
+      Object.assign(g, { unwatched: 0, next: null });
+      const tmp = document.createElement('div'); tmp.innerHTML = seasonCard(g);
+      const had = el.contains(document.activeElement); const n = tmp.firstElementChild; el.replaceWith(n);
+      if (had) n.querySelector('.clink')?.focus({ preventScroll: true });
+      toast(`${g.showTitle}: ${sn} är markerad som sedd`);
+    }) },
+    { icon: '☰', label: `Visa ${sn}`, href: `#/item/${+g.show}/${+g.season}` },
+    { icon: 'ℹ', label: 'Gå till serien', href: `#/item/${+g.show}` },
+    'separator',
+    { icon: '✎', label: 'Redigera serien…', hidden: !admin, onSelect: act(async () => editItem(await api('/items/' + g.show, { bg: true }))) },
+  ];
+}
+
 let opening = 0;
 /** Öppnar menyn för ett kort. point = muspekarens läge (högerklick/långtryck), annars vid ⋮-knappen. */
 export async function openCardMenu(el, point = null) {
-  const it = cardItem(el.dataset.id);
   const btn = el.querySelector('.cmenu');
-  if (!it || !btn) return;
+  if (!btn) return;
+  if (el.dataset.season != null) {
+    const g = seasonItem(el.dataset.show, el.dataset.season);
+    if (!g) return;
+    const name = `${g.showTitle} – ${g.season === 0 ? 'Specialavsnitt' : 'Säsong ' + g.season}`;
+    return openMenu(btn, seasonActions(g, el), { point, title: name, label: `Åtgärder för ${name}` });
+  }
+  const it = cardItem(el.dataset.id);
+  if (!it) return;
   const seq = ++opening;
   let st;
   try { st = await api(`/items/${it.id}/state`, { bg: true }); }
@@ -131,13 +160,30 @@ export async function openCardMenu(el, point = null) {
   openMenu(btn, cardActions(it, st, el), { point, title: name, label: `Åtgärder för ${name}` });
 }
 
-/** Kopplar ⋮-knapparna och snabbmenyn för alla kort (delegerat – fungerar även för kort som ritas senare) */
+/** ▶ på kortet: spelar direkt – filmer och avsnitt där man slutade, serier nästa avsnitt */
+async function playCard(b) {
+  const it = cardItem(b.dataset.cplay);
+  if (b.dataset.pos != null || !it) return startPlay(b, +b.dataset.cplay, +b.dataset.pos || 0);
+  if (it.kind !== 'show') return startPlay(b, it.id, it.position > 30 ? it.position : 0);
+  b.disabled = true;
+  try {
+    const st = await api(`/items/${it.id}/state`, { bg: true });
+    if (!st.next) return toast('Inga avsnitt att spela');
+    await play(st.next.id, st.next.position || 0);
+  } catch (e) { toastErr(e); } finally { b.disabled = false; }
+}
+
+/** Kopplar knapparna på korten (▶ ✎ ⋮) och snabbmenyn för alla kort (delegerat – fungerar även för kort som ritas senare) */
 export function initCardMenus() {
   document.addEventListener('click', (e) => {
+    const p = e.target.closest?.('.cplay');
+    if (p) { e.preventDefault(); e.stopPropagation(); return playCard(p); }
+    const ed = e.target.closest?.('.cedit');
+    if (ed) { e.preventDefault(); e.stopPropagation(); return act(async () => editItem(await api('/items/' + ed.dataset.cedit, { bg: true })))(); }
     const b = e.target.closest?.('.cmenu'); if (!b) return;
     e.preventDefault(); e.stopPropagation();
     if (b.getAttribute('aria-expanded') === 'true') return closeMenu();
     openCardMenu(b.closest('.card'));
   });
-  contextMenu(document, '.card[data-id]', (el, point) => { if (el.querySelector('.cmenu')) openCardMenu(el, point); });
+  contextMenu(document, '.card[data-id], .card[data-season]', (el, point) => { if (el.querySelector('.cmenu')) openCardMenu(el, point); });
 }

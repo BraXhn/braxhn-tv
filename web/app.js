@@ -5,6 +5,7 @@ import { me } from './js/core.js';
 import { boot, route } from './js/router.js';
 import { initCast } from './js/player/cast.js';
 import { initCardMenus } from './js/ui/cardmenu.js';
+import { initCardSize, initShelves } from './js/ui/shelves.js';
 import './js/player/overlay.js';
 import './js/player/live.js';
 import './js/player/video.js';
@@ -27,6 +28,8 @@ import './js/views/music.js';
 
 initCast();
 initCardMenus();
+initShelves();
+initCardSize();
 
 (async () => {
   try { await boot(); } catch {}

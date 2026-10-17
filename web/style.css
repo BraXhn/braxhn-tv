@@ -1,42 +1,83 @@
 :root{
-  --bg:#0d0f14;--bg2:#151821;--bg3:#1e2230;--line:#2a2f40;--text:#e9ebf1;--dim:#9aa1b4;
+  --bg:#1b1c1f;--bg2:#232427;--bg3:#2e2f33;--line:#38393e;--text:#ececec;--dim:#a3a3a3;--chrome:#141517;
   --accent:#ff6b4a;--accent2:#ff8a6e;--ok:#4cc38a;--err:#ff5d6c;--warn:#ffc857;--r:10px;
   /* Designtokens för komponenterna (se docs/ui-komponenter.md) */
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:40px;
   --r-sm:8px;--r-lg:14px;--r-pill:999px;--focus:var(--accent);--touch:44px;
   --shadow:0 12px 40px rgba(0,0,0,.5);--overlay:rgba(0,0,0,.6);--dur:.18s;
+  /* Skalet: menyraden, sidomenyn och kortstorleken (reglaget i menyraden ändrar --card-w) */
+  --top-h:56px;--rail-w:64px;--card-w:125px;
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);min-height:100%}
-body{font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 h1,h2,h3{margin:0;line-height:1.2}
 [hidden]{display:none!important}
 
-/* Header */
-#top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:20px;padding:10px 28px;
-  background:rgba(13,15,20,.88);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:19px;letter-spacing:.2px}
+/* Menyraden överst: ☰, logga och rubrik till vänster, sidor i mitten, sök/kortstorlek/aktivitet/användare till höger (som Plex) */
+#top{position:sticky;top:0;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px;
+  height:var(--top-h);padding:0 16px 0 12px;background:var(--chrome);border-bottom:1px solid rgba(0,0,0,.4)}
+.tleft,.tright{display:flex;align-items:center;gap:10px;min-width:0;height:100%}
+.tright{justify-content:flex-end}
+.tbtn{width:40px;height:40px;border-radius:50%;border:0;background:none;color:var(--dim);display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.tbtn:hover{color:var(--text);background:var(--bg3)}
+.brand{display:flex;align-items:center;flex:none;font-weight:700}
 .brand img{display:block}
-.brand .logo-full{height:36px;width:auto}
-.brand .logo-mark{display:none;width:32px;height:32px}
-#libnav{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
-#libnav a{padding:6px 12px;border-radius:999px;color:var(--dim);white-space:nowrap}
-#libnav a:hover{color:var(--text)}
-#libnav a.on{background:var(--bg3);color:var(--text)}
-.search{margin-left:auto;flex:0 1 300px}
-.search input{width:100%;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--bg2)}
-.search input:focus{outline:2px solid var(--accent);outline-offset:-1px}
-.usermenu{position:relative}
+.brand .logo-full{height:28px;width:auto}
+.brand .logo-mark{display:none;width:30px;height:30px}
+#crumb{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:12px;border-left:1px solid var(--line)}
+#crumb:empty{display:none}
+#toptabs{display:flex;gap:2px;height:100%}
+#toptabs a{display:flex;align-items:center;padding:0 12px;color:var(--dim);font-size:14px;font-weight:600;white-space:nowrap;
+  border-top:3px solid transparent;border-bottom:3px solid transparent}
+#toptabs a:hover{color:var(--text)}
+#toptabs a.on{color:var(--text);border-bottom-color:var(--accent)}
+#toptabs a:focus-visible{outline-offset:-3px}
+.search{position:relative;flex:0 1 240px;min-width:110px}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none}
+.search input{width:100%;padding:7px 12px 7px 34px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--bg3);font-size:14px}
+.search input:focus{outline:2px solid var(--accent);outline-offset:-1px;background:var(--bg2)}
+.cardsize{display:flex;align-items:center;gap:6px;margin:0;color:var(--dim);flex:none;cursor:pointer}
+.cardsize input{width:84px;padding:0;margin:0;accent-color:var(--accent);cursor:pointer}
+.usermenu{position:relative;flex:none}
+#userbtn{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border:0;border-radius:var(--r-pill);font-size:14px}
+#userbtn:hover{background:var(--bg3)}
+#userbtn .avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#1a0d08;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none}
+#userbtn .uname{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#userbtn .caret{color:var(--dim);font-size:11px}
+@media (max-width:1180px){#userbtn .uname,#userbtn .caret{display:none}#userbtn{padding:4px}.search{flex-basis:180px}}
+@media (max-width:980px){#toptabs a{padding:0 8px}.cardsize input{width:64px}}
+
+/* Sidomenyn till vänster: ikoner, namnen syns när den är utfälld (☰). Aktivt val i accentfärg med en stapel. */
+html.rail-open{--rail-w:220px}
+#rail{position:fixed;left:0;top:var(--top-h);bottom:0;z-index:25;width:var(--rail-w);background:var(--chrome);display:flex;flex-direction:column;gap:2px;
+  padding:8px 0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+#top[hidden] ~ #rail{display:none}
+#libnav{display:flex;flex-direction:column;gap:2px}
+.ri{position:relative;display:flex;align-items:center;gap:18px;width:100%;height:44px;padding:0 20px;color:var(--dim);background:none;border:0;border-radius:0;
+  text-align:left;font-size:14px;font-weight:600;white-space:nowrap}
+.ri svg{width:24px;height:24px;fill:currentColor;flex:none}
+.ri:hover{color:var(--text);background:var(--bg2)}
+.ri.on{color:var(--accent);background:var(--bg2)}
+.ri.on::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.ri .lbl{overflow:hidden;text-overflow:ellipsis}
+.ri:focus-visible{outline-offset:-3px}
+@media (min-width:761px){
+  html:not(.rail-open) #rail .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  #top:not([hidden]) ~ main{margin-left:var(--rail-w)}
+  #top:not([hidden]) ~ #mbar,#top:not([hidden]) ~ #player.mini{left:var(--rail-w)}
+}
+@media (min-width:761px) and (prefers-reduced-motion:no-preference){#rail,main{transition:width var(--dur),margin-left var(--dur)}}
 .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--line);
   border-radius:var(--r);padding:6px;min-width:180px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .menu a,.menu button{display:block;width:100%;text-align:left;padding:8px 12px;border-radius:6px;background:none;border:0}
 .menu a:hover,.menu button:hover{background:var(--bg3)}
 
-main{padding:24px 28px 60px}
+main{padding:20px 32px 60px;--cw:var(--card-w)}
 
 /* Buttons & forms */
 .btn,button.primary,button.ghost,button.danger{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;
@@ -63,39 +104,47 @@ label{display:block;font-size:13px;color:var(--dim);margin:12px 0 5px}
 .auth p{text-align:center;color:var(--dim);margin:0 0 12px}
 .auth button{width:100%;justify-content:center;margin-top:18px}
 
-/* Rows & grid */
-.section{margin-bottom:34px}
-.section h2{font-size:19px;margin-bottom:12px;display:flex;align-items:baseline;gap:12px}
-.section h2 a{font-size:13px;color:var(--dim);font-weight:500}
-.shelf{display:grid;grid-auto-flow:column;grid-auto-columns:150px;gap:16px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin}
-.shelf.wide{grid-auto-columns:280px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:22px 16px}
-.card{display:block;min-width:0}
-.card .art{position:relative;aspect-ratio:2/3;border-radius:var(--r);overflow:hidden;background:var(--bg3);
-  transition:transform .15s, box-shadow .15s}
+/* Hyllor och rutnät: en rad per hylla som skrollar i sidled (‹ › från ui/shelves.js), kortbredd från reglaget (--cw) */
+.section{margin-bottom:26px;position:relative}
+.section h2{font-size:18px;font-weight:700;margin-bottom:8px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.section.has-nav h2{padding-right:76px}
+.section h2 a{font-size:13px;color:var(--dim);font-weight:600}
+.section h2 a:hover{color:var(--text)}
+.shelf-nav{position:absolute;right:0;top:-3px;display:flex;gap:6px}
+.snav{width:30px;height:30px;border-radius:50%;border:0;background:var(--bg3);color:var(--text);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0 0 3px}
+.snav:hover:not(:disabled){background:var(--accent);color:#1a0d08}
+.snav:disabled{opacity:.3;cursor:default}
+.shelf{display:grid;grid-auto-flow:column;grid-auto-columns:var(--cw);gap:14px;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;
+  scroll-padding-inline:4px;padding:4px 4px 8px;margin:0 -4px;scrollbar-width:none}
+.shelf::-webkit-scrollbar{display:none}
+.shelf>*{scroll-snap-align:start}
+.shelf.wide{grid-auto-columns:calc(var(--cw) * 1.9)}
+.sk-shelf{overflow:hidden}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--cw),1fr));gap:20px 14px}
+.card{display:block;min-width:0;font-size:13px}
+.card .art{position:relative;aspect-ratio:2/3;border-radius:4px;overflow:hidden;background:var(--bg3);transition:box-shadow var(--dur)}
 .card.land .art{aspect-ratio:16/9}
-.card:hover .art{transform:translateY(-3px);box-shadow:0 0 0 2px var(--accent)}
+.card:hover .art,.card:focus-within .art{box-shadow:0 0 0 2px var(--accent)}
 .art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .ep .card .t,.ep .card .s{display:none}
-.art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;text-align:center;
-  font-weight:700;font-size:17px;background:linear-gradient(150deg,var(--h1),var(--h2));color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.4)}
-.art .bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(0,0,0,.5)}
+.art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:10px;text-align:center;overflow:hidden;overflow-wrap:anywhere;
+  font-weight:700;font-size:14px;line-height:1.25;background:linear-gradient(150deg,var(--h1),var(--h2));color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+.art .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,.6)}
 .art .bar i{display:block;height:100%;background:var(--accent)}
-.art .badge{position:absolute;top:7px;right:7px;background:var(--accent);color:#1a0d08;font-size:12px;font-weight:700;
-  border-radius:999px;min-width:22px;height:22px;padding:0 6px;display:flex;align-items:center;justify-content:center}
-.art .seen{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:var(--ok);
-  display:flex;align-items:center;justify-content:center}
-.card .t{margin-top:7px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .s{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.art .badge,.art .seen{position:absolute;top:0;right:0;min-width:22px;height:22px;padding:0 6px;border-radius:0 0 0 4px;background:rgba(0,0,0,.78);color:#fff;
+  font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.art .seen{color:var(--accent);font-size:13px}
+.card .t{margin-top:6px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .s{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
-.toolbar h1{font-size:26px;margin-right:auto}
+.toolbar h1{font-size:22px;margin-right:auto}
 .toolbar select{width:auto}
 
 /* Detail */
-.hero{position:relative;margin:-24px -28px 0;padding:60px 28px 28px;min-height:420px;display:flex;align-items:flex-end;overflow:hidden}
+.hero{position:relative;margin:-20px -32px 0;padding:60px 32px 28px;min-height:420px;display:flex;align-items:flex-end;overflow:hidden}
 .hero .bd{position:absolute;inset:0;background-size:cover;background-position:center top;opacity:.45}
-.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 4%,rgba(13,15,20,.55) 55%,rgba(13,15,20,.3)),
-  linear-gradient(90deg,rgba(13,15,20,.9),transparent 70%)}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 4%,rgba(27,28,31,.55) 55%,rgba(27,28,31,.3)),
+  linear-gradient(90deg,rgba(27,28,31,.9),transparent 70%)}
 .hero .in{position:relative;z-index:1;display:flex;gap:30px;align-items:flex-end;width:100%}
 .hero .poster{flex:0 0 210px}
 .hero h1{font-size:36px;margin-bottom:6px}
@@ -157,23 +206,31 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 body:has(#tabbar:not([hidden])) #toast,body.hasbar #toast{bottom:calc(96px + env(safe-area-inset-bottom))}
 
 @media (max-width:760px){
-  #top{padding:8px 14px;gap:10px;flex-wrap:wrap}
+  /* Telefon: logga, sök och användare överst; biblioteken som en rad med knappar under; flikmenyn längst ner */
+  #top{display:flex;height:auto;padding:8px 12px;gap:8px}
+  #railbtn,#toptabs,#crumb,.cardsize,#userbtn .uname,#userbtn .caret{display:none}
   #top .brand .logo-full{display:none}
   #top .brand .logo-mark{display:block}
-  #libnav{order:3;width:100%}
-  .search{flex:1}
-  main{padding:16px 14px 50px}
-  .hero{margin:-16px -14px 0;padding:40px 14px 20px;min-height:0}
+  .tright{flex:1}
+  .search{flex:1;min-width:0}
+  #rail{position:static;width:auto;flex-direction:row;gap:6px;padding:8px 12px;overflow-x:auto;background:var(--bg)}
+  #libnav{flex-direction:row;gap:6px}
+  .ri{width:auto;height:34px;padding:0 12px;gap:6px;border-radius:var(--r-pill);background:var(--bg2);font-size:13px;flex:none}
+  .ri svg{width:18px;height:18px}
+  .ri.on{background:var(--bg3)}
+  .ri.on::before{display:none}
+  main{padding:12px 14px 50px;--cw:108px}
+  .hero{margin:-12px -14px 0;padding:40px 14px 20px;min-height:0}
   .hero .in{flex-direction:column;align-items:flex-start;gap:18px}
   .hero .poster{flex:none;width:130px}
   .hero h1{font-size:26px}
-  .shelf{grid-auto-columns:120px}.shelf.wide{grid-auto-columns:220px}
-  .grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:16px 10px}
+  .shelf{gap:10px}
+  .grid{gap:16px 10px}
   .ep{flex-direction:column}.ep .card{flex:none;width:100%}
   .panel{padding:16px}
 }
 #player .skip{position:absolute;right:28px;bottom:96px;padding:12px 20px;border-radius:10px;border:2px solid #fff;
-  background:rgba(13,15,20,.85);color:#fff;font-weight:700;font-size:16px;transition:opacity .3s}
+  background:rgba(27,28,31,.85);color:#fff;font-weight:700;font-size:16px;transition:opacity .3s}
 #player .skip:hover{background:var(--accent);border-color:var(--accent);color:#1a0d08}
 #player .small{font-size:12px}
 #player #pmode{font-size:12px;color:#ccd;text-shadow:0 1px 2px #000}
@@ -230,7 +287,7 @@ tr.warnrow td{background:rgba(255,93,108,.06)}
 .tabbtn.on{background:var(--text);color:var(--bg);border-color:var(--text)}
 .plpick{display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
 .plpick button{justify-content:space-between}
-#mbar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(21,24,33,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+#mbar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(30,31,34,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);
   display:grid;grid-template-columns:1fr 2fr 1fr;gap:16px;align-items:center;padding:10px 20px}
 body.hasbar main{padding-bottom:110px}
 #mbar .mleft{display:flex;gap:12px;align-items:center;min-width:0}
@@ -248,7 +305,7 @@ body.hasbar main{padding-bottom:110px}
 /* Lyssning: sovtimer, låttext och smarta listor */
 #mbar #msleep.on,#mbar #mlyr.on{border-color:var(--accent);color:var(--accent)}
 #lyrics{position:fixed;right:20px;bottom:96px;z-index:39;width:min(420px,calc(100vw - 40px));max-height:min(60vh,560px);display:flex;flex-direction:column;
-  background:rgba(21,24,33,.97);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  background:rgba(30,31,34,.97);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 #lyrics .lyhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
 #lyrics .lyhead b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #lybody{overflow:auto;padding:14px 16px 40px;position:relative}
@@ -264,7 +321,7 @@ body.hasbar main{padding-bottom:110px}
   .mhero{flex-direction:column;align-items:flex-start}
   .cover.big{width:160px;height:160px;flex:none}
 }
-#player .partybox{position:absolute;right:18px;top:64px;width:320px;background:rgba(21,24,33,.95);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+#player .partybox{position:absolute;right:18px;top:64px;width:320px;background:rgba(30,31,34,.95);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
 #player .pchat{max-height:180px;overflow:auto;font-size:13px;display:flex;flex-direction:column;gap:3px}
 #player .partybox input{font-size:13px;padding:6px 10px}
 #userbtn.upd{position:relative}
@@ -324,7 +381,7 @@ dialog.wide{width:min(760px,94vw)}
 #player .pbar .liveind{background:rgba(20,22,30,.85);border:1px solid #fff3;color:#fff;font-weight:700}
 #player .pbar .liveind.on{background:#c62828;border-color:#c62828}
 /* Rollista och personsidor */
-.shelf.people{grid-auto-columns:112px}
+.shelf.people{grid-auto-columns:calc(var(--cw) * .9)}
 .pcard .art{aspect-ratio:1;border-radius:50%}
 .pcard .art .ph{font-size:26px}
 .pcard .t,.pcard .s{text-align:center}
@@ -400,12 +457,13 @@ body.hasmini main{padding-bottom:100px}
   body.hasmini main{padding-bottom:80px}
 }
 /* ---- Installerad som app på telefonen ---- */
-html.standalone #top{padding-top:calc(10px + env(safe-area-inset-top))}
+html.standalone #top{padding-top:env(safe-area-inset-top);height:calc(var(--top-h) + env(safe-area-inset-top))}
+@media (max-width:760px){html.standalone #top{padding-top:calc(8px + env(safe-area-inset-top));height:auto}}
 #player .pbar{padding-top:calc(14px + env(safe-area-inset-top))}
 #player .crow{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
 #tabbar{display:none}
 @media (max-width:760px){
-  #tabbar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;background:rgba(14,16,24,.97);backdrop-filter:blur(10px);
+  #tabbar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;background:rgba(20,21,23,.97);backdrop-filter:blur(10px);
     border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
   #tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--dim);text-decoration:none;padding:4px 0}
   #tabbar a svg{width:24px;height:24px;fill:currentColor}
@@ -427,7 +485,7 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,[t
 td,code{overflow-wrap:anywhere}
 @media (max-width:700px){main table{display:block;overflow-x:auto}}
 /* Långa bibliotek: kort utanför skärmen ritas inte förrän man skrollar dit */
-.grid>.card{content-visibility:auto;contain-intrinsic-size:auto 150px auto 280px}
+.grid>.card{content-visibility:auto;contain-intrinsic-size:auto var(--cw) auto calc(var(--cw) * 1.5 + 60px)}
 /* Mindre rörelse för den som valt det i systemet */
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .remember{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:14px;color:var(--dim);cursor:pointer;text-align:left}
@@ -499,17 +557,26 @@ button[aria-pressed=true].iconbtn{color:var(--accent)}
 .tabs .tabbtn.on,.tabs .tabbtn[aria-selected=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
 .tabs .tabbtn:hover{color:var(--text)}
 
-/* ---- Kort med menyknapp (ui/cards.js, ui/cardmenu.js) ---- */
+/* ---- Kort med knappar (ui/cards.js, ui/cardmenu.js): ▶ i mitten, ✎ nere till vänster, ⋮ nere till höger ---- */
 .card{position:relative}
 .card>.clink{display:block;-webkit-touch-callout:none}
 .card>.clink:focus-visible{outline:none}
 .card>.clink:focus-visible .art{outline:3px solid var(--focus);outline-offset:2px}
-.card:focus-within .art{transform:translateY(-3px)}
-.cmenu{position:absolute;top:6px;left:6px;z-index:2;width:34px;height:34px;border-radius:50%;border:0;padding:0;display:flex;align-items:center;justify-content:center;
-  background:rgba(13,15,20,.78);color:#fff;font-size:20px;font-weight:700;line-height:1;opacity:0;transition:opacity var(--dur);backdrop-filter:blur(6px)}
-.card:hover .cmenu,.card:focus-within .cmenu,.cmenu[aria-expanded=true]{opacity:1}
-.cmenu:hover{background:var(--accent);color:#1a0d08}
-@media (hover:none){.cmenu{opacity:1;width:36px;height:36px}}
+.card .art::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.28);opacity:0;transition:opacity var(--dur);pointer-events:none}
+.card:hover .art::after,.card:focus-within .art::after{opacity:1}
+.card .ov{position:absolute;left:0;right:0;top:0;aspect-ratio:2/3;pointer-events:none;z-index:2}
+.card.land .ov{aspect-ratio:16/9}
+.ov>button{position:absolute;pointer-events:auto;border:0;padding:0;display:flex;align-items:center;justify-content:center;color:#fff;
+  opacity:0;transition:opacity var(--dur),background var(--dur)}
+.card:hover .ov>button,.card:focus-within .ov>button,.ov>.cmenu[aria-expanded=true]{opacity:1}
+.cplay{left:50%;top:50%;transform:translate(-50%,-50%);width:clamp(32px,38%,52px);aspect-ratio:1;border-radius:50%;background:rgba(0,0,0,.62)}
+.cplay svg{width:52%;height:52%}
+.cmenu,.cedit{bottom:5px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.62);font-size:16px;font-weight:700;line-height:1}
+.cmenu{right:5px;font-size:19px}
+.cedit{left:5px}
+.ov>button:hover{background:var(--accent);color:#1a0d08}
+.ov>button:focus-visible{opacity:1;outline-offset:1px}
+@media (hover:none){.cplay,.cedit{display:none!important}.cmenu{opacity:1!important;width:34px;height:34px}}
 @media (pointer:coarse){.cmenu::after{content:"";position:absolute;inset:-5px}}
 .card .clink{user-select:none;-webkit-user-select:none}
 
@@ -577,3 +644,5 @@ button[aria-pressed=true].iconbtn{color:var(--accent)}
 .pop:focus-visible{outline:none}
 .job-meta,.job-detail{color:var(--dim);font-size:13px}
 .job-n{color:var(--dim);font-weight:400}
+.hero .card .art::after{display:none}
+@media (hover:none) and (max-width:760px){.shelf-nav{display:none}.section.has-nav h2{padding-right:0}}

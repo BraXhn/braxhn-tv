@@ -1,6 +1,6 @@
 // Routing och appens skal: inloggning vid start (boot), route() med navigeringsgeneration, bibliotekslänkar,
 // användarmenyn, sökfältet, flikmenyn och installation som app
-import { $, $$, api, esc, leaveFns, libs, main, me, nextRoute, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
+import { $, $$, api, esc, leaveFns, store, libs, main, me, nextRoute, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
 import { stopAudio } from './audio.js';
 import { closeLive, closeRec } from './player/live.js';
 import { P, closeAllPlayers } from './player/video.js';
@@ -9,12 +9,41 @@ import { fillWatch } from './views/streaming.js';
 import { openDialog } from './ui/dialog.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
 import { startActivity, stopActivity } from './ui/activity.js';
+import { RAIL_ICON } from './ui/icons.js';
+import { openMenu } from './ui/menu.js';
 
 // ---------- routing ----------
+const LIB_PATH = { music: 'music', audiobook: 'books' };
+const railItem = (href, icon, label) => `<a class="ri" href="${href}" title="${esc(label)}">${RAIL_ICON[icon] || RAIL_ICON.movie}<span class="lbl">${esc(label)}</span></a>`;
+const libIcon = (l) => /barn|kids|junior/i.test(l.name) && (l.type === 'movie' || l.type === 'show') ? 'kids' : l.type;
 export async function loadLibs() {
   setLibs(await api('/libraries'));
-  $('#libnav').innerHTML = `<a href="#/">Hem</a>` + libs.map(l => `<a href="#/${{ music: 'music', audiobook: 'books' }[l.type] || 'lib'}/${l.id}">${esc(l.name)}</a>`).join('')
-    + (me?.liveTv ? '<a href="#/live">Live-TV</a>' : '') + (me?.streaming ? '<a href="#/streaming">Strömmande</a>' : '') + (!me?.kid ? '<a href="#/podcasts">Poddar</a>' : '');
+  // Sidomenyn: Hem, ett val per bibliotek och övriga delar (ikoner, namnen syns när menyn är utfälld)
+  $('#libnav').innerHTML = railItem('#/', 'home', 'Hem') + libs.map(l => railItem(`#/${LIB_PATH[l.type] || 'lib'}/${+l.id}`, libIcon(l), l.name)).join('')
+    + (me?.liveTv ? railItem('#/live', 'live', 'Live-TV') : '') + (me?.streaming ? railItem('#/streaming', 'streaming', 'Strömmande') : '')
+    + (!me?.kid ? railItem('#/podcasts', 'podcast', 'Poddar') : '');
+  markNav();
+}
+// Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
+const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
+  account: 'Mitt konto', admin: 'Administration', stats: 'Statistik', requests: 'Önskningar', wrapped: 'Årssammanfattning', collection: 'Samling', person: 'Person' };
+/** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
+function markNav() {
+  const h = location.hash.slice(2) || '';
+  const [name, arg] = h.split('/');
+  for (const a of $$('#libnav a')) {
+    const hr = a.getAttribute('href');
+    const on = hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/');
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  for (const a of $$('#toptabs a')) {
+    const on = a.dataset.top === (name || '');
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  const lib = ['lib', 'music', 'books'].includes(name) ? libs.find(l => String(l.id) === arg) : null;
+  $('#crumb').textContent = lib ? lib.name : CRUMB[name] ?? '';
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k) { try { sessionStorage.setItem(k, '1'); } catch {} }
@@ -23,7 +52,7 @@ export async function boot() {
   setLogin(st);
   if (!me) return false;
   $('#top').hidden = false;
-  $('#userbtn').textContent = (me.kid ? '🧸 ' : '') + me.name + ' ▾';
+  $('#userbtn').innerHTML = `<span class="avatar" aria-hidden="true">${me.kid ? '🧸' : esc((me.name || '?').slice(0, 1).toUpperCase())}</span><span class="uname">${esc(me.name)}</span><span class="caret" aria-hidden="true">▾</span>`;
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
   $$('[data-requests]').forEach(e => e.hidden = me.kid);
@@ -50,12 +79,13 @@ export async function route() {
   // (då skulle framsteget sparas på fel profil, och en barnprofil kunna titta vidare)
   if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
   else if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
-  $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
+  markNav();
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
   // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
   $('#top').hidden = !me || name === 'login' || name === 'profiles';
   $('#tabbar').hidden = $('#top').hidden;
+  $('#rail').hidden = $('#top').hidden;
   $$('#tabbar [data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === (name || '')));
   main.innerHTML = loadingState({ kind: SKELETON[name || 'home'] || 'list' });
   main.setAttribute('aria-busy', 'true');
@@ -96,3 +126,26 @@ $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.s
 $('#logout').onclick = async () => { stopAudio(); stopActivity(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
 let qt;
 $('#q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { const q = e.target.value.trim(); location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/'; }, 300); };
+
+// ---------- sidomenyn ----------
+// Ikoner som standard; ☰ fäller ut menyn med namnen (sparas i webbläsaren)
+function setRail(open) {
+  document.documentElement.classList.toggle('rail-open', open);
+  $('#railbtn').setAttribute('aria-expanded', String(open));
+  $('#railbtn').setAttribute('aria-label', open ? 'Dölj namnen i sidomenyn' : 'Visa namnen i sidomenyn');
+}
+setRail(!!store.get('rail', false));
+$('#railbtn').onclick = () => { const open = !document.documentElement.classList.contains('rail-open'); store.set('rail', open); setRail(open); };
+// Mer: det som inte får plats i sidomenyn
+$('#railmore').onclick = (e) => {
+  e.stopPropagation();
+  openMenu(e.currentTarget, [
+    { icon: '🔖', label: 'Min lista', href: '#/watchlist' },
+    { icon: '✋', label: 'Önskningar', href: '#/requests', hidden: !!me?.kid },
+    { icon: '🎁', label: 'Årssammanfattning', href: '#/wrapped' },
+    { icon: '👤', label: 'Mitt konto', href: '#/account' },
+    'separator',
+    { icon: '📊', label: 'Statistik och aktivitet', href: '#/stats', hidden: !me?.adminHere },
+    { icon: '⚙', label: 'Administration', href: '#/admin', hidden: !me?.adminHere },
+  ], { title: 'Mer', label: 'Mer' });
+};

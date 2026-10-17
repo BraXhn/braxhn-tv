@@ -1,10 +1,10 @@
 // Service worker: gör BraXhn TV installerbar som app och låter den starta även när servern inte svarar.
 // Appens egna filer hämtas alltid från servern först (en ny version syns direkt) och tas ur cachen bara
 // utan kontakt. API-anrop, strömmar och bilder går aldrig genom cachen.
-const CACHE = 'braxhn-app-v4';
+const CACHE = 'braxhn-app-v5';
 // Webbklientens moduler i /js/ måste finnas med här (annars startar appen inte utan kontakt med servern)
 const MODULES = ['core.js', 'router.js', 'passkeys.js', 'screentime.js', 'audio.js', 'audio-extras.js',
-  'ui/cards.js', 'ui/icons.js', 'ui/dialog.js', 'ui/states.js', 'ui/buttons.js', 'ui/tabs.js', 'ui/menu.js', 'ui/cardmenu.js', 'ui/activity.js',
+  'ui/cards.js', 'ui/icons.js', 'ui/dialog.js', 'ui/states.js', 'ui/buttons.js', 'ui/tabs.js', 'ui/menu.js', 'ui/cardmenu.js', 'ui/activity.js', 'ui/shelves.js',
   'player/overlay.js', 'player/video.js', 'player/controls.js', 'player/subs.js', 'player/caps.js', 'player/cast.js', 'player/live.js', 'player/party.js',
   'views/login.js', 'views/home.js', 'views/item.js', 'views/person.js', 'views/wrapped.js', 'views/account.js', 'views/books.js', 'views/live.js',
   'views/streaming.js', 'views/requests.js', 'views/stats.js', 'views/admin.js', 'views/admin-ops.js', 'views/music.js'].map(f => '/js/' + f);

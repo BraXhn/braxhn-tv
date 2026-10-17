@@ -17,7 +17,7 @@ import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
 import * as follows from '../follows.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
-import { insideMedia, MEDIA_ROOT, ctx, listItems, recommend, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
+import { insideMedia, MEDIA_ROOT, ctx, listItems, recommend, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
 
 // Bibliotek
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
@@ -73,10 +73,13 @@ route('GET', '/api/home', user, (c) => {
       [s.sid, last], 'i.season, i.episode', 1)[0];
     if (next) cont.push(next);
   }
-  const rows = all("SELECT * FROM libraries WHERE type != 'music' ORDER BY name").map(l => ({
-    library: l, title: `Nytt i ${l.name}`,
-    items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24)
-  }));
+  const rows = all("SELECT * FROM libraries WHERE type != 'music' ORDER BY name").map(l => {
+    const row = { library: l, title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
+    // Serier: nya avsnitt grupperade per säsong (nytt fält – items är oförändrat för apparna)
+    if (l.type === 'show') row.seasons = groupNewEpisodes(listItems(uid, `i.library_id=? AND i.kind='episode'`, [l.id],
+      'i.added DESC, i.season DESC, i.episode DESC', 400, 0, { slim: true }), 24);
+    return row;
+  });
   const watchlist = listItems(uid, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 30);
   const recommended = recommend(uid, 20);
   const forYou = listItems(uid, follows.FOR_YOU_WHERE, [], follows.FOR_YOU_ORDER, 30);

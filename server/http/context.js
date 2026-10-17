@@ -14,7 +14,8 @@ export const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
 // Avsnittsräkning behövs bara för serier (CASE gör att underfrågorna inte körs för filmer/avsnitt)
 export const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
   CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id) END AS ep_total,
-  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) END AS ep_watched`;
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) END AS ep_watched,
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(DISTINCT e.season) FROM items e WHERE e.parent_id=i.id) END AS ep_seasons`;
 // Kolumner som shape() använder – inte tunga fält som streams/chapters (och overview i listvyer)
 const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop, i.thumb, i.duration, i.rating, i.added, i.hdr,
   i.genres, i.cert, i.age, i.collection_id, i.season, i.episode, i.parent_id, i.height,
@@ -29,8 +30,8 @@ function shape(r) {
     genres: (() => { try { return JSON.parse(r.genres || '[]'); } catch { return []; } })(), cert: r.cert || null, age: r.age ?? null,
     collection: r.collection_id || null
   };
-  if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title });
-  if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched });
+  if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb });
+  if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched, seasons: r.ep_seasons ?? 0 });
   else Object.assign(o, { position: r.p_pos || 0, watched: !!r.p_watched, height: r.height,
     intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null,
     recap: r.recap_end ? { start: r.recap_start || 0, end: r.recap_end } : null, trickplay: r.trickplay === 1 });
@@ -59,9 +60,34 @@ export const MAIN_ONLY = ' AND i.version_of IS NULL';
 /** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
 export const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
   const age = ageFilter(uid);
-  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };
+/**
+ * Nya avsnitt grupperade per serie och säsong (som "Nyligen tillagda" i Plex): ett kort per säsong i stället för
+ * ett per avsnitt. eps = avsnitt från listItems med det senast tillagda först. Ordningen följer det nyaste avsnittet
+ * i varje grupp. latest = nyaste avsnittet (högst nummer bland de nyaste), next = första osedda i säsongsordning.
+ */
+export function groupNewEpisodes(eps, limit = 24) {
+  const groups = new Map();
+  for (const e of eps) {
+    if (e.kind !== 'episode' || e.show == null) continue;
+    const k = e.show + ':' + e.season;
+    let g = groups.get(k);
+    if (!g) {
+      if (groups.size >= limit) continue;
+      g = { show: e.show, showTitle: e.showTitle || '', showPoster: !!e.showPoster, showThumb: !!e.showThumb, season: e.season, added: e.added, count: 0, unwatched: 0, latest: null, next: null };
+      groups.set(k, g);
+    }
+    g.count++;
+    if (!e.watched) {
+      g.unwatched++;
+      if (!g.next || e.episode < g.next.episode) g.next = { id: e.id, episode: e.episode, position: e.position || 0 };
+    }
+    if (!g.latest || e.episode > g.latest.episode) g.latest = { id: e.id, title: e.title, season: e.season, episode: e.episode };
+  }
+  return [...groups.values()];
+}
 export const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1, 0, { versions: true })[0];
 
 export function insideMedia(p) {
