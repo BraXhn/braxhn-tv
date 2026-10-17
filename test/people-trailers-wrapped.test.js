@@ -268,3 +268,28 @@ test('årssammanfattning: timmar, mest sedda, genre, musik och ljudböcker per �
   assert.equal(o.music.plays, 0);
   assert.equal(o.video.hours, 0);              // ingen position sparad
 });
+
+test('avsnitt utan nummer matchas mot TMDB på titel, numrerade på nummer', async () => {
+  setSetting('tmdb_key', 'testnyckel');
+  const show = item('show', 'Chuggington');
+  const ep = (title, season, episode, guess) => item('episode', title, { parent_id: show, season, episode, ep_guess: guess });
+  const a = ep('Hjälpsamma Hodge', 1, 1, 1), b = ep('Wilson och raketen', 1, 2, 1), c = ep('Avsnitt 3', 1, 3, 0), d = ep('Okänd titel här', 1, 4, 1);
+  const S1 = { episodes: [{ episode_number: 1, name: 'Bråttom Brewster' }, { episode_number: 2, name: 'Avsnitt 2' }, { episode_number: 3, name: 'Tågtvätten', overview: 'Tvätt' }] };
+  const S2 = { episodes: [{ episode_number: 5, name: 'Hjälpsamma Hodge', overview: 'Hodge hjälper' }, { episode_number: 6, name: 'Wilson och raketen' }] };
+  mockTmdb((u) => {
+    if (u.hostname === 'image.tmdb.org') return new Response('nej', { status: 404 });
+    if (u.pathname === '/3/search/tv') return { results: [{ id: 77, name: 'Chuggington', original_name: 'Chuggington', first_air_date: '2008-09-22' }] };
+    if (u.pathname === '/3/tv/77') return { id: 77, name: 'Chuggington', first_air_date: '2008-09-22', seasons: [{ season_number: 1, episode_count: 3 }, { season_number: 2, episode_count: 6 }] };
+    if (u.pathname === '/3/tv/77/season/1') return S1;
+    if (u.pathname === '/3/tv/77/season/2') return S2;
+    return new Response('{}', { status: 404 });
+  });
+  try { assert.equal(await scanner.refreshItem(get('SELECT * FROM items WHERE id=?', show)), true); } finally { restore(); }
+  const row = (id) => ({ ...get('SELECT season, episode, title, ep_guess FROM items WHERE id=?', id) });
+  assert.deepEqual(row(a), { season: 2, episode: 5, title: 'Hjälpsamma Hodge', ep_guess: 2 });
+  assert.deepEqual(row(b), { season: 2, episode: 6, title: 'Wilson och raketen', ep_guess: 2 });
+  // Numrerat avsnitt: på nummer, och TMDB:s titel ersätter "Avsnitt 3"
+  assert.deepEqual(row(c), { season: 1, episode: 3, title: 'Tågtvätten', ep_guess: 0 });
+  // Ingen träff: gissat nummer och filens titel ligger kvar (får inte "Bråttom Brewster" från S1E1… eller S1E4)
+  assert.deepEqual(row(d), { season: 1, episode: 4, title: 'Okänd titel här', ep_guess: 1 });
+});

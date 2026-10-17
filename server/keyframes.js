@@ -195,8 +195,9 @@ async function check(file, kf, duration) {
   const has = (t) => { let lo = 0, hi = kf.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (kf[m] < t - 0.002) lo = m + 1; else hi = m; } return Math.abs(kf[lo] - t) <= 0.002; };
   let any = false, complete = true;
   // Fem utspridda stickprov (fMP4-remux kräver en komplett lista – ett index som saknar nyckelbilder ska fångas)
-  for (const at of [0, duration * 0.23, duration * 0.47, duration * 0.71, Math.max(0, duration - 30)]) {
-    const s = await sample(file, at, 12);
+  // Samtidigt (spelaren väntar), 8 s vardera
+  const samples = await Promise.all([0, duration * 0.23, duration * 0.47, duration * 0.71, Math.max(0, duration - 30)].map(at => sample(file, at, 8)));
+  for (const s of samples) {
     // Stickprovets första nyckelbild kan ligga före intervallet (sökningen landar på närmaste föregående)
     for (const t of s) { if (has(t)) any = true; else complete = false; }
     // Omvänt: en tid i listan mellan stickprovets nyckelbilder som inte är en nyckelbild betyder att indexet

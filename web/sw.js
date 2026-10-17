@@ -1,7 +1,7 @@
 // Service worker: gör BraXhn TV installerbar som app och låter den starta även när servern inte svarar.
 // Appens egna filer hämtas alltid från servern först (en ny version syns direkt) och tas ur cachen bara
 // utan kontakt. API-anrop, strömmar och bilder går aldrig genom cachen.
-const CACHE = 'braxhn-app-v1';
+const CACHE = 'braxhn-app-v2';
 const SHELL = ['/app.js', '/style.css', '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg',
   '/brand/icon-192.png', '/brand/icon-512.png', '/vendor/hls.min.js', '/offline.html'];
 

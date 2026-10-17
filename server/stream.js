@@ -641,7 +641,8 @@ function sessionFor(it, query, userId) {
   const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
-    s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0 };
+    s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0,
+      created: Date.now(), title: it.title, slowLogged: false, firstLogged: false };
     fs.mkdirSync(s.dir, { recursive: true });
     sessions.set(key, s);
   }
@@ -693,8 +694,19 @@ export async function serveSegment(req, res, it, n, query, userId) {
   if (!(Number.isInteger(n) && n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
   if (!complete(s, n)) {
     s.waiting++;
+    const w0 = Date.now();
     try { const r = await awaitSegment(req, res, it, s, n, userId); if (r !== true) return; }
     finally { s.waiting--; }
+    // Diagnos: spelaren fick vänta på ett segment mitt i uppspelningen = servern hinner inte med
+    const waited = (Date.now() - w0) / 1000;
+    if (s.firstLogged && waited > 4 && !s.slowLogged) {
+      s.slowLogged = true;
+      console.warn(`[hls] ${s.title}: väntade ${waited.toFixed(1)} s på segment ${n} (${d.mode}) – ${d.mode === 'transcode' ? `omkodningen (${HW === 'none' ? 'processor' : HW}) är långsammare än uppspelningen` : 'disken eller nätverket hinner inte med'}`);
+    }
+  }
+  if (!s.firstLogged) {
+    s.firstLogged = true;
+    console.log(`[hls] ${s.title}: första segmentet klart ${((Date.now() - s.created) / 1000).toFixed(1)} s efter start (${d.mode}${d.mode === 'transcode' ? ', ' + (HW === 'none' ? 'processor' : HW) : ''})`);
   }
   throttle(s, n);
   sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');

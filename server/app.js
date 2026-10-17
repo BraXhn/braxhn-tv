@@ -976,11 +976,13 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const main = ver.mainOf(row);
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   if (c.q.get('info') !== '1' && screenBlock(c)) return;
+  const t0 = Date.now();
   // Ej analyserad film: ta fram nyckelbilderna nu (före bakgrundsanalysen) så att den kan skickas utan
-  // omkodning. Vänta högst 25 s – annars omkodas den den här gången och nästa gång går det direkt.
+  // omkodning. Filens index räcker oftast (någon sekund); måste hela filen läsas väntar vi högst 10 s –
+  // då omkodas den den här gången och nästa gång går den utan omkodning.
   if (c.q.get('info') !== '1' && c.q.get('force') !== 'transcode') {
     const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v)).slice(0, 2);
-    if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 25000))]);
+    if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 10000))]);
     if (c.res.writableEnded || c.req.destroyed) return;
   }
   let o = st.parseCaps(c.q);
@@ -1012,6 +1014,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först)
   if (hp && !info && !d.abr) st.prewarm(it, hp, c.user.id, Math.max(0, +c.q.get('start') || 0));
   if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
+  // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
+  if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
   const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
