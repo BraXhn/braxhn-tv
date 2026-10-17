@@ -1,0 +1,68 @@
+// Videospelarens kontroller och kortkommandon
+import { $, fmtTime, store } from '../core.js';
+import { setMini } from './overlay.js';
+import { P, closePlayer } from './video.js';
+import { ICON } from '../ui/icons.js';
+
+/** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
+export function bindControls(cur, v) {
+  const { el, it } = cur, q = (s) => $(s, el);
+  const chaps = it.chapters || [];
+  const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
+  const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
+  const sync = () => { playBtn.innerHTML = v.paused ? ICON.play : ICON.pause; el.classList.toggle('paused', v.paused); };
+  const syncVol = () => { muteBtn.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol; vol.value = v.muted ? 0 : v.volume; };
+  v.volume = +store.get('pvol', 1); syncVol();
+  ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
+  v.addEventListener('volumechange', syncVol);
+  v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; });
+  // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
+  const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? 'Startar omkodning…' : 'Laddar…'; };
+  v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
+  v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
+  const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
+  playBtn.onclick = toggle;
+  // Pekskärm: första trycket när kontrollerna är dolda visar dem i stället för att pausa
+  el.addEventListener('touchstart', () => { cur.tapWake = el.classList.contains('idle'); }, { passive: true });
+  v.onclick = () => { if (cur.tapWake) { cur.tapWake = false; return; } if (cur.mini) return setMini(false); if (!q('#setp').hidden || !q('#chlist').hidden) { q('#setp').hidden = true; q('#chlist').hidden = true; return; } toggle(); };
+  const full = () => {
+    if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
+    if (!el.requestFullscreen) {
+      // iPhone: bara videon kan bli helskärm, och då syns inga bildundertexter ovanpå. Med PGS fyller spelaren
+      // i stället skärmen själv (vrid telefonen för liggande bild).
+      if (cur.pgs) { el.classList.toggle('pfull'); return; }
+      return v.webkitEnterFullscreen?.();
+    }
+    // Telefon: vrid till liggande när det går (Android); ignoreras annars
+    el.requestFullscreen().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+  };
+  v.ondblclick = full; q('#cfull').onclick = full;
+  q('#cback').onclick = () => { v.currentTime = Math.max(0, v.currentTime - 10); };
+  q('#cfwd').onclick = () => { v.currentTime = Math.min(dur() || Infinity, v.currentTime + 30); };
+  q('#cprev').onclick = () => {
+    // Föregående kapitel (eller början av det aktuella om man just passerat starten), annars till början
+    const c = chaps.filter(x => x.start < v.currentTime - 3).pop();
+    v.currentTime = c ? c.start + 0.05 : 0;
+  };
+  if (q('#cnextch')) q('#cnextch').onclick = () => { const c = chaps.find(x => x.start > v.currentTime + 1); if (c) v.currentTime = c.start + 0.05; };
+  q('#cstop').onclick = () => closePlayer();
+  q('#cmini').onclick = () => setMini(!cur.mini);
+  q('#cset').onclick = (e) => { e.stopPropagation(); q('#chlist').hidden = true; q('#setp').hidden = !q('#setp').hidden; };
+  muteBtn.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
+  vol.oninput = () => { v.volume = +vol.value; v.muted = v.volume === 0; store.set('pvol', v.volume); };
+}
+
+export function keys(e) {
+  // I litet fönster tar spelaren inte över tangentbordet (man bläddrar och söker)
+  if (!P || P.mini || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
+  const v = $('#vid', P.el); if (!v) return;
+  // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
+  if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
+  if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
+  else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
+  else if (e.key === 'ArrowRight') v.currentTime += 10;
+  else if (e.key === 'ArrowLeft') v.currentTime -= 10;
+  else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
+  else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
+  else if (e.key === 'm') v.muted = !v.muted;
+}
