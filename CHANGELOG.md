@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- Ny logotyp (räls mot en linuxserver, X som andreaskors) i webben, som appikon i iOS, Android och Google TV, och som appikon och topphylla på Apple TV
+- Installerbar app på telefonen: manifest med ikoner, service worker (startar även utan kontakt med servern), "Installera som app" i menyn, meny längst ner på telefon, anpassad spelare och kompakt litet fönster
 - Rättat: många filmer startade inte när de omkodades (spelaren gav upp efter 10 s och bytte kvalitetssteg, vilket startade om omkodningen). Spelaren väntar nu upp till 60 s, och flera kvalitetssteg används bara utanför hemmet
 - Bättre matchning mot TMDB: titlar på två språk, ett ord för mycket, "01" i stället för "del 1", utgåvetillägg (Director's Cut, Extended) och kvalitetsord (1080p, BluRay, x264) – och hellre ingen träff än fel film. Titlar som tidigare inte hittades försöker igen
 - Dubbletter (samma film i flera kvaliteter eller med olika filnamn) slås ihop till en film; servern väljer fil efter önskad kvalitet

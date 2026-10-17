@@ -124,7 +124,7 @@ views.login = async () => {
   const setup = st.needsSetup;
   $('#top').hidden = true;
   main.innerHTML = `<form class="auth" id="f">
-    <div class="brand"><img src="/icon.svg" alt=""><span>BraXhn TV</span></div>
+    <div class="brand"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"></div>
     <p>${setup ? 'Välkommen! Skapa administratörskontot.' : 'Logga in'}</p>
     <label for="n">Användarnamn</label><input id="n" autocomplete="username" required maxlength="64">
     <label for="p">Lösenord</label><input id="p" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required minlength="${setup ? 10 : 1}">
@@ -1981,8 +1981,15 @@ function bindControls(cur, v) {
   v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
   const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
   playBtn.onclick = toggle;
-  v.onclick = () => { if (cur.mini) return setMini(false); if (!q('#setp').hidden || !q('#chlist').hidden) { q('#setp').hidden = true; q('#chlist').hidden = true; return; } toggle(); };
-  const full = () => document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen ? el.requestFullscreen() : v.webkitEnterFullscreen?.();
+  // Pekskärm: första trycket när kontrollerna är dolda visar dem i stället för att pausa
+  el.addEventListener('touchstart', () => { cur.tapWake = el.classList.contains('idle'); }, { passive: true });
+  v.onclick = () => { if (cur.tapWake) { cur.tapWake = false; return; } if (cur.mini) return setMini(false); if (!q('#setp').hidden || !q('#chlist').hidden) { q('#setp').hidden = true; q('#chlist').hidden = true; return; } toggle(); };
+  const full = () => {
+    if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
+    if (!el.requestFullscreen) return v.webkitEnterFullscreen?.(); // iPhone: bara videon kan bli helskärm
+    // Telefon: vrid till liggande när det går (Android); ignoreras annars
+    el.requestFullscreen().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+  };
   v.ondblclick = full; q('#cfull').onclick = full;
   q('#cback').onclick = () => { v.currentTime = Math.max(0, v.currentTime - 10); };
   q('#cfwd').onclick = () => { v.currentTime = Math.min(dur() || Infinity, v.currentTime + 30); };
@@ -2889,6 +2896,8 @@ async function route() {
   if (!v) { location.hash = '#/'; return; }
   // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
   $('#top').hidden = !me || name === 'login' || name === 'profiles';
+  $('#tabbar').hidden = $('#top').hidden;
+  $$('#tabbar [data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === (name || '')));
   main.innerHTML = '<div class="spin"></div>';
   if (me && name !== 'timeup') refreshScreen();
   try { await v(arg, arg2); if (gen !== routeGen) return; window.scrollTo(0, 0); fillWatch(); }
@@ -2898,6 +2907,28 @@ window.addEventListener('hashchange', route);
 
 $('#userbtn').onclick = (e) => { e.stopPropagation(); $('#usermenu').hidden = !$('#usermenu').hidden; };
 document.addEventListener('click', () => { $('#usermenu').hidden = true; });
+// ---------- installera som app ----------
+// Service workern kräver HTTPS (eller localhost); utan den går appen ändå att lägga på hemskärmen
+if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#install').hidden = false; });
+window.addEventListener('appinstalled', () => { installEvt = null; $('#install').hidden = true; toast('BraXhn TV är installerad'); });
+if (!standalone() && isIos()) $('#install').hidden = false; // Safari har ingen installationsdialog – visa instruktioner
+document.documentElement.classList.toggle('standalone', standalone());
+$('#install').onclick = async () => {
+  if (installEvt) { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; $('#install').hidden = true; return; }
+  const d = document.createElement('dialog');
+  d.innerHTML = `<h2>Installera BraXhn TV</h2>${isIos()
+    ? '<ol><li>Tryck på <b>Dela</b> (rutan med pilen uppåt) i Safari.</li><li>Välj <b>Lägg till på hemskärmen</b>.</li><li>Tryck <b>Lägg till</b>.</li></ol><p class="muted small">Appen öppnas sedan i helskärm med egen ikon.</p>'
+    : '<p>Öppna webbläsarens meny (⋮) och välj <b>Installera app</b> eller <b>Lägg till på startskärmen</b>.</p><p class="muted small">Fullständig installation kräver att servern nås via HTTPS (se README, "Titta utanför hemmet").</p>'}
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="primary" id="ok">OK</button></div>`;
+  document.body.append(d); d.showModal(); $('#ok', d).onclick = () => { d.close(); d.remove(); };
+};
+// Flikmenyn: Sök fokuserar sökfältet i stället för att byta sida
+$('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
+
 $('#logout').onclick = async () => { stopAudio(); await api('/logout', { method: 'POST' }).catch(() => {}); me = null; location.hash = '#/login'; };
 let qt;
 $('#q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { const q = e.target.value.trim(); location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/'; }, 300); };
