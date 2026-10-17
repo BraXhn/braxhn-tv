@@ -17,7 +17,12 @@ function validRestore(f) {
     // Kontrollen kan skapa -wal/-shm bredvid filen; ta bort dem som inte fanns innan
     const extra = ['-wal', '-shm'].map(x => f + x).filter(x => !fs.existsSync(x));
     const t = new DatabaseSync(f, { readOnly: true });
-    try { return t.prepare('PRAGMA quick_check').get()?.quick_check === 'ok'; }
+    try {
+      if (t.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') return false;
+      // En annan SQLite-databas (inte BraXhn TV) får inte heller bytas in – då skulle servern starta tom
+      const names = new Set(t.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name));
+      return ['users', 'items', 'progress', 'settings'].every(n => names.has(n));
+    }
     finally { t.close(); for (const x of extra) fs.rmSync(x, { force: true }); }
   } catch { return false; }
 }

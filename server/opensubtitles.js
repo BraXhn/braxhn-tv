@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { get, getSetting, SUBS_DIR } from './db.js';
+import { writeAtomic } from './util.js';
 
 const BASE = 'https://api.opensubtitles.com/api/v1';
 const UA = 'BraXhn TV v0.2';
@@ -81,7 +82,7 @@ export async function download(it, fileId, lang) {
   const file = path.join(dir, `${safeLang}.${+fileId}.srt`);
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf.length > 5 << 20) throw new Error('Undertextfilen är för stor');
-  fs.writeFileSync(file, buf);
+  writeAtomic(file, buf);
   return { file: path.basename(file), remaining: j.remaining };
 }
 

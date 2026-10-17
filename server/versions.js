@@ -15,7 +15,7 @@ export function versionKey(parsed) {
 }
 
 /** Flyttar framsteg och Min lista från en rad till en annan (sedd vinner, senaste positionen gäller) */
-function mergeInto(fromId, toId) {
+export function mergeInto(fromId, toId) {
   run(`INSERT INTO progress(user_id,item_id,position,duration,watched,updated)
     SELECT user_id, ?, position, duration, watched, updated FROM progress WHERE item_id=?
     ON CONFLICT(user_id,item_id) DO UPDATE SET watched=MAX(watched,excluded.watched),

@@ -122,7 +122,17 @@ export async function scanMusic(lib, status) {
   if (blocked) return scanWarn(status, blocked);
   const gone = [];
   tx(() => {
-    for (const r of missing) run('DELETE FROM tracks WHERE id=?', r.id);
+    for (const r of missing) {
+      // Omdöpt fil (t.ex. omtaggad med Picard/beets): samma album, skiva, spår och titel tar över spellistor, favoriter och historik
+      const nu = get(`SELECT n.id FROM tracks o JOIN tracks n ON n.library_id=o.library_id AND n.album_id=o.album_id AND n.disc_no IS o.disc_no
+        AND n.track_no IS o.track_no AND n.title=o.title COLLATE NOCASE AND n.id!=o.id WHERE o.id=? ORDER BY n.id DESC LIMIT 1`, r.id);
+      if (nu && !known.has(get('SELECT path FROM tracks WHERE id=?', nu.id).path)) {
+        run('UPDATE playlist_items SET track_id=? WHERE track_id=?', nu.id, r.id);
+        run('INSERT OR IGNORE INTO favorites(user_id,track_id) SELECT user_id, ? FROM favorites WHERE track_id=?', nu.id, r.id);
+        run('UPDATE track_plays SET track_id=? WHERE track_id=?', nu.id, r.id);
+      }
+      run('DELETE FROM tracks WHERE id=?', r.id);
+    }
     for (const a of all('SELECT id FROM albums WHERE library_id=? AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id=albums.id)', lib.id)) {
       run('DELETE FROM albums WHERE id=?', a.id); gone.push(a.id);
     }

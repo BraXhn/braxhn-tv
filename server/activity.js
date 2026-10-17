@@ -100,8 +100,13 @@ export function backupNow() {
   // Lokalt datum och lokal tid (tidigare blandades UTC-datum med lokal tid)
   const name = `braxhn-tv-${localDay(d)}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.db`;
   const file = path.join(BACKUP_DIR, name);
-  fs.rmSync(file, { force: true });
-  db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  // Via .part: en krasch mitt i kopieringen får inte lämna en halv fil som räknas som den senaste säkerhetskopian
+  // (och knuffar bort en hel kopia vid gallringen)
+  const part = file + '.part';
+  // Rester från en avbruten kopiering (även -journal, som annars kunde spelas upp i den nya filen)
+  for (const f of fs.readdirSync(BACKUP_DIR)) if (/^braxhn-tv-[\d-]+\.db\.part/.test(f)) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+  try { db.exec(`VACUUM INTO '${part.replace(/'/g, "''")}'`); fs.renameSync(part, file); }
+  catch (e) { fs.rmSync(part, { force: true }); throw e; }
   const keep = Math.max(1, +getSetting('backup_keep', '14'));
   const files = listBackups();
   for (const f of files.slice(keep)) fs.rmSync(path.join(BACKUP_DIR, f.name), { force: true });

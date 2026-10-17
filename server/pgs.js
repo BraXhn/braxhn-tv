@@ -60,11 +60,18 @@ function palette(seg, hd) {
   return p;
 }
 
+// Skydd mot fientliga filer: några få byte kan annars beskriva enorma bilder som refereras om och om igen
+// (en 16 kB fil låste servern i närmare en minut). Blu-ray tillåter högst två objekt per visning.
+const MAX_OBJS = 2;
+const MAX_PIXELS = 2e9;      // bildpunkter som får ritas per spår (en hel film brukar ligga under 0,5 miljarder)
+const MAX_OBJ_BYTES = 16 << 20; // ett objekts RLE-data (längdfältet är 24 bitar)
+
 /** Tolkar en PGS-ström bit för bit. onCue({ s, items: [{ x, y, w, h, png }] }), onClear(pts) */
 export class PgsParser {
   constructor({ onCue, onClear }) {
     this.buf = Buffer.alloc(0); this.onCue = onCue; this.onClear = onClear;
     this.palettes = new Map(); this.raw = new Map(); this.objects = new Map(); this.pcs = null; this.w = 0; this.h = 0; this.upto = 0;
+    this.gen = 0; this.pixels = 0; this.rendered = new Map(); // oförändrat objekt + palett + beskärning ritas bara en gång
   }
   push(data) {
     this.buf = this.buf.length ? Buffer.concat([this.buf, data]) : data;
@@ -82,8 +89,8 @@ export class PgsParser {
     this.upto = Math.max(this.upto, pts);
     if (type === 0x16 && s.length >= 11) { // presentation (PCS)
       const pcs = { pts, w: s.readUInt16BE(0), h: s.readUInt16BE(2), state: s[7], pal: s[9], objs: [] };
-      if (pcs.state & 0x80) { this.objects.clear(); this.raw.clear(); this.palettes.clear(); } // ny epok
-      for (let o = 11, k = 0; k < s[10] && o + 8 <= s.length; k++) {
+      if (pcs.state & 0x80) { this.objects.clear(); this.raw.clear(); this.palettes.clear(); this.rendered.clear(); } // ny epok
+      for (let o = 11, k = 0; k < Math.min(s[10], MAX_OBJS) && o + 8 <= s.length; k++) {
         // objekt-id (2), fönster (1), beskärning (1), x (2), y (2) [, beskärning x, y, b, h]
         const ob = { id: s.readUInt16BE(o), x: s.readUInt16BE(o + 4), y: s.readUInt16BE(o + 6), crop: null };
         if (s[o + 3] & 0x40 && o + 16 <= s.length) ob.crop = { x: s.readUInt16BE(o + 8), y: s.readUInt16BE(o + 10), w: s.readUInt16BE(o + 12), h: s.readUInt16BE(o + 14) };
@@ -91,14 +98,17 @@ export class PgsParser {
         pcs.objs.push(ob);
       }
       this.pcs = pcs; this.w = pcs.w; this.h = pcs.h;
-    } else if (type === 0x14 && s.length >= 2) this.palettes.set(s[0], s); // palett (PDS) – omvandlas när den används
+    } else if (type === 0x14 && s.length >= 2) { s.gen = ++this.gen; this.palettes.set(s[0], s); } // palett (PDS) – omvandlas när den används
     else if (type === 0x15 && s.length >= 4) { // objekt (ODS), kan vara uppdelat på flera segment
       const id = s.readUInt16BE(0), first = s[3] & 0x80;
       if (first) {
         if (s.length < 11) return;
-        this.raw.set(id, { w: s.readUInt16BE(7), h: s.readUInt16BE(9), parts: [s.subarray(11)] });
-      } else this.raw.get(id)?.parts.push(s.subarray(4));
-      if (s[3] & 0x40) { const r = this.raw.get(id); if (r) { this.objects.set(id, { w: r.w, h: r.h, data: Buffer.concat(r.parts) }); this.raw.delete(id); } }
+        this.raw.set(id, { w: s.readUInt16BE(7), h: s.readUInt16BE(9), parts: [s.subarray(11)], size: s.length - 11 });
+      } else {
+        const r = this.raw.get(id);
+        if (r) { r.parts.push(s.subarray(4)); r.size += s.length - 4; if (r.size > MAX_OBJ_BYTES) this.raw.delete(id); }
+      }
+      if (s[3] & 0x40) { const r = this.raw.get(id); if (r) { this.objects.set(id, { w: r.w, h: r.h, data: Buffer.concat(r.parts), gen: ++this.gen }); this.raw.delete(id); } }
     } else if (type === 0x80 && this.pcs) { // slut på visningen
       const pcs = this.pcs; this.pcs = null;
       this.onClear(pcs.pts);
@@ -109,9 +119,13 @@ export class PgsParser {
       for (const ob of pcs.objs) {
         const o = this.objects.get(ob.id);
         if (!o || !o.w || !o.h || o.w * o.h > 4096 * 2304) continue;
-        const idx = rle(o.data, o.w, o.h);
         const c = ob.crop ? { x: Math.min(ob.crop.x, o.w - 1), y: Math.min(ob.crop.y, o.h - 1), w: ob.crop.w, h: ob.crop.h } : { x: 0, y: 0, w: o.w, h: o.h };
         c.w = Math.max(1, Math.min(c.w, o.w - c.x)); c.h = Math.max(1, Math.min(c.h, o.h - c.y));
+        const rkey = `${ob.id}:${o.gen}:${pds.gen}:${c.x},${c.y},${c.w},${c.h}`;
+        if (this.rendered.has(rkey)) { const png = this.rendered.get(rkey); if (png) items.push({ x: ob.x, y: ob.y, w: c.w, h: c.h, png }); continue; }
+        // Avkodningen kostar hela objektets yta, även när bara en liten del visas
+        if ((this.pixels += o.w * o.h + c.w * c.h) > MAX_PIXELS) throw new Error('orimligt stora bilder – filen är trasig eller skadlig');
+        const idx = rle(o.data, o.w, o.h);
         const rgba = Buffer.alloc(c.w * c.h * 4);
         let any = false;
         for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
@@ -119,7 +133,10 @@ export class PgsParser {
           rgba[q] = pal[p]; rgba[q + 1] = pal[p + 1]; rgba[q + 2] = pal[p + 2]; rgba[q + 3] = pal[p + 3];
           if (pal[p + 3]) any = true;
         }
-        if (any) items.push({ x: ob.x, y: ob.y, w: c.w, h: c.h, png: png(c.w, c.h, rgba) });
+        const out = any ? png(c.w, c.h, rgba) : null;
+        this.rendered.set(rkey, out);
+        if (this.rendered.size > 16) this.rendered.delete(this.rendered.keys().next().value);
+        if (out) items.push({ x: ob.x, y: ob.y, w: c.w, h: c.h, png: out });
       }
       if (items.length) this.onCue({ s: pcs.pts, items });
     }
