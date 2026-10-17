@@ -1,5 +1,5 @@
 // Återanvändbara kort och hyllor: titlar, säsonger, samlingar och personer
-import { esc, hue, me, sxe } from '../core.js';
+import { esc, hue, me, sxe, imgSrc, cardW } from '../core.js';
 
 // ---------- kort ----------
 // Titlarna bakom korten som visas just nu – kortens meny (⋮) behöver hela titeln, inte bara id:t
@@ -23,16 +23,18 @@ const countBadge = (n) => `<span class="badge" aria-hidden="true">${n}</span>`;
 const seenBadge = () => `<span class="seen" title="Sedd" aria-hidden="true">✓</span>`;
 const progressBar = (pos, dur) => `<div class="bar" aria-hidden="true"><i style="width:${Math.min(100, pos / dur * 100)}%"></i></div>`;
 
-/** Bilden på ett kort: färgplatta med titeln som reserv, affisch/miniatyr ovanpå, märken och framsteg */
-export function art(it, land) {
+/** Bilden på ett kort: färgplatta med titeln som reserv, affisch/miniatyr ovanpå, märken och framsteg.
+ *  css = bildens ungefärliga bredd i pixlar (standard: kortbredden), styr vilken storlek som hämtas */
+export function art(it, land, css) {
   let pick = land ? (it.thumb ? 'thumb' : it.backdrop ? 'backdrop' : it.poster ? 'poster' : null)
     : (it.poster ? 'poster' : it.thumb ? 'thumb' : null);
   let imgId = land && !it.thumb && it.kind === 'episode' && it.show ? null : it.id;
   // Stående avsnittskort (Fortsätt titta): seriens affisch, som i Plex
   if (!land && it.kind === 'episode' && it.show && !it.poster && (it.showPoster || it.showThumb)) { imgId = it.show; pick = it.showPoster ? 'poster' : 'thumb'; }
   let html = placeholder(it.showTitle || it.title);
-  // width/height ger bildens proportioner i förväg (ingen layoutförskjutning); data-fb tar bort trasiga bilder så att plattan syns
-  if (pick && imgId) html += `<img loading="lazy" decoding="async" src="/api/image/${imgId}/${pick}" alt="" width="${land ? 480 : 300}" height="${land ? 270 : 450}" data-fb="1">`;
+  // width/height ger bildens proportioner i förväg (ingen layoutförskjutning); data-fb tar bort trasiga bilder så att plattan syns.
+  // Storleken följer kortet (liggande kort är 1,9 kort breda); rutnätets kort kan bli något bredare än --cw (× 1,2).
+  if (pick && imgId) html += `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${imgId}/${pick}`, css || cardW() * (land ? 1.9 : 1.2))} alt="" width="${land ? 480 : 300}" height="${land ? 270 : 450}" data-fb="1">`;
   if (it.kind === 'show') {
     const left = (it.episodes || 0) - (it.watchedEpisodes || 0);
     if (it.watched) html += seenBadge();
@@ -100,7 +102,7 @@ export function seasonCard(g) {
   const st = g.unwatched > 0 ? `${g.unwatched} ${g.unwatched === 1 ? 'nytt osett avsnitt' : 'nya osedda avsnitt'}` : 'sedd';
   const label = [t, sn, g.latest ? `senaste avsnitt ${g.latest.episode}: ${g.latest.title}` : '', st].filter(Boolean).join(', ');
   const pick = g.showPoster ? 'poster' : g.showThumb ? 'thumb' : '';
-  const img = pick ? `<img loading="lazy" decoding="async" src="/api/image/${+g.show}/${pick}" alt="" width="300" height="450" data-fb="1">` : '';
+  const img = pick ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+g.show}/${pick}`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : '';
   const badge = g.unwatched > 0 ? countBadge(g.unwatched) : seenBadge();
   return `<div class="card scard" data-show="${+g.show}" data-season="${+g.season}"><a class="clink" href="#/item/${+g.show}/${+g.season}" aria-label="${esc(label)}">`
     + `<div class="art">${placeholder(t)}${img}${badge}</div>${textLines(t, s, s2)}</a>`
@@ -123,17 +125,17 @@ export function shelfHtml(title, cardsHtml, { land = false, more = '', row = '',
 }
 export function colCard(c) {
   return `<a class="card" href="#/collection/${c.id}"><div class="art">${placeholder(c.name)}
-    ${c.poster ? `<img loading="lazy" src="/api/collection-image/${c.id}/poster" alt="" data-fb="1">` : ''}<span class="badge">${c.count}</span></div>
+    ${c.poster ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/collection-image/${+c.id}/poster`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : ''}<span class="badge">${c.count}</span></div>
     <div class="t">${esc(c.name)}</div><div class="s">${c.years?.[0] || ''}${c.years?.[1] && c.years[1] !== c.years[0] ? '–' + c.years[1] : ''}</div></a>`;
 }
 
 // ---------- Skådespelare och personsidor ----------
 export const ROLE_NAME = { director: 'Regi', creator: 'Skapare' };
 const initials = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-export function personArt(p) {
+export function personArt(p, css) {
   const h = hue(p.name);
   return `<div class="art"><div class="ph" aria-hidden="true" style="--h1:hsl(${h} 30% 34%);--h2:hsl(${(h + 40) % 360} 35% 18%)">${esc(initials(p.name))}</div>
-    ${p.image ? `<img loading="lazy" src="/api/people/${+p.id}/image" alt="" data-fb="1">` : ''}</div>`;
+    ${p.image ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/people/${+p.id}/image`, css || cardW(), 240)} alt="" width="185" height="185" data-fb="1">` : ''}</div>`;
 }
 export const personCard = (p, sub = '') => `<a class="card pcard" href="#/person/${+p.id}">${personArt(p)}<div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></a>`;
 export function castShelf(it) {

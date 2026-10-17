@@ -8,6 +8,7 @@ import * as music from '../music.js';
 import * as books from '../audiobooks.js';
 import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
+import { sized } from '../imgsize.js';
 import { route, user, img } from '../http/router.js';
 import { screenBlock, ctx } from '../http/context.js';
 
@@ -29,10 +30,11 @@ route('POST', '/api/audiobooks/book/:bid/bookmarks', user, async (c) => {
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/audiobooks/bookmarks/:mid', user, (c) => { run('DELETE FROM bookmarks WHERE id=? AND user_id=?', +c.p.mid, c.user.id); send(c.res, 200, { ok: true }); });
-route('GET', '/api/audiobooks/cover/:bid', img, (c) => {
+route('GET', '/api/audiobooks/cover/:bid', img, async (c) => {
   const f = books.coverPath(+c.p.bid);
   if (!f) return fail(c.res, 404, 'Inget omslag');
-  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(f), c.res, () => {});
+  const out = await sized(f, c.q.get('w')); // ?w= = nedskalad (imgsize.js)
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(out), c.res, () => {});
 });
 const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
 // Strömmar för ljudböcker/poddar: kortlivad token (24 h) som bara gäller den boken/det avsnittet – för appar och AirPlay
@@ -84,9 +86,10 @@ route('DELETE', '/api/podcasts/:pid', user, (c) => {
   if (!c.user.is_admin && p.added_by !== c.user.id) return fail(c.res, 403, 'Bara den som lade till podden eller en administratör kan ta bort den');
   pods.unsubscribe(p.id); send(c.res, 200, { ok: true });
 });
-route('GET', '/api/podcasts/:pid/image', img, (c) => {
+route('GET', '/api/podcasts/:pid/image', img, async (c) => {
   const f = pods.imagePath(+c.p.pid); if (!f) return fail(c.res, 404, 'Ingen bild');
-  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(f), c.res, () => {});
+  const out = await sized(f, c.q.get('w'));
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(out), c.res, () => {});
 });
 route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const { position, played } = await readJson(c.req);
