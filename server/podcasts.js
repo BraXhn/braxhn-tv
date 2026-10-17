@@ -10,6 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG, IMAGES } from './db.js';
 import { streamFile } from './util.js';
+import * as jobs from './jobs.js';
 
 // RFC 822-datum med tidszonsförkortningar (CEST, BST …) som Date.parse inte förstår
 const TZ = { CET: '+0100', CEST: '+0200', BST: '+0100', EET: '+0200', EEST: '+0300', WET: '+0000', WEST: '+0100', IST: '+0530', AEST: '+1000', AEDT: '+1100' };
@@ -217,6 +218,7 @@ export function download(epId) {
   run('UPDATE podcast_episodes SET downloading=1 WHERE id=?', epId);
   queue.push(async () => {
     const out = epFile(ep), tmp = out + '.part';
+    const jb = jobs.track('download', `Laddar ner: ${ep.title}`, { detail: 'podd' });
     try {
       // Total tidsgräns: en server som droppar en byte i taget får inte hålla en nedladdningsplats i dagar
       const { r } = await safeFetch(ep.url, { timeout: 30 * 60e3, signal: AbortSignal.timeout(3 * 3600e3) });
@@ -230,7 +232,7 @@ export function download(epId) {
       fs.rmSync(tmp, { force: true });
       run('UPDATE podcast_episodes SET downloading=0 WHERE id=?', epId);
       console.warn('[podd] nedladdning misslyckades:', ep.title, e.message);
-    }
+    } finally { jb.end(); }
   });
   pump();
 }

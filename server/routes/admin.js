@@ -21,6 +21,7 @@ import * as dlna from '../dlna.js';
 import * as mediaImport from '../mediaimport.js';
 import { route, admin, adminAnywhere, trustVpn, isTrusted } from '../http/router.js';
 import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile } from '../http/context.js';
+import * as jobs from '../jobs.js';
 
 // Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
 let integCache = null, integAt = 0;
@@ -351,3 +352,6 @@ route('POST', '/api/import/run', admin, async (c) => {
 });
 diskmon.start();
 setTimeout(() => { try { dlna.apply(); } catch (e) { console.warn('[dlna]', e.message); } }, 1000).unref();
+
+// Pågående jobb för aktivitetsindikatorn i menyraden (skanning, analys, omkodning, inspelning …)
+route('GET', '/api/jobs', admin, (c) => send(c.res, 200, { jobs: jobs.list() }));

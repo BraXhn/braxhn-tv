@@ -159,3 +159,15 @@ test('undertext läses där tittaren är först, sedan resten', async () => {
   assert.equal(cues.find(c => c.s === 200).text, 'Rad 200');
   r.close();
 });
+
+test('pågående jobb listas med förlopp och försvinner när de är klara', async () => {
+  const jobs = await import('../server/jobs.js');
+  const h = jobs.track('download', 'Laddar ner: test', { total: 4 });
+  h.update(1);
+  const j = jobs.list().find(x => x.title === 'Laddar ner: test');
+  assert.equal(j.progress, 0.25);
+  h.end(); h.end();
+  assert.ok(!jobs.list().some(x => x.title === 'Laddar ner: test'));
+  await assert.rejects(jobs.tracked('x', 'Fel', async () => { throw new Error('nej'); }));
+  assert.ok(!jobs.list().some(x => x.title === 'Fel'));
+});
