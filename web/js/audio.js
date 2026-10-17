@@ -1,5 +1,5 @@
 // Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå
-import { $, $$, act, api, esc, fmtTime, keyClick, routeGen, store, toast } from './core.js';
+import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, routeGen, store, toast } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
 import { LP, RP } from './player/live.js';
@@ -98,7 +98,7 @@ export function playSpoken(s) {
   M.sfile = null;
   setBarMode(true);
   const bar = $('#mbar'); bar.hidden = false; document.body.classList.add('hasbar');
-  $('#mcov').innerHTML = s.cover ? `<div class="cover small"><img src="${esc(s.cover)}" alt=""></div>` : '<div class="cover small">🎧</div>';
+  $('#mcov').innerHTML = s.cover ? `<div class="cover small"><img src="${esc(imgUrl(s.cover, 52))}" alt="" decoding="async" data-fb="1"></div>` : '<div class="cover small">🎧</div>';
   $('#mtitle').textContent = s.title;
   $('#martist').textContent = s.sub || ''; $('#martist').href = s.link || '#';
   $('#mspeed').value = String(M.spoken.speed);

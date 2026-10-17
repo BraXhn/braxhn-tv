@@ -83,7 +83,9 @@ test('card: ett namn för länken, menyknapp med aria-label och aria-haspopup, b
   noRawTag(h);
   assert.match(h, /<a class="clink" href="#\/item\/7" aria-label="&lt;img[^"]*, 2020, 50 % sett">/);
   assert.match(h, /class="cmenu" data-cmenu="7" aria-haspopup="menu" aria-expanded="false" aria-label="Fler åtgärder för &lt;img/);
-  assert.match(h, /<img loading="lazy" decoding="async" src="\/api\/image\/7\/poster" alt="" width="300" height="450"/);
+  // Bilden hämtas i kortets storlek (standardbredd 125 px × 1,2 → 160 px), inte i full storlek
+  assert.match(h, /<img loading="lazy" decoding="async" src="\/api\/image\/7\/poster\?w=160" alt="" width="300" height="450"/);
+  assert.match(card({ ...it, id: 10, kind: 'episode', thumb: true }, true), /src="\/api\/image\/10\/thumb\?w=240"/); // liggande: 1,9 kort
   assert.match(h, /class="bar" aria-hidden="true"/);
   assert.equal(cardItem(7), it);
   assert.doesNotMatch(card({ ...it, id: 8 }, false, { menu: false }), /cmenu/);
@@ -97,7 +99,7 @@ test('card: Plex-rader under affischen, ▶ med namn, märke för osedda avsnitt
   assert.doesNotMatch(mv, /cedit/); // bara administratörer
   const ep = card({ id: 22, kind: 'episode', title: 'Pilot', season: 3, episode: 23, show: 4, showTitle: 'Serien', showPoster: true, position: 0 });
   assert.match(ep, /<div class="t">Serien<\/div><div class="s">Pilot<\/div><div class="s s2">S3 · A23<\/div>/);
-  assert.match(ep, /src="\/api\/image\/4\/poster"/);
+  assert.match(ep, /src="\/api\/image\/4\/poster\?w=160"/);
   assert.match(ep, /href="#\/item\/4"/);
   const sh = card({ id: 23, kind: 'show', title: 'Serie', seasons: 3, episodes: 10, watchedEpisodes: 4 });
   assert.match(sh, /<div class="s">3 säsonger<\/div>/);

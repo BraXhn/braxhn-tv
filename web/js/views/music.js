@@ -1,5 +1,5 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
-import { $, $$, act, api, esc, fmtDur, fmtTime, hue, keyClick, libs, main, routeGen, store, toast, views } from '../core.js';
+import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, libs, main, routeGen, store, toast, views } from '../core.js';
 import { M, playQueue } from '../audio.js';
 import { route } from '../router.js';
 import { emptyState, noLib } from '../ui/states.js';
@@ -9,7 +9,7 @@ import { tabsHtml } from '../ui/tabs.js';
 
 export const cover = (albumId, has, cls = '') => {
   const h = hue(String(albumId));
-  return `<div class="cover ${cls}" style="--h1:hsl(${h} 40% 30%);--h2:hsl(${(h + 60) % 360} 45% 16%)">♪${has ? `<img loading="lazy" src="/api/music/cover/${albumId}" alt="" data-fb="1">` : ''}</div>`;
+  return `<div class="cover ${cls}" style="--h1:hsl(${h} 40% 30%);--h2:hsl(${(h + 60) % 360} 45% 16%)">♪${has ? coverImg(`/api/music/cover/${+albumId}`, cls) : ''}</div>`;
 };
 const albumCard = (a) => `<a class="card mcard" href="#/album/${a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</div></a>`;
 export function trackRows(tracks, opts = {}) {
@@ -145,7 +145,7 @@ const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0;
 // ---------- smarta spellistor ----------
 function smartCard(lid, x) {
   const c = x.covers || [];
-  const art = c.length >= 4 ? `<div class="cover smartmosaic">${c.slice(0, 4).map(id => `<img loading="lazy" src="/api/music/cover/${+id}" alt="" data-fb="1">`).join('')}</div>`
+  const art = c.length >= 4 ? `<div class="cover smartmosaic">${c.slice(0, 4).map(id => `<img loading="lazy" decoding="async" ${imgSrc(`/api/music/cover/${+id}`, cardW() * 0.6)} alt="" width="300" height="300" data-fb="1">`).join('')}</div>`
     : cover(c[0] || x.id, !!c.length);
   return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(x.name)}</div><div class="s">${x.count} låtar</div></a>`;
 }

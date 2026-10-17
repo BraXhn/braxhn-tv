@@ -1,5 +1,5 @@
 // Vyer: startsidan, bibliotek, sökning, Min lista och samlingar
-import { $, act, api, esc, later, libs, main, me, store, views } from '../core.js';
+import { $, act, api, esc, heroUrl, later, libs, main, me, store, views } from '../core.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { card, colCard, personCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
@@ -69,7 +69,7 @@ views.watchlist = async () => {
 };
 views.collection = async (id) => {
   const c = await api('/collections/' + id);
-  main.innerHTML = `<div class="hero">${c.backdrop ? `<div class="bd" style="background-image:url(/api/collection-image/${c.id}/backdrop)"></div>` : ''}
+  main.innerHTML = `<div class="hero">${c.backdrop ? `<div class="bd" style="background-image:url(${heroUrl(`/api/collection-image/${+c.id}/backdrop`)})"></div>` : ''}
     <div class="in"><div><h1>${esc(c.name)}</h1><div class="meta"><span>${c.items.length} filmer</span></div>${c.overview ? `<p class="overview">${esc(c.overview)}</p>` : ''}
     ${c.items.find(i => !i.watched) ? `<button class="primary" id="playfirst">▶ Spela ${esc(c.items.find(i => !i.watched).title)}</button>` : ''}</div></div></div>
     <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;

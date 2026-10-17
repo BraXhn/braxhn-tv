@@ -1,10 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 0.9.0
 - Strömning utanför hemmet: webbspelaren mäter uppkopplingen (i förväg och vid start, högst 1,5 s) och servern väljer kvalitet efter vad som ryms – aldrig över inställd maxkvalitet. "Spara data" i telefonen ger högst 480p
 - Anpassningsbar kvalitet har fått ett 360p-steg, och steget som ryms i uppkopplingen listas först (iPhone börjar på första varianten i stället för att fastna på ett för tungt steg). Spelaren hämtar aldrig högre upplösning än skärmen visar
 - Omkodning med kvalitetsgräns kodar kvalitetsstyrt med tak (x264 CRF, NVENC VBR) i stället för fast bithastighet: lugna scener tar mindre bandbredd med samma bild
 - Utanför hemmet blir ljudet AAC stereo 128 kbit/s vid omkodning (surround/Dolby tog 0,4–0,6 Mbit/s av uppkopplingen)
+- **Bilder i rätt storlek:** affischer, bakgrunder, avsnittsminiatyrer, samlings- och personbilder samt omslag till musik, ljudböcker och poddar kan hämtas nedskalade med `?w=` (`/api/image/…`, `/api/collection-image/…`, `/api/people/:id/image`, `/api/music/cover/…`, `/api/audiobooks/cover/…`, `/api/podcasts/:id/image`). Bredden avrundas uppåt till 160, 240, 320, 480, 720 eller 1280 px; andra värden ignoreras och ger originalet, som också skickas när det redan är smalare (ingen förstoring) eller om skalningen misslyckas. Varje storlek görs en gång med ffmpeg (högst två åt gången) och sparas i `cache/img`; byts bilden görs nya storlekar och de gamla tas bort. Behörighet och åldersgränser är oförändrade
+- Webben ber om bilder efter hur stora de visas (kortstorleken, skärmens pixeltäthet upp till 2×): på en telefon blir en affisch t.ex. 320 px (18 kB i stället för 39 kB med testbilden), på datorn 160 px. Bakgrunden överst på titelsidor hämtas i skärmens bredd. Omslag i listor (38–52 px) hämtas i 160 px
 
 ## 0.8.2
 - Rättat: efter en uppdatering kunde webbläsaren visa den nya sidan med den gamla stilmallen (cachad i en timme), så att layouten blev helt trasig. Stilmall och startmodul har nu versionsnummer i adressen, och appens filer kontrolleras mot servern vid varje besök (ETag – oförändrade filer laddas inte om)
