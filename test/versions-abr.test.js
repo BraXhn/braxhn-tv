@@ -32,7 +32,7 @@ async function req(p, { method = 'GET', body, headers = {} } = {}) {
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function waitScan() {
-  for (let i = 0; i < 120; i++) { await sleep(1000); const r = await req('/api/scan'); if (!r.data.running && r.data.last) return; }
+  for (let i = 0; i < 120; i++) { await sleep(1000); const r = await req('/api/scan'); if (!r.data.running && !r.data.analysis?.running && r.data.last) return; }
   throw new Error('skanning tog för lång tid');
 }
 const FILMER = path.join(MEDIA, 'Filmer');

@@ -1500,9 +1500,13 @@ views.admin = async () => {
     try {
       const s = await api('/scan');
       const el = $('#scanst'); if (!el || seq !== pollSeq) return;
-      el.innerHTML = s.running ? `Skannar <b>${esc(s.library)}</b>: ${esc(s.phase)} ${s.done}/${s.total}<div class="prog"><i style="width:${s.total ? s.done / s.total * 100 : 0}%"></i></div>`
-        : s.last ? `Senaste skanning: ${new Date(s.last * 1000).toLocaleString('sv-SE')}` : '';
-      cancelPoll = later(poll, s.running ? 1500 : 6000);
+      const bar = (x) => `<div class="prog"><i style="width:${x.total ? x.done / x.total * 100 : 0}%"></i></div>`;
+      const a = s.analysis;
+      el.innerHTML = (s.running ? `Skannar <b>${esc(s.library || '')}</b>: ${esc(s.phase)} ${s.done}/${s.total}${s.queued ? ` · ${s.queued} till i kö` : ''}${bar(s)}`
+        : s.last ? `Senaste skanning: ${new Date(s.last * 1000).toLocaleString('sv-SE')}` : '')
+        // Tunga analyser körs för sig och hindrar inte skanning eller metadata
+        + (a?.running ? `<div class="muted small" style="margin-top:8px">I bakgrunden: <b>${esc(a.library || '')}</b> – ${esc(a.phase)} ${a.done}/${a.total}${a.queued ? ` · ${a.queued} bibliotek till i kö` : ''}${bar(a)}</div>` : '');
+      cancelPoll = later(poll, s.running || a?.running ? 1500 : 6000);
     } catch {}
   }
   poll();

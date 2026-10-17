@@ -276,15 +276,20 @@ async function scanLibrary(lib) {
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
   if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
-  await thumbnails(lib);
-  await chapters(lib);
-  await autoSubtitles(lib);
-  status.phase = 'Indexerar nyckelbilder (för remux)';
+}
+
+/** Tunga analyser (minuter–timmar för stora bibliotek). Körs i en egen bakgrundskö så att skanning
+ *  och metadata aldrig behöver vänta på dem. Allt styrs av flaggor i databasen och kan avbrytas och tas upp igen. */
+async function analyzeLibrary(lib, st) {
+  await thumbnails(lib, st);
+  await chapters(lib, st);
+  await autoSubtitles(lib, st);
+  st.phase = 'Indexerar nyckelbilder (för remux)';
   const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL`, lib.id);
-  status.done = 0; status.total = kf.length;
-  for (const it of kf) { status.done++; await hooks.keyframes?.(it); if (status.done % 200 === 0) await new Promise(setImmediate); }
-  if (lib.type === 'show' && hooks.markers) { status.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, status); }
-  if (hooks.trickplay) await hooks.trickplay(lib, status);
+  st.done = 0; st.total = kf.length;
+  for (const it of kf) { st.done++; await hooks.keyframes?.(it); if (st.done % 200 === 0) await new Promise(setImmediate); }
+  if (lib.type === 'show' && hooks.markers) { st.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, st); }
+  if (hooks.trickplay) await hooks.trickplay(lib, st);
 }
 /** Serien som en mapp i seriebiblioteket hör till (för trailers i seriens mapp) */
 function showIdOfFolder(lib, folder) {
@@ -446,11 +451,11 @@ function remapAbsolute(show, seasons) {
 }
 
 // ---------- kapitel ----------
-async function chapters(lib) {
+async function chapters(lib, st = status) {
   const todo = all(`SELECT id,path FROM items WHERE library_id=? AND kind IN('movie','episode') AND chapters IS NULL AND path IS NOT NULL`, lib.id);
   if (!todo.length) return;
-  status.phase = 'Läser kapitel'; status.done = 0; status.total = todo.length;
-  for (const it of todo) { status.done++; run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
+  st.phase = 'Läser kapitel'; st.done = 0; st.total = todo.length;
+  for (const it of todo) { st.done++; run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
 }
 export async function readChapters(file) {
   try {
@@ -466,7 +471,7 @@ const L3 = { sv: ['swe', 'sv'], en: ['eng', 'en'], no: ['nor', 'nob', 'no', 'nb'
   es: ['spa', 'es'], it: ['ita', 'it'], nl: ['dut', 'nld', 'nl'], pl: ['pol', 'pl'], pt: ['por', 'pt'], ja: ['jpn', 'ja'], ko: ['kor', 'ko'], zh: ['chi', 'zho', 'zh'], ar: ['ara', 'ar'] };
 export const langMatches = (code, want) => !!code && (L3[want] || [want]).includes(String(code).toLowerCase().split(/[-_]/)[0]);
 export const autoSubs = { downloaded: 0, last: null, error: null };
-async function autoSubtitles(lib) {
+async function autoSubtitles(lib, st = status) {
   if (getSetting('sub_auto', '0') !== '1' || !os.enabled() || !hooks.subtitlesOf) return;
   const langs = getSetting('sub_auto_langs', getSetting('sub_langs', 'sv,en')).split(',').map(s => s.trim()).filter(Boolean).slice(0, 4);
   const onlyHash = getSetting('sub_auto_hash', '1') === '1';
@@ -474,10 +479,10 @@ async function autoSubtitles(lib) {
   // Försök igen efter en vecka för titlar där inget hittades
   const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','episode') AND path IS NOT NULL AND sub_auto < ? ORDER BY added DESC LIMIT 200`, lib.id, now() - 7 * 86400);
   if (!todo.length) return;
-  status.phase = 'Hämtar undertexter'; status.done = 0; status.total = todo.length;
+  st.phase = 'Hämtar undertexter'; st.done = 0; st.total = todo.length;
   let n = 0;
   for (const it of todo) {
-    status.done++;
+    st.done++;
     if (n >= maxRun) break;
     const have = hooks.subtitlesOf(it).filter(s => !s.forced && !s.bitmap);
     const missing = langs.filter(l => !have.some(s => langMatches(s.lang, l)));
@@ -522,10 +527,10 @@ export async function extractThumb(it) {
   } catch (e) { console.warn('[thumb]', it.path, e.message); }
 }
 
-async function thumbnails(lib) {
+async function thumbnails(lib, st = status) {
   const todo = all(`SELECT id,path,duration FROM items WHERE library_id=? AND kind IN('movie','episode') AND thumb=0 AND vcodec IS NOT NULL`, lib.id);
-  status.phase = 'Skapar miniatyrer'; status.done = 0; status.total = todo.length;
-  for (const it of todo) { status.done++; await extractThumb(it); }
+  st.phase = 'Skapar miniatyrer'; st.done = 0; st.total = todo.length;
+  for (const it of todo) { st.done++; await extractThumb(it); }
   // Serier utan affisch: använd första avsnittets miniatyr
   for (const sh of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND poster=0 AND thumb=0`, lib.id)) {
     const ep = get(`SELECT id FROM items WHERE parent_id=? AND thumb=1 ORDER BY season, episode LIMIT 1`, sh.id);
@@ -534,15 +539,52 @@ async function thumbnails(lib) {
   }
 }
 
+// ---- bakgrundsanalys (miniatyrer, kapitel, undertexter, nyckelbilder, intro, förhandsbilder) ----
+export const analysis = { running: false, library: null, phase: '', done: 0, total: 0, queued: 0 };
+status.analysis = analysis; // syns i /api/scan
+const pendingAnalysis = new Map(); // bibliotekets id → väntande löften
+let analysisRunning = false;
+/** Köa analys av ett bibliotek. Löftet blir klart när biblioteket analyserats. */
+export function requestAnalysis(libId) {
+  return new Promise((res) => {
+    const w = pendingAnalysis.get(libId) || [];
+    w.push(res); pendingAnalysis.set(libId, w);
+    analysis.queued = pendingAnalysis.size;
+    runAnalysis();
+  });
+}
+async function runAnalysis() {
+  if (analysisRunning) return;
+  analysisRunning = true; analysis.running = true;
+  try {
+    while (pendingAnalysis.size) {
+      const [id, waiters] = pendingAnalysis.entries().next().value;
+      pendingAnalysis.delete(id); analysis.queued = pendingAnalysis.size;
+      const lib = get('SELECT * FROM libraries WHERE id=?', id);
+      if (lib && (lib.type === 'movie' || lib.type === 'show')) {
+        analysis.library = lib.name;
+        try { await analyzeLibrary(lib, analysis); }
+        catch (e) { console.error(`[analys] fel i ${lib.name}:`, e); scanWarning(`${lib.name}: analysen avbröts (${e.message})`); }
+      }
+      for (const r of waiters) r();
+    }
+  } finally {
+    analysisRunning = false;
+    Object.assign(analysis, { running: false, library: null, phase: '', done: 0, total: 0, queued: 0 });
+  }
+}
+
+// ---- skanning (filer och metadata – snabbt, väntar aldrig på analysen) ----
 let queue = Promise.resolve();
 const queued = new Set(); // köade men ej påbörjade skanningar ('all' eller bibliotekets id)
 export function scan(libId = null) {
   // Samma skanning köas bara en gång (t.ex. en webhook från Sonarr per avsnitt i ett säsongspaket)
   const key = libId ? String(libId) : 'all';
   if (queued.has(key) || queued.has('all')) return queue;
-  queued.add(key);
+  queued.add(key); status.queued = queued.size;
+  const analyses = [];
   queue = queue.then(async () => {
-    queued.delete(key);
+    queued.delete(key); status.queued = queued.size;
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
     status.running = true; status.started = now(); status.warnings = [];
     try {
@@ -551,11 +593,13 @@ export function scan(libId = null) {
         try {
           if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); }
           else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); }
-          else await scanLibrary(l);
+          else { await scanLibrary(l); analyses.push(requestAnalysis(l.id)); }
         } catch (e) { console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`); }
       }
     }
     finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }
   });
-  return queue;
+  // Nästa skanning köas bara efter själva skanningen; den som väntar på anropet får vänta tills även
+  // analysen av de skannade biblioteken är klar (t.ex. testerna)
+  return queue.then(() => Promise.all(analyses));
 }
