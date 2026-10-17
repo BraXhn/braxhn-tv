@@ -94,6 +94,19 @@ test('tolkning av avsnittsnamn', () => {
   assert.equal(e.season, 2); assert.equal(e.episode, 7);
 });
 
+test('lösa avsnittsnamn: skivor, volymer och onumrerade', () => {
+  const sep = path.sep;
+  let e = scanner.parseEpisode(['Byggare Bob', 'Byggare Bob 026 - Jul hos Byggare Bob.avi'].join(sep));
+  assert.equal(e.show, 'Byggare Bob'); assert.equal(e.episode, 26); assert.equal(e.epTitle, 'Jul hos Byggare Bob');
+  e = scanner.parseEpisode(['Julkalendrar', 'jul.i.kapernaum.1995.disc1.mp4'].join(sep));
+  assert.equal(e.show, 'jul i kapernaum'); assert.equal(e.year, 1995); assert.equal(e.episode, 1);
+  e = scanner.parseEpisode(['Tures', 'Turesdvd2.mp4'].join(sep));
+  assert.equal(e.show, 'Tures'); assert.equal(e.episode, 2);
+  e = scanner.parseEpisode(['Chuggington - Collection', 'Chuggington - Hjälpsamma Hodge.avi'].join(sep));
+  assert.equal(e.show, 'Chuggington'); assert.equal(e.episode, null); assert.equal(e.epTitle, 'Hjälpsamma Hodge');
+  assert.equal(scanner.parseEpisode('Liv i Luckan.mp4'), null);
+});
+
 test('anime: absolut numrering och mappning till säsonger', () => {
   const sep = path.sep;
   let e = scanner.parseEpisode('[SubsPlease] Jujutsu Kaisen - 25 (1080p) [A1B2C3D4].mkv');

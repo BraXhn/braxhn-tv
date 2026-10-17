@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: alla omkodningar misslyckades när HWACCEL=nvenc var satt utan NVIDIA-drivrutin i containern (`Cannot load libcuda.so.1`). Servern provar nu hårdvaruomkodaren vid start och går automatiskt över till processorn om den inte fungerar; säkerhetskontrollen visar varför
+- Serier med lösare filnamn känns igen: "Byggare Bob 026 - Titel", "Kaspar2", "Lille Luj Disc3", "Turesdvd2", "Sunes.Jul.Volym.2-8". Avsnitt utan nummer i en seriemapp numreras i namnordning
 - Filmer som inte analyserats än startar utan omkodning: nyckelbilderna tas fram direkt när man trycker på Spela (före bakgrundsanalysen, högst 25 s väntan), och bakgrundsanalysen indexerar nyckelbilder före miniatyrer m.m.
 - Rättat: filmer som omkodades startade inte på iPhone/iPad (Safaris egen HLS-spelare klarar inte Dolby Digital i TS-segment – ljudet blir nu AAC där). Spelaren visar "Startar omkodning…" och ett begripligt fel om uppspelningen misslyckas
 - Ny logotyp (räls mot en linuxserver, X som andreaskors) i webben, som appikon i iOS, Android och Google TV, och som appikon och topphylla på Apple TV

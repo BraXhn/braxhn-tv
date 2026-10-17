@@ -1729,6 +1729,8 @@ route('GET', '/api/security-check', admin, (c) => {
   if (typeof process.getuid === 'function' && process.getuid() === 0) add('warn', 'Servern körs som root', 'Kör containern med PUID/PGID (standard i Unraid-mallen).');
   else add('ok', 'Servern körs utan root-rättigheter', '');
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
+  if (st.hwStatus.error) add('warn', `Hårdvaruomkodning (${st.hwStatus.wanted}) fungerar inte – processorn används`,
+    `Fel: ${st.hwStatus.error}. För NVIDIA krävs pluginen Nvidia-Driver och --runtime=nvidia i Extra Parameters; för Intel/AMD enheten /dev/dri. Annars: sätt HWACCEL=none.`);
   if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
   items.push(...diskmon.checkItems());
   if (dlna.enabled()) add('info', 'DLNA är påslaget', 'Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning' + (dlna.maxAge() != null ? ` (titlar upp till ${dlna.maxAge()} år).` : '.'));
