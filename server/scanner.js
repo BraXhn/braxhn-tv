@@ -21,11 +21,45 @@ export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.
 const clean = (s) => s.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
 const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
 
+// ---- Blu-ray-mappar (BDMV/STREAM/00000.m2ts …) ----
+// En kopierad skiva innehåller varningstexter, loggor, menyer och trailers som egna klipp. Bara huvudfilmen
+// (största filen) ska bli en titel, och den får namnet från mappen ovanför BDMV.
+const DISC_DIR = /^(disc|disk|dvd|bd|cd|del|skiva)[\s._-]*\d+$/i;
+/** Mappen som innehåller BDMV (skivans rot), eller null om filen inte ligger på en kopierad Blu-ray */
+export function discRoot(file) {
+  const parts = file.split(path.sep);
+  const i = parts.findLastIndex(x => x.toUpperCase() === 'BDMV');
+  return i > 0 ? parts.slice(0, i).join(path.sep) || path.sep : null;
+}
+/** Namnet på en skiva: mappen ovanför BDMV, utan "Disc 1"/"_D1" (en mapp som bara heter "Disc 1" ger föräldern) */
+function discName(root) {
+  let name = path.basename(root);
+  if (DISC_DIR.test(name)) name = path.basename(path.dirname(root));
+  return name.replace(/[\s._-]+(disc|disk|d|cd)[\s._-]*\d+$/i, '');
+}
+/** Behåll bara huvudfilmen (största .m2ts i BDMV/STREAM) per skiva; övriga klipp och BACKUP-kopior hoppas över */
+export async function discMainOnly(files) {
+  const best = new Map(), out = [];
+  for (const f of files) {
+    const root = discRoot(f);
+    if (!root) { out.push(f); continue; }
+    const rel = f.slice(root.length + 1).split(path.sep).map(x => x.toUpperCase());
+    if (rel[1] !== 'STREAM' || rel.length !== 3) continue; // BDMV/BACKUP, PLAYLIST m.m.
+    let size = 0; try { size = (await fs.promises.stat(f)).size; } catch { continue; }
+    const b = best.get(root);
+    if (!b || size > b.size) best.set(root, { f, size });
+  }
+  for (const { f } of best.values()) out.push(f);
+  return out;
+}
+
 export function parseMovie(file) {
   const tryName = (name) => {
     const m = name.match(/^(.*)[\s._(\[-]+((?:19|20)\d\d)(?=[\s._)\]-]|$)/); // sista årtalet (t.ex. Blade Runner 2049 (2017))
     return m && clean(m[1]) ? { title: clean(m[1]), year: +m[2] } : null;
   };
+  const root = discRoot(file);
+  if (root) { const n = discName(root); return tryName(n) || { title: clean(n.replace(JUNK, '')) || n, year: null }; }
   const base = path.basename(file, path.extname(file));
   const folder = path.basename(path.dirname(file));
   return tryName(base) || tryName(folder) || { title: clean(base.replace(JUNK, '')) || base, year: null };
@@ -147,7 +181,9 @@ async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
   const { files: found, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
   // Trailers ("Film (2020)-trailer.mkv", mappen trailers/) blir inte egna titlar – de kopplas till titeln efteråt
-  const files = found.filter(f => !isTrailerFile(f)), trailerFiles = found.filter(isTrailerFile);
+  const trailerFiles = found.filter(isTrailerFile);
+  // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
+  const files = await discMainOnly(found.filter(f => !isTrailerFile(f)));
   if (!rootOk) {
     // Mappen saknas/går inte att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
     scanWarning(deletionBlocked({ name: lib.name, rootOk }));
@@ -176,6 +212,12 @@ async function scanLibrary(lib) {
       if (pending.length >= 200 || Date.now() - flushed > 2000) flush();
       let st; try { st = await fs.promises.stat(f); } catch { continue; }
       const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
+      // Huvudfilm på en Blu-ray som tidigare fick filnamnet ("00800") som titel: byt till skivans namn
+      if (k && lib.type === 'movie' && discRoot(f)) {
+        const p = parseMovie(f), raw = path.basename(f, path.extname(f));
+        pending.push(() => run(`UPDATE items SET title=?, sort_title=?, year=?, meta_done=0 WHERE id=? AND title=? AND match_locked=0`,
+          p.title, sortTitle(p.title), p.year, k.id, raw));
+      }
       if (k && k.size === st.size && k.mtime === mtime) continue;
       const info = await probe(f);
       // Misslyckad probe (t.ex. disken vaknade för långsamt): spara mtime 0 så att filen läses om vid nästa skanning
