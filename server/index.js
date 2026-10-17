@@ -1,6 +1,11 @@
 // Loggning av oväntade fel. Ett avvisat löfte som ingen fångar loggas och servern fortsätter.
 // Ett ofångat undantag kan ha lämnat servern i ett okänt tillstånd: logga och avsluta så att
 // Docker/Unraid startar om containern (restart: unless-stopped).
+// Tidsstämpel på varje loggrad i containern (Unraids loggvy visar annars inga tider)
+if (process.env.NODE_ENV === 'production' && process.env.LOG_TIME !== '0') {
+  const stamp = () => { const d = new Date(); return `${d.toLocaleDateString('sv-SE')} ${d.toLocaleTimeString('sv-SE')}`; };
+  for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console); console[k] = (...a) => orig(stamp(), ...a); }
+}
 process.on('unhandledRejection', (e) => { console.error('[fel] ohanterat avvisat löfte:', e?.stack || e); });
 process.on('uncaughtException', (e, origin) => {
   console.error(`[fel] ofångat undantag (${origin}):`, e?.stack || e);
@@ -13,7 +18,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { handle } from './app.js';
 import { scan } from './scanner.js';
-import { CONFIG } from './db.js';
+import { CONFIG, db } from './db.js';
+import { purgeIdle } from './stream.js';
 import { scheduleRenewal } from './acme.js';
 import { shutdown as liveShutdown } from './livetv.js';
 import { shutdown as dvrShutdown } from './dvr.js';
@@ -65,5 +71,8 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => {
   if (stopping) return; stopping = true;
   server.close(); tlsServer?.close();
   try { liveShutdown(); await dvrShutdown(5000); } catch {}
+  // Stoppa omkodningar och stäng databasen ordentligt (WAL skrivs in i huvudfilen)
+  try { purgeIdle(-1); } catch {}
+  try { db.close(); } catch {}
   process.exit(0);
 });

@@ -27,7 +27,8 @@ export function serveStatic(req, res, pathname) {
       if (e2) return fail(res, 404, 'Hittades inte');
       const ext = path.extname(f);
       const fresh = ext === '.html' || ext === '.webmanifest' || pathname === '/sw.js'; // nya versioner ska nå appen direkt
-      const h = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': fresh ? 'no-cache' : 'max-age=3600' };
+      // ETag: appen frågar om nya versioner (no-cache) och får 304 i stället för hela filen
+      const h = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': fresh ? 'no-cache' : 'max-age=3600', ETag: 'auto' };
       if (ext === '.html') h['Content-Security-Policy'] = CSP;
       send(res, 200, data, h);
     });

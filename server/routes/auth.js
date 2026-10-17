@@ -11,7 +11,11 @@ import * as screen from '../screentime.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
 import { allowUnrated, ctx, householdRoot, canManage } from '../http/context.js';
 
-route('GET', '/api/health', pub, (c) => send(c.res, 200, { ok: true }));
+// Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
+route('GET', '/api/health', pub, (c) => {
+  try { get('SELECT 1'); } catch (e) { return send(c.res, 503, { ok: false, error: 'Databasen svarar inte' }); }
+  send(c.res, 200, { ok: true });
+});
 route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   // Avslöja inte för utomstående att servern är nyinstallerad
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',

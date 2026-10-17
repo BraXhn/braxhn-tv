@@ -64,9 +64,11 @@ route('GET', '/api/home', user, (c) => {
   const have = new Set(cont.map(x => x.show).filter(Boolean));
   for (const s of shows) {
     if (have.has(s.sid)) continue;
-    const next = listItems(uid, `i.parent_id=? AND COALESCE(p.watched,0)=0 AND (i.season*10000+i.episode) > COALESCE(
-      (SELECT MAX(e.season*10000+e.episode) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.parent_id),-1)`,
-      [s.sid], 'i.season, i.episode', 1)[0];
+    // Senast sedda avsnittet hämtas separat (som underfråga kördes den en gång per avsnitt – långsamt för långa serier)
+    const last = get(`SELECT MAX(e.season*10000+e.episode) AS m FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=? AND q.watched=1
+      WHERE e.parent_id=?`, uid, s.sid)?.m ?? -1;
+    const next = listItems(uid, `i.parent_id=? AND COALESCE(p.watched,0)=0 AND (i.season*10000+i.episode) > ?`,
+      [s.sid, last], 'i.season, i.episode', 1)[0];
     if (next) cont.push(next);
   }
   const rows = all("SELECT * FROM libraries WHERE type != 'music' ORDER BY name").map(l => ({
@@ -99,7 +101,7 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
   send(c.res, 200, out);
 });
 route('GET', '/api/search', user, (c) => {
-  const q = `%${(c.q.get('q') || '').trim()}%`;
+  const q = `%${(c.q.get('q') || '').normalize('NFC').trim()}%`;
   if (q.length < 3) return send(c.res, 200, []);
   send(c.res, 200, listItems(c.user.id, `(i.title LIKE ? OR (i.kind='show' AND i.overview LIKE ?))`, [q, q],
     `CASE i.kind WHEN 'movie' THEN 0 WHEN 'show' THEN 0 ELSE 1 END, i.sort_title`, 60));
@@ -308,7 +310,7 @@ route('GET', '/api/image/:id/:type', img, (c) => {
   // Begränsade profiler (barn) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen) från titlar över gränsen
   if (maxAgeOf(c.user.id) != null && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
   const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
-  const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' });
+  const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
   fs.readFile(f, (e, data) => {
     if (!e) return ok(data);
     // Filmversioner har ingen egen affisch – använd filmens (t.ex. när Chromecast fått en token för versionen)

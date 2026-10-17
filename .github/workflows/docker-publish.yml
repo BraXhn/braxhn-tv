@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: '22' }
+        with: { node-version: '24' }   # samma som imagen
       - name: Tester
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && npm run verify && npm test
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
@@ -26,6 +26,33 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Röktest av själva imagen (Node 24 och Debians ffmpeg) innan något publiceras
+      - name: Bygg för röktest (amd64)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: braxhn-tv:rokttest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Röktest
+        run: |
+          docker run -d --name rok -p 18420:8420 braxhn-tv:rokttest
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18420/api/health; then echo; break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:18420/api/health
+          curl -fsS -o /dev/null http://127.0.0.1:18420/
+          sleep 4
+          docker logs rok
+          docker logs rok 2>&1 | grep -q 'programfiler stämmer' || { echo 'Integritetskontrollen misslyckades'; exit 1; }
+          docker exec rok ffmpeg -hide_banner -f lavfi -i testsrc2=d=1 -c:v libx264 -f null - >/dev/null 2>&1
+          docker rm -f rok
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -33,6 +60,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
+            type=sha,prefix=sha-,enable={{is_default_branch}}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -43,6 +71,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       # Signera imagen (Sigstore, utan nyckel) så att den kan verifieras:
       #   cosign verify ghcr.io/braxhn/braxhn-tv:latest --certificate-identity-regexp 'https://github.com/BraXhn/braxhn-tv/' --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
