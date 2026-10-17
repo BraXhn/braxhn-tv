@@ -546,7 +546,8 @@ function startFfmpeg(s, it, n) {
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
       ...va.filter, ...va.map, ...audioArgs(d), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: B-bilder ger negativ DTS i början; utan detta förskjuts hela körningen ~0,08 s
-      // och segmenten från en omstart (spolning) skulle inte passa ihop med de första
+      // och segmenten från en omstart (spolning) skulle inte passa ihop med de första. (Segment 0 börjar ändå
+      // ~0,08 s sent – TS-muxern inuti skjuter fram det – ett överlapp som spelarna hanterar.)
       '-output_ts_offset', String(t), '-muxdelay', '0', '-muxpreload', '0', '-avoid_negative_ts', 'disabled',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
@@ -689,7 +690,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
   const d = s.d;
   const total = segmentsOf(it, d).length;
   s.total = total;
-  if (!(n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
+  if (!(Number.isInteger(n) && n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
   if (!complete(s, n)) {
     s.waiting++;
     try { const r = await awaitSegment(req, res, it, s, n, userId); if (r !== true) return; }
