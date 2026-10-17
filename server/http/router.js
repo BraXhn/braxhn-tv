@@ -11,7 +11,7 @@
 // /api/music/albums/:aid) ligger i samma fil och i samma inbördes ordning.
 import { getSetting, get } from '../db.js';
 import { clientIp, isPrivate, inCidr, fail, isHttps, send } from '../util.js';
-import { userFromReq, require2faRemote, audit } from '../auth.js';
+import { userFromReq, require2faRemote, audit, cookieHeader } from '../auth.js';
 import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
 import * as metrics from '../metrics.js';
@@ -98,6 +98,8 @@ export async function handle(req, res) {
     try { p = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { return fail(res, 400, 'Ogiltig adress'); }
     // Token i adressen (?t=) tas bara emot på routes som tillåter media- eller bildtoken
     const c = { req, res, q: url.searchParams, p, user: userFromReq(req, url.searchParams, !!(r.media || r.img)) };
+    // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
+    if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;
     if (u) {
       // Kortlivade token gäller bara där de är avsedda:

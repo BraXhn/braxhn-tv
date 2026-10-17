@@ -5,13 +5,13 @@ import { api } from './core.js';
 const b64uEnc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const b64uDec = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
 export const passkeyOk = () => !!window.PublicKeyCredential && window.isSecureContext;
-export async function passkeyLogin() {
+export async function passkeyLogin(remember = true) {
   const o = await (await fetch('/api/passkey/options', { method: 'POST' })).json();
   if (o.error) throw new Error(o.error);
   const cred = await navigator.credentials.get({ publicKey: { ...o, challenge: b64uDec(o.challenge) } });
   const r = await fetch('/api/passkey/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
     id: cred.id, response: { clientDataJSON: b64uEnc(cred.response.clientDataJSON), authenticatorData: b64uEnc(cred.response.authenticatorData),
-      signature: b64uEnc(cred.response.signature) } }) });
+      signature: b64uEnc(cred.response.signature) }, remember }) });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
 }

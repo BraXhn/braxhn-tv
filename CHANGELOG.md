@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- "Håll mig inloggad i 30 dagar" vid inloggning (även med passkey). Valt: inloggningen gäller i 30 dagar räknat från senaste besöket (kakan förnyas). Ej valt: webbläsaren glömmer inloggningen när den stängs, och den går ut efter 12 timmar utan aktivitet. Valet sparas till nästa gång och följer med vid profilbyte
+- Pågående jobb (skanning, analys, omkodning, inspelning, nedladdning, undertexter, nyckelbilder) finns för administratören via `/api/jobs`
 
 ## 0.6.1
 - Rättat: undertexter som slogs på mitt i en film syntes inte (eller först efter flera minuter). Ett inbäddat spår lästes från filmens början och skickades först när hela filen var läst – för en stor film tar det minuter. Nu läses spåret där tittaren är (text och Blu-ray/PGS), visas inom någon sekund och fylls sedan i medan man tittar; efter spolning läses det nya stället direkt. Färdiga spår sparas som förut

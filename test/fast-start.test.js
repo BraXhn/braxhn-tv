@@ -171,3 +171,15 @@ test('pågående jobb listas med förlopp och försvinner när de är klara', as
   await assert.rejects(jobs.tracked('x', 'Fel', async () => { throw new Error('nej'); }));
   assert.ok(!jobs.list().some(x => x.title === 'Fel'));
 });
+
+test('inloggning: "Håll mig inloggad" ger 30 dagar, annars en sessionskaka', async () => {
+  const auth = await import('../server/auth.js');
+  assert.match(auth.cookieHeader('a'.repeat(64), false, true), /Max-Age=2592000/);
+  assert.doesNotMatch(auth.cookieHeader('a'.repeat(64), false, false), /Max-Age/);
+  const { run, get } = await import('../server/db.js');
+  const uid = Number(run(`INSERT INTO users(name,pass,created) VALUES('rem${Date.now()}','x',1)`).lastInsertRowid);
+  const keep = auth.createSession(uid, 'web', { remember: true }), short = auth.createSession(uid, 'web', { remember: false });
+  const exp = (t) => get('SELECT expires - created AS d, remember FROM sessions WHERE token=?', auth.sha(t));
+  assert.deepEqual({ ...exp(keep) }, { d: 30 * 86400, remember: 1 });
+  assert.deepEqual({ ...exp(short) }, { d: 12 * 3600, remember: 0 });
+});
