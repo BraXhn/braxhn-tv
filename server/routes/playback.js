@@ -108,12 +108,12 @@ route('GET', '/api/stream/:id/hls/init.mp4', media, async (c) => { const it = me
 route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
-route('GET', '/api/stream/:id/subs/:sid', media, (c) => { const it = mediaItem(c); if (it) st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q); });
+route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q); });
 const pgsSub = (it, sid) => st.subtitlesOf(it).find(s => s.id === sid && s.pgs);
-route('GET', '/api/stream/:id/pgs/:sid', media, (c) => {
+route('GET', '/api/stream/:id/pgs/:sid', media, async (c) => {
   const it = mediaItem(c); if (!it) return;
   const sub = pgsSub(it, c.p.sid); if (!sub) return fail(c.res, 404, 'Undertext saknas');
-  pgs.serveIndex(c.res, it, sub);
+  await pgs.serveIndex(c.res, it, sub, +c.q.get('pos') || 0);
 });
 route('GET', '/api/stream/:id/pgs/:sid/:n', media, (c) => {
   const it = mediaItem(c); if (!it) return;

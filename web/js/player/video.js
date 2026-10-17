@@ -6,7 +6,7 @@ import { castItem, castReady } from './cast.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
-import { pgsStop, setSubs, subBurns } from './subs.js';
+import { pgsStop, setSubs, subBurns, textStop } from './subs.js';
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { ICON } from '../ui/icons.js';
@@ -328,7 +328,7 @@ export function closePlayer(refresh = true) {
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   const el = P.el, v = $('#vid', el), id = P.it.id;
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
-  pgsStop(P);
+  pgsStop(P); textStop(P);
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);

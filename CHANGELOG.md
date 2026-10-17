@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.6.1
+- Rättat: undertexter som slogs på mitt i en film syntes inte (eller först efter flera minuter). Ett inbäddat spår lästes från filmens början och skickades först när hela filen var läst – för en stor film tar det minuter. Nu läses spåret där tittaren är (text och Blu-ray/PGS), visas inom någon sekund och fylls sedan i medan man tittar; efter spolning läses det nya stället direkt. Färdiga spår sparas som förut
+
 ## 0.6.0
 - Omstrukturering utan ändrad funktion: serverns routes är uppdelade per område (`server/routes/`) med säkerhetsmodellen samlad i `server/http/router.js`, och webbklienten är uppdelad i ES-moduler (`web/js/`)
 - Drift: segment långt bakom uppspelningen tas bort (en hel film hamnar inte längre i /transcode, som ofta ligger i RAM); säkerhetskopia av databasen före varje uppgradering (`backups/före-uppgradering-*.db`) och varning om en äldre version startas mot en nyare databas; containern startar snabbare (ägarbyte bara på filer som behöver det); ordnad avstängning (omkodningar stoppas, databasen stängs); tidsstämplar i loggen; hälsokontrollen frågar databasen; tidszon (`TZ`, standard Europe/Stockholm) för skärmtid, inspelningar och nattliga säkerhetskopior
