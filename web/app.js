@@ -2041,6 +2041,8 @@ async function load(start) {
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
   let pb;
+  // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
+  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
   try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
   catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toast(e.message); } return; }
   if (!live()) return;

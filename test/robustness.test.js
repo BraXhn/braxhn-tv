@@ -256,3 +256,15 @@ test('iPhone (Safaris egen HLS): Dolby Digital i TS-segment blir AAC, men skicka
   assert.equal(d.fmt, 'ts'); assert.equal(d.audioMode, 'aac', 'Safari: AAC i TS');
   assert.ok(!d.reasons.some(r => /skickas orört/.test(r)));
 });
+
+test('nyckelbilder: den som trycker på Spela går före bakgrundsanalysen', async () => {
+  // Fyll de två bakgrundsplatserna med filer som inte finns klara, och kontrollera att en prioriterad
+  // beräkning ändå startar direkt (den tredje platsen) i stället för att köa bakom dem
+  const dir = path.join(MEDIA, 'kf'); fs.mkdirSync(dir, { recursive: true });
+  const mk = (id) => ({ id, vcodec: 'h264', mtime: 1, path: path.join(dir, `saknas-${id}.mkv`) });
+  const bg = [st.computeKeyframes(mk(900001)), st.computeKeyframes(mk(900002)), st.computeKeyframes(mk(900003))];
+  const t0 = Date.now();
+  await st.computeKeyframes(mk(900004), { priority: true });
+  assert.ok(Date.now() - t0 < 5000);
+  await Promise.all(bg);
+});

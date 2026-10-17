@@ -185,12 +185,13 @@ export const keyframesCached = (it) => kfMem.get(it.id)?.mtime === it.mtime || f
 export const kfCacheSize = () => kfMem.size;
 const kfRunning = new Map();
 let kfActive = 0; const kfWait = [];
-export function computeKeyframes(it) {
+export function computeKeyframes(it, { priority = false } = {}) {
   if (!['h264', 'hevc'].includes(it.vcodec)) return Promise.resolve(null); // remux: H.264 (TS) och HEVC (fMP4)
   if (keyframesReady(it)) return Promise.resolve(keyframesReady(it));
   if (kfRunning.has(it.id)) return kfRunning.get(it.id);
   const p = (async () => {
-    if (kfActive >= 2) await new Promise(r => kfWait.push(r));
+    // Bakgrundsanalysen använder högst två samtidigt; den som just tryckt på Spela får en egen plats direkt
+    if (priority ? kfActive >= 3 : kfActive >= 2) await new Promise(r => priority ? kfWait.unshift(r) : kfWait.push(r));
     kfActive++;
     try {
       const { stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
