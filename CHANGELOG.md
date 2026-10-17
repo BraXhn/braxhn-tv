@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: filmer som omkodades startade inte på iPhone/iPad (Safaris egen HLS-spelare klarar inte Dolby Digital i TS-segment – ljudet blir nu AAC där). Spelaren visar "Startar omkodning…" och ett begripligt fel om uppspelningen misslyckas
 - Ny logotyp (räls mot en linuxserver, X som andreaskors) i webben, som appikon i iOS, Android och Google TV, och som appikon och topphylla på Apple TV
 - Installerbar app på telefonen: manifest med ikoner, service worker (startar även utan kontakt med servern), "Installera som app" i menyn, meny längst ner på telefon, anpassad spelare och kompakt litet fönster
 - Rättat: många filmer startade inte när de omkodades (spelaren gav upp efter 10 s och bytte kvalitetssteg, vilket startade om omkodningen). Spelaren väntar nu upp till 60 s, och flera kvalitetssteg används bara utanför hemmet

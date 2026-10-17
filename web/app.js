@@ -1922,6 +1922,7 @@ async function play(id, start = 0, opts = {}) {
   v.addEventListener('ended', () => P === cur && onEnded());
   v.addEventListener('error', () => {
     if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(); }
+    else if (P === cur && v.error) toast(`Kunde inte spela upp (${['', 'avbrutet', 'nätverksfel', 'avkodningsfel', 'formatet stöds inte'][v.error.code] || 'fel'}) – prova en lägre kvalitet under ⚙`);
   });
   // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
   let idle; const wake = () => {
@@ -1978,6 +1979,9 @@ function bindControls(cur, v) {
   ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
   v.addEventListener('volumechange', syncVol);
   v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; });
+  // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
+  const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? 'Startar omkodning…' : 'Laddar…'; };
+  v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
   v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
   const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
   playBtn.onclick = toggle;
@@ -2035,6 +2039,7 @@ async function load(start) {
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
+  if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
   let pb;
   try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
   catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toast(e.message); } return; }
