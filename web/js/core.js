@@ -1,0 +1,86 @@
+// Kärnan i webbklienten: DOM-hjälpare, esc(), lagring, inloggningsläge, navigeringsgeneration med later()/onLeave(),
+// api(), toast och formatering. Importerar inget – därför säker att använda när andra moduler utvärderas.
+export const $ = (s, el = document) => el.querySelector(s);
+export const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+export const main = $('#main');
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const store = {
+  get(k, d) { try { const v = localStorage.getItem('braxhn-tv.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('braxhn-tv.' + k, JSON.stringify(v)); } catch {} }
+};
+export let me = null, libs = [], status = {};
+// Inloggningsläget sätts av router.js (importerade bindningar är skrivskyddade i andra moduler)
+export function setLogin(st) { status = st; me = st.user; }
+export function setMe(u) { me = u; }
+export function setLibs(l) { libs = l; }
+// Navigering: varje route() får en ny generation. Anrop och timers från en gammal vy avbryts.
+export let routeGen = 0;
+export const nextRoute = () => ++routeGen;
+export const leaveFns = new Set();
+export const onLeave = (fn) => { leaveFns.add(fn); return fn; };
+// setTimeout knuten till vyn: körs bara om man är kvar, rensas när man lämnar. Returnerar en avbrytfunktion.
+export function later(fn, ms) {
+  const g = routeGen;
+  const cancel = () => { clearTimeout(t); leaveFns.delete(cancel); };
+  const t = setTimeout(() => {
+    leaveFns.delete(cancel);
+    if (g !== routeGen) return;
+    const r = fn();
+    if (r && r.catch) r.catch(e => { if (!e?.aborted) console.warn(e); });
+  }, ms);
+  leaveFns.add(cancel);
+  return cancel;
+}
+const abortErr = () => Object.assign(new Error(''), { aborted: true });
+window.addEventListener('unhandledrejection', (e) => { if (e.reason?.aborted) e.preventDefault(); });
+// Trasiga bilder tas bort (ersätter inline onerror, som CSP blockerar)
+document.addEventListener('error', (e) => { if (e.target?.tagName === 'IMG' && e.target.dataset.fb) e.target.remove(); }, true);
+
+export async function api(path, opts = {}) {
+  // bg: true = anropet hör inte till den aktuella vyn (t.ex. spelaren) och avbryts inte vid navigering
+  const { bg, ...rest } = opts;
+  const gen = routeGen;
+  const o = { headers: {}, ...rest };
+  if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
+  const r = await fetch('/api' + path, o);
+  const data = r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text();
+  if (r.status === 401 && !path.startsWith('/login')) { me = null; location.hash = '#/login'; throw new Error('Inte inloggad'); }
+  if (!bg && gen !== routeGen) throw abortErr(); // användaren har gått vidare – resultatet ska inte användas
+  if (!r.ok) throw Object.assign(new Error(data?.error || `Fel ${r.status}`), { code: data?.code, data });
+  return data;
+}
+// Rader och mappar som bara har onclick: gör dem nåbara med tangentbord och fjärrkontroll (Tab/D-pad + Enter)
+export function keyClick(el) {
+  el.tabIndex = 0; el.setAttribute('role', 'button');
+  el.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); el.click(); } };
+  return el;
+}
+export function toast(msg) {
+  if (!msg) return;
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 3200);
+}
+// Kör en asynkron händelsehanterare och visar fel som toast (avbrutna anrop ignoreras)
+export const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (!e?.aborted) toast(e?.message || String(e)); } };
+// Profilfärg: bara #hex, rgb()/hsl() släpps in i style-attributet
+export const safeColor = (c) => typeof c === 'string' && (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\([0-9a-z\s.,%/+-]*\)$/i.test(c)) ? c : '';
+export const fmtTime = (s) => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`;
+};
+export const fmtDur = (s) => { if (!s) return ''; const m = Math.max(1, Math.round(s / 60)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+export const fmtSize = (b) => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+export const resLabel = (h) => !h ? '' : h >= 2000 ? '4K' : h >= 1000 ? '1080p' : h >= 700 ? '720p' : h >= 560 ? '576p' : h + 'p';
+export const sxe = (e) => `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')}`;
+export function hue(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+// ---------- vyer ----------
+export const views = {};
+export const fmtDay = (d) => { const t = new Date(d + 'T12:00:00'); return isNaN(t) ? d : t.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' }); };
+export const fmtDate = (t) => t ? new Date(t * 1000).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }) : '–';
+
+// ---------- live-TV ----------
+export const hhmm = (t) => new Date(t * 1000).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+export const dayName = (t) => { const d = new Date(t * 1000), n = new Date(); const diff = Math.round((new Date(d.toDateString()) - new Date(n.toDateString())) / 864e5);
+  return diff === 0 ? 'Idag' : diff === 1 ? 'Imorgon' : d.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' }); };

@@ -1,8 +1,14 @@
 // Service worker: gör BraXhn TV installerbar som app och låter den starta även när servern inte svarar.
 // Appens egna filer hämtas alltid från servern först (en ny version syns direkt) och tas ur cachen bara
 // utan kontakt. API-anrop, strömmar och bilder går aldrig genom cachen.
-const CACHE = 'braxhn-app-v2';
-const SHELL = ['/app.js', '/style.css', '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg',
+const CACHE = 'braxhn-app-v3';
+// Webbklientens moduler i /js/ måste finnas med här (annars startar appen inte utan kontakt med servern)
+const MODULES = ['core.js', 'router.js', 'passkeys.js', 'screentime.js', 'audio.js', 'audio-extras.js',
+  'ui/cards.js', 'ui/icons.js',
+  'player/overlay.js', 'player/video.js', 'player/controls.js', 'player/subs.js', 'player/caps.js', 'player/cast.js', 'player/live.js', 'player/party.js',
+  'views/login.js', 'views/home.js', 'views/item.js', 'views/person.js', 'views/wrapped.js', 'views/account.js', 'views/books.js', 'views/live.js',
+  'views/streaming.js', 'views/requests.js', 'views/stats.js', 'views/admin.js', 'views/admin-ops.js', 'views/music.js'].map(f => '/js/' + f);
+const SHELL = ['/app.js', ...MODULES, '/style.css', '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg',
   '/brand/icon-192.png', '/brand/icon-512.png', '/vendor/hls.min.js', '/offline.html'];
 
 self.addEventListener('install', (e) => {
