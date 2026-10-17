@@ -608,13 +608,24 @@ function startFfmpeg(s, it, n) {
     if (code && !sig && d.mode === 'transcode' && HW !== 'none' && HW_FAIL.test(err)) disableHw(err);
   });
   s.proc = p; s.paused = false; s.start = n; s.done = false; s.total = segs.length;
+  if ((s.trimmed ?? -1) >= n) s.trimmed = n - 1; // spolat bakåt: segmenten därifrån skapas på nytt
 }
 
 // ffmpeg som ligger långt före uppspelningen pausas (SIGSTOP), annars kopieras en hel 4K-remux
 // till disk på några minuter. Den återupptas när spelaren närmar sig eller ber om något som saknas.
 const AHEAD = 40;
 function resume(s) { if (s.paused && s.proc) s.proc.kill('SIGCONT'); s.paused = false; }
+// Segment långt bakom uppspelningen tas bort – annars hamnar en hel film i omkodningsmappen
+// (ofta /tmp = RAM i Unraid). Spolar man tillbaka skapas de igen.
+const BEHIND = 30;
+function trimBehind(s, n) {
+  const upto = n - BEHIND;
+  if (upto <= (s.trimmed ?? -1)) return;
+  for (let k = Math.max(0, (s.trimmed ?? -1) + 1); k <= upto; k++) fs.rmSync(segFile(s, k), { force: true });
+  s.trimmed = upto;
+}
 function throttle(s, n) {
+  trimBehind(s, n);
   if (!s.proc) return;
   const ahead = highestFile(s) - n;
   if (!s.paused && ahead > AHEAD) { s.proc.kill('SIGSTOP'); s.paused = true; }
@@ -630,11 +641,13 @@ function stopProc(s) {
 // Högsta sammanhängande segmentet från s.start. Senaste kända värdet sparas så att varje anrop
 // bara behöver kontrollera några få filer i stället för alla segment sedan start.
 function highestFile(s) {
-  let k = s.start;
-  if (s.hi != null && s.hi >= s.start && fs.existsSync(segFile(s, s.hi))) k = s.hi;
+  // Segment bakom uppspelningen kan redan vara borttagna (trimBehind) – räkna från det första som finns kvar
+  const from = Math.max(s.start, (s.trimmed ?? -1) + 1);
+  let k = from;
+  if (s.hi != null && s.hi >= from && fs.existsSync(segFile(s, s.hi))) k = s.hi;
   while (k >= 0 && fs.existsSync(segFile(s, k))) k++;
-  s.hi = k - 1 >= s.start ? k - 1 : null;
-  return k - 1;
+  s.hi = k - 1 >= from ? k - 1 : null;
+  return k > from ? k - 1 : Math.max(from - 1, s.start - 1);
 }
 // Ett segment är klart när filen finns och (remux) ffmpeg gått vidare till nästa fil eller slutat.
 // Halvfärdiga filer raderas alltid när en remux-process stoppas eller kraschar.
@@ -816,3 +829,6 @@ export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = nu
   else { post = ['format=yuv420p']; enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || 'veryfast', ...rate(['-crf', '22']), '-profile:v', 'high']; }
   return { pre: HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [], vf: ['-vf', [...sw, ...post].join(',')], enc };
 }
+
+// För tester
+export const _segs = { trimBehind, highestFile };

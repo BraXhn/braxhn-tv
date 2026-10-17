@@ -135,7 +135,7 @@ function startRecording(rec) {
     const dir = path.join(dvrDir(), safeName(rec.title));
     fs.mkdirSync(dir, { recursive: true });
     const se = rec.season != null && rec.episode != null ? ` S${String(rec.season).padStart(2, '0')}E${String(rec.episode).padStart(2, '0')}` : '';
-    let base = `${safeName(rec.title)}${se} ${d.toISOString().slice(0, 10)} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+    let base = `${safeName(rec.title)}${se} ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
     // Samma sändning på två kanaler (regel utan kanal) får inte skriva till samma fil
     const taken = (b) => [...active.values()].some(a => a.ts === path.join(dir, b + '.ts')) || fs.existsSync(path.join(dir, b + '.ts')) || fs.existsSync(path.join(dir, b + '.mp4'));
     if (taken(base)) base += ` (${rec.id})`;

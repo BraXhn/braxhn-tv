@@ -19,7 +19,8 @@ export const status = { running: false, library: null, phase: '', done: 0, total
 /** Varning från skanningen (t.ex. omonterad NAS) – syns i skanningsstatus och loggen */
 export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.push(msg); if (status.warnings.length > 20) status.warnings.shift(); }
 
-const clean = (s) => s.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
+// NFC: filnamn från macOS (SMB) har ofta å/ä/ö som två tecken (NFD) – annars går de inte att söka på eller slå ihop
+const clean = (s) => s.normalize('NFC').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
 const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
 
 // ---- Blu-ray-mappar (BDMV/STREAM/00000.m2ts …) ----
@@ -65,6 +66,12 @@ export function parseMovie(file) {
   if (root) { const n = discName(root); return tryName(n) || { title: clean(n.replace(JUNK, '')) || n, year: null }; }
   const base = path.basename(file, path.extname(file));
   const folder = path.basename(path.dirname(file));
+  // Film delad på flera filer ("Film (2020) cd1.avi", "cd2.avi"): delarna är inte versioner av varandra
+  const part = base.match(/[\s._-](?:cd|part|pt)[\s._-]*(\d)$/i);
+  if (part) {
+    const p = parseMovie(path.join(path.dirname(file), base.slice(0, part.index) + path.extname(file)));
+    return { ...p, title: +part[1] > 1 ? `${p.title} (del ${part[1]})` : p.title, part: +part[1] };
+  }
   // Utan årtal: ta bort kvalitetsord, och utgåvetillägg ("Extended", "Proper") bara om något av titeln blir kvar
   const t1 = clean(stripTrailingQuality(base));
   return tryName(base) || tryName(folder) || { title: clean(t1.replace(JUNK, '')) || t1 || base, year: null };
@@ -103,7 +110,8 @@ export function parseEpisode(rel) {
   // Fansub-grupper och hash-taggar i hakparenteser, t.ex. "[SubsPlease] Show - 12 (1080p) [ABCD1234]"
   const base = path.basename(rel, path.extname(rel)).replace(/^\s*\[[^\]]*\]\s*/, '').replace(/\s*\[[0-9A-F]{8}\]\s*$/i, '');
   const sf = parts.slice(0, -1).find(p => /^(season|säsong|s)[\s._-]*\d+$/i.test(p));
-  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,4})/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
+  // Dubbelavsnitt "S01E01E02" / "S01E01-E02": det andra numret hör inte till titeln
+  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,4})(?:[-_ ]?[eE]\d{1,4})*/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
   let season, episode, before = base, absolute = false;
   if (m) { season = +m[1]; episode = +m[2]; before = base.slice(0, m.index); }
   else {
@@ -115,6 +123,9 @@ export function parseEpisode(rel) {
     else { episode = +e[1]; before = base.slice(0, e.index); }
     season = sf ? +sf.match(/\d+/)[0] : 1;
     absolute = !sf;
+    // "The 100 - 101 - Pilot" i mappen "Season 1": 101 = säsong 1, avsnitt 01
+    const sn = sf ? String(season) : '';
+    if (a && sf && a[2].length >= 3 && a[2].startsWith(sn) && a[2].length - sn.length === 2) episode = +a[2].slice(sn.length);
   }
   const show = parts.length > 1 ? parts[0] : clean(before);
   if (!show) return null;
