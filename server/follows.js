@@ -191,7 +191,7 @@ const MAX_ITEMS = 60;
 /**
  * Vilka avsnitt ska finnas offline? Nästa N osedda avsnitt per serie (efter det senast sedda; specialavsnitt räknas inte).
  * have = avsnitt som appens synk själv har laddat ner; remove = de av dem som är sedda eller borttagna.
- * Returnerar avsnittens id i ordning (åldersgränsen filtreras i app.js).
+ * Returnerar avsnittens id i ordning (åldersgränsen filtreras i server/routes/social.js).
  */
 export function syncPlan(uid, have = []) {
   const s = getSync(uid);

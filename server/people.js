@@ -57,7 +57,7 @@ export function castOf(itemId) {
     .map(r => ({ id: r.id, name: r.name, role: r.role, character: r.character || null, image: !!r.profile_path }));
 }
 
-/** Personer vars namn matchar – bara de som finns i titlar profilen får se. age = ageFilter(uid) från app.js */
+/** Personer vars namn matchar – bara de som finns i titlar profilen får se. age = ageFilter(uid) från http/context.js */
 export function searchPeople(q, age, limit = 20) {
   const like = `%${String(q).trim().replace(/[%_\\]/g, '\\$&')}%`;
   return all(`SELECT p.id, p.name, p.profile_path, COUNT(DISTINCT i.id) AS n FROM people p JOIN item_people ip ON ip.person_id=p.id
