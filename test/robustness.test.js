@@ -245,3 +245,14 @@ test('skanning väntar inte på tunga analyser (förhandsbilder m.m.) i ett anna
     release(); await pa;
   } finally { sc.hooks.trickplay = orig; release?.(); }
 });
+
+test('iPhone (Safaris egen HLS): Dolby Digital i TS-segment blir AAC, men skickas orört till hls.js och i fMP4', () => {
+  const it = { id: 999999, path: '/m/Film (2020).mkv', size: 1e9, duration: 6000, hdr: null, mtime: 1,
+    streams: JSON.stringify([{ index: 0, type: 'video', codec: 'h264', width: 1920, height: 1080, pix: 'yuv420p' },
+      { index: 1, type: 'audio', codec: 'ac3', channels: 6, default: true }]) };
+  const caps = (extra = '') => st.parseCaps(new URLSearchParams('c=mp4&v=h264,hevc&a=aac,mp3,ac3,eac3&hdr=0&q=720' + extra));
+  assert.equal(st.decide(it, caps()).audioMode, 'copy', 'hls.js/appar: orört');
+  const d = st.decide(it, caps('&nhls=1'));
+  assert.equal(d.fmt, 'ts'); assert.equal(d.audioMode, 'aac', 'Safari: AAC i TS');
+  assert.ok(!d.reasons.some(r => /skickas orört/.test(r)));
+});

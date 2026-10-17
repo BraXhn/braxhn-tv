@@ -232,7 +232,9 @@ export function parseCaps(q, ua = '') {
     containers: list('c', 'mp4,webm'), vcodecs: list('v', 'h264,vp8,vp9'), acodecs: list('a', 'aac,mp3,opus,vorbis,flac'),
     hdr: q.get('hdr') === '1', dv: q.get('dv') === '1', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', sub: String(q.get('sub') || '').slice(0, 10),
-    hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || ''
+    hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || '',
+    // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
+    nativeHls: q.get('nhls') === '1'
   };
 }
 
@@ -259,12 +261,15 @@ export function decide(it, o) {
   const aOk = !aSel || o.acodecs.has(aSel.codec);
   const audioDefault = !aSel || aSel === defAudio;
   let mode, fmt = 'ts', tag = '';
-  const am = audioPlan(aSel, o);
+  let am = audioPlan(aSel, o);
   if (!burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && remuxBounds(it, 'ts')) mode = 'remux';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && remuxBounds(it, 'fmp4')) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
   } else mode = 'transcode';
+  // Safaris egen HLS-spelare (iPhone) klarar inte Dolby Digital i MPEG-TS-segment – filmen startar aldrig.
+  // I fMP4 (HEVC-remux) fungerar det; i TS blir ljudet AAC.
+  if (o.nativeHls && mode !== 'direct' && fmt === 'ts' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) am = 'aac';
   if (mode === 'remux') reasons.push((fmt === 'fmp4' ? `${it.hdr ? it.hdr.toUpperCase() + '-' : ''}HEVC kopieras utan omkodning` : 'bilden kopieras utan omkodning') +
     (am === 'aac' ? ', ljudet konverteras till AAC' : am === 'eac3' ? ', surroundljud konverteras till Dolby Digital Plus 5.1' : ''));
   if (mode !== 'direct' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) reasons.push(`${aSel.codec === 'eac3' ? 'Dolby Digital Plus/Atmos' : 'Dolby Digital'} skickas orört`);
