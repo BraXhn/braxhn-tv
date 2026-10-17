@@ -8,7 +8,7 @@ views.person = async (id) => {
   const life = [p.birthday ? `Född ${fmtDay(p.birthday)}${!p.deathday && age ? ` (${age} år)` : ''}` : '', p.birthplace || '',
     p.deathday ? `Död ${fmtDay(p.deathday)}${age ? ` (${age} år)` : ''}` : ''].filter(Boolean);
   const roleText = (i) => i.roles.map(r => r.role === 'cast' ? (r.character || 'Medverkar') : ROLE_NAME[r.role] || r.role).join(', ');
-  main.innerHTML = `<div class="person-head"><div class="card pcard">${personArt(p)}</div>
+  main.innerHTML = `<div class="person-head"><div class="card pcard">${personArt(p, 180)}</div>
     <div><h1>${esc(p.name)}</h1><div class="meta">${life.map(x => `<span>${esc(x)}</span>`).join('')}</div>
     ${p.bio ? `<p class="overview bio clamp" id="bio">${esc(p.bio)}</p><button class="ghost small" id="biomore" hidden>Visa mer</button>` : ''}</div></div>
     <section class="section"><h2>I biblioteket <span class="muted small">${p.items.length} ${p.items.length === 1 ? 'titel' : 'titlar'}</span></h2>

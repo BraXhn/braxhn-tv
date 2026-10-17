@@ -1,5 +1,5 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, metadataverktyg, undertextsökning och följ-knapp
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { LP, RP } from '../player/live.js';
 import { stopVideo } from '../player/overlay.js';
@@ -16,8 +16,8 @@ function heroHtml(it, extra = '') {
     it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? 'Barntillåten' : it.age + '+'}</span>` : '',
     (it.genres || []).slice(0, 3).map(esc).join(', ')]
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
-  return `<div class="hero">${it.backdrop ? `<div class="bd" style="background-image:url(/api/image/${it.id}/backdrop)"></div>` : ''}
-    <div class="in"><div class="poster card">${art({ ...it, position: 0 })}</div>
+  return `<div class="hero">${it.backdrop ? `<div class="bd" style="background-image:url(${heroUrl(`/api/image/${+it.id}/backdrop`)})"></div>` : ''}
+    <div class="in"><div class="poster card">${art({ ...it, position: 0 }, false, innerWidth <= 700 ? 130 : 210)}</div>
     <div><h1>${esc(it.title)}</h1><div class="meta">${meta}</div>
     ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;
 }

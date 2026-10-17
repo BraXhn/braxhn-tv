@@ -16,6 +16,7 @@ import * as wrapped from '../wrapped.js';
 import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
 import * as follows from '../follows.js';
+import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
 import { insideMedia, MEDIA_ROOT, ctx, listItems, recommend, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
 
@@ -341,23 +342,25 @@ route('GET', '/api/items/:id/trickplay/:n', img, (c) => {
 });
 
 // Bilder
-route('GET', '/api/collection-image/:cid/:type', img, (c) => {
+// ?w= ger bilden nedskalad till en av de fasta bredderna (imgsize.js) – behörighetskontrollerna görs först
+route('GET', '/api/collection-image/:cid/:type', img, async (c) => {
   if (!['poster', 'backdrop'].includes(c.p.type)) return fail(c.res, 404, '');
-  fs.readFile(path.join(IMAGES, `c${+c.p.cid}-${c.p.type}.jpg`), (e, data) => e ? fail(c.res, 404, 'Ingen bild')
+  fs.readFile(await sized(path.join(IMAGES, `c${+c.p.cid}-${c.p.type}.jpg`), c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild')
     : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
 });
-route('GET', '/api/image/:id/:type', img, (c) => {
+route('GET', '/api/image/:id/:type', img, async (c) => {
   if (!['poster', 'backdrop', 'thumb'].includes(c.p.type)) return fail(c.res, 404, '');
   // Begränsade profiler (barn) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen) från titlar över gränsen
   if (maxAgeOf(c.user.id) != null && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
   const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
   const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
-  fs.readFile(f, (e, data) => {
+  const w = c.q.get('w');
+  fs.readFile(await sized(f, w), async (e, data) => {
     if (!e) return ok(data);
     // Filmversioner har ingen egen affisch – använd filmens (t.ex. när Chromecast fått en token för versionen)
     const main = c.p.type !== 'thumb' && get('SELECT version_of FROM items WHERE id=?', +c.p.id)?.version_of;
     if (!main) return fail(c.res, 404, 'Ingen bild');
-    fs.readFile(path.join(IMAGES, `${main}-${c.p.type}.jpg`), (e2, d2) => e2 ? fail(c.res, 404, 'Ingen bild') : ok(d2));
+    fs.readFile(await sized(path.join(IMAGES, `${main}-${c.p.type}.jpg`), w), (e2, d2) => e2 ? fail(c.res, 404, 'Ingen bild') : ok(d2));
   });
 });
 
@@ -387,7 +390,7 @@ route('GET', '/api/people/:pid', user, async (c) => {
 route('GET', '/api/people/:pid/image', img, async (c) => {
   const f = await people.personImage(+c.p.pid);
   if (!f) return fail(c.res, 404, 'Ingen bild');
-  fs.readFile(f, (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+  fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
 });
 // Lokala trailers spelas direkt (som filen är). Mediatoken gäller bara den trailern.
 const trailerStream = { auth: true, media: true, scope: (p) => TRAILER_SCOPE + (+p.tid) };

@@ -5,6 +5,7 @@ import { fail, send, clientIp, readJson } from '../util.js';
 import { createSession } from '../auth.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
+import { sized } from '../imgsize.js';
 import { route, user, img, audio } from '../http/router.js';
 import { screenBlock } from '../http/context.js';
 
@@ -16,10 +17,10 @@ route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if
 route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.searchMusic(String(c.q.get('q') || '').slice(0, 100), c.user.id)); });
 route('GET', '/api/music/albums/:aid', user, (c) => { const a = music.album(+c.p.aid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
 route('GET', '/api/music/artists/:arid', user, (c) => { const a = music.artist(+c.p.arid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
-route('GET', '/api/music/cover/:aid', img, (c) => {
+route('GET', '/api/music/cover/:aid', img, async (c) => {
   const f = music.coverPath(+c.p.aid);
   if (!f) return fail(c.res, 404, 'Inget omslag');
-  fs.readFile(f, (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
+  fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
 });
 const trackRow = (c) => { const t = get('SELECT * FROM tracks WHERE id=?', +c.p.tid); if (!t) fail(c.res, 404, 'Spåret finns inte'); return t; };
 route('GET', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, t, c.q); });

@@ -114,6 +114,39 @@ export const resLabel = (h) => !h ? '' : h >= 2000 ? '4K' : h >= 1000 ? '1080p' 
 export const sxe = (e) => `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')}`;
 export function hue(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 
+// ---------- bilder i rätt storlek ----------
+// Servern skalar bilder till några fasta bredder (?w=, server/imgsize.js) – över mobilnätet hämtas bara det som syns
+export const IMG_W = [160, 240, 320, 480, 720, 1280];
+/**
+ * Bredden att be om för en bild som visas css pixlar bred: × skärmens pixeltäthet, men högst dprMax (2) –
+ * på en telefon med 3× skärm syns ingen skillnad på ett kort, men affischen blir nästan lika stor som originalet.
+ */
+export function imgW(css, dprMax = 2) {
+  const px = css * Math.min(globalThis.devicePixelRatio || 1, dprMax);
+  return IMG_W.find(w => w >= px) || IMG_W.at(-1);
+}
+/** Url med ?w= för en bild som visas css pixlar bred (max = största bredd, källbilden är sällan större) */
+export const imgUrl = (url, css, max = 1280, dprMax = 2) => `${url}${url.includes('?') ? '&' : '?'}w=${Math.min(imgW(css, dprMax), max)}`;
+/** Bakgrundsbilden överst på titel- och samlingssidor: dämpad bakom en toning, så skärmbredd × högst 1,5 räcker */
+export const heroUrl = (url) => imgUrl(url, Math.min(globalThis.innerWidth || 1280, 1920), 1280, 1.5);
+/** src-attributet för en bild som visas css pixlar bred */
+export const imgSrc = (url, css, max = 720) => `src="${imgUrl(url, css, max)}"`;
+/** Bredden på ett runt/fyrkantigt omslag (.cover) i pixlar efter klassen: tiny/small i listor, big överst, annars ett kort */
+export const coverPx = (cls = '') => /\btiny\b/.test(cls) ? 38 : /\bsmall\b/.test(cls) ? 52 : /\bbig\b/.test(cls) ? 220 : cardW() * 1.2;
+/** <img> i ett omslag (.cover): lazy, i rätt storlek, och tas bort om den inte går att läsa (plattan syns då) */
+export const coverImg = (url, cls = '') => `<img loading="lazy" decoding="async" ${imgSrc(url, coverPx(cls))} alt="" width="600" height="600" data-fb="1">`;
+let cwCache = 0;
+/** Kortbredden just nu (--cw: reglaget för kortstorlek, mindre på telefon) */
+export function cardW() {
+  // Läses en gång per bildruta (många kort ritas på en gång); utan layout (tester) gäller standardbredden
+  if (!cwCache) {
+    try { cwCache = parseFloat(getComputedStyle(main || document.documentElement).getPropertyValue('--cw')) || 0; } catch {}
+    cwCache ||= 125;
+    globalThis.requestAnimationFrame?.(() => { cwCache = 0; });
+  }
+  return cwCache;
+}
+
 // ---------- vyer ----------
 export const views = {};
 export const fmtDay = (d) => { const t = new Date(d + 'T12:00:00'); return isNaN(t) ? d : t.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' }); };
