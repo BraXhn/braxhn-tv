@@ -43,6 +43,7 @@ targets:
     platform: tvOS
     sources:
       - path: Shared
+      - path: tvOS/Assets.xcassets
     info:
       path: tvOS/Info.plist
       properties:
@@ -55,4 +56,5 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.braxhn.tv.appletv
         TARGETED_DEVICE_FAMILY: "3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
     scheme: {}

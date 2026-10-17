@@ -16,7 +16,9 @@ h1,h2,h3{margin:0;line-height:1.2}
 #top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:20px;padding:10px 28px;
   background:rgba(13,15,20,.88);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:19px;letter-spacing:.2px}
-.brand img{width:28px;height:28px}
+.brand img{display:block}
+.brand .logo-full{height:36px;width:auto}
+.brand .logo-mark{display:none;width:32px;height:32px}
 #libnav{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
 #libnav a{padding:6px 12px;border-radius:999px;color:var(--dim);white-space:nowrap}
 #libnav a:hover{color:var(--text)}
@@ -53,7 +55,7 @@ label{display:block;font-size:13px;color:var(--dim);margin:12px 0 5px}
 /* Auth */
 .auth{max-width:380px;margin:9vh auto;background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:32px}
 .auth .brand{justify-content:center;font-size:26px;margin-bottom:6px}
-.auth .brand img{width:40px;height:40px}
+.auth .brand .logo-full{height:72px;margin:0 auto}
 .auth p{text-align:center;color:var(--dim);margin:0 0 12px}
 .auth button{width:100%;justify-content:center;margin-top:18px}
 
@@ -148,7 +150,8 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 
 @media (max-width:760px){
   #top{padding:8px 14px;gap:10px;flex-wrap:wrap}
-  .brand span{display:none}
+  #top .brand .logo-full{display:none}
+  #top .brand .logo-mark{display:block}
   #libnav{order:3;width:100%}
   .search{flex:1}
   main{padding:16px 14px 50px}
@@ -376,4 +379,30 @@ dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8p
 #player.mini .pbar,#player.mini .skip,#player.mini .sub2,#player.mini .partybox,#player.mini .next,#player.mini .msg,#player.mini #cfull{display:none}
 #player.mini .setp,#player.mini .chapters{bottom:90px}
 body.hasmini main{padding-bottom:100px}
-@media (max-width:700px){#player.mini{height:118px}#player.mini video{width:110px;height:62px}}
+@media (max-width:700px){
+  /* Telefon: en kompakt rad – liten bild, titel och tid, spela/pausa och stopp */
+  #player.mini{height:64px}
+  #player.mini video{width:96px;height:64px}
+  #player.mini .ctl{left:96px;top:0}
+  #player.mini .crow{grid-template-columns:1fr auto;justify-items:stretch;padding:6px 8px 6px 12px;gap:6px}
+  #player.mini .cinfo{align-items:flex-start}
+  #player.mini .cinfo span:nth-child(2),#player.mini .cright,#player.mini #cprev,#player.mini #cback,#player.mini #cfwd,#player.mini #pnext,#player.mini #cnextch{display:none}
+  body.hasmini main{padding-bottom:80px}
+}
+/* ---- Installerad som app på telefonen ---- */
+html.standalone #top{padding-top:calc(10px + env(safe-area-inset-top))}
+#player .pbar{padding-top:calc(14px + env(safe-area-inset-top))}
+#player .crow{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+#tabbar{display:none}
+@media (max-width:760px){
+  #tabbar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;background:rgba(14,16,24,.97);backdrop-filter:blur(10px);
+    border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  #tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--dim);text-decoration:none;padding:4px 0}
+  #tabbar a svg{width:24px;height:24px;fill:currentColor}
+  #tabbar a.on{color:var(--accent)}
+  body:has(#tabbar:not([hidden])) main{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+  body:has(#tabbar:not([hidden])) #mbar,body:has(#tabbar:not([hidden])) #player.mini{bottom:calc(58px + env(safe-area-inset-bottom))}
+  body.hasmini:has(#tabbar:not([hidden])) main{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
+  #player .ctl button{padding:8px}
+  #player .cmid{gap:2px}
+}

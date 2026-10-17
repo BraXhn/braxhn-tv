@@ -1,3 +1,25 @@
-{ "name": "BraXhn TV", "short_name": "BraXhn TV", "start_url": "/", "display": "standalone",
-  "background_color": "#0d0f14", "theme_color": "#0d0f14",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
+{
+  "id": "/",
+  "name": "BraXhn TV",
+  "short_name": "BraXhn TV",
+  "description": "Filmer, serier, musik, ljudböcker, poddar och live-TV från din egen server",
+  "lang": "sv",
+  "start_url": "/?app=1",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "categories": ["entertainment", "music"],
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Min lista", "url": "/#/watchlist", "icons": [{ "src": "/brand/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Live-TV", "url": "/#/live", "icons": [{ "src": "/brand/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

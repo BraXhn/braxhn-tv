@@ -1,5 +1,7 @@
 # BraXhn TV – egen mediaserver för Unraid
 
+<p align="center"><img src="web/brand/logo.svg" alt="BraXhn TV" width="520"></p>
+
 BraXhn TV är en självhostad mediaserver för **filmer, serier, musik, ljudböcker, poddar och live-TV**, skriven från grunden. Den kräver inga konton, ingen molntjänst och ingen prenumeration. Allt körs på din egen server.
 
 ## Innehåll
@@ -45,6 +47,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
 | **Anpassningsbar kvalitet** | När servern omkodar med automatisk kvalitet kan spelaren själv växla ner (1080p/720p/480p) när nätet blir sämre, t.ex. i bilen eller på mobilnät. |
+| **App på telefonen** | Webben kan installeras som app på iPhone och Android: egen ikon, helskärm, meny längst ner och kompakt spelare. Se *Installera som app* nedan. |
 | **Spelare** | Egen kontrollrad som visas vid paus eller när musen rör sig, och **litet fönster** längst ner så att filmen fortsätter medan du bläddrar. Tangenter: mellanslag, ←/→, f, m, s (hoppa över intro). |
 | **Flera versioner** | Samma film i flera versioner (t.ex. 4K och 1080p) visas som en film. Servern väljer den version enheten kan spela utan omkodning, och på webben kan du välja själv. Framsteg och sedd gäller filmen oavsett version. |
 | **Rollista och personsidor** | Skådespelare, regi och skapare från TMDB. Klicka på en person för bild, biografi och allt med personen i biblioteket. Sökningen hittar även personer. |
@@ -214,6 +217,12 @@ Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i
 
 - Lokala kopior görs varje natt i `/config/backups`. Extern, krypterad kopia ställs in under *Statistik → Extern säkerhetskopia*. **Spara lösenfrasen på ett säkert ställe** – utan den går kopian inte att läsa.
 - Återställ från webben (*Återställ* vid en kopia, starta sedan om containern) eller från terminalen: `docker exec -it braxhn-tv node server/restore.js /backup/braxhn-tv-….bxtv` och starta om.
+
+## Installera som app på telefonen
+
+- **iPhone/iPad (Safari):** öppna BraXhn TV, tryck **Dela** → **Lägg till på hemskärmen**. Användarmenyn har en knapp med samma instruktioner.
+- **Android (Chrome):** användarmenyn → **📲 Installera som app**, eller Chromes meny → **Installera app**.
+- Fullständig installation på Android (och snabb start utan nät) kräver att servern nås via **HTTPS** – med domännamn via Nginx Proxy Manager eller inbyggd Let's Encrypt (se *Titta utanför hemmet*). Över vanlig http hemma går det ändå att lägga en genväg på hemskärmen.
 
 ## Casting
 

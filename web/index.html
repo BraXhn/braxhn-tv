@@ -3,15 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d0f14">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BraXhn TV">
 <title>BraXhn TV</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon.png" type="image/png" sizes="256x256">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header id="top" hidden>
-  <a href="#/" class="brand" aria-label="BraXhn TV hem"><img src="/icon.svg" alt=""><span>BraXhn TV</span></a>
+  <a href="#/" class="brand" aria-label="BraXhn TV hem"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"><img class="logo-mark" src="/icon.svg" alt=""></a>
   <nav id="libnav"></nav>
   <div class="search"><input id="q" type="search" placeholder="Sök filmer och serier" autocomplete="off"></div>
   <div class="usermenu">
@@ -21,6 +27,7 @@
       <a href="#/watchlist">Min lista</a>
       <a href="#/requests" data-requests>Önskningar</a>
       <a href="#/account">Mitt konto</a>
+      <button id="install" hidden>📲 Installera som app</button>
       <a href="#/wrapped">Årssammanfattning</a>
       <a href="#/stats" data-admin>Statistik och aktivitet</a>
       <a href="#/admin" data-admin>Administration</a>
@@ -29,6 +36,12 @@
   </div>
 </header>
 <main id="main"></main>
+<nav id="tabbar" hidden aria-label="Meny">
+  <a href="#/" data-tab=""><svg viewBox="0 0 24 24"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg><span>Hem</span></a>
+  <a href="#/search" data-tab="search"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 1 0 4.2 12.6l5.1 5.1 1.4-1.4-5.1-5.1A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg><span>Sök</span></a>
+  <a href="#/watchlist" data-tab="watchlist"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>Min lista</span></a>
+  <a href="#/account" data-tab="account"><svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5z"/></svg><span>Konto</span></a>
+</nav>
 <div id="player" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="/app.js" type="module"></script>
