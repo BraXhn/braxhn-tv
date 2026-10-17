@@ -183,3 +183,20 @@ test('inloggning: "Håll mig inloggad" ger 30 dagar, annars en sessionskaka', as
   assert.deepEqual({ ...exp(keep) }, { d: 30 * 86400, remember: 1 });
   assert.deepEqual({ ...exp(short) }, { d: 12 * 3600, remember: 0 });
 });
+
+test('förhandsbilder: hopp till en nyckelbild per intervall (även apostrof i filnamnet)', async () => {
+  const st = await import('../server/stream.js');
+  const trick = await import('../server/trickplay.js');
+  const f = path.join(dir, "Tom's film.mkv");
+  ff('-f', 'lavfi', '-i', 'testsrc=s=320x180:r=24:d=125', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '48', f);
+  const it = { id: 4242, mtime: 1, path: f, duration: 125, vcodec: 'h264', streams: JSON.stringify([{ type: 'video', width: 320, height: 180 }]) };
+  assert.ok((await st.computeKeyframes(it))?.length > 10);
+  await trick.generate(it);
+  const inf = trick.info(it);
+  assert.equal(inf.count, 13); // 0, 10 … 120 s
+  assert.equal(inf.sheets, 1);
+  assert.ok(trick.sprite(it, 1));
+  // Ett blad med 10×10 rutor (240×136 var)
+  const [w, h] = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', trick.sprite(it, 1)]).toString().trim().split(',').map(Number);
+  assert.equal(w, 2400); assert.equal(h, 1360);
+});
