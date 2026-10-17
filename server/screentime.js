@@ -89,7 +89,7 @@ export function resetToday(uid, d = new Date()) {
 
 // Senaste räknade ögonblick per användare och senaste position per ström
 const beats = new Map(); // uid -> { t (ms), pos: Map(key -> position) }
-export let onBlocked = null; // sätts av app.js: stoppar pågående strömmar
+export let onBlocked = null; // sätts av routes/social.js: stoppar pågående strömmar
 export const setOnBlocked = (fn) => { onBlocked = fn; };
 
 /**
