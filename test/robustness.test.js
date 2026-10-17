@@ -224,3 +224,24 @@ test('Blu-ray-mappar: bara huvudfilmen blir en titel och får skivans namn', asy
   assert.deepEqual(rows.map(r => [r.title, r.year]), [['Arrival', 2016], ['Titanic', 1997]]);
   assert.equal(rows[1].path, path.join(disc, 'STREAM', '00800.m2ts'));
 });
+
+test('skanning väntar inte på tunga analyser (förhandsbilder m.m.) i ett annat bibliotek', async () => {
+  const a = path.join(MEDIA, 'Kö-A'), b = path.join(MEDIA, 'Kö-B');
+  touch(path.join(a, 'Alfa (2001).mkv')); touch(path.join(b, 'Beta (2002).mkv'));
+  const libA = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('Kö-A','movie',?)", a).lastInsertRowid);
+  const libB = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('Kö-B','movie',?)", b).lastInsertRowid);
+  // En analys som "tar timmar" tills vi släpper den
+  const orig = sc.hooks.trickplay; let release; const blocked = new Promise(r => { release = r; });
+  sc.hooks.trickplay = (lib, st) => { st.phase = 'Skapar förhandsbilder'; return lib.id === libA ? blocked : null; };
+  try {
+    const pa = sc.scan(libA);
+    for (let i = 0; i < 100 && !(sc.analysis.running && sc.analysis.library === 'Kö-A' && sc.analysis.phase === 'Skapar förhandsbilder'); i++) await new Promise(r => setTimeout(r, 50));
+    assert.ok(sc.analysis.running, 'analysen av A pågår');
+    // Skanningen av B ska bli klar (filer + metadata) trots att A:s analys står still
+    sc.scan(libB);
+    for (let i = 0; i < 100 && !D.get("SELECT 1 FROM items WHERE library_id=? AND title='Beta'", libB); i++) await new Promise(r => setTimeout(r, 50));
+    assert.ok(D.get("SELECT 1 FROM items WHERE library_id=? AND title='Beta'", libB), 'B skannades medan A analyserades');
+    assert.equal(sc.status.running, false);
+    release(); await pa;
+  } finally { sc.hooks.trickplay = orig; release?.(); }
+});

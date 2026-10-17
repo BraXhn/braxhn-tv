@@ -47,7 +47,7 @@ t('skanning: trailern blir ingen egen film', async () => {
   assert.equal((await req('/api/setup', { method: 'POST', body: { name: 'admin', password: PW }, tok: '' })).status, 200);
   await login();
   assert.equal((await req('/api/libraries', { method: 'POST', body: { name: 'Filmer', type: 'movie', path: path.join(MEDIA, 'Filmer') } })).status, 200);
-  for (let i = 0; i < 120; i++) { await sleep(500); const r = await req('/api/scan'); if (!r.data.running && r.data.last) break; }
+  for (let i = 0; i < 120; i++) { await sleep(500); const r = await req('/api/scan'); if (!r.data.running && !r.data.analysis?.running && r.data.last) break; }
   const lib = (await req('/api/libraries')).data[0];
   const items = (await req(`/api/libraries/${lib.id}/items`)).data.items;
   assert.deepEqual(items.map(i => i.title).sort(), ['Barn', 'Film']);

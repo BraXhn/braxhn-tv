@@ -26,7 +26,7 @@ async function req(p, { method = 'GET', body, headers = {}, auth = true } = {}) 
   return { status: r.status, headers: r.headers, data: ct.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()) };
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-async function waitScan() { for (let i = 0; i < 120; i++) { await sleep(1000); const r = await req('/api/scan'); if (!r.data.running && r.data.last) return; } throw new Error('skanning tog för lång tid'); }
+async function waitScan() { for (let i = 0; i < 120; i++) { await sleep(1000); const r = await req('/api/scan'); if (!r.data.running && !r.data.analysis?.running && r.data.last) return; } throw new Error('skanning tog för lång tid'); }
 
 before(async () => {
   if (!hasFfmpeg) return;
