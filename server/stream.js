@@ -31,9 +31,24 @@ const HW_WANTED = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi
 let HW = HW_WANTED;
 export const hwStatus = { wanted: HW_WANTED, active: HW_WANTED, error: null };
 const HW_FAIL = /libcuda|nvenc|cuda|vaapi|va-api|qsv|libmfx|mfx|hwupload|hwaccel|Failed to (initiali[sz]e|open|create)|No (VA display|device|NVENC)|device (type|creation)|Error while opening encoder|Generic error in an external library/i;
+/** Begriplig åtgärd för de vanligaste felen (ffmpegs egna meddelanden är svåra att tolka) */
+export function hwHint(err) {
+  if (/libcuda|libnvidia-encode|Cannot load|cuInit|CUDA_ERROR_NO_DEVICE|no CUDA-capable/i.test(err))
+    return 'containern når inte NVIDIA-drivrutinen. Installera pluginen Nvidia-Driver, lägg till --runtime=nvidia under Extra Parameters och sätt NVIDIA_VISIBLE_DEVICES=all och NVIDIA_DRIVER_CAPABILITIES=all (eller använd mallen braxhn-tv-nvidia.xml).';
+  if (/API version|minimum required Nvidia driver|Driver does not support/i.test(err))
+    return 'NVIDIA-drivrutinen är för gammal för ffmpeg i containern – uppdatera drivrutinen i pluginen Nvidia-Driver.';
+  if (/OpenEncodeSessionEx|out of memory|incompatible client key/i.test(err))
+    return 'grafikkortet tillåter inte fler samtidiga kodningar (vanligt på GeForce) eller används av något annat, t.ex. en annan mediaserver.';
+  if (/vaapi|VA-API|renderD|\/dev\/dri|No VA display/i.test(err))
+    return 'enheten /dev/dri saknas i containern – lägg till den under GPU-enhet (Intel/AMD).';
+  return null;
+}
 export function disableHw(reason) {
   if (HW === 'none') return;
   console.warn(`[hårdvara] ${HW} fungerar inte – använder processorn i stället. ${String(reason || '').split('\n').filter(Boolean).slice(-2).join(' ')}`);
+  const tip = hwHint(String(reason || ''));
+  if (tip) console.warn(`[hårdvara] Åtgärd: ${tip}`);
+  hwStatus.hint = tip;
   hwStatus.error = String(reason || '').trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400);
   HW = 'none'; hwStatus.active = 'none';
 }
@@ -213,14 +228,25 @@ export function keyframesReady(it) {
 export const keyframesCached = (it) => kfMem.get(it.id)?.mtime === it.mtime || fs.existsSync(kfFile(it));
 export const kfCacheSize = () => kfMem.size;
 const kfRunning = new Map();
+const kfQueued = new Map(); // id → väntande plats i kön (bakgrundsanalys)
 let kfActive = 0; const kfWait = [];
 export function computeKeyframes(it, { priority = false } = {}) {
   if (!['h264', 'hevc'].includes(it.vcodec)) return Promise.resolve(null); // remux: H.264 (TS) och HEVC (fMP4)
   if (keyframesReady(it)) return Promise.resolve(keyframesReady(it));
-  if (kfRunning.has(it.id)) return kfRunning.get(it.id);
+  if (kfRunning.has(it.id)) {
+    // Bakgrundsanalysen har redan köat filen – den som tryckt på Spela ska inte vänta på kön
+    const r = kfQueued.get(it.id);
+    if (priority && r) {
+      const i = kfWait.indexOf(r); if (i >= 0) kfWait.splice(i, 1);
+      kfQueued.delete(it.id);
+      if (kfActive < 3) r(); else kfWait.unshift(r);
+    }
+    return kfRunning.get(it.id);
+  }
   const p = (async () => {
     // Bakgrundsanalysen använder högst två samtidigt; den som just tryckt på Spela får en egen plats direkt
-    if (priority ? kfActive >= 3 : kfActive >= 2) await new Promise(r => priority ? kfWait.unshift(r) : kfWait.push(r));
+    if (priority ? kfActive >= 3 : kfActive >= 2) await new Promise(r => { if (priority) kfWait.unshift(r); else { kfWait.push(r); kfQueued.set(it.id, r); } });
+    kfQueued.delete(it.id);
     kfActive++;
     try {
       // Snabba vägen: filens eget index (MKV Cues / MP4 moov) – sekunder i stället för att läsa hela filen.
@@ -228,6 +254,7 @@ export function computeKeyframes(it, { priority = false } = {}) {
       const fast = await fastKeyframes(it.path, it.duration);
       let kf = fast && (fast.complete || it.vcodec === 'h264') ? fast.kf : null;
       if (!kf) {
+        const t0 = Date.now();
         const { stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
           '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 });
         kf = [];
@@ -236,6 +263,8 @@ export function computeKeyframes(it, { priority = false } = {}) {
           if (flags && flags[0] === 'K') { const x = parseFloat(t); if (!isNaN(x)) kf.push(x); }
         }
         kf.sort((a, b) => a - b);
+        // Diagnos: när någon väntar (Spela) syns det varför starten tog tid
+        if (priority) console.log(`[nyckelbilder] ${path.basename(it.path)}: ${fast ? 'filens index var ofullständigt' : 'filens index gick inte att använda'} – hela filen lästes på ${((Date.now() - t0) / 1000).toFixed(0)} s`);
       }
       for (const f of fs.readdirSync(path.join(CACHE, 'keyframes'))) if (f.startsWith(it.id + '-')) fs.rmSync(path.join(CACHE, 'keyframes', f), { force: true });
       writeAtomic(kfFile(it), JSON.stringify(kf)); // en halv fil skulle räknas som indexerad men aldrig gå att läsa
@@ -299,8 +328,8 @@ export function decide(it, o) {
   let mode, fmt = 'ts', tag = '';
   let am = audioPlan(aSel, o);
   if (!burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
-  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && remuxBounds(it, 'ts')) mode = 'remux';
-  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && remuxBounds(it, 'fmp4')) {
+  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
+  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
   } else mode = 'transcode';
   // Safaris egen HLS-spelare (iPhone) klarar inte Dolby Digital i MPEG-TS-segment – filmen startar aldrig.
@@ -314,7 +343,7 @@ export function decide(it, o) {
     else if (['h264', 'hevc'].includes(v?.codec) && !keyframesReady(it)) reasons.push('nyckelbilder ej indexerade än');
     else reasons.push('formatet stöds inte direkt');
   }
-  if (mode === 'remux' || mode === 'transcode') computeKeyframes(it).catch(() => {});
+  if ((mode === 'remux' || mode === 'transcode') && !o.assumeKf) computeKeyframes(it).catch(() => {});
   return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
@@ -466,7 +495,9 @@ function videoArgs(it, d, fromStart) {
   const rate = (hwFlag) => Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : hwFlag;
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
-  if (h) sw.push(`scale=-2:${h}`);
+  // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare x264-läge nedan
+  const big = HW === 'none' && (v?.height || 0) > 1100;
+  if (h) sw.push(big ? `scale=-2:${h}:flags=bilinear` : `scale=-2:${h}`);
   const useVaapiTm = d.tonemap && HW === 'vaapi';
   if (d.tonemap && !useVaapiTm) sw.push(TM_CPU());
   const chain = (extra) => [...sw, ...extra].join(',') || 'null';
@@ -482,7 +513,7 @@ function videoArgs(it, d, fromStart) {
     enc = ['-c:v', 'h264_qsv', '-forced_idr', '1', ...rate(['-global_quality', '22'])];
   } else {
     post = ['format=yuv420p'];
-    enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || 'veryfast', ...rate(['-crf', '21']), '-profile:v', 'high', '-sc_threshold', '0'];
+    enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...rate(['-crf', '21']), '-profile:v', 'high', '-sc_threshold', '0'];
   }
   const vf = chain(post);
   const pre = HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [];

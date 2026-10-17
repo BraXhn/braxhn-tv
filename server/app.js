@@ -981,7 +981,11 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // omkodning. Filens index räcker oftast (någon sekund); måste hela filen läsas väntar vi högst 10 s –
   // då omkodas den den här gången och nästa gång går den utan omkodning.
   if (c.q.get('info') !== '1' && c.q.get('force') !== 'transcode') {
-    const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v)).slice(0, 2);
+    // Bara versioner som faktiskt skulle kunna skickas utan omkodning (rätt kvalitet, ingen inbränning/tonmappning)
+    // – annars omkodas filmen ändå och väntan på nyckelbilderna vore bortkastad
+    const pre = st.parseCaps(c.q); pre.assumeKf = true;
+    if ((!c.q.get('q') || c.q.get('q') === 'auto') && !isLocalReq(c.req)) pre.q = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
+    const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v) && st.decide(v, pre).mode !== 'transcode').slice(0, 2);
     if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 10000))]);
     if (c.res.writableEnded || c.req.destroyed) return;
   }
@@ -1755,7 +1759,7 @@ route('GET', '/api/security-check', admin, (c) => {
   else add('ok', 'Servern körs utan root-rättigheter', '');
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
   if (st.hwStatus.error) add('warn', `Hårdvaruomkodning (${st.hwStatus.wanted}) fungerar inte – processorn används`,
-    `Fel: ${st.hwStatus.error}. För NVIDIA krävs pluginen Nvidia-Driver och --runtime=nvidia i Extra Parameters; för Intel/AMD enheten /dev/dri. Annars: sätt HWACCEL=none.`);
+    `Fel: ${st.hwStatus.error}. ${st.hwStatus.hint ? 'Åtgärd: ' + st.hwStatus.hint : 'För NVIDIA krävs pluginen Nvidia-Driver och --runtime=nvidia i Extra Parameters; för Intel/AMD enheten /dev/dri.'} Annars: sätt HWACCEL=none.`);
   if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
   items.push(...diskmon.checkItems());
   if (dlna.enabled()) add('info', 'DLNA är påslaget', 'Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning' + (dlna.maxAge() != null ? ` (titlar upp till ${dlna.maxAge()} år).` : '.'));
