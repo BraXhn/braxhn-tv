@@ -220,6 +220,15 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
     assert.equal(h, +m[3]);
   }
   assert.ok(Math.abs(starts[0] - starts[1]) < 0.05, `starttider ${starts}`);
+  // Segmenten passar ihop: segment 1:s första DTS ligger inte före segment 0:s sista (Chrome avbryter annars)
+  {
+    const q = inf[0][4].split('?')[1];
+    const r0 = await req(new URL('seg-0.ts', base).pathname + '?' + q);
+    const f0 = path.join(ROOT, 'abr-s0.ts'); fs.writeFileSync(f0, r0.data);
+    const dts = (f) => execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=dts_time', '-of', 'csv=p=0', f]).toString().trim().split('\n').map(x => parseFloat(x)).filter(x => !isNaN(x));
+    const last0 = Math.max(...dts(f0)), first1 = dts(path.join(ROOT, 'abr0.ts'))[0];
+    assert.ok(first1 > last0, `DTS ${last0} → ${first1}`);
+  }
   // Omkodning börjar med korta segment: 0, 2, 4, 6, 12 …
   assert.ok(Math.abs(starts[0] - 2) < 0.05, `segment 1 börjar vid 2 s (${starts[0]})`);
 });
