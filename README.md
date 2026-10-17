@@ -23,6 +23,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | Användare | Flera konton med egen tittarhistorik, *Fortsätt titta*, *Nästa avsnitt* och sedd/osedd. |
 | **Profiler** | *Vem tittar?* – profiler i hushållet med egen historik och Min lista, valfri **PIN** och **åldersgräns** för barn (svensk åldersgräns från TMDB, med USA/Tyskland som reserv). |
 | **Upptäck** | **Min lista**, **samlingar** (t.ex. alla Bond-filmer), **rekommendationer** utifrån det du sett och *Liknande titlar*. |
+| **Snabbåtgärder på korten** | **⋮** på varje affisch (även högerklick, långtryck och Menu-tangenten på fjärrkontrollen): spela/fortsätt, markera som sedd, Min lista, **ta bort från Fortsätt titta**, följ serien, titta tillsammans och ladda ner – utan att öppna titelsidan. Administratörer får även metadataverktygen. Det mesta går att ångra direkt. |
 | **Direktuppspelning** | Filer som enheten klarar skickas orörda (med spolning). |
 | **Remux** | H.264-, **HEVC**-, **HDR10**- och **Dolby Vision**-filer i MKV eller med fel ljudformat strömmas med **originalbilden kopierad**. Bara ljudet konverteras vid behov, så processorbelastningen blir nästan noll. Segmenten delas exakt på filens nyckelbilder, som indexeras vid skanningen. HEVC strömmas som fMP4-HLS till Apple-enheter. **Surroundljud** (AC-3/E-AC-3) skickas vidare orört när enheten klarar det. |
 | Omkodning | Behövs bara för t.ex. HEVC till enheter utan HEVC-stöd, lägre kvalitet eller inbränning. Kan köras med processor eller GPU (Intel/AMD VAAPI, Quick Sync, NVIDIA NVENC). |
@@ -47,6 +48,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
 | **Anpassningsbar kvalitet** | När servern omkodar med automatisk kvalitet kan spelaren själv växla ner (1080p/720p/480p) när nätet blir sämre, t.ex. i bilen eller på mobilnät. |
+| **Aktivitet** | Administratörer ser i menyraden när servern arbetar (skanning, analys, omkodning, inspelning, nedladdning) och kan öppna en lista med förloppet. |
 | **App på telefonen** | Webben kan installeras som app på iPhone och Android: egen ikon, helskärm, meny längst ner och kompakt spelare. Se *Installera som app* nedan. |
 | **Spelare** | Egen kontrollrad som visas vid paus eller när musen rör sig, och **litet fönster** längst ner så att filmen fortsätter medan du bläddrar. Tangenter: mellanslag, ←/→, f, m, s (hoppa över intro). |
 | **Flera versioner** | Samma film i flera versioner (t.ex. 4K och 1080p) visas som en film. Servern väljer den version enheten kan spela utan omkodning, och på webben kan du välja själv. Framsteg och sedd gäller filmen oavsett version. |
@@ -351,6 +353,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Snabb start | Nyckelbilder ur MKV-index och MP4-tabeller stämde exakt med ffprobe; omkodning med korta startsegment (2 s) delades på rätt ställen. |
 | Bildundertexter (PGS) | En syntetisk PGS-ström i MKV tolkades till bilder med rätt tider och position. **Otestat:** riktiga Blu-ray-rippar och iPhone. |
 | NVIDIA/Intel-avkodning | **Otestat** (ingen GPU i testmiljön); automatisk återgång till processorn testades med `HWACCEL=nvenc` utan drivrutin. |
+| Webbgränssnittet | I Chromium vid 375 och 1920 px: dialoger, kortmeny och aktivitetspanel med bara tangentbord (fokus tillbaka, Escape, Tab stannar i dialogen), PIN-dialog för profil, bekräftelse innan borttagning, ark nerifrån på telefon, långtryck, skelett vid laddning och "Ingen kontakt med servern" när servern stoppades. Alla knappar har ett namn och ingen sida skrollar i sidled. **Otestat:** riktiga TV-fjärrkontroller och skärmläsare (VoiceOver/TalkBack). |
 | Drift | Diskövervakning, import mot simulerade Plex- och Jellyfin-servrar, `/metrics` och DLNA:s SOAP/DIDL samt spärr mot andra nät. |
 
 **Inte testat här:**

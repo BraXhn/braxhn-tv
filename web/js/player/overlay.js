@@ -30,7 +30,7 @@ export function setMini(on) {
   const el = cur.el; cur.mini = on;
   el.classList.toggle('mini', on); el.classList.remove('idle');
   document.body.classList.toggle('hasmini', on);
-  const btn = $('#cmini', el); if (btn) { btn.innerHTML = on ? ICON.expand : ICON.mini; btn.title = on ? 'Helskärmsläge' : 'Litet fönster (fortsätt bläddra)'; }
+  const btn = $('#cmini', el); if (btn) { btn.innerHTML = on ? ICON.expand : ICON.mini; btn.title = on ? 'Helskärmsläge' : 'Litet fönster (fortsätt bläddra)'; btn.setAttribute('aria-label', btn.title); }
   if (on) {
     $('#setp', el).hidden = true; $('#chlist', el).hidden = true;
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

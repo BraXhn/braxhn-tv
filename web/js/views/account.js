@@ -1,9 +1,11 @@
 // Vy: Mitt konto – lösenord, tvåstegsverifiering, passkeys, profiler, Trakt, enheter, följda serier och nedladdning i appen
-import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';
 import { route } from '../router.js';
 import { screenDialog } from '../screentime.js';
+import { confirmDialog, formDialog, openDialog, promptDialog } from '../ui/dialog.js';
+import { loadingState } from '../ui/states.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
   setup: 'Server konfigurerad', password_changed: 'Lösenord bytt', '2fa_enabled': '2FA aktiverad', '2fa_disabled': '2FA avstängd',
@@ -23,13 +25,14 @@ function loadQr() {
   return new Promise((ok, no) => { const s = document.createElement('script'); s.src = '/vendor/qrcode.min.js'; s.onload = () => ok(window.qrcode); s.onerror = no; document.head.append(s); });
 }
 function showCodes(codes) {
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Dina reservkoder</h2><p class="muted">Spara dem säkert (t.ex. i en lösenordshanterare). Varje kod kan användas <b>en gång</b> om du tappar telefonen. De visas bara nu.</p>
-    <pre style="font-size:17px;line-height:1.7;background:var(--bg3);padding:14px;border-radius:8px;columns:2">${codes.map(esc).join('\n')}</pre>
-    <div class="row" style="justify-content:flex-end"><button class="ghost" id="cp">Kopiera</button><button class="primary" id="ok">Jag har sparat dem</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  $('#cp', d).onclick = () => navigator.clipboard?.writeText(codes.join('\n')).then(() => toast('Kopierat'));
-  $('#ok', d).onclick = () => { d.close(); d.remove(); route(); };
+  openDialog({
+    title: 'Dina reservkoder',
+    body: `<p class="muted">Spara dem säkert (t.ex. i en lösenordshanterare). Varje kod kan användas <b>en gång</b> om du tappar telefonen. De visas bara nu.</p>
+      <pre class="codes">${codes.map(esc).join('\n')}</pre>`,
+    actions: [{ label: 'Kopiera', onClick: () => { navigator.clipboard?.writeText(codes.join('\n')).then(() => toast('Kopierat')); return false; } },
+      { label: 'Jag har sparat dem', kind: 'primary' }],
+    onClose: (v) => { if (v !== 'route') route(); }
+  });
 }
 
 views.account = async () => {
@@ -58,7 +61,7 @@ views.account = async () => {
     <div class="row" style="margin-top:12px">${passkeyOk() ? '<button class="primary" id="pkadd">Lägg till passkey</button>' : '<span class="muted">Passkeys kräver HTTPS (eller localhost) i den här webbläsaren.</span>'}</div></div>` : ''}
   ${!me.kid ? `<div class="panel"><h2>Profiler i hushållet</h2>
     <p class="muted small">Profiler delar inloggning men har egen tittarhistorik och Min lista. Barnprofiler ser bara titlar upp till sin åldersgräns. Med PIN kan barnen inte byta till vuxnas profiler.</p>
-    <div id="proflist"><div class="spin"></div></div>
+    <div id="proflist">${loadingState({ kind: 'inline' })}</div>
     <form id="addprof" class="row" style="margin-top:12px;align-items:flex-end">
       <div style="flex:1;min-width:140px"><label>Namn</label><input id="pn" required maxlength="40"></div>
       <div><label>Åldersgräns</label><select id="pa"><option value="">Vuxen (ingen)</option><option value="0">Barntillåten</option><option value="7">7 år</option><option value="11">11 år</option><option value="13">13 år</option><option value="15">15 år</option></select></div>
@@ -78,7 +81,7 @@ views.account = async () => {
   $('#pw').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/me/password', { method: 'POST', body: { current: $('#c').value, password: $('#n1').value } }); toast('Lösenordet är bytt – andra enheter är utloggade'); route(); }
-    catch (er) { toast(er.message); }
+    catch (er) { toastErr(er); }
   };
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
@@ -93,16 +96,19 @@ views.account = async () => {
         else if ($('#trst')) $('#trst').textContent = p.status === 'denied' ? 'Nekades på Trakt.' : 'Koden gick ut – försök igen.';
       };
       later(tick, (r.interval || 5) * 1000);
-    } catch (e) { toast(e.message); }
+    } catch (e) { toastErr(e); }
   };
-  if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt`); route(); } catch (e) { toast(e.message); } };
-  if ($('#troff')) $('#troff').onclick = act(async () => { if (confirm('Koppla från Trakt?')) { await api('/me/trakt', { method: 'DELETE' }); route(); } });
-  $$('[data-pkdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort passkeyn?')) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } }));
+  if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt`); route(); } catch (e) { toastErr(e); } };
+  if ($('#troff')) $('#troff').onclick = act(async () => { if (await confirmDialog('Koppla från Trakt?', { okLabel: 'Koppla från', danger: true })) { await api('/me/trakt', { method: 'DELETE' }); route(); } });
+  $$('[data-pkdel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort passkeyn?', { okLabel: 'Ta bort', danger: true })) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } }));
   if ($('#pkadd')) $('#pkadd').onclick = async () => {
-    const password = prompt('Ange ditt lösenord för att lägga till en passkey:'); if (!password) return;
     // Med tvåstegsverifiering krävs även en kod (en passkey loggar in utan den)
-    const code = me?.totp ? prompt('Ange koden från din autentiseringsapp:') : undefined; if (me?.totp && !code) return;
-    const name = prompt('Namn på passkeyn (t.ex. "iPhone" eller "Jobbdator"):', device(navigator.userAgent)) || 'Passkey';
+    const f = await formDialog({ title: 'Lägg till passkey', okLabel: 'Fortsätt', fields: [
+      { name: 'password', label: 'Ditt lösenord', type: 'password', required: true },
+      ...(me?.totp ? [{ name: 'code', label: 'Kod från autentiseringsappen', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12, required: true }] : []),
+      { name: 'name', label: 'Namn på passkeyn', value: device(navigator.userAgent), hint: 'T.ex. "iPhone" eller "Jobbdator".', maxlength: 60 }] });
+    if (!f) return;
+    const { password } = f, code = me?.totp ? f.code : undefined, name = f.name.trim() || 'Passkey';
     try { await passkeyRegister(password, name, code); toast('Passkey tillagd'); route(); }
     catch (e) { toast(e.name === 'NotAllowedError' ? 'Avbrutet' : e.name === 'InvalidStateError' ? 'Den här enheten har redan en passkey för kontot' : e.message); }
   };
@@ -113,18 +119,18 @@ views.account = async () => {
       <td class="r">${p.owner ? '' : `<button class="ghost small" data-pst="${p.id}">Skärmtid</button>`}<button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
       ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">Ta bort</button>`}</td></tr>`).join('')}</table>`;
     $$('[data-ppin]').forEach(b => b.onclick = async () => {
-      const pin = prompt('Ny PIN (4–8 siffror). Lämna tomt för att ta bort PIN:'); if (pin === null) return;
-      try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toast(e.message); }
+      const pin = await promptDialog('Ny PIN (4–8 siffror)', { type: 'pin', hint: 'Lämna tomt för att ta bort PIN.', pattern: '[0-9]{4,8}', maxlength: 8, okLabel: 'Spara' }); if (pin === null) return;
+      try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toastErr(e); }
     });
     $$('[data-pst]').forEach(b => b.onclick = act(() => screenDialog(P2.profiles.find(p => p.id === +b.dataset.pst))));
-    $$('[data-pdel]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort profilen och dess tittarhistorik?')) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } }));
+    $$('[data-pdel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort profilen och dess tittarhistorik?', { okLabel: 'Ta bort', danger: true })) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } }));
     $('#addprof').onsubmit = async (e) => {
       e.preventDefault();
       try { await api('/profiles', { method: 'POST', body: { name: $('#pn').value, maxAge: $('#pa').value, pin: $('#pp').value } }); toast('Profil skapad'); route(); }
-      catch (er) { toast(er.message); }
+      catch (er) { toastErr(er); }
     };
   }
-  $('#revall').onclick = act(async () => { if (confirm('Logga ut alla andra enheter, inklusive appar?')) { await api('/me/sessions/revoke-others', { method: 'POST' }); toast('Utloggade'); route(); } });
+  $('#revall').onclick = act(async () => { if (await confirmDialog('Logga ut alla andra enheter, inklusive appar?', { okLabel: 'Logga ut' })) { await api('/me/sessions/revoke-others', { method: 'POST' }); toast('Utloggade'); route(); } });
   if ($('#on')) $('#on').onclick = act(async () => {
     const r = await api('/me/2fa/setup', { method: 'POST' });
     $('#tfasetup').innerHTML = `<ol style="padding-left:18px;line-height:1.7">
@@ -138,17 +144,20 @@ views.account = async () => {
     $('#tc').focus();
     $('#tcok').onclick = async () => {
       try { const res = await api('/me/2fa/enable', { method: 'POST', body: { code: $('#tc').value, password: $('#tpw').value } }); showCodes(res.recoveryCodes); }
-      catch (e) { toast(e.message); }
+      catch (e) { toastErr(e); }
     };
   });
   if ($('#off')) $('#off').onclick = async () => {
-    const password = prompt('Ange ditt lösenord för att stänga av tvåstegsverifiering:'); if (!password) return;
-    const code = prompt('Ange en kod från autentiseringsappen (eller en reservkod):'); if (!code) return;
-    try { await api('/me/2fa/disable', { method: 'POST', body: { password, code } }); toast('Tvåstegsverifiering avstängd'); route(); } catch (e) { toast(e.message); }
+    const f = await formDialog({ title: 'Stäng av tvåstegsverifiering', okLabel: 'Stäng av', danger: true, fields: [
+      { name: 'password', label: 'Ditt lösenord', type: 'password', required: true },
+      { name: 'code', label: 'Kod från autentiseringsappen (eller en reservkod)', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12, required: true }] });
+    if (!f) return;
+    const { password, code } = f;
+    try { await api('/me/2fa/disable', { method: 'POST', body: { password, code } }); toast('Tvåstegsverifiering avstängd'); route(); } catch (e) { toastErr(e); }
   };
   if ($('#newrc')) $('#newrc').onclick = async () => {
-    const password = prompt('Ange ditt lösenord:'); if (!password) return;
-    try { const r = await api('/me/2fa/recovery', { method: 'POST', body: { password } }); showCodes(r.recoveryCodes); } catch (e) { toast(e.message); }
+    const password = await promptDialog('Ditt lösenord', { title: 'Skapa nya reservkoder', type: 'password', required: true, okLabel: 'Skapa' }); if (!password) return;
+    try { const r = await api('/me/2fa/recovery', { method: 'POST', body: { password } }); showCodes(r.recoveryCodes); } catch (e) { toastErr(e); }
   };
   await accountExtras();
 };

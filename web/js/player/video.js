@@ -1,5 +1,5 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, store, sxe, toast } from '../core.js';
+import { $, $$, api, esc, fmtTime, store, sxe, toast, toastErr } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery } from './caps.js';
 import { castItem, castReady } from './cast.js';
@@ -25,7 +25,7 @@ export function loadHls() {
 // Startknapp: inaktiveras medan spelaren startar (dubbelklick ger inte två spelare)
 export function startPlay(b, ...args) {
   if (b) { if (b.disabled) return; b.disabled = true; }
-  return play(...args).catch(e => toast(e?.message)).finally(() => { if (b) b.disabled = false; });
+  return play(...args).catch(e => toastErr(e)).finally(() => { if (b) b.disabled = false; });
 }
 
 export async function play(id, start = 0, opts = {}) {
@@ -41,7 +41,7 @@ export async function play(id, start = 0, opts = {}) {
       if (p.version && p.version !== it.version) it = await api(`/items/${id}?version=${p.version}`, { bg: true });
     }
   }
-  catch (e) { if (seq === playSeq) toast(e.message); return; }
+  catch (e) { if (seq === playSeq) toastErr(e); return; }
   if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
   const partyId = opts.party || (P && P.party) || null;
   // Behåll anslutningen till rummet vid byte av avsnitt – tas över först nu när hämtningen lyckats
@@ -66,7 +66,7 @@ export async function play(id, start = 0, opts = {}) {
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
       <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button></div>
-    <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose">✕</button></div>
+    <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
     <button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
@@ -75,26 +75,26 @@ export async function play(id, start = 0, opts = {}) {
       ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
       <label>Undertexter<select id="ps"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
       ${textSubs.length > 1 ? `<label>Andra undertext<select id="ps2"><option value="">Ingen</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
-      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Senare">+</button></span></div>
+      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare" aria-label="Undertexten tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Senare" aria-label="Undertexten senare">+</button></span></div>
     <div class="ctl" id="ctl">
       <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
         <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
       <div class="crow">
         <div class="cinfo"><b>${esc(it.kind === 'episode' ? it.showTitle || it.title : it.title)}</b><span>${line2}</span><span id="ctime">0:00</span></div>
         <div class="cmid">
-          <button id="cprev" title="${chaps.length ? 'Föregående kapitel' : 'Till början'}">${ICON.prev}</button>
-          <button id="cback" title="10 s bakåt (←)">${ICON.back10}</button>
-          <button id="cplay" class="big" title="Spela/pausa (mellanslag)">${ICON.play}</button>
-          <button id="cfwd" title="30 s framåt (→)">${ICON.fwd30}</button>
+          <button id="cprev" title="${chaps.length ? 'Föregående kapitel' : 'Till början'}" aria-label="${chaps.length ? 'Föregående kapitel' : 'Till början'}">${ICON.prev}</button>
+          <button id="cback" title="10 s bakåt (←)" aria-label="10 s bakåt (←)">${ICON.back10}</button>
+          <button id="cplay" class="big" title="Spela/pausa (mellanslag)" aria-label="Spela/pausa (mellanslag)">${ICON.play}</button>
+          <button id="cfwd" title="30 s framåt (→)" aria-label="30 s framåt (→)">${ICON.fwd30}</button>
           <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
-          <button id="cstop" title="Stoppa">${ICON.stop}</button>
+          <button id="cstop" title="Stoppa" aria-label="Stoppa">${ICON.stop}</button>
         </div>
         <div class="cright">
-          ${chaps.length ? `<button id="pchap" title="Kapitel">${ICON.list}</button>` : ''}
-          <button id="cset" title="Kvalitet, ljud och undertexter">${ICON.gear}</button>
-          <span class="vol"><button id="cmute" title="Ljud av/på (m)">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="Volym"></span>
-          <button id="cmini" title="Litet fönster (fortsätt bläddra)">${ICON.mini}</button>
-          <button id="cfull" title="Helskärm (f)">${ICON.full}</button>
+          ${chaps.length ? `<button id="pchap" title="Kapitel" aria-label="Kapitel">${ICON.list}</button>` : ''}
+          <button id="cset" title="Kvalitet, ljud och undertexter" aria-label="Kvalitet, ljud och undertexter">${ICON.gear}</button>
+          <span class="vol"><button id="cmute" title="Ljud av/på (m)" aria-label="Ljud av/på (m)">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="Volym"></span>
+          <button id="cmini" title="Litet fönster (fortsätt bläddra)" aria-label="Litet fönster (fortsätt bläddra)">${ICON.mini}</button>
+          <button id="cfull" title="Helskärm (f)" aria-label="Helskärm (f)">${ICON.full}</button>
         </div>
       </div>
     </div>`;
@@ -129,11 +129,12 @@ export async function play(id, start = 0, opts = {}) {
   q('#pparty').onclick = async () => {
     if (!cur.party) {
       try { const r = await api('/party', { method: 'POST', body: { itemId: it.id }, bg: true }); if (P !== cur) return; cur.party = r.id; pushState(); joinParty(); toast('Rum skapat – dela länken'); }
-      catch (e) { return toast(e.message); }
+      catch (e) { return toastErr(e); }
     }
     q('#partybox').hidden = !q('#partybox').hidden;
   };
   q('#pbclose').onclick = () => { q('#partybox').hidden = true; };
+  if (opts.startParty && !cur.party) q('#pparty').click(); // "Titta tillsammans…" från kortets meny
   q('#pcopy').onclick = () => { navigator.clipboard?.writeText(q('#plink').value).then(() => toast('Länken kopierad')); };
   q('#pmsg').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim() && cur.party) { api(`/party/${cur.party}/chat`, { method: 'POST', body: { text: e.target.value }, bg: true }).catch(() => {}); e.target.value = ''; } };
   // Lokala händelser skickas till rummet (men inte de som kommer från rummet självt)
@@ -230,7 +231,7 @@ async function load(start) {
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
   const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
   try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
-  catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toast(e.message); } return; }
+  catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
   if (!live()) return;
   cur.pb = pb;
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];

@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- **Snabbåtgärder på korten**: ⋮ på varje affisch (hovring, högerklick, långtryck på telefonen, Menu-tangenten/Shift+F10 på tangentbord och fjärrkontroll) öppnar en meny med spela/fortsätt, sedd/osedd (även hela säsongen), Min lista, *Ta bort från Fortsätt titta*, följ serien, titta tillsammans, ladda ner och – för administratörer – uppdatera metadata, fel titel, redigera och analysera intro igen. Kortet ändras direkt och det mesta går att ångra i meddelandet. På telefon visas menyn som ett ark nerifrån
+- Nytt i API:t: `GET /api/items/:id/state` (Min lista, följer, nästa avsnitt) och `POST /api/items/:id/continue` (tar bort en titel ur Fortsätt titta utan att markera den som sedd, med ångra). Barnprofiler kan inte nå titlar över åldersgränsen – inte heller längre via `POST /api/items/:id/watched`
+- **Aktivitet** i menyraden för administratörer: en ring runt ikonen medan servern skannar, analyserar, kodar om eller spelar in, och en panel med förloppet (bygger på `GET /api/jobs`)
+- Webbgränssnittet har fått gemensamma komponenter (`web/js/ui/`, se `docs/ui-komponenter.md`): alla `confirm()`/`prompt()` är ersatta med riktiga dialoger som fungerar med fjärrkontroll, i installerad app och med skärmläsare (PIN och lösenord i dolda fält, Avbryt i fokus vid borttagning, Escape stänger, fokus tillbaka); skelett i sidans form medan den laddas; enhetliga tomma lägen och fel med *Försök igen*; meddelanden med Ångra som läses upp; alla ikonknappar har namn; flikar med piltangenter; minst 44 px stora mål på pekskärm
 
 ## 0.6.1
 - Rättat: undertexter som slogs på mitt i en film syntes inte (eller först efter flera minuter). Ett inbäddat spår lästes från filmens början och skickades först när hela filen var läst – för en stor film tar det minuter. Nu läses spåret där tittaren är (text och Blu-ray/PGS), visas inom någon sekund och fylls sedan i medan man tittar; efter spolning läses det nya stället direkt. Färdiga spår sparas som förut
