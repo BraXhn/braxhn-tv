@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES } from './db.js';
+import * as jobs from './jobs.js';
 import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
 import * as people from './people.js';
@@ -16,6 +17,15 @@ const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '
 const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|webrip|web-dl|webdl|web|hdtv|dvdrip|dvd|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|eac3|dts|remux|proper|repack|extended|unrated|hdr|10bit|multi|swesub|nordic)\b.*$/i;
 
 export const status = { running: false, library: null, phase: '', done: 0, total: 0, last: null, warnings: [] };
+// Aktivitetsindikatorn: skanning och bakgrundsanalys
+jobs.addSource(() => {
+  const out = [];
+  if (status.running) out.push({ id: 'scan', kind: 'scan', title: `Skannar ${status.library || 'bibliotek'}`, detail: status.phase || '', done: status.done, total: status.total || null });
+  const a = status.analysis;
+  if (a?.running) out.push({ id: 'analysis', kind: 'analysis', title: `Analyserar ${a.library || 'bibliotek'}`, detail: a.phase || '', done: a.done, total: a.total || null });
+  if (a?.queued > (a?.running ? 1 : 0)) out.push({ id: 'analysis-queue', kind: 'analysis', title: 'Väntar på analys', detail: `${a.queued - (a.running ? 1 : 0)} bibliotek i kö`, done: 0, total: null });
+  return out;
+});
 /** Varning från skanningen (t.ex. omonterad NAS) – syns i skanningsstatus och loggen */
 export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.push(msg); if (status.warnings.length > 20) status.warnings.shift(); }
 

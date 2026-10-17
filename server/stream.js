@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream';
 import { send, fail, MIME, streamFile, writeAtomic } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
+import * as jobs from './jobs.js';
 import { SubReader, vttParser } from './subreader.js';
 
 const pexec = promisify(execFile);
@@ -175,7 +176,7 @@ function liveVtt(it, sub, t) {
     j = { cues: [], done: false, error: null };
     const forget = (ms) => setTimeout(() => { if (liveSubs.get(key) === j) liveSubs.delete(key); }, ms).unref();
     j.reader = new SubReader({
-      file: it.path, stream: +sub.id.slice(1), format: 'webvtt', duration: it.duration || 0,
+      file: it.path, stream: +sub.id.slice(1), format: 'webvtt', duration: it.duration || 0, title: it.title,
       parser: () => vttParser((c) => {
         // Sorterat på starttid; två läsningar som överlappar ger samma cue två gånger
         let lo = 0, hi = j.cues.length;
@@ -299,8 +300,12 @@ export function computeKeyframes(it, { priority = false } = {}) {
       let kf = fast && (fast.complete || it.vcodec === 'h264') ? fast.kf : null;
       if (!kf) {
         const t0 = Date.now();
-        const { stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
-          '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 });
+        const jb = jobs.track('keyframes', `Indexerar nyckelbilder: ${it.title || path.basename(it.path)}`, { detail: 'läser hela filen' });
+        let stdout;
+        try {
+          ({ stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
+            '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 }));
+        } finally { jb.end(); }
         kf = [];
         for (const line of stdout.split('\n')) {
           const [t, flags] = line.split(',');
@@ -848,6 +853,11 @@ export function stopUserSessions(itemId, userId) {
   for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`)) stopProc(s);
 }
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
+jobs.addSource(() => [...sessions.values()].filter(s => s.proc && !s.paused).map(s => ({
+  id: 'hls-' + s.key, kind: s.d.mode === 'transcode' ? 'transcode' : 'remux',
+  title: `${s.d.mode === 'transcode' ? 'Omkodar' : 'Remuxar'} ${s.title || ''}`.trim(),
+  detail: s.d.mode === 'transcode' ? `${s.d.q && s.d.q !== 'orig' ? s.d.q + 'p · ' : ''}${HW === 'none' ? 'processor' : HW}${s.d.tonemap ? ' · HDR→SDR' : ''}` : 'utan omkodning',
+  done: Math.max(0, highestFile(s) + 1), total: s.total || null })));
 // Diskövervakning: antal HLS-sessioner och rensning av inaktiva när omkodningsdisken är nästan full
 export const sessionCount = () => sessions.size;
 export function purgeIdle(idleMs) {

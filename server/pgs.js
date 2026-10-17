@@ -210,7 +210,7 @@ export function job(it, sub) {
     return cue;
   };
   j.reader = new SubReader({
-    file: it.path, stream: +sub.id.slice(1), format: 'sup', duration: it.duration || 0,
+    file: it.path, stream: +sub.id.slice(1), format: 'sup', duration: it.duration || 0, title: it.title,
     parser: () => {
       let open = null; // den här körningens visning som ännu inte tagits bort
       const p = new PgsParser({

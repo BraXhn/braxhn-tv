@@ -9,6 +9,7 @@ import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts, activeLive } from './l
 import * as comskip from './comskip.js';
 import { notify } from './notify.js';
 import { fail, streamFile } from './util.js';
+import * as jobs from './jobs.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS dvr_rules(id INTEGER PRIMARY KEY, title TEXT NOT NULL, channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
   new_only INTEGER NOT NULL DEFAULT 1, keep INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created INTEGER NOT NULL);
@@ -116,6 +117,12 @@ export function conflicts(start, stop, { channelId = null, excludeId = null } = 
 
 // ---------- inspelning ----------
 const active = new Map(); // recordingId → { proc, key, tuner }
+// Aktivitetsindikatorn: pågående inspelningar och efterbearbetning
+jobs.addSource(() => [
+  ...[...active.keys()].map(id => { const r = get('SELECT title, start, stop FROM recordings WHERE id=?', id); const now = Date.now() / 1000;
+    return { id: 'rec-' + id, kind: 'record', title: `Spelar in: ${r?.title || ''}`, detail: '', done: r ? Math.max(0, now - r.start) : 0, total: r ? r.stop - r.start : null }; }),
+  ...[...converting.keys()].map(id => ({ id: 'conv-' + id, kind: 'record', title: `Bearbetar inspelning: ${get('SELECT title FROM recordings WHERE id=?', id)?.title || ''}`, detail: '', done: 0, total: null }))
+]);
 const converting = new Map(); // recordingId → pågående ffprobe/ffmpeg i efterbearbetningen
 let shuttingDown = false;
 const lastLine = (s, def) => s.trim().split('\n').pop() || def;

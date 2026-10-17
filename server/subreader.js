@@ -4,6 +4,8 @@
 // stämmer), läser framåt, och fyller sedan i det som saknas tills hela spåret är läst.
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import path from 'node:path';
+import * as jobs from './jobs.js';
 
 const LEAD = 10;          // börja så här många sekunder före tittarens position
 const AHEAD = 120;        // en läsning som snart når tittaren får fortsätta
@@ -62,7 +64,7 @@ export class SubReader {
   }
   stop() {
     const p = this.proc; if (!p) return;
-    this.proc = null;
+    this.proc = null; this.jb?.end();
     this.add(this.from, this.pos);
     p.kill('SIGKILL');
   }
@@ -78,6 +80,8 @@ export class SubReader {
       '-map', '0:v:0?', '-c', 'copy', '-f', 'null', '-', '-progress', 'pipe:2', '-stats_period', '1'];
     const p = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     this.proc = p;
+    this.jb?.end();
+    const jb = this.jb = jobs.track('subtitle', `Läser undertext: ${this.title || path.basename(this.file)}`, { total: this.duration || null });
     const parser = this.parser();
     let err = '', line = '';
     p.stdout.on('data', (c) => {
@@ -92,14 +96,15 @@ export class SubReader {
           if (this.proc !== p) continue;
           this.pos = from + +m[1] / 1e6;
           this.add(from, this.pos);
+          jb.update(this.covered.reduce((a, [x, y]) => a + Math.min(y, this.duration || y) - x, 0));
           // Läsningen har nått något som redan är läst: hoppa till nästa lucka
           if (this.stopAt != null && this.pos >= this.stopAt) { this.stop(); parser.end?.(); this.next(); }
         } else if (!/^[a-z_]+=/.test(l)) err = (err + l + '\n').slice(-1000);
       }
     });
-    p.on('error', (e) => { if (this.proc === p) { this.proc = null; this.fail(e.message); } });
+    p.on('error', (e) => { jb.end(); if (this.proc === p) { this.proc = null; this.fail(e.message); } });
     p.on('close', (code) => {
-      parser.end?.();
+      parser.end?.(); jb.end();
       if (this.proc !== p) return; // stoppad av oss
       this.proc = null;
       // Filens slut: allt härifrån är läst
