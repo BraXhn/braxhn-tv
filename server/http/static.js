@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fail, MIME, send } from '../util.js';
 
+const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web');
 
 // ---------- statiska filer ----------
@@ -29,10 +30,16 @@ export function serveStatic(req, res, pathname) {
       // Nya versioner ska nå appen direkt. Webbklientens moduler (/app.js, /js/…) måste dessutom alltid komma från
       // samma version – en blandning av gamla och nya moduler i webbläsarens cache kan stoppa appen helt.
       // (no-cache + ETag: webbläsaren frågar varje gång men får 304 om inget ändrats.)
-      const fresh = ext === '.html' || ext === '.webmanifest' || pathname === '/sw.js' || pathname === '/app.js' || pathname.startsWith('/js/');
+      // Stilmallen hör också dit: en ny sida med gammal stilmall (max-age) gav en helt trasig layout efter uppdatering.
+      // Bara vendor-filer och bilder (som byter namn eller sällan ändras) får cachas en timme.
+      const fresh = !(pathname.startsWith('/vendor/') || pathname.startsWith('/brand/') || /\.(png|jpe?g|webp|ico|woff2?)$/.test(pathname));
       // ETag: appen frågar om nya versioner (no-cache) och får 304 i stället för hela filen
       const h = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': fresh ? 'no-cache' : 'max-age=3600', ETag: 'auto' };
-      if (ext === '.html') h['Content-Security-Policy'] = CSP;
+      if (ext === '.html') {
+        h['Content-Security-Policy'] = CSP;
+        // Versionsnummer på stilmall och startmodul: webbläsaren hämtar dem på nytt efter varje uppdatering
+        data = Buffer.from(String(data).replaceAll('{{v}}', VERSION));
+      }
       send(res, 200, data, h);
     });
   });

@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.8.2
+- Rättat: efter en uppdatering kunde webbläsaren visa den nya sidan med den gamla stilmallen (cachad i en timme), så att layouten blev helt trasig. Stilmall och startmodul har nu versionsnummer i adressen, och appens filer kontrolleras mot servern vid varje besök (ETag – oförändrade filer laddas inte om)
+
 ## 0.8.1
 - Förhandsbilderna för spolning skapas mycket snabbare: med filmens nyckelbilder kända hoppar ffmpeg direkt till en bild var 10:e sekund i stället för att läsa hela filen och avkoda varje nyckelbild (för en stor 4K-film från många minuter till under en minut). Två filmer bearbetas samtidigt
 
