@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: omkodade filmer kunde stoppa i Chrome med "formatet stöds inte" (särskilt med NVENC). Segmenten överlappade i avkodningstid på grund av B-bilder; omkodningen görs nu utan B-bilder så att segmenten passar exakt ihop
 - Snabbare start när filmen ändå måste omkodas (t.ex. vald kvalitet 1080p för en 4K-film): servern väntar inte längre upp till 10 s på nyckelbilder som inte behövs. En film som bakgrundsanalysen redan köat flyttas först i kön när någon trycker Spela
 - Omkodning av 4K med processorn använder snabbare inställningar (x264 superfast, enklare skalning)
 - Fungerar inte hårdvaruomkodningen visar loggen och Administration → Säkerhet nu en konkret åtgärd (t.ex. saknad --runtime=nvidia, för gammal drivrutin, för många samtidiga kodningar)

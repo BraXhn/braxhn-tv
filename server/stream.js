@@ -491,7 +491,10 @@ function videoArgs(it, d, fromStart) {
   const Q = QUALITIES[d.q] || QUALITIES.orig;
   const v = videoOf(it);
   const h = Q.h && v?.height && v.height > Q.h ? Q.h : null;
-  const gop = ['-force_key_frames', forcedKeys(fromStart)];
+  // Inga B-bilder: med B-bilder börjar varje segments DTS före föregående segments sista DTS (ffmpegs TS-muxer
+  // skjuter bara fram det första segmentet), och Chrome avbryter då uppspelningen ("formatet stöds inte").
+  // Utan B-bilder är DTS = PTS och segmenten passar exakt ihop, oavsett kodare.
+  const gop = ['-force_key_frames', forcedKeys(fromStart), '-bf', '0'];
   const rate = (hwFlag) => Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : hwFlag;
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
