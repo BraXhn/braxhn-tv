@@ -1,12 +1,31 @@
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream';
 import net from 'node:net';
+// Text som lönar sig att komprimera (bibliotekslistor i JSON är ~15 ggr mindre med gzip)
+const COMPRESSIBLE = /^(application\/(json|javascript|manifest\+json|vnd\.apple\.mpegurl)|text\/|image\/svg)/;
+/** Skickar ett svar. headers.ETag === 'auto' räknar fram en ETag ur innehållet; If-None-Match ger då 304. */
 export function send(res, code, body, headers = {}) {
   if (res.headersSent) return;
   if (typeof body === 'object' && !Buffer.isBuffer(body) && body !== null) {
     body = JSON.stringify(body);
     headers['Content-Type'] = 'application/json; charset=utf-8';
+  }
+  const req = res.req;
+  if (code === 200 && headers.ETag) {
+    if (headers.ETag === 'auto') headers.ETag = `"${crypto.createHash('sha1').update(body ?? '').digest('base64url').slice(0, 22)}"`;
+    if (req?.headers['if-none-match'] === headers.ETag) {
+      const { 'Content-Type': _, ...rest } = headers;
+      res.writeHead(304, { 'Cache-Control': 'no-store', ...rest });
+      return res.end();
+    }
+  }
+  if (body != null && body.length > 1024 && COMPRESSIBLE.test(headers['Content-Type'] || '') && /\bgzip\b/.test(req?.headers['accept-encoding'] || '')) {
+    body = zlib.gzipSync(body, { level: 5 });
+    headers['Content-Encoding'] = 'gzip';
+    headers['Vary'] = 'Accept-Encoding';
   }
   res.writeHead(code, { 'Cache-Control': 'no-store', ...headers });
   res.end(body ?? '');
