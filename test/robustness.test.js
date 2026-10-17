@@ -197,3 +197,30 @@ test('start: omkodningsmappen töms men tas inte bort (den är ofta en monterad 
   assert.equal(fs.statSync(dir).birthtimeMs, born, 'mappen själv ska finnas kvar (inte raderas och skapas om)');
   assert.deepEqual(fs.readdirSync(dir), []);
 });
+
+test('Blu-ray-mappar: bara huvudfilmen blir en titel och får skivans namn', async () => {
+  const d = (...p) => path.join('/m', ...p);
+  assert.equal(sc.discRoot(d('Titanic (1997)', 'BDMV', 'STREAM', '00800.m2ts')), d('Titanic (1997)'));
+  assert.equal(sc.discRoot(d('Film (2020)', 'Film.mkv')), null);
+  assert.deepEqual(sc.parseMovie(d('Titanic (1997)', 'BDMV', 'STREAM', '00800.m2ts')), { title: 'Titanic', year: 1997 });
+  assert.deepEqual(sc.parseMovie(d('Titanic (1997)', 'Disc 2', 'BDMV', 'STREAM', '00001.m2ts')), { title: 'Titanic', year: 1997 });
+  assert.deepEqual(sc.parseMovie(d('TITANIC_1997_D1', 'BDMV', 'STREAM', '00001.m2ts')), { title: 'TITANIC', year: 1997 });
+
+  const dir = path.join(MEDIA, 'Filmer-BD');
+  const disc = path.join(dir, 'Titanic (1997)', 'BDMV');
+  touch(path.join(disc, 'STREAM', '00000.m2ts'), 'x'.repeat(10));           // varningstext
+  touch(path.join(disc, 'STREAM', '00001.m2ts'), 'x'.repeat(20));           // logga
+  touch(path.join(disc, 'STREAM', '00800.m2ts'), 'x'.repeat(5000));         // huvudfilmen
+  touch(path.join(disc, 'BACKUP', 'STREAM', '00800.m2ts'), 'x'.repeat(6000)); // reservkopia på skivan – aldrig med
+  touch(path.join(dir, 'Arrival (2016).mkv'));
+  const lib = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('BD','movie',?)", dir).lastInsertRowid);
+  // Som en tidigare version: varje klipp blev en egen "film" med filnamnet som titel
+  for (const f of ['00000', '00001', '00800']) {
+    D.run("INSERT INTO items(library_id,kind,title,sort_title,path,size,mtime,added) VALUES(?,?,?,?,?,?,?,?)",
+      lib, 'movie', f, f, path.join(disc, 'STREAM', f + '.m2ts'), 1, 1, 0);
+  }
+  await sc.scan(lib);
+  const rows = D.all("SELECT title, year, path FROM items WHERE library_id=? AND kind='movie' ORDER BY title", lib);
+  assert.deepEqual(rows.map(r => [r.title, r.year]), [['Arrival', 2016], ['Titanic', 1997]]);
+  assert.equal(rows[1].path, path.join(disc, 'STREAM', '00800.m2ts'));
+});

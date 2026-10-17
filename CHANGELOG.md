@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- Kopierade Blu-ray-skivor (`BDMV/STREAM/*.m2ts`) blir en film med skivans namn – varningstexter, loggor och andra klipp på skivan skannas inte längre in som egna titlar (de som redan finns tas bort vid nästa skanning)
 - Rättat: containern startade inte (avslutades direkt utan begriplig logg) när omkodningsmappen var en monterad volym – nu töms bara innehållet
 - Unraid-mallen har fått *Port i containern*, så att servern kan köras med egen IP-adress (Custom: br0) på t.ex. port 80
 - Anpassningsbar kvalitet (ABR): vid omkodning med automatisk kvalitet kan spelaren växla ner till 720p/480p när nätet blir sämre

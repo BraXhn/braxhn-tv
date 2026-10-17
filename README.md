@@ -228,13 +228,14 @@ Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i
 /media/Filmer/Dune (2021)/Dune (2021) - 2160p.mkv       ← två versioner av samma film
 /media/Filmer/Dune (2021)/Dune (2021) - 1080p.mkv
 /media/Filmer/Dune (2021)/Dune (2021)-trailer.mp4       ← trailer (eller mappen trailers/)
+/media/Filmer/Titanic (1997)/BDMV/STREAM/00800.m2ts     ← kopierad Blu-ray: bara huvudfilmen (största filen) tas med
 /media/Serier/Bron (2011)/Season 1/Bron - S01E01.mkv
 /media/Serier/Doctor Who (2005)/Season 1/...            ← årtalet skiljer serier med samma namn
 /media/Musik/Artist/Album/01 Låt.flac
 /media/Musik/Artist/Album/01 Låt.lrc                    ← låttext
 ```
 
-Filer utan årtal grupperas aldrig som versioner.
+Filer utan årtal grupperas aldrig som versioner. I en kopierad Blu-ray-mapp (`BDMV`) blir bara huvudfilmen en titel, med namnet på mappen ovanför `BDMV` – varningstexter, loggor, menyer och trailers på skivan hoppas över.
 
 ## DLNA (smart-TV utan app)
 
