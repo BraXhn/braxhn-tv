@@ -1,5 +1,6 @@
 // Vyer: inloggning, första kontot och profilval ("Vem tittar?")
-import { $, $$, act, api, esc, hue, main, me, safeColor, toast, views } from '../core.js';
+import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, toast, views } from '../core.js';
+import { closeAllPlayers } from '../player/video.js';
 import { stopAudio } from '../audio.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
 import { boot } from '../router.js';
@@ -20,7 +21,7 @@ views.login = async () => {
     <button class="primary">${setup ? 'Skapa konto' : 'Logga in'}</button>
     ${!setup && passkeyOk() ? '<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>' : ''}</form>`;
   if ($('#pkl')) $('#pkl').onclick = async () => {
-    try { await passkeyLogin(); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : '#/'; }
+    try { await passkeyLogin(); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); }
     catch (e) { $('#e').textContent = e.name === 'NotAllowedError' ? 'Avbrutet' : e.message; }
   };
   $('#n').focus();
@@ -35,7 +36,7 @@ views.login = async () => {
       if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
       await boot();
       if (d.weakPassword) { toast('Ditt lösenord är svagt – byt det under Mitt konto'); location.hash = '#/account'; }
-      else location.hash = setup ? '#/admin' : me.profiles > 1 ? '#/profiles' : '#/';
+      else location.hash = setup ? '#/admin' : me.profiles > 1 ? '#/profiles' : pageAfterLogin();
     } catch (e) { $('#e').textContent = e.message; }
   };
 };
@@ -62,7 +63,7 @@ views.profiles = async () => {
       if (j.needPin) { const pin = prompt(body.pin ? 'Fel PIN – försök igen:' : 'Ange PIN för profilen:'); if (!pin) return; body.pin = pin; return attempt(); }
       if (j.needPassword) { const pw = prompt('Ange huvudkontots lösenord:'); if (!pw) return; body.password = pw; return attempt(); }
       if (!r.ok) return toast(j.error || 'Kunde inte byta profil');
-      stopAudio(); // framsteg ska inte sparas på den nya profilen
+      stopAudio(); closeAllPlayers(); // framsteg ska inte sparas på den nya profilen (och spelaren inte fortsätta)
       await boot(); location.hash = '#/';
     };
     act(attempt)();

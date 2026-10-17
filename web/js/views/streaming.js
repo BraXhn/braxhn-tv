@@ -37,7 +37,7 @@ views.streaming = async () => {
     const d = document.createElement('dialog'); d.className = 'wide';
     d.innerHTML = `<h2>Era streamingtjänster</h2><div class="provpick">${P_.all.map(p => `<label class="prov"><input type="checkbox" value="${p.id}" ${P_.mine.includes(p.id) ? 'checked' : ''}>${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('')}</div>
       <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="pc">Avbryt</button><button class="primary" id="ps">Spara</button></div>`;
-    document.body.append(d); d.showModal();
+    document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     $('#pc', d).onclick = () => { d.close(); d.remove(); };
     $('#ps', d).onclick = act(async () => { const ids = $$('input:checked', d).map(i => +i.value); await api('/streaming/mine', { method: 'PUT', body: { ids } }); store.set('stprov', ''); d.close(); d.remove(); route(); });
   };
@@ -70,7 +70,7 @@ async function streamDialog(x) {
     <div><h2 style="margin-top:0">${esc(x.title)} ${x.year ? `<span class="muted">(${x.year})</span>` : ''}</h2><p class="small">${esc(x.overview || '')}</p></div></div>
     <div id="sdp"><div class="spin"></div></div>
     <div class="row" style="justify-content:flex-end;margin-top:14px">${x.inLibrary ? `<a class="btn primary" href="#/item/${x.inLibrary}">▶ Finns hemma – spela</a>` : '<button class="ghost" id="sdr">Önska till biblioteket</button>'}<button class="ghost" id="sdx">Stäng</button></div>`;
-  document.body.append(d); d.showModal();
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const close = () => { d.close(); d.remove(); };
   $('#sdx', d).onclick = close;
   $$('a[href^="#/"]', d).forEach(a => a.addEventListener('click', close));

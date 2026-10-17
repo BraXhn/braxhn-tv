@@ -7,7 +7,7 @@ export function art(it, land) {
     : (it.poster ? 'poster' : it.thumb ? 'thumb' : null);
   const imgId = land && !it.thumb && it.kind === 'episode' && it.show ? null : it.id;
   const h = hue(it.title);
-  let html = `<div class="ph" style="--h1:hsl(${h} 45% 32%);--h2:hsl(${(h + 50) % 360} 50% 18%)">${esc(it.showTitle || it.title)}</div>`;
+  let html = `<div class="ph" aria-hidden="true" style="--h1:hsl(${h} 45% 32%);--h2:hsl(${(h + 50) % 360} 50% 18%)">${esc(it.showTitle || it.title)}</div>`;
   if (pick && imgId) html += `<img loading="lazy" src="/api/image/${imgId}/${pick}" alt="" data-fb="1">`;
   if (it.kind === 'show') {
     const left = (it.episodes || 0) - (it.watchedEpisodes || 0);
@@ -32,7 +32,7 @@ export function shelf(title, items, land = false, more = '') {
 }
 export function colCard(c) {
   const h = hue(c.name);
-  return `<a class="card" href="#/collection/${c.id}"><div class="art"><div class="ph" style="--h1:hsl(${h} 45% 32%);--h2:hsl(${(h + 50) % 360} 50% 18%)">${esc(c.name)}</div>
+  return `<a class="card" href="#/collection/${c.id}"><div class="art"><div class="ph" aria-hidden="true" style="--h1:hsl(${h} 45% 32%);--h2:hsl(${(h + 50) % 360} 50% 18%)">${esc(c.name)}</div>
     ${c.poster ? `<img loading="lazy" src="/api/collection-image/${c.id}/poster" alt="" data-fb="1">` : ''}<span class="badge">${c.count}</span></div>
     <div class="t">${esc(c.name)}</div><div class="s">${c.years?.[0] || ''}${c.years?.[1] && c.years[1] !== c.years[0] ? '–' + c.years[1] : ''}</div></a>`;
 }
@@ -42,7 +42,7 @@ export const ROLE_NAME = { director: 'Regi', creator: 'Skapare' };
 const initials = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 export function personArt(p) {
   const h = hue(p.name);
-  return `<div class="art"><div class="ph" style="--h1:hsl(${h} 30% 34%);--h2:hsl(${(h + 40) % 360} 35% 18%)">${esc(initials(p.name))}</div>
+  return `<div class="art"><div class="ph" aria-hidden="true" style="--h1:hsl(${h} 30% 34%);--h2:hsl(${(h + 40) % 360} 35% 18%)">${esc(initials(p.name))}</div>
     ${p.image ? `<img loading="lazy" src="/api/people/${+p.id}/image" alt="" data-fb="1">` : ''}</div>`;
 }
 export const personCard = (p, sub = '') => `<a class="card pcard" href="#/person/${+p.id}">${personArt(p)}<div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></a>`;

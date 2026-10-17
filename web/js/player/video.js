@@ -258,9 +258,16 @@ async function load(start) {
       const l = hls.levels?.[d.level];
       if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
     });
+    // Fatala fel: försök igen några gånger, men inte i all oändlighet (utgången inloggning, borttagen fil …)
+    let netTries = 0, mediaTries = 0;
+    hls.on(Hls.Events.FRAG_LOADED, () => { netTries = 0; });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || cur.hls !== hls || !live()) return;
-      if (d.type === 'networkError') hls.startLoad(); else if (d.type === 'mediaError') hls.recoverMediaError(); else toast('Uppspelningsfel: ' + d.details);
+      const code = d.response?.code;
+      if (code === 401 || code === 403) { toast(code === 401 ? 'Inloggningen har gått ut – logga in igen' : 'Uppspelningen nekades'); return closePlayer(false); }
+      if (d.type === 'networkError' && ++netTries <= 3) return void setTimeout(() => cur.hls === hls && hls.startLoad(), 1000 * netTries);
+      if (d.type === 'mediaError' && ++mediaTries <= 2) return hls.recoverMediaError();
+      toast(d.type === 'networkError' ? 'Ingen kontakt med servern – uppspelningen stoppades' : 'Uppspelningsfel: ' + d.details);
     });
     hls.loadSource(pb.url); hls.attachMedia(v);
   }

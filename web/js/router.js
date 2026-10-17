@@ -1,6 +1,6 @@
 // Routing och appens skal: inloggning vid start (boot), route() med navigeringsgeneration, bibliotekslänkar,
 // användarmenyn, sökfältet, flikmenyn och installation som app
-import { $, $$, api, esc, leaveFns, libs, main, me, nextRoute, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
+import { $, $$, api, esc, leaveFns, libs, main, me, nextRoute, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
 import { stopAudio } from './audio.js';
 import { closeLive, closeRec } from './player/live.js';
 import { P, closeAllPlayers } from './player/video.js';
@@ -37,9 +37,11 @@ export async function route() {
   leaveFns.clear();
   const h = location.hash.slice(2) || '';
   const [name, arg, arg2] = h.split('/');
-  if (!me && name !== 'login') { location.hash = '#/login'; return; }
-  // En film i litet fönster fortsätter spela medan man bläddrar
-  if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
+  if (!me && name !== 'login') { rememberPage(); location.hash = '#/login'; return; }
+  // En film i litet fönster fortsätter spela medan man bläddrar – men aldrig efter utloggning eller vid profilval
+  // (då skulle framsteget sparas på fel profil, och en barnprofil kunna titta vidare)
+  if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
+  else if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
   $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }
@@ -50,7 +52,13 @@ export async function route() {
   main.innerHTML = '<div class="spin"></div>';
   if (me && name !== 'timeup') refreshScreen();
   try { await v(arg, arg2); if (gen !== routeGen) return; window.scrollTo(0, 0); fillWatch(); }
-  catch (e) { if (gen !== routeGen || e?.aborted) return; if (me) main.innerHTML = `<div class="empty"><h2>Något gick fel</h2><p>${esc(e.message)}</p></div>`; }
+  catch (e) {
+    if (gen !== routeGen || e?.aborted) return;
+    if (me) {
+      main.innerHTML = `<div class="empty"><h2>${e?.offline ? 'Ingen kontakt med servern' : 'Något gick fel'}</h2><p>${esc(e.message)}</p><button class="primary" id="retry">Försök igen</button></div>`;
+      $('#retry').onclick = () => route();
+    }
+  }
 }
 window.addEventListener('hashchange', route);
 
@@ -73,7 +81,7 @@ $('#install').onclick = async () => {
     ? '<ol><li>Tryck på <b>Dela</b> (rutan med pilen uppåt) i Safari.</li><li>Välj <b>Lägg till på hemskärmen</b>.</li><li>Tryck <b>Lägg till</b>.</li></ol><p class="muted small">Appen öppnas sedan i helskärm med egen ikon.</p>'
     : '<p>Öppna webbläsarens meny (⋮) och välj <b>Installera app</b> eller <b>Lägg till på startskärmen</b>.</p><p class="muted small">Fullständig installation kräver att servern nås via HTTPS (se README, "Titta utanför hemmet").</p>'}
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="primary" id="ok">OK</button></div>`;
-  document.body.append(d); d.showModal(); $('#ok', d).onclick = () => { d.close(); d.remove(); };
+  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal(); $('#ok', d).onclick = () => { d.close(); d.remove(); };
 };
 // Flikmenyn: Sök fokuserar sökfältet i stället för att byta sida
 $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
