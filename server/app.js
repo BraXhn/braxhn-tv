@@ -1995,7 +1995,9 @@ function serveStatic(req, res, pathname) {
     fs.readFile(f, (e2, data) => {
       if (e2) return fail(res, 404, 'Hittades inte');
       const ext = path.extname(f);
-      const fresh = ext === '.html' || ext === '.webmanifest' || pathname === '/sw.js'; // nya versioner ska nå appen direkt
+      // Nya versioner ska nå appen direkt. Webbklientens moduler (/app.js, /js/…) måste dessutom alltid komma från
+      // samma version – en blandning av gamla och nya moduler i webbläsarens cache kan stoppa appen helt.
+      const fresh = ext === '.html' || ext === '.webmanifest' || pathname === '/sw.js' || pathname === '/app.js' || pathname.startsWith('/js/');
       const h = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': fresh ? 'no-cache' : 'max-age=3600' };
       if (ext === '.html') h['Content-Security-Policy'] = CSP;
       send(res, 200, data, h);
