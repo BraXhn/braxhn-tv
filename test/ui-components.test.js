@@ -17,7 +17,7 @@ globalThis.localStorage ??= { getItem: () => null, setItem() {} };
 const { emptyState, errorState, loadingState } = await import('../web/js/ui/states.js');
 const { iconButton } = await import('../web/js/ui/buttons.js');
 const { tabsHtml } = await import('../web/js/ui/tabs.js');
-const { card, cardItem } = await import('../web/js/ui/cards.js');
+const { card, cardItem, seasonCard, seasonItem, shelfHtml } = await import('../web/js/ui/cards.js');
 const { fieldHtml } = await import('../web/js/ui/dialog.js');
 const { cardActions } = await import('../web/js/ui/cardmenu.js');
 
@@ -89,6 +89,35 @@ test('card: ett namn för länken, menyknapp med aria-label och aria-haspopup, b
   assert.doesNotMatch(card({ ...it, id: 8 }, false, { menu: false }), /cmenu/);
   const ep = card({ id: 9, kind: 'episode', title: 'Pilot', season: 1, episode: 2, show: 4, showTitle: 'Serien', watched: true }, true);
   assert.match(ep, /aria-label="Serien, S01E02 · Pilot, sedd"/);
+});
+
+test('card: Plex-rader under affischen, ▶ med namn, märke för osedda avsnitt', () => {
+  const mv = card({ id: 21, kind: 'movie', title: 'Film', year: 2001, poster: true });
+  assert.match(mv, /class="cplay" data-cplay="21" aria-label="Spela Film"/);
+  assert.doesNotMatch(mv, /cedit/); // bara administratörer
+  const ep = card({ id: 22, kind: 'episode', title: 'Pilot', season: 3, episode: 23, show: 4, showTitle: 'Serien', showPoster: true, position: 0 });
+  assert.match(ep, /<div class="t">Serien<\/div><div class="s">Pilot<\/div><div class="s s2">S3 · A23<\/div>/);
+  assert.match(ep, /src="\/api\/image\/4\/poster"/);
+  assert.match(ep, /href="#\/item\/4"/);
+  const sh = card({ id: 23, kind: 'show', title: 'Serie', seasons: 3, episodes: 10, watchedEpisodes: 4 });
+  assert.match(sh, /<div class="s">3 säsonger<\/div>/);
+  assert.match(sh, /class="badge" aria-hidden="true">6</);
+  assert.match(sh, /aria-label="Serie, 3 säsonger, 6 osedda avsnitt"/);
+});
+
+test('seasonCard: ett kort per säsong med nyaste avsnittet och antal nya', () => {
+  const g = { show: 5, showTitle: EVIL, showPoster: true, season: 3, count: 4, unwatched: 3, latest: { id: 9, title: 'Finalen', season: 3, episode: 8 }, next: { id: 7, episode: 6, position: 0 } };
+  const h = seasonCard(g);
+  noRawTag(h);
+  assert.match(h, /data-show="5" data-season="3"/);
+  assert.match(h, /href="#\/item\/5\/3"/);
+  assert.match(h, /<div class="s">Finalen<\/div><div class="s s2">S3 · A8<\/div>/);
+  assert.match(h, /class="badge" aria-hidden="true">3</);
+  assert.match(h, /data-cplay="7" data-pos="0"/);
+  assert.match(h, /class="cmenu"[^>]*aria-label="Fler åtgärder för &lt;img/);
+  assert.equal(seasonItem(5, 3), g);
+  assert.match(seasonCard({ ...g, unwatched: 0, next: null, latest: null }), /class="seen"[^]*<div class="s">Säsong 3<\/div>/);
+  assert.match(shelfHtml('Rad', '', { row: 'continue' }), /<h2>Rad<\/h2><div class="shelf" data-row="continue">/);
 });
 
 test('fieldHtml: PIN och lösenord får rätt typ, inputmode och autocomplete', () => {

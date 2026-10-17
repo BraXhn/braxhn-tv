@@ -175,3 +175,16 @@ test('webbklienten: service workern cachar alla moduler i web/js/ och alla impor
     }
   }
 });
+
+test('startsidan: nya avsnitt grupperas per serie och säsong (nyast först)', async () => {
+  const { groupNewEpisodes } = await import('../server/http/context.js');
+  const ep = (id, show, season, episode, watched = false) => ({ id, kind: 'episode', show, showTitle: 'Serie ' + show, season, episode, title: `Avsnitt ${episode}`, watched, position: 0, added: 100 - id });
+  const g = groupNewEpisodes([ep(1, 10, 3, 8), ep(2, 20, 1, 2), ep(3, 10, 3, 7, true), ep(4, 10, 2, 5), ep(5, 10, 3, 6)]);
+  assert.deepEqual(g.map(x => `${x.show}:${x.season}`), ['10:3', '20:1', '10:2']);
+  assert.equal(g[0].count, 3);
+  assert.equal(g[0].unwatched, 2);
+  assert.deepEqual(g[0].latest, { id: 1, title: 'Avsnitt 8', season: 3, episode: 8 });
+  assert.equal(g[0].next.id, 5);
+  assert.equal(g[0].showTitle, 'Serie 10');
+  assert.equal(groupNewEpisodes([ep(1, 10, 3, 8), ep(2, 20, 1, 2)], 1).length, 1);
+});

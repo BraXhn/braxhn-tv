@@ -22,11 +22,11 @@ function heroHtml(it, extra = '') {
     ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;
 }
 
-views.item = async (id) => {
+views.item = async (id, season) => {
   // Flera versioner (t.ex. 4K och 1080p): valet sparas per film i webbläsaren, annars väljer servern
   const chosen = store.get('version.' + id, '');
   const it = await api('/items/' + id + (chosen ? '?version=' + encodeURIComponent(chosen) : ''));
-  if (it.kind === 'show') return showView(it);
+  if (it.kind === 'show') return showView(it, season);
   const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = it.position > 30;
   const actions = `<div class="row">
@@ -78,9 +78,10 @@ views.item = async (id) => {
   }
 };
 
-function showView(it) {
+// season = säsong från länken (#/item/:id/:säsong, t.ex. från "Nyligen tillagda"), annars den man sist valde
+function showView(it, season) {
   const seasons = [...new Set(it.children.map(e => e.season))].sort((a, b) => a - b);
-  let cur = store.get('season.' + it.id, it.next?.season ?? seasons[0]);
+  let cur = season != null && season !== '' && seasons.includes(+season) ? +season : store.get('season.' + it.id, it.next?.season ?? seasons[0]);
   if (!seasons.includes(cur)) cur = seasons[0];
   const nx = it.next;
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}

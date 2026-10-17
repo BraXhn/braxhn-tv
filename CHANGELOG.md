@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- **Nytt utseende i Plex-stil** i webben: mörkare neutral bakgrund och tätare text, smal **sidomeny** med ikoner (Hem, ett val per bibliotek, Live-TV/Poddar och *Mer*; ☰ visar namnen och valet sparas), menyrad med rubrik, sidflikar (Hem, Min lista, Önskningar, Statistik), sök, aktivitet och ett **reglage för kortstorlek** (sparas i webbläsaren). På telefon ligger biblioteken som knappar under sökfältet och flikmenyn finns kvar längst ner
+- Startsidan består av **hyllor** som skrollar i sidled med ‹ › (bläddrar en sida, inaktiva vid ändarna) och fäster vid korten; piltangenter/D-pad flyttar mellan korten och raderna
+- Nya **affischkort**: titel, år/avsnittstitel/antal säsonger och "S3 · A23" under bilden, tunn framstegslinje, märke med antal osedda avsnitt eller ✓, och vid hovring/fokus ▶ (spelar direkt – serier nästa avsnitt), ✎ (redigera, administratörer) och ⋮
+- **Nyligen tillagda** i seriebibliotek visar ett kort per serie och säsong med nyaste avsnittet och antal nya; kortet öppnar rätt säsong (`#/item/:id/:säsong`). API: `GET /api/home` har fått `rows[].seasons` för seriebibliotek, serier har `seasons` (antal säsonger) och avsnitt `showPoster`/`showThumb` – befintliga fält är oförändrade
 
 ## 0.7.0
 - "Håll mig inloggad i 30 dagar" vid inloggning (även med passkey). Valt: inloggningen gäller i 30 dagar räknat från senaste besöket (kakan förnyas). Ej valt: webbläsaren glömmer inloggningen när den stängs, och den går ut efter 12 timmar utan aktivitet. Valet sparas till nästa gång och följer med vid profilbyte

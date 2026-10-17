@@ -56,7 +56,8 @@ export function loadingState({ kind = 'list', count, label = 'Laddar…' } = {})
   let inner;
   if (kind === 'inline') return `<div class="state loading inline" role="status" aria-live="polite"><span class="sk-dots" aria-hidden="true"><i></i><i></i><i></i></span>${sr}</div>`;
   if (kind === 'grid') inner = `<div class="sk sk-h1"></div><div class="grid">${cards(count || 12)}</div>`;
-  else if (kind === 'shelves') inner = [true, false, false].map(land => `<div class="section"><div class="sk sk-h2"></div><div class="shelf${land ? ' wide' : ''}">${cards(land ? 5 : 8, land)}</div></div>`).join('');
+  // Startsidan: tre hyllor med stående affischer på en rad (lika många som får plats – resten klipps)
+  else if (kind === 'shelves') inner = [0, 1, 2].map(() => `<div class="section"><div class="sk sk-h2"></div><div class="shelf sk-shelf">${cards(14)}</div></div>`).join('');
   else if (kind === 'detail') inner = `<div class="sk-hero"><div class="sk sk-poster"></div><div class="sk-hero-text"><div class="sk sk-h1"></div>${SK_TEXT}<div class="sk sk-btns"></div></div></div>`;
   else if (kind === 'panels') inner = Array.from({ length: count || 3 }, () => `<div class="panel"><div class="sk sk-h2"></div>${SK_TEXT}${SK_TEXT}</div>`).join('');
   else inner = `<div class="sk sk-h1"></div>${Array.from({ length: count || 6 }, () => `<div class="sk-row"><div class="sk sk-thumb"></div><div style="flex:1">${SK_TEXT}</div></div>`).join('')}`;

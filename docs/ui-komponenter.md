@@ -13,7 +13,8 @@ i själva filen – den här sidan är översikten.
 | `ui/buttons.js` | `iconButton`, `setIconButton` | knappar med bara ✕ ♥ ⏮ utan namn |
 | `ui/tabs.js` | `tabsHtml`, `bindTabs` | `.tabs` med knappar/länkar utan roller |
 | `ui/menu.js` | `openMenu`, `openPopover`, `closeMenu`, `contextMenu` | – (nytt) |
-| `ui/cards.js` | `card`, `art`, `shelf`, `colCard`, `personCard`, `cardItem` | – |
+| `ui/cards.js` | `card`, `seasonCard`, `art`, `shelf`, `shelfHtml`, `colCard`, `personCard`, `cardItem` | – |
+| `ui/shelves.js` | `initShelves`, `initCardSize` | – (‹ › på hyllor, piltangenter mellan kort, kortstorlek) |
 | `ui/cardmenu.js` | `initCardMenus`, `openCardMenu`, `cardActions` | – (snabbåtgärder på korten) |
 | `ui/activity.js` | `startActivity`, `stopActivity` | – (aktivitetsindikatorn för administratörer) |
 
@@ -161,6 +162,8 @@ contextMenu(document, '.card[data-id]', (el, point) => openCardMenu(el, point));
 undertitel och läge, t.ex. "Alfa Film, 2020, 40 % sett") och en `⋮`-knapp (`aria-label="Fler åtgärder för …"`,
 `aria-haspopup="menu"`). Knappen syns vid hovring och fokus, alltid på pekskärm. Bilder laddas lat, har
 `width`/`height` (ingen layoutförskjutning) och tas bort om de inte går att ladda så att färgplattan syns.
+
+Ovanpå bilden finns ▶ (`.cplay`, spelar direkt), ✎ (`.cedit`, bara administratörer) och ⋮ nere till höger; knapparna kopplas delegerat i `ui/cardmenu.js`. `seasonCard(g)` ritar ett säsongskort från `/api/home` (`rows[].seasons`) med en egen meny. Hyllor (`.section > h2 + .shelf`) får ‹ › automatiskt av `ui/shelves.js`, som också flyttar fokus mellan kort med piltangenterna; kortbredden styrs av `--card-w` (reglaget `#cardsize`).
 
 Ange vilken rad korten ligger i med `data-row` (`continue`, `watchlist`, `foryou`) – `shelf(title, items, land, more, row)`
 gör det. Kortmenyn visar då t.ex. "Ta bort från Fortsätt titta" och tar bort kortet ur Min lista-raden.

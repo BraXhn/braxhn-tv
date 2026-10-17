@@ -2,7 +2,7 @@
 import { $, act, api, esc, later, libs, main, me, store, views } from '../core.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
-import { card, colCard, personCard, shelf } from '../ui/cards.js';
+import { card, colCard, personCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
 import { emptyState } from '../ui/states.js';
 
 views.home = async () => {
@@ -12,13 +12,18 @@ views.home = async () => {
     html = emptyState({ icon: '🎬', title: 'Inga bibliotek ännu', text: me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.',
       action: me.is_admin ? { label: 'Lägg till bibliotek', href: '#/admin' } : null });
   }
-  if (d.forYou?.length) html += `<section class="section"><h2>Nytt för dig <span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">Markera som sedda</a></h2><div class="shelf wide" data-row="foryou">${d.forYou.map(i => card(i, true)).join('')}</div></section>`;
-  if (d.continue.length) html += `<section class="section"><h2>Fortsätt titta</h2><div class="shelf wide" data-row="continue">${d.continue.map(i => card(i, true)).join('')}</div></section>`;
+  // Som Plex: en vågrät rad per hylla med stående affischer. Seriebibliotek visar nya avsnitt per säsong.
+  if (d.forYou?.length) html += shelfHtml('Nytt för dig', d.forYou.map(i => card(i)).join(''), { row: 'foryou',
+    extra: `<span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">Markera som sedda</a>` });
+  if (d.continue.length) html += shelfHtml('Fortsätt titta', d.continue.map(i => card(i)).join(''), { row: 'continue' });
   html += shelf('Min lista', d.watchlist, false, '<a href="#/watchlist">Visa alla</a>', 'watchlist');
   html += shelf('Rekommenderat för dig', d.recommended);
-  if (cols.length) html += `<section class="section"><h2>Samlingar</h2><div class="shelf">${cols.map(colCard).join('')}</div></section>`;
-  for (const r of d.rows) if (r.items.length)
-    html += `<section class="section"><h2>${esc(r.title)} <a href="#/lib/${r.library.id}">Visa alla</a></h2><div class="shelf">${r.items.map(i => card(i)).join('')}</div></section>`;
+  for (const r of d.rows) {
+    const more = `<a href="#/lib/${+r.library.id}">Visa alla</a>`;
+    if (r.seasons?.length) html += shelfHtml(`Nyligen tillagda i ${r.library.name}`, r.seasons.map(seasonCard).join(''), { more });
+    else if (r.items.length) html += shelfHtml(`Nyligen tillagda i ${r.library.name}`, r.items.map(i => card(i)).join(''), { more });
+  }
+  if (cols.length) html += shelfHtml('Samlingar', cols.map(colCard).join(''));
   if (libs.length && !d.rows.some(r => r.items.length)) {
     const s = await api('/scan');
     html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? 'Skannar bibliotek…' : 'Inget innehåll hittades', text: s.running ? `${s.phase} ${s.done}/${s.total}` : 'Kontrollera sökvägarna under Administration.' });

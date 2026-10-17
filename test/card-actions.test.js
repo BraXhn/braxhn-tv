@@ -67,6 +67,19 @@ t('förberedelse: konto, bibliotek och åldersgränser', async () => {
   db.close();
 });
 
+t('startsidan: nya avsnitt grupperade per säsong utan att ändra raderna', async () => {
+  const rows = (await req('/api/home')).data.rows;
+  const shows = rows.find(r => r.library.type === 'show'), movies = rows.find(r => r.library.type === 'movie');
+  assert.ok(shows.items.every(i => i.kind === 'show'), 'items är som förut: serier');
+  assert.equal(shows.items[0].seasons, 1);
+  assert.equal(movies.seasons, undefined);
+  assert.equal(shows.seasons.length, 1);
+  const g = shows.seasons[0];
+  assert.equal(g.show, S.show); assert.equal(g.season, 1); assert.equal(g.count, 2); assert.equal(g.showTitle, 'Serien');
+  assert.equal(g.latest.id, S.ep2); assert.equal(g.latest.episode, 2);
+  assert.equal(g.next.id, S.ep1);
+});
+
 t('kortets läge: Min lista, följer och nästa avsnitt', async () => {
   let st = (await req(`/api/items/${S.adult}/state`)).data;
   assert.equal(st.inWatchlist, false);
