@@ -7,9 +7,12 @@ import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
 import { send, fail, MIME, streamFile } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
+import { fastKeyframes } from './keyframes.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
+// Omkodning börjar med korta segment (0, 2, 4 s) så att bilden kommer igång snabbare, sedan SEG s
+const HEAD = [0, 2, 4];
 // ffmpeg får bara läsa lokala filer (skydd mot skadliga mediefiler som försöker öppna nätverksadresser)
 export const SAFE_IN = ['-protocol_whitelist', 'file,pipe'];
 const m3uAttr = (v) => String(v ?? '').replace(/["\r\n,]/g, ' ').slice(0, 80);
@@ -44,6 +47,11 @@ if (HW !== 'none') {
   });
 }
 const VAAPI_DEV = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
+// Avkodning på grafikkortet när omkodningen ändå görs där (4K-HEVC är tungt att avkoda med processorn).
+// Utan -hwaccel_output_format hämtas bilderna tillbaka automatiskt, så alla mjukvarufilter fungerar som förut,
+// och format som kortet inte klarar avkodas med processorn. HW_DECODE=0 stänger av.
+const hwDecode = () => process.env.HW_DECODE === '0' ? []
+  : HW === 'nvenc' ? ['-hwaccel', 'cuda'] : HW === 'vaapi' ? ['-hwaccel', 'vaapi', '-hwaccel_device', VAAPI_DEV] : [];
 const TONEMAP = process.env.TONEMAP || 'hable'; // hable | mobius | reinhard | bt2390
 
 const TEXT_SUBS = new Set(['subrip', 'ass', 'ssa', 'mov_text', 'webvtt', 'text']);
@@ -79,8 +87,9 @@ export function subtitlesOf(it) {
     const bitmap = BITMAP_SUBS.has(s.codec);
     if (!bitmap && !TEXT_SUBS.has(s.codec)) continue;
     out.push({
-      id: 'e' + s.index, lang: s.lang, forced: s.forced, hi: !!s.hi, bitmap, source: 'embedded',
-      label: [s.title, s.lang].filter(Boolean).join(' · ') + (bitmap ? ' (bild – bränns in)' : '') || `Spår ${s.index}`
+      // PGS (Blu-ray) visas som bilder i webbspelaren; övriga bildformat bränns in
+      id: 'e' + s.index, lang: s.lang, forced: s.forced, hi: !!s.hi, bitmap, pgs: s.codec === 'hdmv_pgs_subtitle', source: 'embedded',
+      label: [s.title, s.lang].filter(Boolean).join(' · ') + (bitmap ? ' (bild)' : '') || `Spår ${s.index}`
     });
   }
   const dir = path.dirname(it.path), base = path.basename(it.path, path.extname(it.path));
@@ -214,14 +223,20 @@ export function computeKeyframes(it, { priority = false } = {}) {
     if (priority ? kfActive >= 3 : kfActive >= 2) await new Promise(r => priority ? kfWait.unshift(r) : kfWait.push(r));
     kfActive++;
     try {
-      const { stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
-        '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 });
-      const kf = [];
-      for (const line of stdout.split('\n')) {
-        const [t, flags] = line.split(',');
-        if (flags && flags[0] === 'K') { const x = parseFloat(t); if (!isNaN(x)) kf.push(x); }
+      // Snabba vägen: filens eget index (MKV Cues / MP4 moov) – sekunder i stället för att läsa hela filen.
+      // fMP4-remux (HEVC) delar på varje nyckelbild och kräver en komplett lista; TS (H.264) klarar ett urval.
+      const fast = await fastKeyframes(it.path, it.duration);
+      let kf = fast && (fast.complete || it.vcodec === 'h264') ? fast.kf : null;
+      if (!kf) {
+        const { stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
+          '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 });
+        kf = [];
+        for (const line of stdout.split('\n')) {
+          const [t, flags] = line.split(',');
+          if (flags && flags[0] === 'K') { const x = parseFloat(t); if (!isNaN(x)) kf.push(x); }
+        }
+        kf.sort((a, b) => a - b);
       }
-      kf.sort((a, b) => a - b);
       for (const f of fs.readdirSync(path.join(CACHE, 'keyframes'))) if (f.startsWith(it.id + '-')) fs.rmSync(path.join(CACHE, 'keyframes', f), { force: true });
       fs.writeFileSync(kfFile(it), JSON.stringify(kf));
       kfRemember(it.id, it.mtime, kf);
@@ -414,8 +429,9 @@ function segmentsOf(it, d) {
     const b = remuxBounds(it, d.fmt);
     if (b) return b.map((t, i) => ({ start: t, dur: (b[i + 1] ?? it.duration) - t }));
   }
-  const n = Math.ceil(it.duration / SEG);
-  return Array.from({ length: n }, (_, i) => ({ start: i * SEG, dur: i === n - 1 ? it.duration - SEG * i : SEG }));
+  const starts = HEAD.filter(t => t === 0 || t < it.duration - 0.5);
+  for (let t = SEG; t < it.duration - 0.5; t += SEG) starts.push(t);
+  return starts.map((t, i) => ({ start: t, dur: (starts[i + 1] ?? it.duration) - t }));
 }
 
 export function servePlaylist(res, it, query) {
@@ -436,11 +452,17 @@ export function servePlaylist(res, it, query) {
 // ---------------- ffmpeg-argument ----------------
 const TM_CPU = () => `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=${TONEMAP}:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`;
 
-function videoArgs(it, d) {
+// Tvingade nyckelbilder exakt på segmentgränserna (relativt ffmpegs start). Från början: 0, 2, 4, 6, 12 …
+// – annars var SEG s. Mitt i de korta startsegmenten startar ffmpeg alltid om från början (se startFfmpeg).
+const forcedKeys = (fromStart) => fromStart
+  ? `expr:if(lt(n_forced,${HEAD.length}),gte(t,${HEAD[1] - HEAD[0]}*n_forced),gte(t,${SEG}*(n_forced-${HEAD.length - 1})))`
+  : `expr:gte(t,n_forced*${SEG})`;
+
+function videoArgs(it, d, fromStart) {
   const Q = QUALITIES[d.q] || QUALITIES.orig;
   const v = videoOf(it);
   const h = Q.h && v?.height && v.height > Q.h ? Q.h : null;
-  const gop = ['-force_key_frames', `expr:gte(t,n_forced*${SEG})`];
+  const gop = ['-force_key_frames', forcedKeys(fromStart)];
   const rate = (hwFlag) => Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : hwFlag;
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
@@ -454,10 +476,10 @@ function videoArgs(it, d) {
     enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '22'])];
   } else if (HW === 'nvenc') {
     post = ['format=yuv420p'];
-    enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', ...rate(['-cq', '22'])];
+    enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'])];
   } else if (HW === 'qsv') {
     post = ['format=nv12'];
-    enc = ['-c:v', 'h264_qsv', ...rate(['-global_quality', '22'])];
+    enc = ['-c:v', 'h264_qsv', '-forced_idr', '1', ...rate(['-global_quality', '22'])];
   } else {
     post = ['format=yuv420p'];
     enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || 'veryfast', ...rate(['-crf', '21']), '-profile:v', 'high', '-sc_threshold', '0'];
@@ -488,6 +510,8 @@ function startFfmpeg(s, it, n) {
   stopProc(s);
   const d = s.d;
   const segs = segmentsOf(it, d);
+  // Nyckelbildsmönstret för de korta startsegmenten gäller bara när omkodningen börjar från början
+  if (d.mode === 'transcode' && n > 0 && n < HEAD.length) n = 0;
   const t = segs[n].start;
   let args;
   if (d.mode === 'remux' && d.fmt === 'fmp4') {
@@ -515,15 +539,19 @@ function startFfmpeg(s, it, n) {
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
   } else {
-    const va = videoArgs(it, d);
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...SAFE_IN, '-ss', String(t), '-i', it.path,
+    // Omkodning: segment-muxern delar exakt på de tvingade nyckelbilderna (extra nyckelbilder från kodaren,
+    // t.ex. vid scenbyten i hårdvarukodare, ger inga extra segment – listan förblir deterministisk)
+    const va = videoArgs(it, d, n === 0);
+    const times = segs.slice(n + 1).map(x => Math.max(0.001, x.start - t - 0.005).toFixed(3));
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
       ...va.filter, ...va.map, ...audioArgs(d), ...va.enc, '-sn', '-dn',
-      '-output_ts_offset', String(t), '-muxdelay', '0', '-muxpreload', '0',
-      '-f', 'hls', '-hls_time', String(SEG), '-hls_list_size', '0', '-hls_segment_type', 'mpegts',
-      '-start_number', String(n), '-hls_flags', 'temp_file',
-      '-hls_segment_filename', path.join(s.dir, 'seg_%05d.ts'), path.join(s.dir, `ff_${n}.m3u8`)];
+      // avoid_negative_ts: B-bilder ger negativ DTS i början; utan detta förskjuts hela körningen ~0,08 s
+      // och segmenten från en omstart (spolning) skulle inte passa ihop med de första
+      '-output_ts_offset', String(t), '-muxdelay', '0', '-muxpreload', '0', '-avoid_negative_ts', 'disabled',
+      '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
+      '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
   }
-  if (d.mode === 'remux' && d.fmt === 'ts') {
+  if (d.fmt === 'ts') {
     // gamla filer framåt kan komma från en annan körning – skapa om dem för entydig klarsignal
     for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.ts$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
   }
@@ -537,7 +565,7 @@ function startFfmpeg(s, it, n) {
   p.stderr?.on('data', c => { err = (err + c).slice(-3000); });
   p.on('exit', (code, sig) => {
     if (s.proc === p) {
-      if (code !== 0 && d.mode === 'remux' && d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
+      if (code !== 0 && d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
       s.proc = null; s.done = code === 0;
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
@@ -562,7 +590,7 @@ function stopProc(s) {
   if (!s.proc) return;
   s.proc.kill('SIGKILL'); s.proc = null;
   // segment-muxern skriver direkt till slutligt filnamn – radera det senaste (ev. halvfärdiga) segmentet
-  if (s.d.mode === 'remux' && s.d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
+  if (s.d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
 }
 // Högsta sammanhängande segmentet från s.start. Senaste kända värdet sparas så att varje anrop
 // bara behöver kontrollera några få filer i stället för alla segment sedan start.
@@ -577,8 +605,8 @@ function highestFile(s) {
 // Halvfärdiga filer raderas alltid när en remux-process stoppas eller kraschar.
 function complete(s, n) {
   if (!fs.existsSync(segFile(s, n))) return false;
-  // HLS-muxern (omkodning och fMP4) skriver till temporärt namn och byter namn när segmentet är klart
-  return s.d.mode !== 'remux' || s.d.fmt === 'fmp4' || !s.proc || n < s.start || fs.existsSync(segFile(s, n + 1));
+  // HLS-muxern (fMP4) skriver till temporärt namn och byter namn när segmentet är klart; segment-muxern (TS) skriver direkt
+  return s.d.fmt === 'fmp4' || !s.proc || n < s.start || fs.existsSync(segFile(s, n + 1));
 }
 
 // Gränser för samtidiga omkodningar (skydd mot överbelastning)
@@ -618,6 +646,19 @@ function sessionFor(it, query, userId) {
   }
   s.last = Date.now();
   return s;
+}
+
+/** Startar ffmpeg direkt när uppspelningen begärs, så att första segmentet är på väg medan spelaren
+ *  hämtar spellistorna (sparar några rundresor innan bilden kommer). */
+export function prewarm(it, query, userId, start = 0) {
+  try {
+    const s = sessionFor(it, query, userId);
+    if (s.proc || !it.duration) return;
+    const segs = segmentsOf(it, s.d);
+    let n = 0;
+    while (n + 1 < segs.length && segs[n + 1].start <= start) n++;
+    if (ensureCapacity(s, userId)) startFfmpeg(s, it, n);
+  } catch (e) { console.warn('[hls] förstart:', e.message); }
 }
 
 // fMP4-initsegment (moov). Identiskt för alla körningar i samma session.

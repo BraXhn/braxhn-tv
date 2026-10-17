@@ -267,6 +267,8 @@ dialog.wide{width:min(760px,94vw)}
 .mcard:hover,.mcard:focus-visible{border-color:var(--accent,#ffc857)}
 .mcard.on{border-color:var(--ok,#4cc38a)}
 .mcard img,.mcard .ph{width:62px;height:93px;object-fit:cover;border-radius:6px;flex:0 0 62px;background:#222}
+.pgs{position:absolute;inset:0;pointer-events:none;z-index:2;overflow:hidden}
+.pgs img{position:absolute}
 .sub2{position:absolute;top:7%;left:0;right:0;text-align:center;pointer-events:none;z-index:3}
 .sub2 span{background:rgba(0,0,0,.65);color:#ffe9a8;font-size:clamp(14px,2.2vw,26px);padding:2px 8px;border-radius:4px;white-space:pre-line;line-height:1.35}
 .chapters{position:absolute;right:12px;bottom:90px;max-height:50vh;overflow:auto;background:rgba(20,20,24,.95);border-radius:10px;padding:6px;z-index:6;min-width:240px}
@@ -376,7 +378,7 @@ dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8p
 #player.mini video{position:absolute;left:0;top:0;width:150px;height:84px;object-fit:cover;cursor:pointer}
 #player.mini .ctl{left:150px;background:transparent}
 #player.mini .crow{padding:6px 14px 8px}
-#player.mini .pbar,#player.mini .skip,#player.mini .sub2,#player.mini .partybox,#player.mini .next,#player.mini .msg,#player.mini #cfull{display:none}
+#player.mini .pbar,#player.mini .skip,#player.mini .sub2,#player.mini .pgs,#player.mini .partybox,#player.mini .next,#player.mini .msg,#player.mini #cfull{display:none}
 #player.mini .setp,#player.mini .chapters{bottom:90px}
 body.hasmini main{padding-bottom:100px}
 @media (max-width:700px){
