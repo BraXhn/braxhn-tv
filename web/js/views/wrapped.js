@@ -1,6 +1,7 @@
 // Vy: årssammanfattning
 import { $, api, esc, main, me, views } from '../core.js';
 import { art } from '../ui/cards.js';
+import { emptyState } from '../ui/states.js';
 
 // ---------- Årssammanfattning ----------
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
@@ -16,7 +17,7 @@ views.wrapped = async (year, uid) => {
   main.innerHTML = `<div class="toolbar"><h1>${other ? 'Året för ' + esc(w.user.name) : 'Ditt år'} – ${year}</h1>
     <select id="wy" aria-label="År">${yrs.map(y => `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`).join('')}</select>
     ${w.users ? `<select id="wu" aria-label="Användare">${w.users.map(u => `<option value="${+u.id}"${u.id === w.user.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : ''}</div>
-    ${empty ? `<div class="empty"><h2>Ingen statistik för ${year}</h2><p>Titta på film och serier eller lyssna på musik och ljudböcker så fylls sammanfattningen på.</p></div>` : `
+    ${empty ? emptyState({ icon: '📊', title: `Ingen statistik för ${year}`, text: 'Titta på film och serier eller lyssna på musik och ljudböcker så fylls sammanfattningen på.' }) : `
     <p class="wrap-hero">${other ? esc(w.user.name) : 'Du'} tittade och lyssnade i <b>${h(w.hours)} timmar</b> under ${year}${w.topGenre ? ` – favoritgenren var <b>${esc(w.topGenre)}</b>` : ''}.</p>
     <div class="tiles">
       <div class="tile"><b>${h(w.video.hours)} h</b><span>film och tv</span></div>

@@ -1,7 +1,9 @@
 // Vy: statistik och aktivitet (administratör)
-import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { route } from '../router.js';
 import { diskTable } from './admin-ops.js';
+import { confirmDialog } from '../ui/dialog.js';
+import { emptyState, errorState, loadingState } from '../ui/states.js';
 
 views.stats = async () => {
   if (!me.adminHere) { location.hash = '#/'; return; }
@@ -13,7 +15,7 @@ views.stats = async () => {
   const modeName = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' };
   main.innerHTML = `
   <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span><a class="btn small" href="#/wrapped/${new Date().getFullYear()}">Årssammanfattning</a></div>
-  <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now"><div class="spin"></div></div></div>
+  <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now">${loadingState({ kind: 'inline' })}</div></div>
   <div class="tiles">
     <div class="tile"><b>${L.movies}</b><span>filmer</span></div><div class="tile"><b>${L.shows}</b><span>serier</span></div>
     <div class="tile"><b>${L.episodes}</b><span>avsnitt</span></div><div class="tile"><b>${gb(L.bytes)}</b><span>media</span></div>
@@ -64,12 +66,12 @@ views.stats = async () => {
     if ($('#ofs').value) body.secretKey = $('#ofs').value;
     return api('/offsite', { method: 'PUT', body });
   };
-  $('#ofform').onsubmit = async (e) => { e.preventDefault(); try { await ofSave(); toast('Sparat'); route(); } catch (er) { toast(er.message); } };
-  $('#oftest').onclick = async () => { try { await ofSave(); await api('/offsite/test', { method: 'POST' }); toast('Anslutningen fungerar'); } catch (er) { toast(er.message); } };
-  $('#ofrun').onclick = async () => { $('#ofrun').disabled = true; try { await ofSave(); const r = await api('/offsite/run', { method: 'POST' }); toast('Skickade ' + r.name); route(); } catch (er) { toast(er.message); $('#ofrun').disabled = false; } };
+  $('#ofform').onsubmit = async (e) => { e.preventDefault(); try { await ofSave(); toast('Sparat'); route(); } catch (er) { toastErr(er); } };
+  $('#oftest').onclick = async () => { try { await ofSave(); await api('/offsite/test', { method: 'POST' }); toast('Anslutningen fungerar'); } catch (er) { toastErr(er); } };
+  $('#ofrun').onclick = async () => { $('#ofrun').disabled = true; try { await ofSave(); const r = await api('/offsite/run', { method: 'POST' }); toast('Skickade ' + r.name); route(); } catch (er) { toastErr(er); $('#ofrun').disabled = false; } };
   const restore = async (body, label) => {
-    if (!confirm(`Återställ ${label}? Allt som ändrats efter kopian (tittarhistorik, konton, inställningar) försvinner. Den nuvarande databasen sparas och återställningen sker när containern startas om.`)) return;
-    try { await api('/restore', { method: 'POST', body }); toast('Klart – starta om containern i Unraid'); route(); } catch (e) { toast(e.message); }
+    if (!await confirmDialog('Allt som ändrats efter kopian (tittarhistorik, konton, inställningar) försvinner. Den nuvarande databasen sparas och återställningen sker när containern startas om.', { title: `Återställ ${label}?`, okLabel: 'Återställ', danger: true })) return;
+    try { await api('/restore', { method: 'POST', body }); toast('Klart – starta om containern i Unraid'); route(); } catch (e) { toastErr(e); }
   };
   $$('[data-rlocal]').forEach(b => b.onclick = () => restore({ local: b.dataset.rlocal }, b.dataset.rlocal));
   if ($('#rcancel')) $('#rcancel').onclick = act(async () => { await api('/restore', { method: 'DELETE' }); route(); });
@@ -77,8 +79,8 @@ views.stats = async () => {
     if (!$('#oflist')) return;
     $('#oflist').innerHTML = list.length ? `<table>${list.map(f => `<tr><td>${esc(f.name)}</td><td class="muted small">${fmtDate(f.mtime)}</td><td class="muted small">${(f.size / 1e6).toFixed(1)} MB</td><td class="r"><button class="ghost small" data-rremote="${esc(f.name)}">Återställ</button></td></tr>`).join('')}</table>` : '<p class="muted small">Inga externa kopior ännu.</p>';
     $$('[data-rremote]').forEach(b => b.onclick = () => restore({ remote: b.dataset.rremote }, b.dataset.rremote));
-  }).catch(e => { if (!e.aborted && $('#oflist')) $('#oflist').innerHTML = `<p class="err small">${esc(e.message)}</p>`; });
-  $('#bknow').onclick = async () => { try { const r = await api('/backups', { method: 'POST' }); toast('Skapade ' + r.name); route(); } catch (e) { toast(e.message); } };
+  }).catch(e => { if (!e.aborted && $('#oflist')) $('#oflist').innerHTML = errorState(e, { compact: true }); });
+  $('#bknow').onclick = async () => { try { const r = await api('/backups', { method: 'POST' }); toast('Skapade ' + r.name); route(); } catch (e) { toastErr(e); } };
   $('#bksave').onclick = act(async () => { await api('/settings', { method: 'PUT', body: { backupEnabled: $('#bken').checked, backupKeep: $('#bkkeep').value } }); toast('Sparat'); });
   // En enda uppdateringsslinga: nytt anrop avbryter den schemalagda och gamla svar ignoreras
   let nowSeq = 0, cancelNow = null;
@@ -92,8 +94,8 @@ views.stats = async () => {
       $('#now').innerHTML = A.length ? `<table>${A.map(a => `<tr><td><b>${esc(a.user)}</b><div class="muted small">${esc(a.device)} · ${esc(a.ip)}${a.remote ? ' · utifrån' : ''}</div></td>
         <td>${esc(a.title)}<div class="prog" style="max-width:260px"><i style="width:${a.duration ? Math.min(100, a.position / a.duration * 100) : 0}%"></i></div></td>
         <td class="muted small">${esc(modeName[a.mode] || a.mode)}${a.quality && a.quality !== 'orig' ? ' · ' + esc(a.quality) + 'p' : ''}${a.paused ? ' · pausad' : ''}<div>${esc((a.reasons || []).join(', '))}</div></td>
-        <td class="r"><button class="danger small" data-stop="${esc(a.key)}">Stoppa</button></td></tr>`).join('')}</table>` : '<p class="muted">Ingen tittar just nu.</p>';
-      $$('[data-stop]').forEach(b => b.onclick = act(async () => { if (confirm('Stoppa uppspelningen?')) { await api(`/activity/${b.dataset.stop}/stop`, { method: 'POST' }); loadNow(); } }));
+        <td class="r"><button class="danger small" data-stop="${esc(a.key)}">Stoppa</button></td></tr>`).join('')}</table>` : emptyState({ compact: true, text: 'Ingen tittar just nu.' });
+      $$('[data-stop]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Stoppa uppspelningen?', { okLabel: 'Stoppa', danger: true })) { await api(`/activity/${b.dataset.stop}/stop`, { method: 'POST' }); loadNow(); } }));
     } catch (e) { if (e?.aborted) return; }
     if (seq === nowSeq) cancelNow = later(loadNow, 5000);
   };

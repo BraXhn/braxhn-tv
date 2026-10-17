@@ -1,7 +1,9 @@
 // Vyer: live-TV, programguide och inspelningar (DVR)
-import { $, $$, act, api, dayName, esc, fmtDur, hhmm, keyClick, later, main, me, toast, views } from '../core.js';
+import { $, $$, act, api, dayName, esc, fmtDur, hhmm, keyClick, later, main, me, toast, toastErr, views } from '../core.js';
 import { playLive, playRec } from '../player/live.js';
 import { route } from '../router.js';
+import { choiceDialog, confirmDialog, openDialog } from '../ui/dialog.js';
+import { emptyState } from '../ui/states.js';
 
 const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
 function loadLogos() {}
@@ -11,7 +13,8 @@ views.live = async () => {
     ${D.channels.length ? `<div class="chgrid">${D.channels.map((c, i) => `<button class="chcard" data-ch="${i}">${chLogo(c)}<div class="chinfo"><b>${esc(c.name)}</b>
       ${c.now ? `<div class="small">${esc(c.now.title)}</div><div class="prog"><i style="width:${Math.min(100, (Date.now() / 1000 - c.now.start) / (c.now.stop - c.now.start) * 100)}%"></i></div>` : '<div class="small muted">Ingen guide</div>'}
       ${c.next ? `<div class="small muted">${hhmm(c.next.start)} ${esc(c.next.title)}</div>` : ''}</div></button>`).join('')}</div>`
-    : `<div class="empty"><p>Inga kanaler ännu.${me.adminHere ? ' Lägg till en HDHomeRun eller en IPTV-lista under Administration → Live-TV.' : ''}</p></div>`}`;
+    : emptyState({ icon: '📺', title: 'Inga kanaler ännu', text: me.adminHere ? 'Lägg till en HDHomeRun eller en IPTV-lista under Administration → Live-TV.' : 'En administratör behöver lägga till en TV-källa.',
+      action: me.adminHere ? { label: 'Till Administration', href: '#/admin' } : null })}`;
   $$('[data-ch]').forEach(b => b.onclick = () => playLive(D.channels[+b.dataset.ch]));
   loadLogos();
 };
@@ -47,34 +50,30 @@ views.guide = async (dayOffset) => {
 };
 async function programDialog(id) {
   let p;
-  try { p = await api('/live/programs/' + id); } catch (e) { toast(e.message); return; }
+  try { p = await api('/live/programs/' + id); } catch (e) { toastErr(e); return; }
   const nowT = Date.now() / 1000, onNow = p.start <= nowT && p.stop > nowT;
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>${esc(p.title)}</h2>
+  const h = openDialog({ title: p.title, actions: [{ label: 'Stäng' }], body: `
     <p class="muted">${esc(p.channel_name)} · ${dayName(p.start)} ${hhmm(p.start)}–${hhmm(p.stop)}${p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}${p.is_new ? ' · Nytt' : ''}${p.category ? ' · ' + esc(p.category) : ''}</p>
     ${p.subtitle ? `<p><b>${esc(p.subtitle)}</b></p>` : ''}${p.description ? `<p>${esc(p.description)}</p>` : ''}
     ${p.recording ? `<p class="ok-badge" style="display:inline-block">${{ scheduled: 'Inspelning bokad', recording: 'Spelas in nu', processing: 'Bearbetas', done: 'Inspelad' }[p.recording.status]}</p>` : ''}
     ${p.airings.length ? `<details><summary class="muted small">Fler sändningar (${p.airings.length})</summary><table>${p.airings.map(a => `<tr><td>${dayName(a.start)} ${hhmm(a.start)}</td><td class="muted">${esc(a.channel)}</td></tr>`).join('')}</table></details>` : ''}
-    <div class="row" style="margin-top:16px;justify-content:flex-end;flex-wrap:wrap">
+    <div class="row" style="margin-top:16px;flex-wrap:wrap">
       ${onNow ? '<button class="primary" id="pdw">▶ Titta</button>' : ''}
       ${p.recording ? (p.recording.status === 'scheduled' ? '<button class="ghost" id="pdc">Avboka</button>' : '') : '<button class="ghost" id="pdr">⏺ Spela in</button>'}
-      ${p.rule ? '<span class="muted small">Serieinspelning aktiv</span>' : '<button class="ghost" id="pds">⏺⏺ Spela in serien</button>'}
-      <button class="ghost" id="pdx">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  const close = () => { d.close(); d.remove(); };
-  $('#pdx', d).onclick = close;
+      ${p.rule ? '<span class="muted small">Serieinspelning aktiv</span>' : '<button class="ghost" id="pds">⏺⏺ Spela in serien</button>'}</div>` });
+  const d = h.el, close = () => h.close();
+  if ($('#pdw', d)) $('#pdw', d).focus();
   if ($('#pdw', d)) $('#pdw', d).onclick = act(async () => { close(); const D = await api('/live/channels'); const ch = D.channels.find(c => c.id === p.channel_id); if (ch) playLive(ch); });
-  if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { const r = await api('/dvr/program', { method: 'POST', body: { programId: id } }); toast(r.conflict ? 'Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.' : 'Inspelning bokad'); close(); } catch (e) { toast(e.message); } };
+  if ($('#pdr', d)) $('#pdr', d).onclick = async () => { try { const r = await api('/dvr/program', { method: 'POST', body: { programId: id }, bg: true }); toast(r.conflict ? 'Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.' : 'Inspelning bokad'); close(); } catch (e) { toastErr(e); } };
   if ($('#pdc', d)) $('#pdc', d).onclick = act(async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); close(); });
   // Serieinspelning: två tydliga val (tidigare confirm(), där Avbryt betydde "bara den här kanalen")
   const series = async (any) => {
-    try { await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: id, series: true, newOnly: true } }); toast('Serieinspelning skapad – bara nya avsnitt spelas in'); close(); } catch (e) { toast(e.message); }
+    try { await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: id, series: true, newOnly: true }, bg: true }); toast('Serieinspelning skapad – bara nya avsnitt spelas in'); close(); } catch (e) { toastErr(e); }
   };
-  if ($('#pds', d)) $('#pds', d).onclick = () => {
-    const b = $('#pds', d);
-    b.outerHTML = `<button class="ghost" id="pds1">Bara ${esc(p.channel_name)}</button><button class="ghost" id="pdsa">Alla kanaler</button>`;
-    $('#pds1', d).onclick = () => series(false); $('#pdsa', d).onclick = () => series(true);
-    $('#pds1', d).focus();
+  if ($('#pds', d)) $('#pds', d).onclick = async () => {
+    const any = await choiceDialog('Spela in serien', [{ label: `Bara ${p.channel_name}`, value: false }, { label: 'Alla kanaler', value: true }],
+      { text: `Nya avsnitt av ${p.title} spelas in automatiskt. Från vilka kanaler?` });
+    if (any !== null) series(any);
   };
 }
 views.dvr = async () => {
@@ -89,10 +88,13 @@ views.dvr = async () => {
     ${D.rules.length ? `<section class="section"><h2>Serieinspelningar</h2><table>${D.rules.map(r => `<tr><td><b>${esc(r.title)}</b></td><td class="muted">${esc(r.channel_name || 'Alla kanaler')}${r.new_only ? ' · bara nya' : ''}${r.keep ? ` · sparar ${r.keep}` : ''}</td><td>${r.upcoming} kommande</td><td class="r"><button class="ghost small" data-rule="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
     ${D.done.filter(r => r.status !== 'done').length ? `<section class="section"><h2>Pågående och misslyckade</h2><table>${D.done.filter(r => r.status !== 'done').map(r => `<tr><td>${dayName(r.start)} ${hhmm(r.start)}</td><td>${esc(r.title)}</td><td>${st[r.status]}</td><td class="muted small">${esc(r.error || '')}</td><td class="r"><button class="ghost small" data-rdel="${r.id}">Ta bort</button></td></tr>`).join('')}</table></section>` : ''}
     ${D.dir ? `<p class="muted small">Inspelningar sparas i <code>${esc(D.dir)}</code>.</p>` : ''}`;
-  $$('[data-rdel]').forEach(b => b.onclick = async () => { if (confirm('Ta bort?')) { try { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); } catch (e) { toast(e.message); } } });
+  $$('[data-rdel]').forEach(b => b.onclick = act(async () => {
+    const r = [...D.done, ...D.scheduled].find(x => x.id === +b.dataset.rdel);
+    if (await confirmDialog(r ? `Ta bort ”${r.title}”?` : 'Ta bort inspelningen?', { okLabel: b.textContent.trim() || 'Ta bort', danger: true })) { await api('/dvr/recordings/' + b.dataset.rdel, { method: 'DELETE' }); route(); }
+  }));
   $$('[data-rstop]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rstop}/stop`, { method: 'POST' }); toast('Stoppad – sparas'); later(route, 1500); }));
   $$('[data-rcs]').forEach(b => b.onclick = act(async () => { await api(`/dvr/recordings/${b.dataset.rcs}/commercials`, { method: 'POST' }); toast('Letar reklamavbrott i bakgrunden'); later(route, 1500); }));
-  $$('[data-rule]').forEach(b => b.onclick = act(async () => { if (confirm('Ta bort serieinspelningen och dess bokningar?')) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } }));
+  $$('[data-rule]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort serieinspelningen och dess bokningar?', { okLabel: 'Ta bort', danger: true })) { await api('/dvr/rules/' + b.dataset.rule, { method: 'DELETE' }); route(); } }));
   $$('[data-rplay]').forEach(b => b.onclick = act(async () => {
     if (b.disabled) return;
     b.disabled = true;

@@ -4,6 +4,7 @@ import { closeAllPlayers } from '../player/video.js';
 import { stopAudio } from '../audio.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
 import { boot } from '../router.js';
+import { promptDialog } from '../ui/dialog.js';
 
 views.login = async () => {
   const st = await api('/status');
@@ -51,8 +52,8 @@ views.profiles = async () => {
   main.innerHTML = `<div class="profiles"><h1>Vem tittar?</h1><div class="plist">${d.profiles.map(p => {
     const h = hue(p.name);
     return `<button class="pcard" data-pid="${p.id}" data-pin="${p.hasPin ? 1 : 0}" data-kid="${p.kid ? 1 : 0}">
-      <span class="pav" style="background:${esc(safeColor(p.color)) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
-      <span>${esc(p.name)}</span>${p.kid ? `<small class="muted">Barn · max ${p.maxAge} år</small>` : p.hasPin ? '<small class="muted">🔒 PIN</small>' : ''}</button>`;
+      <span class="pav" aria-hidden="true" style="background:${esc(safeColor(p.color)) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+      <span>${esc(p.name)}</span>${p.kid ? `<small class="muted">Barn · max ${p.maxAge} år</small>` : p.hasPin ? '<small class="muted"><span aria-hidden="true">🔒 </span>PIN</small>' : ''}</button>`;
   }).join('')}</div>
   <div class="row" style="justify-content:center;margin-top:30px"><button class="ghost" id="pdone">Fortsätt som ${esc(me.name)}</button></div></div>`;
   $('#pdone').onclick = () => { $('#top').hidden = false; location.hash = '#/'; };
@@ -63,8 +64,15 @@ views.profiles = async () => {
     const attempt = async () => {
       const r = await fetch('/api/profiles/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      if (j.needPin) { const pin = prompt(body.pin ? 'Fel PIN – försök igen:' : 'Ange PIN för profilen:'); if (!pin) return; body.pin = pin; return attempt(); }
-      if (j.needPassword) { const pw = prompt('Ange huvudkontots lösenord:'); if (!pw) return; body.password = pw; return attempt(); }
+      const name = b.querySelector('span:not(.pav)')?.textContent || 'profilen';
+      if (j.needPin) {
+        const pin = await promptDialog('PIN', { title: `PIN för ${name}`, text: body.pin ? 'Fel PIN – försök igen.' : '', type: 'pin', autocomplete: 'off', required: true, maxlength: 8, okLabel: 'Byt profil' });
+        if (!pin) return; body.pin = pin; return attempt();
+      }
+      if (j.needPassword) {
+        const pw = await promptDialog('Huvudkontots lösenord', { title: `Byt till ${name}`, type: 'password', required: true, okLabel: 'Byt profil' });
+        if (!pw) return; body.password = pw; return attempt();
+      }
       if (!r.ok) return toast(j.error || 'Kunde inte byta profil');
       stopAudio(); closeAllPlayers(); // framsteg ska inte sparas på den nya profilen (och spelaren inte fortsätta)
       await boot(); location.hash = '#/';
