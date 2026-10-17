@@ -160,3 +160,18 @@ test('poddar: datum med tidszonsförkortning', async () => {
   assert.equal(new Date(parseDate('Mon, 06 Oct 2025 10:00:00 GMT')).toISOString(), '2025-10-06T10:00:00.000Z');
   assert.ok(isNaN(parseDate('')));
 });
+
+test('webbklienten: service workern cachar alla moduler i web/js/ och alla importer finns', () => {
+  const web = path.join(import.meta.dirname, '..', 'web');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const files = walk(path.join(web, 'js')).filter(f => f.endsWith('.js')).map(f => '/' + path.relative(web, f).split(path.sep).join('/'));
+  const sw = fs.readFileSync(path.join(web, 'sw.js'), 'utf8');
+  const listed = [...sw.match(/const MODULES = \[([^\]]*)\]/)[1].matchAll(/'([^']+)'/g)].map(m => '/js/' + m[1]);
+  assert.deepEqual(listed.sort(), files.sort());
+  for (const f of ['/app.js', ...files]) {
+    const src = fs.readFileSync(path.join(web, f), 'utf8');
+    for (const m of src.matchAll(/^import (?:[^'"]* from )?'([^']+)';$/gm)) {
+      assert.ok(fs.existsSync(path.join(web, path.dirname(f), m[1])), `${f} importerar ${m[1]}`);
+    }
+  }
+});
