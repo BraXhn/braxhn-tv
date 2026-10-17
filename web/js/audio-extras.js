@@ -1,6 +1,9 @@
 // Ljudspelaren: sovtimer och låttexter
 import { $, $$, api, esc, keyClick, toast } from './core.js';
 import { M, applyVolume, seekTo, spokenPos } from './audio.js';
+import { iconButton } from './ui/buttons.js';
+import { openDialog } from './ui/dialog.js';
+import { loadingState } from './ui/states.js';
 
 // ---------- sovtimer ----------
 export const SLEEP = { until: 0, end: false, timer: null };
@@ -40,17 +43,15 @@ function sleepLabel(left) {
   const b = $('#msleep'); if (!b) return;
   b.classList.toggle('on', !!(SLEEP.until || SLEEP.end));
   b.textContent = SLEEP.until ? `☾ ${Math.max(1, Math.ceil((left ?? sleepLeft()) / 60))} min` : SLEEP.end ? '☾ slut' : '☾';
+  b.setAttribute('aria-label', SLEEP.until ? `Sovtimer, ${Math.max(1, Math.ceil((left ?? sleepLeft()) / 60))} minuter kvar` : SLEEP.end ? 'Sovtimer, pausar vid slutet' : 'Sovtimer');
 }
 export function sleepDialog() {
   const what = M.spoken ? (M.spoken.kind === 'book' ? 'kapitlet' : 'avsnittet') : 'låten';
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Sovtimer</h2><p class="muted small">Ljudet tonas ner och pausas – positionen i ljudböcker och poddar sparas.</p>
+  const h = openDialog({ title: 'Sovtimer', closeOnRoute: false, body: `<p class="muted small">Ljudet tonas ner och pausas – positionen i ljudböcker och poddar sparas.</p>
     <div class="plpick">${[15, 30, 45, 60].map(m => `<button class="ghost" data-sl="${m}">${m} minuter</button>`).join('')}
-    <button class="ghost" data-sl="end">När ${what} tar slut</button>${SLEEP.until || SLEEP.end ? '<button class="ghost" data-sl="0">Stäng av sovtimern</button>' : ''}</div>
-    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  const close = () => { d.close(); d.remove(); };
-  $('#cl', d).onclick = close;
+    <button class="ghost" data-sl="end">När ${what} tar slut</button>${SLEEP.until || SLEEP.end ? '<button class="ghost" data-sl="0">Stäng av sovtimern</button>' : ''}</div>` });
+  const d = h.el, close = () => h.close();
+  $('[data-sl]', d)?.focus();
   $$('[data-sl]', d).forEach(b => b.onclick = () => {
     const v = b.dataset.sl;
     setSleep(v === 'end' ? 'end' : +v);
@@ -64,14 +65,14 @@ const LY = { open: false, data: null, tid: null, idx: -1, seq: 0 };
 export function ensureLyricsPanel() {
   if ($('#lyrics')) return;
   const p = document.createElement('div'); p.id = 'lyrics'; p.hidden = true;
-  p.innerHTML = `<div class="lyhead"><b id="lytitle"></b><button class="ghost small" id="lyx" title="Stäng">✕</button></div><div id="lybody"></div>`;
+  p.innerHTML = `<div class="lyhead"><b id="lytitle"></b>${iconButton({ icon: '✕', label: 'Stäng låttexten', id: 'lyx' })}</div><div id="lybody"></div>`;
   document.body.append(p);
   $('#lyx').onclick = () => showLyrics(false);
 }
 export function showLyrics(on) {
   LY.open = on;
   const p = $('#lyrics'); if (p) p.hidden = !on;
-  $('#mlyr')?.classList.toggle('on', on);
+  $('#mlyr')?.classList.toggle('on', on); $('#mlyr')?.setAttribute('aria-pressed', String(on));
   if (on) { LY.tid = null; loadLyrics(); }
 }
 export const toggleLyrics = () => showLyrics(!LY.open);
@@ -81,7 +82,7 @@ export async function loadLyrics() {
   LY.tid = t.id; LY.data = null; LY.idx = -1;
   const seq = ++LY.seq;
   $('#lytitle').textContent = t.title;
-  $('#lybody').innerHTML = '<div class="spin"></div>';
+  $('#lybody').innerHTML = loadingState({ kind: 'inline', label: 'Hämtar låttext…' });
   let d;
   try { d = await api(`/music/tracks/${t.id}/lyrics`, { bg: true }); } catch { d = { lines: [] }; }
   if (seq !== LY.seq) return; // en annan låt hann starta

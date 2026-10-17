@@ -36,10 +36,6 @@ window.addEventListener('unhandledrejection', (e) => { if (e.reason?.aborted) e.
 // Trasiga bilder tas bort (ersätter inline onerror, som CSP blockerar)
 document.addEventListener('error', (e) => { if (e.target?.tagName === 'IMG' && e.target.dataset.fb) e.target.remove(); }, true);
 
-// Tom vy när en sorts bibliotek saknas
-export function noLib(what, type) {
-  main.innerHTML = `<div class="empty"><h2>Inget bibliotek för ${esc(what)}</h2><p>Lägg till ett bibliotek av typen ${esc(type)} under Administration.</p></div>`;
-}
 // Sidan man var på när inloggningen gick ut – dit kommer man tillbaka efter ny inloggning
 export function rememberPage() {
   try { if (location.hash && !/^#\/(login|profiles)/.test(location.hash)) sessionStorage.setItem('bx_after', location.hash); } catch {}
@@ -68,13 +64,43 @@ export function keyClick(el) {
   el.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); el.click(); } };
   return el;
 }
-export function toast(msg) {
+/**
+ * Kort meddelande längst ner på skärmen. Läses upp av skärmläsare (role=status, fel med role=alert).
+ * @param {string} msg
+ * @param {{ error?: boolean, action?: { label: string, onClick: () => void }, ms?: number }} [opts]
+ *   action: en knapp i meddelandet, t.ex. { label: 'Ångra', onClick }. Meddelandet står då kvar längre.
+ */
+export function toast(msg, opts = {}) {
   if (!msg) return;
-  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 3200);
+  const { error = false, action = null, ms } = opts;
+  const t = $('#toast');
+  clearTimeout(toast.t);
+  // Fel läses upp direkt (assertive), annat när skärmläsaren är klar (polite)
+  t.setAttribute('role', error ? 'alert' : 'status');
+  t.setAttribute('aria-live', error ? 'assertive' : 'polite');
+  t.classList.toggle('err', !!error);
+  const text = document.createElement('span'); text.textContent = msg;
+  t.replaceChildren(text);
+  const hide = () => { clearTimeout(toast.t); t.classList.remove('on'); t.inert = true; };
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'toast-act'; b.textContent = action.label;
+    b.onclick = () => { hide(); action.onClick(); };
+    t.append(b);
+  }
+  t.inert = false;
+  t.classList.add('on');
+  const wait = ms || (action ? 7000 : error ? 5000 : 3200);
+  const arm = () => { clearTimeout(toast.t); toast.t = setTimeout(hide, wait); };
+  // Står kvar medan muspekaren eller fokus är på meddelandet (hinner trycka på Ångra)
+  t.onmouseenter = t.onfocusin = () => clearTimeout(toast.t);
+  t.onmouseleave = t.onfocusout = arm;
+  arm();
 }
+/** Visar ett fel som toast (avbrutna anrop ignoreras) */
+export const toastErr = (e) => { if (!e?.aborted) toast(e?.message || String(e), { error: true }); };
 // Kör en asynkron händelsehanterare och visar fel som toast (avbrutna anrop ignoreras)
-export const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (!e?.aborted) toast(e?.message || String(e)); } };
+export const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toastErr(e); } };
 // Profilfärg: bara #hex, rgb()/hsl() släpps in i style-attributet
 export const safeColor = (c) => typeof c === 'string' && (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\([0-9a-z\s.,%/+-]*\)$/i.test(c)) ? c : '';
 export const fmtTime = (s) => {

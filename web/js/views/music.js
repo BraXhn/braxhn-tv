@@ -1,7 +1,11 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
-import { $, $$, act, api, esc, fmtDur, fmtTime, hue, keyClick, libs, main, noLib, routeGen, store, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtTime, hue, keyClick, libs, main, routeGen, store, toast, views } from '../core.js';
 import { M, playQueue } from '../audio.js';
 import { route } from '../router.js';
+import { emptyState, noLib } from '../ui/states.js';
+import { iconButton } from '../ui/buttons.js';
+import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
+import { tabsHtml } from '../ui/tabs.js';
 
 export const cover = (albumId, has, cls = '') => {
   const h = hue(String(albumId));
@@ -13,28 +17,30 @@ export function trackRows(tracks, opts = {}) {
     <td class="muted num">${opts.showCover ? cover(t.albumId, t.cover, 'tiny') : (t.track || i + 1)}</td>
     <td><b>${esc(t.title)}</b>${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
     <td class="r muted">${fmtTime(t.duration)}</td>
-    <td class="r"><button class="ghost small fav" data-fav="${t.id}" title="Favorit">${t.favorite ? '♥' : '♡'}</button>
-    <button class="ghost small" data-addpl="${t.id}" title="Lägg till i spellista">+</button></td></tr>`).join('')}</table>`;
+    <td class="r">${iconButton({ icon: t.favorite ? '♥' : '♡', label: `Favorit: ${t.title}`, cls: 'ghost small fav', data: { fav: t.id }, pressed: !!t.favorite })}
+    ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}</td></tr>`).join('')}</table>`;
 }
 function bindTracks(tracks, root = main) {
   $$('[data-ti]', root).forEach(r => keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
   $$('[data-fav]', root).forEach(b => b.onclick = act(async () => {
-    const on = b.textContent !== '♥'; b.textContent = on ? '♥' : '♡';
+    const set = (v) => { b.setAttribute('aria-pressed', String(v)); b.firstElementChild.textContent = v ? '♥' : '♡'; };
+    const on = b.getAttribute('aria-pressed') !== 'true'; set(on);
     try { await api(`/music/tracks/${b.dataset.fav}/favorite`, { method: 'POST', body: { on }, bg: true }); }
-    catch (e) { b.textContent = on ? '♡' : '♥'; throw e; }
+    catch (e) { set(!on); throw e; }
   }));
   $$('[data-addpl]', root).forEach(b => b.onclick = act(() => addToPlaylist([+b.dataset.addpl])));
 }
 async function addToPlaylist(ids) {
   const pls = await api('/music/playlists', { bg: true });
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Lägg till i spellista</h2><div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
-    <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…"><button class="primary" id="mkpl">Skapa</button></div>
-    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="cl">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  $('#cl', d).onclick = () => { d.close(); d.remove(); };
-  $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast('Tillagd'); d.close(); d.remove(); }));
-  $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast('Spellista skapad'); d.close(); d.remove(); });
+  const h = openDialog({ title: 'Lägg till i spellista', closeOnRoute: false,
+    body: `<div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…" aria-label="Namn på ny spellista"><button class="primary" id="mkpl">Skapa</button></div>` });
+  const d = h.el;
+  // Fokus på första spellistan (inte på fältet för en ny)
+  $('[data-pl]', d)?.focus();
+  $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast('Tillagd'); h.close(); }));
+  $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return $('#newpl', d).focus(); await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast('Spellista skapad'); h.close(); });
+  $('#newpl', d).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#mkpl', d).click(); } };
 }
 
 views.music = async (lid, tab) => {
@@ -77,8 +83,8 @@ views.music = async (lid, tab) => {
 };
 function musicHeader(lid, tabs, tab) {
   const lib = libs.find(l => l.id === +lid);
-  return `<div class="toolbar"><h1>${esc(lib?.name || 'Musik')}</h1><input id="msearch" placeholder="Sök artist, album, låt (Enter)" style="max-width:280px"></div>
-    <div class="tabs">${tabs.map(([k, n]) => `<a class="tabbtn ${k === tab ? 'on' : ''}" href="#/music/${lid}/${k}">${n}</a>`).join('')}</div>`;
+  return `<div class="toolbar"><h1>${esc(lib?.name || 'Musik')}</h1><input id="msearch" aria-label="Sök i musiken" placeholder="Sök artist, album, låt (Enter)" style="max-width:280px"></div>
+    ${tabsHtml({ label: 'Musik', current: tab, items: tabs.map(([k, n]) => ({ key: k, label: n, href: `#/music/${lid}/${k}` })) })}`;
 }
 let msearchSeq = 0;
 document.addEventListener('keydown', act(async (e) => {
@@ -126,13 +132,13 @@ views.playlist = async (id) => {
     <div id="pltracks">${trackRows(p.trackList, { showCover: true })}</div>`;
   bindTracks(p.trackList);
   // Ta bort enskilda låtar
-  $$('#pltracks tr').forEach((r, i) => { const b = document.createElement('button'); b.className = 'ghost small'; b.textContent = '✕'; b.title = 'Ta bort ur listan';
+  $$('#pltracks tr').forEach((r, i) => { const t = document.createElement('template'); t.innerHTML = iconButton({ icon: '✕', label: `Ta bort ${p.trackList[i]?.title || 'låten'} ur listan` }); const b = t.content.firstElementChild;
     b.onclick = act(async () => { const ids = p.trackList.map(t => t.id); ids.splice(i, 1); await api('/music/playlists/' + id, { method: 'PUT', body: { trackIds: ids } }); route(); });
     r.lastElementChild.append(b); });
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
-  $('#rn').onclick = act(async () => { const n = prompt('Nytt namn:', p.name); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } });
-  $('#dl').onclick = act(async () => { if (confirm('Ta bort spellistan?')) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } });
+  $('#rn').onclick = act(async () => { const n = (await promptDialog('Nytt namn', { title: 'Byt namn på spellistan', value: p.name, required: true, maxlength: 100, okLabel: 'Spara' }))?.trim(); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } });
+  $('#dl').onclick = act(async () => { if (await confirmDialog(`Ta bort spellistan ${p.name}?`, { okLabel: 'Ta bort', danger: true })) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } });
 };
 const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -148,7 +154,7 @@ views.smart = async (lid, sid) => {
   main.innerHTML = `<div class="mhero"><div class="cover big plcover">✦</div><div><div class="muted small">SMART LISTA</div><h1>${esc(p.name)}</h1>
     <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span><span>Uppdateras automatiskt</span></div>
     <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="ap">+ Spellista</button></div></div></div>
-    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : '<p class="muted">Listan är tom just nu.</p>'}`;
+    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: 'Listan är tom just nu', text: 'Den fylls på automatiskt när du lyssnar.' })}`;
   bindTracks(p.trackList);
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);

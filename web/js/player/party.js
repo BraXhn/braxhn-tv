@@ -1,6 +1,7 @@
 // Titta tillsammans (watch party)
 import { $, api, esc, main, me, status, toast, views } from '../core.js';
 import { P, play } from './video.js';
+import { errorState } from '../ui/states.js';
 
 export function joinParty() {
   if (!P) return;
@@ -35,5 +36,5 @@ views.party = async (rid) => {
     const pos = r.state.position + (r.state.playing ? (Date.now() - r.state.at) / 1000 : 0);
     location.hash = '#/item/' + r.itemId;
     setTimeout(() => play(r.itemId, pos, { party: rid }), 50);
-  } catch (e) { if (e.aborted) throw e; main.innerHTML = `<div class="empty"><h2>Rummet finns inte längre</h2><p>${esc(e.message)}</p></div>`; }
+  } catch (e) { if (e.aborted) throw e; main.innerHTML = errorState(e.offline ? e : { message: `Rummet finns inte längre. ${e.message}` }); }
 };

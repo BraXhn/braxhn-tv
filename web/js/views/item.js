@@ -1,11 +1,14 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, metadataverktyg, undertextsökning och följ-knapp
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, leaveFns, main, me, onLeave, resLabel, store, sxe, toast, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { LP, RP } from '../player/live.js';
 import { stopVideo } from '../player/overlay.js';
 import { P, startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { art, card, castShelf, shelf } from '../ui/cards.js';
+import { openDialog } from '../ui/dialog.js';
+import { emptyState, errorState, loadingState } from '../ui/states.js';
+import { bindTabs, tabsHtml } from '../ui/tabs.js';
 
 function heroHtml(it, extra = '') {
   const meta = [it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
@@ -86,8 +89,8 @@ function showView(it) {
     <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
     <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
-  main.innerHTML = heroHtml(it, actions) + `<div class="tabs" id="tabs">${seasons.map(s =>
-    `<button data-s="${s}" class="${s === cur ? 'on' : ''}">${s === 0 ? 'Specialavsnitt' : 'Säsong ' + s}</button>`).join('')}</div><div id="eps"></div>`;
+  main.innerHTML = heroHtml(it, actions) + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
+    items: seasons.map(s => ({ key: s, label: s === 0 ? 'Specialavsnitt' : 'Säsong ' + s })) }) + '<div id="eps" role="tabpanel"></div>';
   const renderEps = () => {
     const eps = it.children.filter(e => e.season === cur);
     const allSeen = eps.every(e => e.watched);
@@ -107,10 +110,7 @@ function showView(it) {
   main.insertAdjacentHTML('beforeend', castShelf(it));
   bindFollow(it);
   main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
-  $$('#tabs button').forEach(b => b.onclick = () => {
-    cur = +b.dataset.s; store.set('season.' + it.id, cur);
-    $$('#tabs button').forEach(x => x.classList.toggle('on', x === b)); renderEps();
-  });
+  bindTabs($('#tabs'), (key, tab) => { cur = +key; store.set('season.' + it.id, cur); $('#eps').setAttribute('aria-label', tab.textContent); renderEps(); });
   if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
@@ -138,117 +138,96 @@ function bindTrailers(it) {
   $$('[data-trailer]').forEach(b => b.onclick = () => playTrailer(+b.dataset.trailer, it.title));
 }
 function playTrailer(id, title) {
-  const d = document.createElement('dialog');
-  d.className = 'wide trailer';
-  d.innerHTML = `<h2>${esc(title)} – trailer</h2><video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>
-    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="ghost" id="tclose">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  const v = $('video', d);
-  v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)');
-  const leave = onLeave(() => { if (d.open) d.close(); });
-  d.onclose = () => { leaveFns.delete(leave); v.onerror = null; stopVideo(v); d.remove(); };
-  $('#tclose', d).onclick = () => d.close();
+  let v;
+  const d = openDialog({ title: `${title} – trailer`, size: 'wide', className: 'trailer',
+    body: `<video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>`,
+    onClose: () => { v.onerror = null; stopVideo(v); } });
+  v = d.$('video');
+  v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)', { error: true });
 }
 
-async function refreshMeta(it) {
+export async function refreshMeta(it) {
   toast('Uppdaterar…');
-  try { await api(`/items/${it.id}/refresh`, { method: 'POST', body: {} }); toast('Klart'); route(); }
-  catch (e) { toast(e.message); }
+  try { await api(`/items/${it.id}/refresh`, { method: 'POST', body: {}, bg: true }); toast('Klart'); route(); }
+  catch (e) { toastErr(e); }
 }
-function matchItem(it) {
-  const d = document.createElement('dialog');
-  d.className = 'wide';
-  d.innerHTML = `<h2>Välj rätt ${it.kind === 'show' ? 'serie' : 'film'}</h2>
-    <form id="mf" class="row" style="align-items:flex-end"><div style="flex:1;min-width:180px"><label>Sök</label><input id="mq" value="${esc(it.title)}"></div>
-    <div><label>År</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">Sök</button></form>
-    <div id="mres" class="matchgrid"><div class="spin"></div></div>
-    <div class="row" style="margin-top:14px;justify-content:space-between"><span class="muted small" id="mlock"></span><span><button class="ghost" id="munlock" hidden>Lås upp (automatisk matchning)</button> <button class="ghost" id="mclose">Stäng</button></span></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  const close = () => { d.close(); d.remove(); };
-  $('#mclose', d).onclick = close;
+export function matchItem(it) {
+  const h = openDialog({ title: `Välj rätt ${it.kind === 'show' ? 'serie' : 'film'}`, size: 'wide',
+    body: `<form id="mf" class="row" style="align-items:flex-end"><div style="flex:1;min-width:180px"><label for="mq">Sök</label><input id="mq" value="${esc(it.title)}"></div>
+    <div><label for="my">År</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">Sök</button></form>
+    <div id="mres" class="matchgrid" aria-live="polite">${loadingState({ kind: 'inline', label: 'Söker…' })}</div>
+    <p class="muted small" id="mlock"></p>`,
+    actions: [{ label: 'Lås upp (automatisk matchning)', id: 'munlock', onClick: async () => {
+      await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true }, bg: true }); toast('Upplåst – matchas automatiskt vid nästa skanning');
+    } }, { label: 'Stäng' }] });
+  const d = h.el, close = () => h.close();
+  $('#munlock', d).hidden = true;
   const search = async () => {
-    $('#mres', d).innerHTML = '<div class="spin"></div>';
+    $('#mres', d).innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
     try {
-      const r = await api(`/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`);
+      const r = await api(`/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`, { bg: true });
       $('#mlock', d).textContent = r.locked ? 'Matchningen är låst och ändras inte vid omskanning.' : '';
       $('#munlock', d).hidden = !r.locked;
       $('#mres', d).innerHTML = r.results.map(x => `<button class="mcard${x.id === r.current ? ' on' : ''}" data-tid="${x.id}">
         ${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
         <div><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}${x.original && x.original !== x.title ? `<div class="muted small">${esc(x.original)}</div>` : ''}
-        <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || '<p class="muted">Inga träffar – prova en annan stavning eller originaltiteln.</p>';
+        <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || emptyState({ compact: true, title: 'Inga träffar', text: 'Prova en annan stavning eller originaltiteln.' });
       $$('[data-tid]', d).forEach(b => b.onclick = async () => {
         b.disabled = true;
-        try { await api(`/items/${it.id}/match`, { method: 'POST', body: { tmdbId: +b.dataset.tid } }); toast('Matchat'); close(); route(); }
-        catch (e) { toast(e.message); b.disabled = false; }
+        try { await api(`/items/${it.id}/match`, { method: 'POST', body: { tmdbId: +b.dataset.tid }, bg: true }); toast('Matchat'); close(); route(); }
+        catch (e) { toastErr(e); b.disabled = false; }
       });
-    } catch (e) { $('#mres', d).innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+    } catch (e) { if (d.isConnected) $('#mres', d).innerHTML = errorState(e, { compact: true }); }
   };
   $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
-  $('#munlock', d).onclick = act(async () => { await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true } }); toast('Upplåst – matchas automatiskt vid nästa skanning'); close(); });
   search();
 }
-function editItem(it) {
-  const d = document.createElement('dialog');
-  d.innerHTML = `<form method="dialog"><h2>Redigera</h2>
-    <label>Titel</label><input id="et" value="${esc(it.title)}">
-    <label>År</label><input id="ey" type="number" value="${it.year || ''}">
-    <label>Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
-    ${it.kind !== 'episode' ? `<label>Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}
-    <div class="row" style="margin-top:18px;justify-content:flex-end"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></div></form>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
-  d.onclose = async () => {
-    if (d.returnValue === 'ok') {
-      try {
-        await api(`/items/${it.id}`, { method: 'PUT', body: { title: $('#et', d).value, year: $('#ey', d).value, overview: $('#eo', d).value, ...($('#eage', d) ? { age: $('#eage', d).value } : {}) } });
-        toast('Sparat'); route();
-      } catch (e) { toast(e.message); }
-    }
-    d.remove();
-  };
+export function editItem(it) {
+  openDialog({ title: 'Redigera', form: true,
+    body: `<label for="et">Titel</label><input id="et" value="${esc(it.title)}">
+    <label for="ey">År</label><input id="ey" type="number" value="${it.year || ''}">
+    <label for="eo">Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
+    ${it.kind !== 'episode' ? `<label for="eage">Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}`,
+    actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: async ({ $: q }) => {
+      await api(`/items/${it.id}`, { method: 'PUT', body: { title: q('#et').value, year: q('#ey').value, overview: q('#eo').value, ...(q('#eage') ? { age: q('#eage').value } : {}) }, bg: true });
+      toast('Sparat'); route();
+    } }] });
 }
 
 // ---------- undertexter online ----------
 async function subSearch(it) {
-  const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Sök undertexter</h2><p class="muted" id="ssm">Söker på OpenSubtitles…</p><div id="ssr" style="max-height:50vh;overflow:auto"></div>
-    <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="ghost" id="ssc">Stäng</button></div>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   let got = false;
   // Stängs dialogen: ladda bara om sidan om något faktiskt hämtades
-  d.addEventListener('close', () => { d.remove(); if (got && !P && !LP && !RP) route(); });
-  $('#ssc', d).onclick = () => d.close();
+  const h = openDialog({ title: 'Sök undertexter', body: `<p class="muted" id="ssm" aria-live="polite">Söker på OpenSubtitles…</p><div id="ssr" class="scrollbox"></div>`,
+    onClose: (v) => { if (got && v !== 'route' && !P && !LP && !RP) route(); } });
+  const d = h.el;
   try {
-    const r = await api(`/items/${it.id}/subsearch`);
+    const r = await api(`/items/${it.id}/subsearch`, { bg: true });
+    if (!d.isConnected) return;
     $('#ssm', d).textContent = r.length ? `${r.length} träffar – ✓ = exakt matchning mot din fil` : 'Inga träffar.';
     $('#ssr', d).innerHTML = `<table>${r.slice(0, 40).map((x, i) => `<tr><td>${x.hashMatch ? '✓ ' : ''}<b>${esc(x.lang)}</b></td><td style="word-break:break-all">${esc(x.name)}${x.hi ? ' <span class="muted">(HI)</span>' : ''}</td>
       <td class="muted">${esc(x.downloads)}</td><td class="r"><button class="primary small" data-i="${i}">Hämta</button></td></tr>`).join('')}</table>`;
     $$('[data-i]', d).forEach(b => b.onclick = async () => {
       const x = r[+b.dataset.i]; b.disabled = true; b.textContent = '…';
-      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang } }); b.textContent = '✓'; got = true; toast(`Undertext sparad${res.remaining != null ? ` – ${res.remaining} nedladdningar kvar idag` : ''}`); }
-      catch (e) { b.textContent = 'Fel'; toast(e.message); }
+      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang }, bg: true }); b.textContent = '✓ Hämtad'; got = true; toast(`Undertext sparad${res.remaining != null ? ` – ${res.remaining} nedladdningar kvar idag` : ''}`); }
+      catch (e) { b.textContent = 'Fel'; toastErr(e); }
     });
   } catch (e) { if ($('#ssm', d)) $('#ssm', d).textContent = e.message; }
 }
 
 function editMarkers(it) {
-  const d = document.createElement('dialog');
   const t = (x) => x == null ? '' : fmtTime(x);
-  d.innerHTML = `<form method="dialog"><h2>Intro och eftertexter</h2><p class="muted">Ange tider som mm:ss eller h:mm:ss. Lämna tomt för att ta bort.</p>
-    <div class="row"><div style="flex:1"><label>Intro start</label><input id="is" value="${t(it.intro?.start)}"></div><div style="flex:1"><label>Intro slut</label><input id="ie" value="${t(it.intro?.end)}"></div></div>
-    <label>Eftertexter börjar</label><input id="cs" value="${t(it.credits)}">
-    <div class="row" style="margin-top:18px;justify-content:space-between"><button type="button" class="ghost" id="redo">Analysera säsongen igen</button>
-    <span class="row"><button value="cancel" class="ghost">Avbryt</button><button value="ok" class="primary">Spara</button></span></div></form>`;
-  document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
   const sec = (v) => { v = v.trim(); if (!v) return null; return v.split(':').reduce((a, x) => a * 60 + (+x || 0), 0); };
-  $('#redo', d).onclick = act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST' }); toast('Analyserar i bakgrunden'); d.close(); });
-  d.onclose = act(async () => {
-    const vals = { introStart: sec($('#is', d).value), introEnd: sec($('#ie', d).value), creditsStart: sec($('#cs', d).value) };
-    d.remove();
-    if (d.returnValue === 'ok') {
-      await api(`/items/${it.id}/markers`, { method: 'PUT', body: vals });
-      toast('Sparat'); route();
-    }
-  });
+  openDialog({ title: 'Intro och eftertexter', form: true,
+    body: `<p class="muted">Ange tider som mm:ss eller h:mm:ss. Lämna tomt för att ta bort.</p>
+    <div class="row"><div style="flex:1"><label for="is">Intro start</label><input id="is" inputmode="numeric" value="${t(it.intro?.start)}"></div><div style="flex:1"><label for="ie">Intro slut</label><input id="ie" inputmode="numeric" value="${t(it.intro?.end)}"></div></div>
+    <label for="cs">Eftertexter börjar</label><input id="cs" inputmode="numeric" value="${t(it.credits)}">`,
+    actions: [{ label: 'Analysera säsongen igen', onClick: async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast('Analyserar i bakgrunden'); } },
+      { label: 'Avbryt' },
+      { label: 'Spara', kind: 'primary', submit: true, onClick: async ({ $: q }) => {
+        await api(`/items/${it.id}/markers`, { method: 'PUT', body: { introStart: sec(q('#is').value), introEnd: sec(q('#ie').value), creditsStart: sec(q('#cs').value) }, bg: true });
+        toast('Sparat'); route();
+      } }] });
 }
 function bindFollow(it) {
   const b = $('#follow'), sel = $('#fsync'); if (!b) return;

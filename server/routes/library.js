@@ -60,7 +60,9 @@ route('GET', '/api/home', user, (c) => {
   const cont = listItems(uid, `i.kind IN('movie','episode') AND p.position > 0`, [], 'p.updated DESC', 20);
   // "Nästa avsnitt" för serier man håller på med
   const shows = all(`SELECT e.parent_id AS sid, MAX(p.updated) AS t FROM progress p JOIN items e ON e.id=p.item_id
-    WHERE p.user_id=? AND e.kind='episode' GROUP BY e.parent_id ORDER BY t DESC LIMIT 20`, uid);
+    WHERE p.user_id=? AND e.kind='episode' GROUP BY e.parent_id
+    HAVING MAX(p.updated) > COALESCE((SELECT h.at FROM continue_hidden h WHERE h.user_id=p.user_id AND h.item_id=e.parent_id), -1)
+    ORDER BY t DESC LIMIT 20`, uid);
   const have = new Set(cont.map(x => x.show).filter(Boolean));
   for (const s of shows) {
     if (have.has(s.sid)) continue;
@@ -171,8 +173,8 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
   const { watched } = await readJson(c.req);
-  const row = get('SELECT id,kind,version_of FROM items WHERE id=?', c.p.id);
-  if (!row) return fail(c.res, 404, 'Finns inte');
+  const row = get('SELECT id,kind,parent_id,version_of,age FROM items WHERE id=?', c.p.id);
+  if (!row || !allowedFor(c.user.id, row)) return fail(c.res, 404, 'Finns inte');
   const it = row.version_of ? { id: row.version_of, kind: row.kind } : row; // sedd gäller filmen, inte filen
   const ids = it.kind === 'show' ? all('SELECT id FROM items WHERE parent_id=?', it.id).map(r => r.id) : [it.id];
   const season = c.q.get('season');
@@ -243,6 +245,42 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
   else { run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(?,?,?)', c.user.id, id, now()); follows.autoFollow(c.user.id, id); }
   invalidateProfile(c.user.id);
   send(c.res, 200, { ok: true });
+});
+
+// Snabbåtgärder från kortens meny: det kortet inte vet (Min lista, följer, nästa avsnitt) utan att hämta hela titelsidan
+route('GET', '/api/items/:id/state', user, (c) => {
+  const uid = c.user.id, row = get('SELECT id, kind, parent_id, version_of, age FROM items WHERE id=?', c.p.id);
+  if (!row || !allowedFor(uid, row)) return fail(c.res, 404, 'Finns inte');
+  const id = row.kind === 'episode' ? row.parent_id : ver.mainIdOf(row);
+  const out = { inWatchlist: !!get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, id) };
+  if (row.kind !== 'movie') Object.assign(out, follows.followInfo(uid, id));
+  if (row.kind === 'show') {
+    const eps = listItems(uid, 'i.parent_id=?', [row.id], 'i.season, i.episode', 5000, 0, { slim: true });
+    const n = eps.find(e => !e.watched && e.position > 0) || eps.find(e => !e.watched) || null;
+    out.next = n && { id: n.id, position: n.position, season: n.season, episode: n.episode };
+  }
+  send(c.res, 200, out);
+});
+// "Ta bort från Fortsätt titta": positionen nollställs utan att titeln markeras som sedd, och serien
+// döljs tills man tittar igen. { hide: false, position } ångrar (återställer positionen om den fortfarande är 0).
+route('POST', '/api/items/:id/continue', user, async (c) => {
+  const uid = c.user.id, b = await readJson(c.req);
+  let it = get("SELECT id, kind, parent_id, version_of, age FROM items WHERE id=? AND kind IN ('movie','episode')", c.p.id);
+  if (it?.version_of) it = get('SELECT id, kind, parent_id, version_of, age FROM items WHERE id=?', it.version_of) || it;
+  if (!it || !allowedFor(uid, it)) return fail(c.res, 404, 'Finns inte');
+  const prev = get('SELECT position FROM progress WHERE user_id=? AND item_id=?', uid, it.id);
+  if (b.hide === false) {
+    const pos = Math.max(0, +b.position || 0);
+    if (pos > 0 && prev && !prev.position) run('UPDATE progress SET position=? WHERE user_id=? AND item_id=?', pos, uid, it.id);
+    if (it.parent_id) run('DELETE FROM continue_hidden WHERE user_id=? AND item_id=?', uid, it.parent_id);
+    return send(c.res, 200, { ok: true });
+  }
+  tx(() => {
+    if (prev?.position) run('UPDATE progress SET position=0 WHERE user_id=? AND item_id=?', uid, it.id);
+    if (it.parent_id) run(`INSERT INTO continue_hidden(user_id,item_id,at) VALUES(?,?,?)
+      ON CONFLICT(user_id,item_id) DO UPDATE SET at=excluded.at`, uid, it.parent_id, now());
+  });
+  send(c.res, 200, { ok: true, position: prev?.position || 0 });
 });
 
 // ---------- Samlingar ----------
