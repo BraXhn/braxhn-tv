@@ -10,6 +10,7 @@ import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
 import { findBest, stripTrailingQuality, similarity, GOOD } from './match.js';
+import { dropVariants } from './imgsize.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -430,7 +431,7 @@ function showIdOfFolder(lib, folder) {
 export const hooks = {};
 
 export function removeImages(id) {
-  for (const t of ['poster', 'backdrop', 'thumb']) fs.rm(path.join(IMAGES, `${id}-${t}.jpg`), { force: true }, () => {});
+  for (const t of ['poster', 'backdrop', 'thumb']) { const f = path.join(IMAGES, `${id}-${t}.jpg`); fs.rm(f, { force: true }, () => {}); dropVariants(f); }
 }
 
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------

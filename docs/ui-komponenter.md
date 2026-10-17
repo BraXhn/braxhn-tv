@@ -163,6 +163,11 @@ undertitel och läge, t.ex. "Alfa Film, 2020, 40 % sett") och en `⋮`-knapp (`a
 `aria-haspopup="menu"`). Knappen syns vid hovring och fokus, alltid på pekskärm. Bilder laddas lat, har
 `width`/`height` (ingen layoutförskjutning) och tas bort om de inte går att ladda så att färgplattan syns.
 
+**Bildstorlek:** be aldrig om en serverbild i full storlek där den visas liten. `imgSrc(url, cssBredd)`,
+`imgUrl(url, cssBredd)`, `heroUrl(url)` och `coverImg(url, klass)` i `core.js` lägger till `?w=` med en av
+serverns fasta bredder (160–1280, `server/imgsize.js`) efter bredden × pixeltätheten (högst 2×). Kortens bredd
+följer `--cw` via `cardW()`. Servern förstorar aldrig och skickar originalet om `w` saknas eller är ogiltigt.
+
 Ovanpå bilden finns ▶ (`.cplay`, spelar direkt), ✎ (`.cedit`, bara administratörer) och ⋮ nere till höger; knapparna kopplas delegerat i `ui/cardmenu.js`. `seasonCard(g)` ritar ett säsongskort från `/api/home` (`rows[].seasons`) med en egen meny. Hyllor (`.section > h2 + .shelf`) får ‹ › automatiskt av `ui/shelves.js`, som också flyttar fokus mellan kort med piltangenterna; kortbredden styrs av `--card-w` (reglaget `#cardsize`).
 
 Ange vilken rad korten ligger i med `data-row` (`continue`, `watchlist`, `foryou`) – `shelf(title, items, land, more, row)`

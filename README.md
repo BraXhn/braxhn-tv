@@ -20,6 +20,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 |---|---|
 | Bibliotek | Filmer, serier, **musik** och **ljudböcker**, mappväljare. Nya filer upptäcks direkt med **filbevakning** (med periodisk skanning som reserv). Igenkänning via filnamn (`S01E02`, `Film (2020)`). |
 | Metadata | Affischer, beskrivningar, betyg och avsnittsnamn via TMDB (gratis nyckel, valfritt). Utan nyckel skapas miniatyrbilder ur videon. **Fel titel?** – sök och välj rätt i TMDB, matchningen låses. **Anime** med absolut numrering (`Serie - 1071`) mappas till säsonger. **Kapitel** läses från filerna. |
+| **Bilder i rätt storlek** | Affischer, bakgrunder, miniatyrer, omslag och personbilder skalas ned på servern till den storlek som visas (`?w=`, några fasta bredder från 160 till 1280 px) och sparas i `cache/img`. På telefon över mobilnätet hämtas t.ex. en affisch på 320 px i stället för hela TMDB-bilden. Bilder förstoras aldrig, och en ny bild ersätter de gamla storlekarna. |
 | Användare | Flera konton med egen tittarhistorik, *Fortsätt titta*, *Nästa avsnitt* och sedd/osedd. |
 | **Profiler** | *Vem tittar?* – profiler i hushållet med egen historik och Min lista, valfri **PIN** och **åldersgräns** för barn (svensk åldersgräns från TMDB, med USA/Tyskland som reserv). |
 | **Upptäck** | **Min lista**, **samlingar** (t.ex. alla Bond-filmer), **rekommendationer** utifrån det du sett och *Liknande titlar*. |
@@ -355,6 +356,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Bildundertexter (PGS) | En syntetisk PGS-ström i MKV tolkades till bilder med rätt tider och position. **Otestat:** riktiga Blu-ray-rippar och iPhone. |
 | NVIDIA/Intel-avkodning | **Otestat** (ingen GPU i testmiljön); automatisk återgång till processorn testades med `HWACCEL=nvenc` utan drivrutin. |
 | Webbgränssnittet | I Chromium vid 375 och 1920 px: Plex-layouten (sidomeny, hyllor med ‹ ›, kortstorlek, piltangenter mellan korten, säsongskort), dialoger, kortmeny och aktivitetspanel med bara tangentbord (fokus tillbaka, Escape, Tab stannar i dialogen), PIN-dialog för profil, bekräftelse innan borttagning, ark nerifrån på telefon, långtryck, skelett vid laddning och "Ingen kontakt med servern" när servern stoppades. Alla knappar har ett namn och ingen sida skrollar i sidled. **Otestat:** riktiga TV-fjärrkontroller och skärmläsare (VoiceOver/TalkBack). |
+| Bilder i rätt storlek | Testbilder 500×750 och 1280×720 (ffmpeg testsrc): affischen 39 kB → 14 kB (240 px) / 18 kB (320 px), bakgrunden 46 kB → 8 kB / 9 kB. Första skalningen ~85 ms, sedan ~3 ms ur cachen. I Chromium hämtade startsidan 320 px-affischer vid 375 px (3×) och 160 px vid 1920 px (1×). Inloggning och barnprofilernas åldersgräns gäller som förut. **Otestat:** riktiga TMDB-bilder och poddomslag i stora format. |
 | Drift | Diskövervakning, import mot simulerade Plex- och Jellyfin-servrar, `/metrics` och DLNA:s SOAP/DIDL samt spärr mot andra nät. |
 
 **Inte testat här:**
