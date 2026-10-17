@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES } from './db.js';
 import { listFiles, deletionBlocked, underFailed } from './util.js';
 import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages } from './versions.js';
+import { findBest, stripTrailingQuality } from './match.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -56,13 +57,17 @@ export async function discMainOnly(files) {
 export function parseMovie(file) {
   const tryName = (name) => {
     const m = name.match(/^(.*)[\s._(\[-]+((?:19|20)\d\d)(?=[\s._)\]-]|$)/); // sista årtalet (t.ex. Blade Runner 2049 (2017))
-    return m && clean(m[1]) ? { title: clean(m[1]), year: +m[2] } : null;
+    // Upplösning/kodek före årtalet ("Film.1080p.2010") hör inte till titeln
+    const t = m && (clean(stripTrailingQuality(m[1])) || clean(m[1]));
+    return t ? { title: t, year: +m[2] } : null;
   };
   const root = discRoot(file);
   if (root) { const n = discName(root); return tryName(n) || { title: clean(n.replace(JUNK, '')) || n, year: null }; }
   const base = path.basename(file, path.extname(file));
   const folder = path.basename(path.dirname(file));
-  return tryName(base) || tryName(folder) || { title: clean(base.replace(JUNK, '')) || base, year: null };
+  // Utan årtal: ta bort kvalitetsord, och utgåvetillägg ("Extended", "Proper") bara om något av titeln blir kvar
+  const t1 = clean(stripTrailingQuality(base));
+  return tryName(base) || tryName(folder) || { title: clean(t1.replace(JUNK, '')) || t1 || base, year: null };
 }
 
 export function parseEpisode(rel) {
@@ -273,6 +278,8 @@ async function scanLibrary(lib) {
   // Efter grupperingen: en trailer i en mapp med flera versioner hör till filmen
   await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
   await metadata(lib);
+  // Nyss matchade filer kan vara samma TMDB-film som en annan fil (t.ex. svensk och engelsk titel) – slå ihop dem
+  groupVersions(lib, parseMovie);
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
   if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
@@ -369,10 +376,7 @@ export async function tmdbSearch(kind, query, year) {
 export async function refreshItem(item, tmdbId = null) {
   if (item.kind === 'movie') {
     let id = tmdbId;
-    if (!id) {
-      const s = await tmdb('/search/movie', { query: item.title, ...(item.year ? { year: item.year } : {}) });
-      id = s.results?.[0]?.id;
-    }
+    if (!id) id = (await findBest((q, y) => tmdb('/search/movie', { query: q, ...(y ? { year: y } : {}) }).then(s => s.results || []), item.title, item.year))?.id;
     if (!id) return false;
     const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos', ...people.videoLangs() });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
@@ -390,10 +394,7 @@ export async function refreshItem(item, tmdbId = null) {
   }
   if (item.kind === 'show') {
     let id = tmdbId;
-    if (!id) {
-      const s = await tmdb('/search/tv', { query: item.title, ...(item.year ? { first_air_date_year: item.year } : {}) });
-      id = s.results?.[0]?.id;
-    }
+    if (!id) id = (await findBest((q, y) => tmdb('/search/tv', { query: q, ...(y ? { first_air_date_year: y } : {}) }).then(s => s.results || []), item.title, item.year, true))?.id;
     if (!id) return false;
     const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos', ...people.videoLangs() });
     const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
@@ -507,6 +508,11 @@ async function autoSubtitles(lib, st = status) {
 
 async function metadata(lib) {
   if (!tmdbKey()) return;
+  // Bättre matchning (match.js): titlar som tidigare inte hittades får ett nytt försök en gång
+  if (getSetting('match_v2', '0') !== '1') {
+    run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
+    setSetting('match_v2', '1');
+  }
   // Versioner av en film delar huvudradens metadata och hämtas inte var för sig
   const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','show') AND meta_done=0 AND version_of IS NULL`, lib.id);
   status.phase = 'Hämtar metadata'; status.done = 0; status.total = todo.length;

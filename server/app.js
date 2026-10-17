@@ -458,6 +458,8 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
   // Valfri sidindelning (?limit=&offset=); utan den skickas hela biblioteket (upp till 5000) som tidigare
   const limit = Math.min(10000, Math.max(1, parseInt(c.q.get('limit')) || 5000)), offset = Math.max(0, parseInt(c.q.get('offset')) || 0);
   const out = { library: lib, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
+  // ?collections=1: filmer i samma samling (minst två synliga i listan) visas som ett samlingskort på den första filmens plats
+  if (lib.type === 'movie' && c.q.get('collections') === '1') out.items = collapseCollections(out.items);
   if (c.q.has('limit') || c.q.has('offset')) {
     const age = ageFilter(c.user.id);
     out.total = get(`SELECT COUNT(*) AS n FROM (SELECT ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where.join(' AND ')})${MAIN_ONLY}${age.sql})`, c.user.id, ...params, ...age.params).n;
@@ -749,6 +751,27 @@ route('POST', '/api/items/:id/watchlist', user, async (c) => {
 });
 
 // ---------- Samlingar ----------
+function collapseCollections(items) {
+  const n = new Map(), years = new Map();
+  for (const it of items) if (it.collection) {
+    n.set(it.collection, (n.get(it.collection) || 0) + 1);
+    const y = years.get(it.collection) || [Infinity, -Infinity];
+    if (it.year) years.set(it.collection, [Math.min(y[0], it.year), Math.max(y[1], it.year)]); else years.set(it.collection, y);
+  }
+  const ids = [...n].filter(([, k]) => k >= 2).map(([id]) => id);
+  if (!ids.length) return items;
+  const cols = new Map(all(`SELECT id, name, poster FROM collections WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids).map(r => [r.id, r]));
+  const out = [], done = new Set();
+  for (const it of items) {
+    const col = it.collection && n.get(it.collection) >= 2 && cols.get(it.collection);
+    if (!col) { out.push(it); continue; }
+    if (done.has(col.id)) continue;
+    done.add(col.id);
+    const [y0, y1] = years.get(col.id);
+    out.push({ kind: 'collection', id: col.id, name: col.name, poster: !!col.poster, count: n.get(col.id), years: isFinite(y0) ? [y0, y1] : [] });
+  }
+  return out;
+}
 route('GET', '/api/collections', user, (c) => {
   const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie' AND i.version_of IS NULL
     GROUP BY c.id HAVING n >= 2 ORDER BY c.name`);
@@ -964,7 +987,8 @@ route('GET', '/api/items/:id/playback', user, (c) => {
   if (!asked) o = ver.mapTracks(o, main, it, st.streamsOf, st.subtitlesOf);
   const d = st.decide(it, o);
   // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
-  d.abr = auto && d.mode === 'transcode';
+  // Bara utanför hemmet: hemma räcker bandbredden, och byten mellan steg startar om omkodningen i onödan
+  d.abr = auto && remote && d.mode === 'transcode';
   // Token i URL behövs för appar, Chromecast och AirPlay (de skickar inte webbläsarens cookie)
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;

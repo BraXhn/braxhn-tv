@@ -184,8 +184,11 @@ t('framsteg och sedd gäller filmen oavsett version', async () => {
 
 t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentgränser', async () => {
   const hi = film.versions.find(v => v.height === 720);
-  const pb = (await req(`/api/items/${film.id}/playback?version=${hi.id}&force=transcode`)).data;
+  // Flera steg bara utanför hemmet (hemma: ett steg, se nedan)
+  const pb = (await req(`/api/items/${film.id}/playback?version=${hi.id}&force=transcode`, { headers: { 'x-forwarded-for': '81.2.3.4' } })).data;
   assert.equal(pb.mode, 'transcode');
+  const home = (await req(`/api/items/${film.id}/playback?version=${hi.id}&force=transcode`)).data;
+  assert.equal((await req(home.url)).data.toString().match(/#EXT-X-STREAM-INF/g).length, 1, 'hemma: ett steg');
   const master = (await req(pb.url)).data.toString();
   const inf = [...master.matchAll(/#EXT-X-STREAM-INF:BANDWIDTH=(\d+),RESOLUTION=(\d+)x(\d+)\n(\S+)/g)];
   assert.deepEqual(inf.map(m => +m[3]), [720, 480], master);

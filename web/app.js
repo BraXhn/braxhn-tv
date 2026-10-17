@@ -188,13 +188,16 @@ views.home = async () => {
 };
 
 views.lib = async (id) => {
-  const sort = store.get('sort.' + id, 'title'), filter = store.get('filter.' + id, '');
-  const d = await api(`/libraries/${id}/items?sort=${sort}&filter=${filter}`);
+  const sort = store.get('sort.' + id, 'title'), filter = store.get('filter.' + id, ''), cols = store.get('cols.' + id, '1');
+  const d = await api(`/libraries/${id}/items?sort=${sort}&filter=${filter}&collections=${cols}`);
+  const movies = d.library.type === 'movie';
   main.innerHTML = `<div class="toolbar"><h1>${esc(d.library.name)}</h1><span class="muted">${d.items.length} titlar</span>
+    ${movies ? `<select id="cols" title="Visa filmer i samma samling som ett kort"><option value="1">Samlingar</option><option value="0">Alla filmer</option></select>` : ''}
     <select id="flt"><option value="">Alla</option><option value="unwatched">Osedda</option><option value="watched">Sedda</option></select>
     <select id="srt"><option value="title">Titel</option><option value="added">Senast tillagda</option><option value="year">År</option><option value="rating">Betyg</option></select></div>
-    <div class="grid">${d.items.map(i => card(i)).join('') || '<p class="muted">Inget här.</p>'}</div>`;
+    <div class="grid">${d.items.map(i => i.kind === 'collection' ? colCard(i) : card(i)).join('') || '<p class="muted">Inget här.</p>'}</div>`;
   $('#srt').value = sort; $('#flt').value = filter;
+  if ($('#cols')) { $('#cols').value = cols; $('#cols').onchange = (e) => { store.set('cols.' + id, e.target.value); route(); }; }
   $('#srt').onchange = (e) => { store.set('sort.' + id, e.target.value); route(); };
   $('#flt').onchange = (e) => { store.set('filter.' + id, e.target.value); route(); };
 };
@@ -789,8 +792,28 @@ function overlayClose(el) {
 window.addEventListener('popstate', () => {
   if (!overlayHist || history.state?.overlay) return;
   overlayHist = false;
-  if (P) closePlayer(); else { closeLive(); closeRec(); }
+  if (P) setMini(true); else { closeLive(); closeRec(); }
 });
+/** Litet fönster: filmen fortsätter i en rad längst ner medan man bläddrar (som Plex). on=false: helskärm igen */
+function setMini(on) {
+  const cur = P; if (!cur || !!cur.mini === on) return;
+  const el = cur.el; cur.mini = on;
+  el.classList.toggle('mini', on); el.classList.remove('idle');
+  document.body.classList.toggle('hasmini', on);
+  const btn = $('#cmini', el); if (btn) { btn.innerHTML = on ? ICON.expand : ICON.mini; btn.title = on ? 'Helskärmsläge' : 'Litet fönster (fortsätt bläddra)'; }
+  if (on) {
+    $('#setp', el).hidden = true; $('#chlist', el).hidden = true;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    document.body.style.overflow = '';
+    // Spelarens historikpost behövs inte längre – Bakåt ska nu gälla sidan man bläddrar på
+    overlayHist = false;
+    setTimeout(() => { if (!overlayHist && history.state?.overlay) history.back(); }, 0);
+  } else {
+    document.body.style.overflow = 'hidden';
+    if (!history.state?.overlay) history.pushState({ overlay: 1 }, '');
+    overlayHist = true;
+  }
+}
 function stopVideo(v) { if (!v) return; v.pause(); v.removeAttribute('src'); v.load(); }
 // Stänger öppna spelare (vanlig, live, inspelning)
 function closeOverlays() { closePlayer(false); closeLive(); closeRec(); }
@@ -1780,28 +1803,50 @@ async function play(id, start = 0, opts = {}) {
   const cur = P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
     party: partyId, es: keepParty, applying: false, tok: null, lmd: null };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
-  el.innerHTML = `<video id="vid" controls autoplay playsinline x-webkit-airplay="allow"></video>
+  const chaps = it.chapters || [];
+  const line2 = it.kind === 'episode' ? `${sxe(it)} — ${esc(it.title)}` : (it.year || '');
+  el.innerHTML = `<video id="vid" autoplay playsinline x-webkit-airplay="allow"></video>
     <div class="pbar"><button class="ghost small" id="pclose">← Tillbaka</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
-      <select id="pq" title="Kvalitet"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select>
-      ${audios.length > 1 ? `<select id="pa" title="Ljudspår">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select>` : ''}
-      <select id="ps" title="Undertexter"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select>
-      ${textSubs.length > 1 ? `<select id="ps2" title="Andra undertext (visas överst)"><option value="">Ingen andra undertext</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select>` : ''}
-      ${it.chapters?.length ? '<button class="ghost small" id="pchap" title="Kapitel">☰ Kapitel</button>' : ''}
-      <span id="poff" class="row" hidden><button class="ghost small" data-off="-0.5" title="Undertext tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Undertext senare">+</button></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
-      <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button>
-      ${it.nextId ? '<button class="ghost small" id="pnext">Nästa ⏭</button>' : ''}</div>
+      <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button></div>
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
     <button class="skip" id="pskip" hidden></button><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
-    <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
-      <div class="track" id="track"><i id="tfill"></i>${(it.chapters || []).slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>`;
+    <div class="setp" id="setp" hidden>
+      <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
+      ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
+      <label>Undertexter<select id="ps"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
+      ${textSubs.length > 1 ? `<label>Andra undertext<select id="ps2"><option value="">Ingen</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
+      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Senare">+</button></span></div>
+    <div class="ctl" id="ctl">
+      <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
+        <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
+      <div class="crow">
+        <div class="cinfo"><b>${esc(it.kind === 'episode' ? it.showTitle || it.title : it.title)}</b><span>${line2}</span><span id="ctime">0:00</span></div>
+        <div class="cmid">
+          <button id="cprev" title="${chaps.length ? 'Föregående kapitel' : 'Till början'}">${ICON.prev}</button>
+          <button id="cback" title="10 s bakåt (←)">${ICON.back10}</button>
+          <button id="cplay" class="big" title="Spela/pausa (mellanslag)">${ICON.play}</button>
+          <button id="cfwd" title="30 s framåt (→)">${ICON.fwd30}</button>
+          <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
+          <button id="cstop" title="Stoppa">${ICON.stop}</button>
+        </div>
+        <div class="cright">
+          ${chaps.length ? `<button id="pchap" title="Kapitel">${ICON.list}</button>` : ''}
+          <button id="cset" title="Kvalitet, ljud och undertexter">${ICON.gear}</button>
+          <span class="vol"><button id="cmute" title="Ljud av/på (m)">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="Volym"></span>
+          <button id="cmini" title="Litet fönster (fortsätt bläddra)">${ICON.mini}</button>
+          <button id="cfull" title="Helskärm (f)">${ICON.full}</button>
+        </div>
+      </div>
+    </div>`;
   overlayOpen(el);
   const v = q('#vid');
+  bindControls(cur, v);
   q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
-  q('#pclose').onclick = () => closePlayer();
+  q('#pclose').onclick = () => setMini(true); // fortsätt spela i litet fönster; ⏹ stoppar
   q('#pq').onchange = (e) => { cur.q = e.target.value; store.set('quality', cur.q); reload(); };
   if (q('#pa')) q('#pa').onchange = (e) => { cur.audio = e.target.value; reload(); };
   q('#ps').onchange = (e) => {
@@ -1814,6 +1859,7 @@ async function play(id, start = 0, opts = {}) {
   if (q('#pchap')) q('#pchap').onclick = (e) => {
     e.stopPropagation();
     const l = q('#chlist');
+    q('#setp').hidden = true;
     if (!l.hidden) { l.hidden = true; return; }
     const c0 = it.chapters.filter(c => c.start <= v.currentTime).pop();
     l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === c0 ? 'on' : ''}"><span>${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
@@ -1877,8 +1923,13 @@ async function play(id, start = 0, opts = {}) {
   v.addEventListener('error', () => {
     if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(); }
   });
-  let idle; const wake = () => { el.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(() => P === cur && !v.paused && el.classList.add('idle'), 3000); };
-  el.onmousemove = wake; el.ontouchstart = wake; wake();
+  // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
+  let idle; const wake = () => {
+    el.classList.remove('idle'); clearTimeout(idle);
+    idle = setTimeout(() => P === cur && !cur.mini && !v.paused && q('#setp').hidden && q('#chlist').hidden && !el.matches(':has(.ctl:hover)') && el.classList.add('idle'), 3000);
+  };
+  el.onmousemove = wake; el.ontouchstart = wake; el.onkeydown = wake; wake();
+  v.addEventListener('pause', wake); v.addEventListener('play', wake);
   videoSession(v);
   document.addEventListener('keydown', keys);
   await load(start);
@@ -1900,17 +1951,67 @@ function markers() {
   } else { b.hidden = true; b.dataset.k = ''; }
 }
 
+const svg = (d, vb = '0 0 24 24') => `<svg viewBox="${vb}" width="22" height="22" fill="currentColor" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  play: svg('<path d="M8 5v14l11-7z"/>'), pause: svg('<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'),
+  prev: svg('<path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/>'), next: svg('<path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/>'),
+  stop: svg('<path d="M6 6h12v12H6z"/>'),
+  back10: svg('<path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.5" font-size="7" text-anchor="middle" font-family="sans-serif" font-weight="700">10</text>'),
+  fwd30: svg('<path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.5" font-size="7" text-anchor="middle" font-family="sans-serif" font-weight="700">30</text>'),
+  gear: svg('<path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>'),
+  list: svg('<path d="M4 6h2v2H4zm4 0h12v2H8zM4 11h2v2H4zm4 0h12v2H8zM4 16h2v2H4zm4 0h12v2H8z"/>'),
+  vol: svg('<path d="M4 9v6h4l5 4V5L8 9zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/>'),
+  mute: svg('<path d="M4 9v6h4l5 4V5L8 9zm16.6 3L23 9.6 21.6 8.2 19.2 10.6 16.8 8.2 15.4 9.6l2.4 2.4-2.4 2.4 1.4 1.4 2.4-2.4 2.4 2.4 1.4-1.4z"/>'),
+  full: svg('<path d="M5 5h5v2H7v3H5zm9 0h5v5h-2V7h-3zM5 14h2v3h3v2H5zm12 0h2v5h-5v-2h3z"/>'),
+  mini: svg('<path d="M3 5h18v14H3zm2 2v10h14V7zm6 4h7v5h-7z"/>'),
+  expand: svg('<path d="M4 4h7v2H7.4l4.3 4.3-1.4 1.4L6 7.4V11H4zm16 16h-7v-2h3.6l-4.3-4.3 1.4-1.4 4.3 4.3V13h2z"/>'),
+};
+/** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
+function bindControls(cur, v) {
+  const { el, it } = cur, q = (s) => $(s, el);
+  const chaps = it.chapters || [];
+  const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
+  const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
+  const sync = () => { playBtn.innerHTML = v.paused ? ICON.play : ICON.pause; el.classList.toggle('paused', v.paused); };
+  const syncVol = () => { muteBtn.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol; vol.value = v.muted ? 0 : v.volume; };
+  v.volume = +store.get('pvol', 1); syncVol();
+  ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
+  v.addEventListener('volumechange', syncVol);
+  v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; });
+  v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
+  const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
+  playBtn.onclick = toggle;
+  v.onclick = () => { if (cur.mini) return setMini(false); if (!q('#setp').hidden || !q('#chlist').hidden) { q('#setp').hidden = true; q('#chlist').hidden = true; return; } toggle(); };
+  const full = () => document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen ? el.requestFullscreen() : v.webkitEnterFullscreen?.();
+  v.ondblclick = full; q('#cfull').onclick = full;
+  q('#cback').onclick = () => { v.currentTime = Math.max(0, v.currentTime - 10); };
+  q('#cfwd').onclick = () => { v.currentTime = Math.min(dur() || Infinity, v.currentTime + 30); };
+  q('#cprev').onclick = () => {
+    // Föregående kapitel (eller början av det aktuella om man just passerat starten), annars till början
+    const c = chaps.filter(x => x.start < v.currentTime - 3).pop();
+    v.currentTime = c ? c.start + 0.05 : 0;
+  };
+  if (q('#cnextch')) q('#cnextch').onclick = () => { const c = chaps.find(x => x.start > v.currentTime + 1); if (c) v.currentTime = c.start + 0.05; };
+  q('#cstop').onclick = () => closePlayer();
+  q('#cmini').onclick = () => setMini(!cur.mini);
+  q('#cset').onclick = (e) => { e.stopPropagation(); q('#chlist').hidden = true; q('#setp').hidden = !q('#setp').hidden; };
+  muteBtn.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
+  vol.oninput = () => { v.volume = +vol.value; v.muted = v.volume === 0; store.set('pvol', v.volume); };
+}
+
 function keys(e) {
-  if (!P || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
+  // I litet fönster tar spelaren inte över tangentbordet (man bläddrar och söker)
+  if (!P || P.mini || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
   const v = $('#vid', P.el); if (!v) return;
   // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
-  if (e.key === 'Escape' && !document.fullscreenElement) closePlayer();
+  if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
   else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
   else if (e.key === 'ArrowRight') v.currentTime += 10;
   else if (e.key === 'ArrowLeft') v.currentTime -= 10;
   else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
   else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
+  else if (e.key === 'm') v.muted = !v.muted;
 }
 
 async function load(start) {
@@ -1946,7 +2047,13 @@ async function load(start) {
     if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
     // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
     // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner
-    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: 6e6, xhrSetup: (x) => { x.withCredentials = true; } });
+    // Omkodning av HEVC/4K kan ta mer än hls.js standard (10 s) innan första byten kommer. Ge upp för tidigt så
+    // försöker spelaren igen eller byter kvalitetssteg – då startar servern om omkodningen och filmen kommer aldrig
+    // igång. Servern väntar själv upp till 90 s på ett segment.
+    const slow = { maxTimeToFirstByteMs: 60000, maxLoadTimeMs: 180000, timeoutRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 4000 },
+      errorRetry: { maxNumRetry: 4, retryDelayMs: 1000, maxRetryDelayMs: 8000 } };
+    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: 6e6,
+      fragLoadPolicy: { default: slow }, xhrSetup: (x) => { x.withCredentials = true; } });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
       if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
@@ -2086,6 +2193,7 @@ function closePlayer(refresh = true) {
   fetch(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
   document.removeEventListener('keydown', keys);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  document.body.classList.remove('hasmini'); el.classList.remove('mini');
   overlayClose(el);
   musicSession();
   if (refresh) route();
@@ -2774,7 +2882,8 @@ async function route() {
   const h = location.hash.slice(2) || '';
   const [name, arg, arg2] = h.split('/');
   if (!me && name !== 'login') { location.hash = '#/login'; return; }
-  closeAllPlayers();
+  // En film i litet fönster fortsätter spela medan man bläddrar
+  if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
   $$('#libnav a').forEach(a => { const hr = a.getAttribute('href'); a.classList.toggle('on', hr === '#/' ? h === '' : ('#/' + h + '/').startsWith(hr + '/')); });
   const v = views[name || 'home'];
   if (!v) { location.hash = '#/'; return; }

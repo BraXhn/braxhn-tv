@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: många filmer startade inte när de omkodades (spelaren gav upp efter 10 s och bytte kvalitetssteg, vilket startade om omkodningen). Spelaren väntar nu upp till 60 s, och flera kvalitetssteg används bara utanför hemmet
+- Bättre matchning mot TMDB: titlar på två språk, ett ord för mycket, "01" i stället för "del 1", utgåvetillägg (Director's Cut, Extended) och kvalitetsord (1080p, BluRay, x264) – och hellre ingen träff än fel film. Titlar som tidigare inte hittades försöker igen
+- Dubbletter (samma film i flera kvaliteter eller med olika filnamn) slås ihop till en film; servern väljer fil efter önskad kvalitet
+- Filmbiblioteket visar filmer i samma samling som ett samlingskort (kan stängas av med "Alla filmer")
+- Ny spelare: egen kontrollrad med tidslinje, titel och tid, ⏮ ⟲10 ▶ ⟳30 ⏭ ⏹, inställningar (kvalitet, ljud, undertexter), volym och helskärm – visas vid paus eller när musen rör sig. Inga dubbla tidslinjer längre
+- Litet fönster: filmen fortsätter i en rad längst ner medan man bläddrar (← Tillbaka, Escape eller Bakåt); klicka på bilden för att gå tillbaka till helskärm, ⏹ stoppar
 - Rättat: skanningar och "Hämta om all metadata" fick vänta i timmar bakom tunga analyser (miniatyrer, nyckelbilder, intro, förhandsbilder). Analyserna körs nu i en egen bakgrundskö, och adminsidan visar båda köerna
 - Kopierade Blu-ray-skivor (`BDMV/STREAM/*.m2ts`) blir en film med skivans namn – varningstexter, loggor och andra klipp på skivan skannas inte längre in som egna titlar (de som redan finns tas bort vid nästa skanning)
 - Rättat: containern startade inte (avslutades direkt utan begriplig logg) när omkodningsmappen var en monterad volym – nu töms bara innehållet
