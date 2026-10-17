@@ -1990,7 +1990,12 @@ function bindControls(cur, v) {
   v.onclick = () => { if (cur.tapWake) { cur.tapWake = false; return; } if (cur.mini) return setMini(false); if (!q('#setp').hidden || !q('#chlist').hidden) { q('#setp').hidden = true; q('#chlist').hidden = true; return; } toggle(); };
   const full = () => {
     if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
-    if (!el.requestFullscreen) return v.webkitEnterFullscreen?.(); // iPhone: bara videon kan bli helskärm
+    if (!el.requestFullscreen) {
+      // iPhone: bara videon kan bli helskärm, och då syns inga bildundertexter ovanpå. Med PGS fyller spelaren
+      // i stället skärmen själv (vrid telefonen för liggande bild).
+      if (cur.pgs) { el.classList.toggle('pfull'); return; }
+      return v.webkitEnterFullscreen?.();
+    }
     // Telefon: vrid till liggande när det går (Android); ignoreras annars
     el.requestFullscreen().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
   };
@@ -2110,7 +2115,7 @@ function setSubs() {
     }; };
     t2.addEventListener('load', on); setTimeout(on, 50);
   }
-  const img = pgsOverlay() ? P.pb?.imageSubs?.find(s => s.id === P.sub) : null;
+  const img = P.pb?.imageSubs?.find(s => s.id === P.sub);
   pgsShow(img);
   const sub = P.pb?.subtitles.find(s => s.id === P.sub) || img;
   $('#poff', el).hidden = !sub;
@@ -2128,10 +2133,8 @@ function setSubs() {
 // ---------------- bildundertexter (PGS) ----------------
 // Servern tolkar Blu-ray-undertexten till bilder med tider; spelaren lägger rätt bild över videon.
 // Medan servern fortfarande läser filen hämtas listan igen var 5:e sekund.
-// iPhone saknar helskärm för element (bara videon själv kan bli helskärm) – där syns ingen bild ovanpå videon,
-// så PGS bränns in av servern som tidigare.
-const pgsOverlay = () => !!document.documentElement.requestFullscreen;
-const subBurns = (x) => !!x?.bitmap && !(x.pgs && pgsOverlay());
+// iPhone saknar helskärm för element – där ger helskärmsknappen en egen helskärm i sidan så att bilderna syns.
+const subBurns = (x) => !!x?.bitmap && !x.pgs;
 function pgsStop(cur) {
   if (!cur?.pgs) return;
   const v = $('#vid', cur.el), g = cur.pgs;
@@ -2163,7 +2166,7 @@ function pgsShow(sub) {
     const k = find(v.currentTime - (cur.offset || 0));
     // Bildens yta i elementet (videon skalas in med svarta kanter)
     const W = g.data.w || v.videoWidth, H = g.data.h || v.videoHeight;
-    const key = k + ':' + v.clientWidth + 'x' + v.clientHeight;
+    const key = `${k}:${v.clientWidth}x${v.clientHeight}:${v.videoWidth}x${v.videoHeight}`;
     if (key === g.shown) return;
     g.shown = key;
     if (k < 0 || !W || !H) { box.innerHTML = ''; return; }

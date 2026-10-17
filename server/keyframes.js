@@ -98,7 +98,7 @@ async function mkvKeyframes(r) {
   }
   if (track == null || cuesPos == null) return null;
   const hb = await r.read(cuesPos, 16), h = ebmlHeader(hb, 0);
-  if (!h || h.id !== ID.CUES || h.size < 0 || h.size > (256 << 20)) return null;
+  if (!h || h.id !== ID.CUES || h.size < 0 || h.size > (64 << 20)) return null;
   return parseCues(await r.read(cuesPos + h.data, h.size), track, scale);
 }
 
@@ -144,7 +144,10 @@ export function parseMoov(moov) {
     }
     const count = (b) => b.readUInt32BE(4);
     let total = 0; for (let k = 0; k < count(stts); k++) total += stts.readUInt32BE(8 + k * 8);
-    if (!total || total > 5e7) return null;
+    // Skydd mot skadliga filer: ett par byte kan annars utlova miljarder bilder (sekunder av låst server
+    // och flera GB minne). 5 miljoner bilder räcker till ett dygn i 60 bilder/s.
+    // Utan stss är varje bild en nyckelbild – orimligt för H.264/HEVC i stor skala (ffprobe får avgöra)
+    if (!total || total > 5e6 || (stss ? count(stss) > total : total > 2e5)) return null;
     const sync = stss ? new Set(Array.from({ length: count(stss) }, (_, k) => stss.readUInt32BE(8 + k * 4) - 1)) : null;
     const ctt = ctts ? { v1: ctts[0] === 1, n: count(ctts) } : null;
     const out = [];
@@ -191,7 +194,8 @@ async function sample(file, at, len) {
 async function check(file, kf, duration) {
   const has = (t) => { let lo = 0, hi = kf.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (kf[m] < t - 0.002) lo = m + 1; else hi = m; } return Math.abs(kf[lo] - t) <= 0.002; };
   let any = false, complete = true;
-  for (const at of [0, duration * 0.37, duration * 0.71]) {
+  // Fem utspridda stickprov (fMP4-remux kräver en komplett lista – ett index som saknar nyckelbilder ska fångas)
+  for (const at of [0, duration * 0.23, duration * 0.47, duration * 0.71, Math.max(0, duration - 30)]) {
     const s = await sample(file, at, 12);
     // Stickprovets första nyckelbild kan ligga före intervallet (sökningen landar på närmaste föregående)
     for (const t of s) { if (has(t)) any = true; else complete = false; }

@@ -408,3 +408,7 @@ html.standalone #top{padding-top:calc(10px + env(safe-area-inset-top))}
   #player .ctl button{padding:8px}
   #player .cmid{gap:2px}
 }
+
+/* Egen helskärm på iPhone när bildundertexter visas (videons egen helskärm skulle dölja dem) */
+#player.pfull .pbar{display:none}
+#player.pfull{background:#000}
