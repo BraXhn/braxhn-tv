@@ -271,7 +271,7 @@ async function readBody(req, limit = 65536) {
 }
 const viaProxy = (req) => ['x-forwarded-for', 'forwarded', 'x-real-ip', 'x-forwarded-host', 'x-forwarded-proto'].some(h => req.headers[h] != null);
 
-/** /dlna/… – trusted = klienten är på ett betrott nät (isTrusted i app.js) */
+/** /dlna/… – trusted = klienten är på ett betrott nät (isTrusted i http/router.js) */
 export async function handle(req, res, url, { trusted }) {
   if (!enabled()) return fail(res, 404, 'Okänd endpoint');
   if (!trusted || viaProxy(req)) return fail(res, 403, 'DLNA är bara tillgängligt på hemnätverket');
