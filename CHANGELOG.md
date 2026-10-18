@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.9.2
+- Rättat: på iPhone kunde flikmenyn längst ner (och ljudspelaren) hamna mitt på skärmen när man skrollade, t.ex. efter att tangentbordet varit uppe. De följer nu den synliga ytans nederkant, och flikmenyn göms medan tangentbordet visas
+
 ## 0.9.1
 - Rättat: HDR-filmer som omkodades (t.ex. utanför hemmet eller med vald kvalitet) gav "avkodningsfel" på iPhone. Omkodningen blir H.264 i 8 bitar, men bilden märktes fortfarande som HDR (PQ/BT.2020) när skärmen klarar HDR – en kombination som iPhone inte spelar. HDR tonmappas nu alltid till SDR vid omkodning och märks som BT.709 (remux utan omkodning behåller HDR som förut)
 

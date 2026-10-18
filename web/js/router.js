@@ -104,6 +104,22 @@ window.addEventListener('hashchange', route);
 
 // Användarmenyn: aria-expanded följer menyn, Escape stänger och lämnar fokus på knappen
 const userMenu = (open) => { $('#usermenu').hidden = !open; $('#userbtn').setAttribute('aria-expanded', String(open)); };
+// iPhone (Safari och hemskärmsappen): efter att tangentbordet stängts eller verktygsfältet krympt kan den synliga
+// ytan och sidans layout hamna ur fas, och fasta element i nederkant (flikmenyn, ljudspelaren) blir hängande
+// mitt på skärmen. Knuffa ner dem till den synliga ytans nederkant, och göm flikmenyn medan tangentbordet är uppe.
+const vv = window.visualViewport;
+if (vv) {
+  const root = document.documentElement;
+  const fitBottom = () => {
+    const below = vv.offsetTop + vv.height - window.innerHeight; // > 0: layoutens nederkant ligger ovanför den synliga
+    root.style.setProperty('--vv-shift', below > 1 ? Math.round(below) + 'px' : '0px');
+    root.classList.toggle('kbd-open', vv.height < window.innerHeight * 0.8 && !!document.activeElement?.matches('input,textarea,select'));
+  };
+  vv.addEventListener('resize', fitBottom); vv.addEventListener('scroll', fitBottom);
+  window.addEventListener('scroll', fitBottom, { passive: true });
+  document.addEventListener('focusout', () => setTimeout(fitBottom, 300));
+  fitBottom();
+}
 $('#userbtn').onclick = (e) => { e.stopPropagation(); userMenu($('#usermenu').hidden); if (!$('#usermenu').hidden) $('#usermenu a:not([hidden]), #usermenu button:not([hidden])')?.focus(); };
 document.addEventListener('click', () => userMenu(false));
 $('#usermenu').addEventListener('keydown', (e) => { if (e.key === 'Escape') { userMenu(false); $('#userbtn').focus(); } });
