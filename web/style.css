@@ -646,3 +646,7 @@ button[aria-pressed=true].iconbtn{color:var(--accent)}
 .job-n{color:var(--dim);font-weight:400}
 .hero .card .art::after{display:none}
 @media (hover:none) and (max-width:760px){.shelf-nav{display:none}.section.has-nav h2{padding-right:0}}
+
+/* Fasta element i nederkant följer den synliga ytan på iPhone (se fitBottom i router.js) */
+#tabbar,#mbar{transform:translateY(var(--vv-shift,0px))}
+html.kbd-open #tabbar{display:none!important}
