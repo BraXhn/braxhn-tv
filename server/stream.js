@@ -363,7 +363,7 @@ export function decide(it, o) {
   const srcKbps = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
   // Sänk även om bithastigheten är för hög för vald kvalitet (t.ex. 4K-remux utanför hemmet)
   const scale = !!(Q.h && ((v?.height && v.height > Q.h) || (Q.br && srcKbps > Q.br * 1.3)));
-  const tonemap = !!(it.hdr && !o.hdr);
+  let tonemap = !!(it.hdr && !o.hdr);
   const ext = CONTAINER[path.extname(it.path).toLowerCase()];
   const reasons = [];
   if (burn) reasons.push('bildundertext bränns in');
@@ -381,6 +381,9 @@ export function decide(it, o) {
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
   } else mode = 'transcode';
+  // Omkodning blir alltid H.264 i 8 bitar, som inte kan bära HDR: HDR-källor tonmappas då även för en HDR-skärm.
+  // (Annars märks bilden som PQ/BT.2020 i 8 bitar – iPhone vägrar avkoda den och andra visar bleka färger.)
+  if (mode === 'transcode' && it.hdr && !tonemap) { tonemap = true; reasons.push(`${it.hdr.toUpperCase()} tonmappas till SDR`); }
   // Safaris egen HLS-spelare (iPhone) klarar inte Dolby Digital i MPEG-TS-segment – filmen startar aldrig.
   // I fMP4 (HEVC-remux) fungerar det; i TS blir ljudet AAC.
   if (o.nativeHls && mode !== 'direct' && fmt === 'ts' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) am = 'aac';
@@ -587,6 +590,8 @@ function videoArgs(it, d, fromStart) {
     post = ['format=yuv420p'];
     enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...rate(['-crf', '21'], ['-crf', '23', ...cap]), '-profile:v', 'high', '-sc_threshold', '0'];
   }
+  // Tonmappad bild märks uttryckligen som SDR/BT.709 (annars kan källans HDR-märkning följa med)
+  if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
   const vf = chain(post);
   const pre = HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [];
   if (d.burn) {

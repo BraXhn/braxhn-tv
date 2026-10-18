@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.9.1
+- Rättat: HDR-filmer som omkodades (t.ex. utanför hemmet eller med vald kvalitet) gav "avkodningsfel" på iPhone. Omkodningen blir H.264 i 8 bitar, men bilden märktes fortfarande som HDR (PQ/BT.2020) när skärmen klarar HDR – en kombination som iPhone inte spelar. HDR tonmappas nu alltid till SDR vid omkodning och märks som BT.709 (remux utan omkodning behåller HDR som förut)
+
 ## 0.9.0
 - Strömning utanför hemmet: webbspelaren mäter uppkopplingen (i förväg och vid start, högst 1,5 s) och servern väljer kvalitet efter vad som ryms – aldrig över inställd maxkvalitet. "Spara data" i telefonen ger högst 480p
 - Anpassningsbar kvalitet har fått ett 360p-steg, och steget som ryms i uppkopplingen listas först (iPhone börjar på första varianten i stället för att fastna på ett för tungt steg). Spelaren hämtar aldrig högre upplösning än skärmen visar

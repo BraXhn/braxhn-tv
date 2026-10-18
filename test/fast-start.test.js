@@ -213,3 +213,17 @@ test('kvalitet utanför hemmet efter uppmätt bandbredd och "Spara data"', async
   assert.equal(remoteQuality('orig', 40000, false), 'orig');
   assert.equal(remoteQuality('orig', 9000, false), '720');
 });
+
+test('HDR-källa som omkodas tonmappas även för en HDR-skärm (H.264 i 8 bitar kan inte bära HDR)', async () => {
+  const st = await import('../server/stream.js');
+  const it = { id: 77, path: '/x/Film.mkv', size: 60e9, duration: 7200, hdr: 'hdr10', vcodec: 'hevc',
+    streams: JSON.stringify([{ index: 0, type: 'video', codec: 'hevc', width: 3840, height: 2160, pix: 'yuv420p10le' }, { index: 1, type: 'audio', codec: 'eac3', channels: 6, default: true }]) };
+  const caps = st.parseCaps(new URLSearchParams({ c: 'mp4', v: 'h264,hevc', a: 'aac,ac3,eac3', hdr: '1', q: '360', nhls: '1' }));
+  const d = st.decide(it, { ...caps, assumeKf: true, remote: true });
+  assert.equal(d.mode, 'transcode');
+  assert.equal(d.tonemap, true);
+  assert.equal(d.audioMode, 'aac'); assert.equal(d.ab, 128);
+  // Remux (ingen omkodning) behåller HDR för en HDR-skärm
+  const r = st.decide(it, { ...st.parseCaps(new URLSearchParams({ c: 'mp4', v: 'h264,hevc', a: 'aac,eac3', hdr: '1' })), assumeKf: true });
+  assert.equal(r.mode, 'remux'); assert.equal(r.tonemap, false);
+});
