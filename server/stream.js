@@ -63,6 +63,23 @@ if (HW !== 'none') {
     if (e) disableHw(stderr || e.message); else console.log(`[hårdvara] ${HW} fungerar`);
   });
 }
+// Segment-muxerns -segment_times jämförs med olika tider beroende på ffmpeg-version: 5.1 (Debian/Docker-imagen)
+// mot utdatans tid inklusive -output_ts_offset, 6.x mot tiden från körningens start. Fel tolkning efter spolning
+// ger ett segment per nyckelbild i stället för rutnätet. Testas en gång vid start: offset 10, delning vid 2.
+// Okänt läge (testet ännu inte klart eller misslyckat) behandlas som 6.x.
+const segTimesAbs = { v: false };
+execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-f', 'lavfi', '-i', 'testsrc=d=4:s=64x64:r=25',
+  '-c:v', 'mpeg2video', '-g', '25', '-output_ts_offset', '10', '-f', 'segment', '-segment_format', 'mpegts', '-segment_times', '2',
+  '-reset_timestamps', '0', '-segment_list', 'pipe:1', '-segment_list_type', 'csv', path.join(TRANSCODE, 'segprobe_%02d.ts')],
+{ timeout: 20000 }, (e, out) => {
+  for (const f of ['segprobe_00.ts', 'segprobe_01.ts', 'segprobe_02.ts', 'segprobe_03.ts']) fs.rmSync(path.join(TRANSCODE, f), { force: true });
+  const end = Number(String(out || '').split('\n')[0]?.split(',')[2]);
+  if (e || !Number.isFinite(end)) return console.warn('[hls] kunde inte testa segment-muxern:', e?.message || out);
+  segTimesAbs.v = end < 11.5;
+  if (segTimesAbs.v) console.log('[hls] ffmpeg tolkar segment_times som absolut tid');
+});
+// Delningstider för en körning som startar på (utdata)tiden base: relativa eller absoluta efter ffmpegs tolkning
+const segTimes = (segs, n, base) => segs.slice(n + 1).map(x => Math.max(0.001, x.start - base - 0.005) + (segTimesAbs.v ? base : 0)).map(v => v.toFixed(3));
 const VAAPI_DEV = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
 // Avkodning på grafikkortet när omkodningen ändå görs där (4K-HEVC är tungt att avkoda med processorn).
 // Utan -hwaccel_output_format hämtas bilderna tillbaka automatiskt, så alla mjukvarufilter fungerar som förut,
@@ -662,7 +679,7 @@ function startFfmpeg(s, it, n) {
     // så sök en bit in i segmentet – men före nästa nyckelbild – för att landa exakt på rätt nyckelbild.
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
-    const times = segs.slice(n + 1).map(x => Math.max(0.001, x.start - ss - 0.005).toFixed(3));
+    const times = segTimes(segs, n, ss);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
       '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
@@ -672,7 +689,7 @@ function startFfmpeg(s, it, n) {
     // Omkodning: segment-muxern delar exakt på de tvingade nyckelbilderna (extra nyckelbilder från kodaren,
     // t.ex. vid scenbyten i hårdvarukodare, ger inga extra segment – listan förblir deterministisk)
     const va = videoArgs(it, d, n === 0);
-    const times = segs.slice(n + 1).map(x => Math.max(0.001, x.start - t - 0.005).toFixed(3));
+    const times = segTimes(segs, n, t);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
       ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
