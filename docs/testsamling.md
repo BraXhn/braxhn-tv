@@ -110,7 +110,7 @@ Apples spelare läser dem – ffprobe räknar fel för ett ensamt fragment (den 
 
 ## macOS-jobbet
 
-`.github/workflows/conformance.yml` har två jobb:
+`.github/workflows/conformance.yml` har två jobb: (macOS-jobbet körs bara på begäran: Actions → Testsamling → Run workflow).
 
 1. **Linux** – hela matrisen i `node:24-bookworm-slim` med Debians ffmpeg, samma som Docker-imagen.
 2. **macOS** – `test/media/apple-check.mjs` startar servern, skapar HLS för de viktigaste fallen (HDR10-, HLG-

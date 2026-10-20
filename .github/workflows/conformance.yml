@@ -39,6 +39,9 @@ jobs:
 
   macos:
     name: macOS – Apples HLS-spelare (AVFoundation), mediastreamvalidator och WebKit
+    # Bara på begäran (Actions → Kör arbetsflödet): macOS-maskiner blev inte tilldelade vid push, och ett jobb som
+    # står och väntar gör hela körningen röd. Kör det före en utgåva.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
