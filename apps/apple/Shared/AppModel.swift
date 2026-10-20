@@ -160,6 +160,11 @@ final class AppModel: ObservableObject {
             // Dolby Vision (t.ex. Apple TV 4K kopplad till en Dolby Vision-TV) – då kan även profil 5 spelas orört
             .init(name: "dv", value: AVPlayer.availableHDRModes.contains(.dolbyVision) ? "1" : "0")
         ]
+        #if os(iOS)
+        // iPhone/iPad: AVPlayer klarar inte Dolby Digital i MPEG-TS-segment (samma HLS-spelare som Safari,
+        // som redan skickar nhls=1) – filmen startar aldrig. Servern ger då AAC i TS; fMP4 behåller Dolby.
+        q.append(.init(name: "nhls", value: "1"))
+        #endif
         if quality != "auto" { q.append(.init(name: "q", value: quality)) }
         if let a = audio { q.append(.init(name: "audio", value: String(a))) }
         if let s = subtitle, s.bitmap == true { q.append(.init(name: "sub", value: s.id)) }

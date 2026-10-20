@@ -157,6 +157,8 @@ async function probe(file) {
       default: !!s.disposition?.default, forced: !!s.disposition?.forced,
       hi: !!s.disposition?.hearing_impaired,
       pix: s.pix_fmt || null, transfer: s.color_transfer || null, primaries: s.color_primaries || null,
+      // Flätad bild (tt/bb/tb/bt) avflätas vid omkodning (stream.js)
+      ...(s.codec_type === 'video' && s.field_order && s.field_order !== 'progressive' && s.field_order !== 'unknown' ? { field: s.field_order } : {}),
       dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || '')),
       dvProfile: (s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))?.dv_profile ?? null
     })).filter(s => ['video', 'audio', 'subtitle'].includes(s.type) && !(s.type === 'video' && ['mjpeg', 'png'].includes(s.codec)));
