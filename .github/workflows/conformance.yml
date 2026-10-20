@@ -24,7 +24,11 @@ jobs:
         env:
           CONFORMANCE: full
           CONFORMANCE_OUT: ${{ runner.temp }}/testsamling
-        run: node --disable-warning=ExperimentalWarning --test --test-reporter=spec test/conformance.test.js
+        run: node --disable-warning=ExperimentalWarning --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/tap.txt" test/conformance.test.js
+      # Felen som anteckningar på körningen (syns direkt i GitHub och går att läsa via API:t utan loggfilerna)
+      - name: Fel som anteckningar
+        if: failure()
+        run: node test/media/annotate.mjs "$RUNNER_TEMP/tap.txt"
       - name: Spara spellistor, ffprobe-JSON och serverlogg
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -54,7 +58,11 @@ jobs:
       - name: Apples HLS-verktyg (finns de?)
         run: command -v mediastreamvalidator hlsreport || echo "HTTP Live Streaming Tools saknas (kräver Apple-ID) – AVFoundation används i stället"
       - name: Spela strömmarna med AVPlayer och WebKit
-        run: node test/media/apple-check.mjs --out "$RUNNER_TEMP/apple" --avplayer "$RUNNER_TEMP/avcheck" --webkit "$RUNNER_TEMP/pw"
+        run: node test/media/apple-check.mjs --out "$RUNNER_TEMP/apple" --avplayer "$RUNNER_TEMP/avcheck" --webkit "$RUNNER_TEMP/pw" 2>&1 | tee "$RUNNER_TEMP/apple.txt"; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Fel som anteckningar
+        if: failure()
+        run: grep -E "FEL|fel:|Error|✗" "$RUNNER_TEMP/apple.txt" | head -10 | while IFS= read -r l; do echo "::error title=macOS::$l"; done
       - name: Spara resultat, spellistor och serverlogg
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
