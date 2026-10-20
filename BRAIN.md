@@ -48,7 +48,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 
 ### Broar (där tillståndet bor – båda sidor måste vara kartlagda före ändring)
 1. **Webb ↔ server** (`web/js/*` ↔ `server/routes/*`): JSON över `/api`. Cookie (`__Host-kt`/`kt`), sameOrigin-krav på icke-GET. Webben och servern levereras i samma image → kan ändras tillsammans.
-2. **Appar ↔ server** (`apps/apple`, `apps/automotive` ↔ `/api/*`): Bearer-token (`kind=app`). Apparna använder bl.a. `/api/home`, `/api/items/:id/playback`, `/api/stream/*`, `/api/music/*`, `/api/audiobooks/*`, `/api/podcasts/*`, `/api/live/*`, `/api/offline/sync`. **Installerade appar uppdateras inte med servern** → fält får bara läggas till, aldrig ändras/tas bort. Ingen API-version och inga kontraktstester ännu.
+2. **Appar ↔ server** (`apps/apple`, `apps/automotive` ↔ `/api/*`): Bearer-token (`kind=app`). iOS-appen skickar `nhls=1` (AVPlayer = Safaris HLS-spelare), tvOS inte (ej verifierat på enhet). Apparna använder bl.a. `/api/home`, `/api/items/:id/playback`, `/api/stream/*`, `/api/music/*`, `/api/audiobooks/*`, `/api/podcasts/*`, `/api/live/*`, `/api/offline/sync`. **Installerade appar uppdateras inte med servern** → fält får bara läggas till, aldrig ändras/tas bort. Ingen API-version och inga kontraktstester ännu.
 3. **Server ↔ ffmpeg/ffprobe** (`stream.js`, `scanner.js`, `pgs.js`, `subreader.js`, `trickplay.js`, `imgsize.js`, `keyframes.js`): argumentlistor via `spawn/execFile` (aldrig skal). Användarvärden når argument bara via vitlistade parametrar (`readParams`). Utdata valideras inte av ffmpeg själv – se Wisdom.
 4. **HLS-spellista ↔ segment** (`servePlaylist/segmentsOf` ↔ `startFfmpeg`): playlistens EXTINF måste exakt motsvara ffmpegs delning. Omkodning: rutnät 0,2,4,6,12… med tvingade nyckelbilder + segment-muxer. Remux TS: förindexerade nyckelbilder (delmängd ok). Remux fMP4 (HEVC): **komplett** nyckelbildslista krävs (en GOP per segment).
 5. **Session ↔ ffmpeg-process** (`sessions`-map i `stream.js`): nyckel = användare+titel+läge+kvalitet+ljud+pid. Strypning (SIGSTOP), trimning bakåt (`trimBehind`), städning efter 60 s/15 min. `highestFile` måste räkna från `trimmed`.
@@ -61,14 +61,17 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).
 - Barnprofilers åldersgräns (`allowedFor`) kontrolleras på varje route som rör en titel – även bilder och kortåtgärder.
 - Omkodad video: H.264, yuv420p, inga B-bilder, BT.709-märkt; HDR-källa tonmappas alltid vid omkodning.
-- Native HLS (Safari) får aldrig AC-3/E-AC-3 i TS.
+- Native HLS (Safari/iOS-appen) får aldrig AC-3/E-AC-3 i TS – inte heller surround som konverteras.
+- Omkodat ljud börjar aldrig före bilden (`transcodeAudio`); utan det överlappar första segmentet nästa.
 - Skannrar tar aldrig bort innehåll när biblioteket ser borttappat ut.
 - Inga npm-beroenden; tredjepartsfiler bara i `web/vendor` med checksumma.
 - `/api`-fält som apparna läser ändras aldrig bakåtinkompatibelt.
 
 ### Öppna frågor och kända luckor
 - **API-kontrakt mot apparna** saknas (versionering + test). Nya fält i 0.9 (`bw`, `save`, `ab`, `sbw`, `imageSubs`, `seasons`) är tillägg – men apparna skickar inte `bw` och får därför ingen bandbreddsanpassning.
-- **Ingen verklig enhet i CI** (iPhone/Safari, GPU, riktiga HDR/DV-filer) – testsamling med macOS-jobb pågår (agentgren).
+- **Testsamling** (`test/conformance.test.js`, `test/media/`, `docs/testsamling.md`): 20 syntetiska källor × 8 klientprofiler, kontrollerar HLS objektivt (EXTINF, DTS, IDR, färgmärkning, ljud). Snabb del i `npm test`, hela med `CONFORMANCE=full`; macOS-jobb spelar med AVPlayer och WebKit i CI. **Kan inte:** riktig iPhone-hårdvara, HDR-skärm, riktig Dolby Vision (RPU), GPU.
+- **fMP4-remux av HEVC med öppen GOP**: ffmpegs HLS-muxer ger nyckelbilden fel tid (två bilder samma PTS). TODO-test. Möjlig väg: dela en vanlig fragmenterad MP4 själv.
+- **TS-remux från början** förskjuts med B-bildernas fördröjning (0,08–0,2 s); efter spolning inte. Varning i sviten.
 - **Dolby Vision profil 5** vid omkodning ger fel färger (ingen IPT→RGB-väg i zscale).
 - **Synkron diskåtkomst** i `subtitlesOf`/`listDir` på förfrågningsvägen kan frysa servern när en arraydisk vaknar.
 - **iPhone-flikmenyn** (0.9.2) är rättad på trolig orsak, inte bekräftad.

@@ -2,6 +2,14 @@
 
 ## Ej utgiven
 - **Kanaler för uppdateringar:** `:latest` uppdateras nu bara när en version ges ut (stabil), `:beta` för förhandsversioner och `:edge` vid varje ändring. Utgåvor ges ut med en knapp i GitHub Actions och får en release med ändringsloggen, så att servern kan visa "ny version finns"
+- **Testsamling för mediahanteringen** (`test/conformance.test.js`, `test/media/`): syntetiska källor i de vanligaste formaten (HDR10, HLG, Dolby Vision-märkt HEVC, H.264 High 10, VP9, MPEG-4, flätad MPEG-2, anamorf bild, VFR, 50 bilder/s, DTS/TrueHD/E-AC-3/FLAC/Opus, flera ljudspår, SRT/ASS/PGS) spelas med klientprofiler för Chrome, Safari, iOS-/tvOS-appen, Android och utanför hemmet, och varje HLS-ström kontrolleras med ffprobe. En snabb delmängd ingår i `npm test`; hela matrisen körs i det nya arbetsflödet `conformance.yml` på Linux (samma ffmpeg som Docker-imagen) och på macOS med AVPlayer och WebKit. Se `docs/testsamling.md`
+- Rättat: DTS-, TrueHD- och FLAC-surround i H.264-filmer blev E-AC-3 i TS-segment för Safaris egen HLS-spelare (iPhone), som inte startar då – ljudet blir nu AAC där, som för Dolby Digital
+- Rättat: efter spolning i en omkodad film med orört ljud (AAC/AC-3) innehöll första segmentet upp till flera sekunder ljud från före spolpunkten, som överlappade föregående segment
+- Rättat: efter spolning i en remuxad film där ljudet konverteras (t.ex. AC-3/DTS → AAC) saknades ljudet de första ~0,25 s av segmentet
+- Rättat: första segmentet vid omkodning kunde överlappa nästa (AAC-ljudets inledande ram gav negativ tid och TS-muxern sköt fram segmentet) – vid 50 bilder/s en hel bild, som Chrome kan avbryta på
+- Rättat: BANDWIDTH i mastern för omkodning med kvalitetsgräns räknade bara med bildens tak; segmenten låg upp till 20 % över. Nu samma värde som i ABR-mastern (tak + marginal + ljud)
+- Rättat: flätade filmer (t.ex. MPEG-2 från DVB/DVD, 1080i) omkodades utan avflätning och fick kam i bilden. Gäller filer som skannats efter uppdateringen
+- iOS-appen anger att den spelar med Apples egen HLS-spelare (`nhls=1`), så att Dolby Digital inte skickas i TS-segment till iPhone/iPad (samma fel som i Safari). tvOS-appen skickar fortfarande Dolby Digital orört
 
 ## 0.9.3
 - Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre
