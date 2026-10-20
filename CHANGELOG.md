@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- **Kanaler för uppdateringar:** `:latest` uppdateras nu bara när en version ges ut (stabil), `:beta` för förhandsversioner och `:edge` vid varje ändring. Utgåvor ges ut med en knapp i GitHub Actions och får en release med ändringsloggen, så att servern kan visa "ny version finns"
 
 ## 0.9.3
 - Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre
