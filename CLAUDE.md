@@ -2,6 +2,8 @@
 
 Självhostad mediaserver (filmer, serier, musik, ljudböcker, poddar, live-TV) för Unraid/Docker, med appar för iOS/tvOS (`apps/apple`) och Android – bil och Google TV (`apps/automotive`). Ägaren skriver svenska: svara på svenska, och skriv kommentarer, UI-texter och commit-meddelanden på svenska.
 
+**Läs `BRAIN.md` först**: kodens topologi (ankare, broar, invarianter, öppna frågor) och lärdomar. Uppdatera den i samma commit när kartan ändras.
+
 ## Kontroll före varje commit
 
 ```bash
