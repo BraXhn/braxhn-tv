@@ -9,6 +9,7 @@
 - Rättat: första segmentet vid omkodning kunde överlappa nästa (AAC-ljudets inledande ram gav negativ tid och TS-muxern sköt fram segmentet) – vid 50 bilder/s en hel bild, som Chrome kan avbryta på
 - Rättat: BANDWIDTH i mastern för omkodning med kvalitetsgräns räknade bara med bildens tak; segmenten låg upp till 20 % över. Nu samma värde som i ABR-mastern (tak + marginal + ljud)
 - Rättat: flätade filmer (t.ex. MPEG-2 från DVB/DVD, 1080i) omkodades utan avflätning och fick kam i bilden. Gäller filer som skannats efter uppdateringen
+- Rättat: efter spolning i remuxade och omkodade filmer blev segmenten fel i Docker-imagen (Debians ffmpeg 5.1): ett segment per nyckelbild i stället för var 6:e sekund, så spellistan inte stämde och uppspelningen kunde hacka eller hoppa. ffmpeg 5.1 och 6.x tolkar delningstiderna olika; servern testar nu vid start vilket som gäller
 - iOS-appen anger att den spelar med Apples egen HLS-spelare (`nhls=1`), så att Dolby Digital inte skickas i TS-segment till iPhone/iPad (samma fel som i Safari). tvOS-appen skickar fortfarande Dolby Digital orört
 
 ## 0.9.3

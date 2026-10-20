@@ -33,6 +33,10 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - **Mönster:** B-bilder gav DTS bakåt mellan TS-segment → Chrome "formatet stöds inte".
 - **Används när:** HLS/DASH, loggrotation, tidsserier, paginering.
 
+> Samma flagga, annan version, annan betydelse – testa beteendet.
+- **Mönster:** `-segment_times` relativt i ffmpeg 6.x, absolut i 5.1 → fel segment efter spolning i Docker-imagen. Lokalt (6.1) syntes inget.
+- **Används när:** externa verktyg, bibliotek, webbläsare – mät beteendet vid start i stället för att läsa versionsnumret.
+
 ## Topologi
 
 ### Ankare (hög centralitet – ändra med störst försiktighet)
@@ -69,6 +73,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 
 ### Öppna frågor och kända luckor
 - **API-kontrakt mot apparna** saknas (versionering + test). Nya fält i 0.9 (`bw`, `save`, `ab`, `sbw`, `imageSubs`, `seasons`) är tillägg – men apparna skickar inte `bw` och får därför ingen bandbreddsanpassning.
+- **ffmpeg-version:** Docker-imagen kör Debians 5.1, utvecklingsmaskinen 6.1. `segTimesAbs` i `stream.js` mäter tolkningen av `segment_times` vid start. Verifiera ffmpeg-ändringar mot båda (CI-jobbet `linux` kör 5.1).
 - **Testsamling** (`test/conformance.test.js`, `test/media/`, `docs/testsamling.md`): 20 syntetiska källor × 8 klientprofiler, kontrollerar HLS objektivt (EXTINF, DTS, IDR, färgmärkning, ljud). Snabb del i `npm test`, hela med `CONFORMANCE=full`; macOS-jobb spelar med AVPlayer och WebKit i CI. **Kan inte:** riktig iPhone-hårdvara, HDR-skärm, riktig Dolby Vision (RPU), GPU.
 - **fMP4-remux av HEVC med öppen GOP**: ffmpegs HLS-muxer ger nyckelbilden fel tid (två bilder samma PTS). TODO-test. Möjlig väg: dela en vanlig fragmenterad MP4 själv.
 - **TS-remux från början** förskjuts med B-bildernas fördröjning (0,08–0,2 s); efter spolning inte. Varning i sviten.
