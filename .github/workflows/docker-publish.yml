@@ -4,9 +4,19 @@ on:
     branches: [main]
     tags: ['v*']
     paths-ignore: ['apps/**', '**.md']
+  # Ge ut en version: Actions → "Bygg och publicera Docker-image" → Run workflow → välj kanal.
+  # Versionen tas från package.json; en tagg och en GitHub-release skapas automatiskt.
   workflow_dispatch:
+    inputs:
+      kanal:
+        description: 'latest = stabil utgåva, beta = förhandsversion'
+        type: choice
+        options: [latest, beta]
+        default: latest
+# Kanaler: :edge vid varje push till main, :beta för förhandsversioner, :latest bara för stabila utgåvor
+# (samt versionsnummer och sha-<commit> att gå tillbaka till)
 permissions:
-  contents: read
+  contents: write        # tagg och release vid utgåva
   packages: write
   id-token: write        # signering utan nyckel (Sigstore)
   attestations: write
@@ -15,6 +25,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Kanal och version
+        id: ch
+        env:
+          KANAL: ${{ inputs.kanal }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$KANAL" ]; then CH="$KANAL"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; if [[ "$V" == *-* ]]; then CH=beta; else CH=latest; fi
+          else CH=edge; fi
+          if [ "$CH" = beta ] && [[ "$V" != *-* ]]; then V="$V-beta.$GITHUB_RUN_NUMBER"; fi
+          # En stabil version ges bara ut en gång – höj versionen i package.json först
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && gh release view "v$V" >/dev/null 2>&1; then
+            echo "::error::Version $V finns redan som utgåva. Höj \"version\" i package.json och försök igen."; exit 1
+          fi
+          echo "channel=$CH" >> "$GITHUB_OUTPUT"; echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Kanal: $CH, version: $V"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: '24' }   # samma som imagen
       - name: Tester
@@ -58,9 +85,11 @@ jobs:
         with:
           images: ghcr.io/braxhn/braxhn-tv
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=sha,prefix=sha-,enable={{is_default_branch}}
+            type=raw,value=edge,enable=${{ steps.ch.outputs.channel == 'edge' }}
+            type=raw,value=beta,enable=${{ steps.ch.outputs.channel == 'beta' }}
+            type=raw,value=latest,enable=${{ steps.ch.outputs.channel == 'latest' }}
+            type=raw,value=${{ steps.ch.outputs.version }},enable=${{ steps.ch.outputs.channel != 'edge' }}
+            type=sha,prefix=sha-
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -80,3 +109,16 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "ghcr.io/braxhn/braxhn-tv@${DIGEST}"
+      # Utgåva: tagg och GitHub-release med avsnittet ur CHANGELOG.md (servern visar då "ny version finns")
+      - name: Skapa release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.ch.outputs.version }}
+          CH: ${{ steps.ch.outputs.channel }}
+        run: |
+          BASE="${V%%-*}"
+          awk -v v="$BASE" '$0 ~ "^## "v"( |$)" {f=1; next} f && /^## / {exit} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Se CHANGELOG.md" > notes.md
+          printf '\n\nDocker: `ghcr.io/braxhn/braxhn-tv:%s` (%s)\n' "$V" "$CH" >> notes.md
+          gh release create "v$V" --target "$GITHUB_SHA" --title "BraXhn TV $V" --notes-file notes.md $([ "$CH" = beta ] && echo --prerelease)

@@ -85,6 +85,17 @@ GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv:latest`) vid 
 
 **Uppdatera:** klicka *Check for updates* i Docker-fliken, sedan *apply update*.
 
+**Kanaler** (välj i mallens *Repository*):
+
+| Tagg | Innehåll |
+|---|---|
+| `ghcr.io/braxhn/braxhn-tv:latest` | Stabila utgåvor (standard). Uppdateras bara när en version ges ut. |
+| `:beta` | Förhandsversioner inför nästa utgåva. |
+| `:edge` | Varje ändring direkt – nytt först, men det är du som testar. |
+| `:0.9.3` / `:sha-…` | En bestämd version, för att gå tillbaka. |
+
+En utgåva ges ut från GitHub: *Actions → Bygg och publicera Docker-image → Run workflow* och välj `latest` eller `beta` (versionen tas från `package.json`, och en release med ändringsloggen skapas).
+
 **Bygga själv i stället:** klona repot på servern och kör `bash install.sh`. Det bygger `braxhn-tv:local` lokalt och installerar mallen.
 
 **Appar:** GitHub bygger apparna under fliken **Actions**:
