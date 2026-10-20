@@ -2,6 +2,9 @@
 
 ## Ej utgiven
 
+## 0.9.3
+- Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre
+
 ## 0.9.2
 - Rättat: på iPhone kunde flikmenyn längst ner (och ljudspelaren) hamna mitt på skärmen när man skrollade, t.ex. efter att tangentbordet varit uppe. De följer nu den synliga ytans nederkant, och flikmenyn göms medan tangentbordet visas
 

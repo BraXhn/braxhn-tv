@@ -227,3 +227,17 @@ test('HDR-källa som omkodas tonmappas även för en HDR-skärm (H.264 i 8 bitar
   const r = st.decide(it, { ...st.parseCaps(new URLSearchParams({ c: 'mp4', v: 'h264,hevc', a: 'aac,eac3', hdr: '1' })), assumeKf: true });
   assert.equal(r.mode, 'remux'); assert.equal(r.tonemap, false);
 });
+
+test('tonmappning fungerar även när bilderna saknar färginformation (som efter GPU-avkodning)', async () => {
+  const st = await import('../server/stream.js');
+  const src = path.join(dir, 'hdr.mkv');
+  ff('-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=24:d=2', '-pix_fmt', 'yuv420p10le', '-c:v', 'libx265', '-x265-params', 'log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc', src);
+  const it = { path: src, hdr: 'hdr10', streams: JSON.stringify([{ type: 'video', width: 640, height: 360, pix: 'yuv420p10le' }]) };
+  const va = st._segs.videoArgs(it, { q: '360', tonemap: true, burn: '' }, true);
+  const vf = va.filter[1];
+  const out = path.join(dir, 'tm.mp4');
+  // Färginformationen tas bort före kedjan, som när NVDEC avkodar
+  ff('-i', src, '-vf', 'setparams=color_trc=unknown:color_primaries=unknown:colorspace=unknown,' + vf, '-c:v', 'libx264', '-preset', 'ultrafast', out);
+  const p = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=color_transfer,pix_fmt', '-of', 'csv=p=0', out]).toString().trim();
+  assert.equal(p, 'yuv420p,bt709');
+});

@@ -32,7 +32,7 @@ const HW_WANTED = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi
 // får aldrig stoppa uppspelningen – då används processorn i stället och adminsidan visar varför.
 let HW = HW_WANTED;
 export const hwStatus = { wanted: HW_WANTED, active: HW_WANTED, error: null };
-const HW_FAIL = /libcuda|nvenc|cuda|vaapi|va-api|qsv|libmfx|mfx|hwupload|hwaccel|Failed to (initiali[sz]e|open|create)|No (VA display|device|NVENC)|device (type|creation)|Error while opening encoder|Generic error in an external library/i;
+const HW_FAIL = /libcuda|nvenc|cuda|vaapi|va-api|qsv|libmfx|mfx|hwupload|hwaccel|Failed to (initiali[sz]e|open|create)|No (VA display|device|NVENC)|device (type|creation)|Error while opening encoder/i;
 /** Begriplig åtgärd för de vanligaste felen (ffmpegs egna meddelanden är svåra att tolka) */
 export function hwHint(err) {
   if (/libcuda|libnvidia-encode|Cannot load|cuInit|CUDA_ERROR_NO_DEVICE|no CUDA-capable/i.test(err))
@@ -547,7 +547,10 @@ export function servePlaylist(res, it, query) {
 }
 
 // ---------------- ffmpeg-argument ----------------
-const TM_CPU = () => `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=${TONEMAP}:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`;
+// Källans färgegenskaper sätts uttryckligen först: efter avkodning på grafikkortet (NVDEC) saknas de ofta i
+// bilderna, och då stannar zscale med "no path between colorspaces" – omkodningen kommer aldrig igång.
+const TM_CPU = (hdr) => `setparams=color_trc=${hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084'}:color_primaries=bt2020:colorspace=bt2020nc:range=tv,` +
+  `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=${TONEMAP}:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`;
 
 // Tvingade nyckelbilder exakt på segmentgränserna (relativt ffmpegs start). Från början: 0, 2, 4, 6, 12 …
 // – annars var SEG s. Mitt i de korta startsegmenten startar ffmpeg alltid om från början (se startFfmpeg).
@@ -574,7 +577,7 @@ function videoArgs(it, d, fromStart) {
   const big = HW === 'none' && (v?.height || 0) > 1100;
   if (h) sw.push(big ? `scale=-2:${h}:flags=bilinear` : `scale=-2:${h}`);
   const useVaapiTm = d.tonemap && HW === 'vaapi';
-  if (d.tonemap && !useVaapiTm) sw.push(TM_CPU());
+  if (d.tonemap && !useVaapiTm) sw.push(TM_CPU(it.hdr));
   const chain = (extra) => [...sw, ...extra].join(',') || 'null';
   let enc, post;
   if (HW === 'vaapi') {
@@ -910,4 +913,4 @@ export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = nu
 }
 
 // För tester
-export const _segs = { trimBehind, highestFile };
+export const _segs = { trimBehind, highestFile, videoArgs };
