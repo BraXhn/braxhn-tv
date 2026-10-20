@@ -342,11 +342,12 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 
 | Funktion | Resultat i testet |
 |---|---|
-| Remux | Segmentgränserna stämde med filens nyckelbilder, även efter spolning, och inga bildrutor dubblades eller tappades. |
+| Testsamlingen (mediakonformitet) | 20 syntetiska källor (H.264 8/10 bit, HEVC 8/10 bit, HDR10, HLG, "Dolby Vision" 8.1/5, VP9, MPEG-4 i AVI, flätad MPEG-2 i TS, anamorf PAL, 1920×800, VFR, 23,976–50 bilder/s; AAC, AC-3, E-AC-3, DTS, TrueHD, FLAC, Opus, flera ljudspår; SRT, ASS, PGS) × 8 klientprofiler × direkt/remux/omkodning/ABR, kontrollerade med ffprobe: segmenttider mot EXTINF, inga överlappande DTS, IDR först, H.264 8 bit utan B-bilder och utan HDR-märkning vid omkodning, rätt ljud per klient, undertexter. Körs i CI på Linux med samma ffmpeg som Docker-imagen och på macOS med AVFoundation (AVPlayer) och WebKit – se [docs/testsamling.md](docs/testsamling.md). **Otestat:** riktig Dolby Vision (ffmpeg kan inte skriva RPU:er), iPhone-hårdvara och HDR-skärm. |
+| Remux | Segmentgränserna stämde med filens nyckelbilder, även efter spolning, och inga bildrutor dubblades eller tappades. Tidsstämplarna kan ligga 1–5 bilder (B-bildernas fördröjning) från spellistan, se testsamlingen. |
 | HDR10 → SDR | Utdata blev BT.709. |
 | Introdetektering | Träffade inom 0,5 s på syntetiska avsnitt. |
 | Eftertexter | Hittades. |
-| Undertexter | Fungerade, liksom token-inloggning för appar, cast-token, CORS, HTTPS och kvalitetsgränsen utanför hemmet. |
+| Undertexter | Fungerade, liksom token-inloggning för appar, cast-token, CORS, HTTPS och kvalitetsgränsen utanför hemmet. SRT, ASS och extern .srt gav WebVTT med rätt tider, även i liveläget; PGS kunde brännas in vid omkodning. |
 | HEVC-remux (fMP4) | Tidsstämplar och init-segment stämde, även efter spolning. |
 | Musik | Skanning av taggar och omslag, strömning direkt och omkodad. |
 | Profiler och åldersgränser | Barnprofiler såg bara tillåtna titlar. |
@@ -371,7 +372,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Drift | Diskövervakning, import mot simulerade Plex- och Jellyfin-servrar, `/metrics` och DLNA:s SOAP/DIDL samt spärr mot andra nät. |
 
 **Inte testat här:**
-- inbränning av bildundertexter (ingen testfil fanns)
+- inbränning av andra bildundertexter än PGS (DVD/DVB)
 - GPU-omkodning och VAAPI-tonmappning
 - OpenSubtitles (API:t var inte nåbart härifrån)
 - Chromecast och AirPlay

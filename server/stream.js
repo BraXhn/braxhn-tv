@@ -386,12 +386,13 @@ export function decide(it, o) {
   if (mode === 'transcode' && it.hdr && !tonemap) { tonemap = true; reasons.push(`${it.hdr.toUpperCase()} tonmappas till SDR`); }
   // Safaris egen HLS-spelare (iPhone) klarar inte Dolby Digital i MPEG-TS-segment – filmen startar aldrig.
   // I fMP4 (HEVC-remux) fungerar det; i TS blir ljudet AAC.
-  if (o.nativeHls && mode !== 'direct' && fmt === 'ts' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) am = 'aac';
+  // Detsamma gäller surround som konverteras till E-AC-3 (DTS, TrueHD, FLAC 5.1) – i TS blir det AAC.
+  if (o.nativeHls && mode !== 'direct' && fmt === 'ts' && (am === 'eac3' || (am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)))) am = 'aac';
   if (mode === 'remux') reasons.push((fmt === 'fmp4' ? `${it.hdr ? it.hdr.toUpperCase() + '-' : ''}HEVC kopieras utan omkodning` : 'bilden kopieras utan omkodning') +
     (am === 'aac' ? ', ljudet konverteras till AAC' : am === 'eac3' ? ', surroundljud konverteras till Dolby Digital Plus 5.1' : ''));
   if (mode !== 'direct' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) reasons.push(`${aSel.codec === 'eac3' ? 'Dolby Digital Plus/Atmos' : 'Dolby Digital'} skickas orört`);
   if (mode === 'transcode' && !reasons.length) {
-    if (!vOk) reasons.push(`videoformatet ${v?.codec || '?'} stöds inte av enheten`);
+    if (!vOk) reasons.push(v?.codec === 'h264' && is10bit(v) ? 'H.264 i 10 bitar stöds inte av enheten' : `videoformatet ${v?.codec || '?'} stöds inte av enheten`);
     else if (['h264', 'hevc'].includes(v?.codec) && !keyframesReady(it)) reasons.push('nyckelbilder ej indexerade än');
     else reasons.push('formatet stöds inte direkt');
   }
@@ -475,7 +476,9 @@ export function serveMaster(res, it, query) {
   const Q = QUALITIES[d.q];
   const h = Q.h && v?.height > Q.h ? Q.h : v?.height || 720;
   const w = v?.width && v?.height ? Math.round(v.width * h / v.height / 2) * 2 : Math.round(h * 16 / 9);
-  const bw = (Q.br || (d.mode === 'remux' ? Math.max(4000, Math.round((it.size * 8 / (it.duration || 1)) / 1000)) : h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000)) * 1000;
+  // Med kvalitetsgräns: samma toppvärde som i ABR-mastern (taket + marginal + ljud). Tidigare angavs bara
+  // bildens tak, och segmenten (med ljud och TS-omkostnad) låg upp till 20 % över BANDWIDTH.
+  const bw = Q.br ? abrVariants(it, d)[0].bw : (d.mode === 'remux' ? Math.max(4000, Math.round((it.size * 8 / (it.duration || 1)) / 1000)) : h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000) * 1000;
   const params = new URLSearchParams(query); params.delete('hlssubs');
   const subs = subsMedia(it, query, d);
   let m = '#EXTM3U\n#EXT-X-VERSION:4\n' + subs.m;
@@ -573,6 +576,9 @@ function videoArgs(it, d, fromStart) {
   const cap = Q.br ? ['-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : [];
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
+  // Flätad källa (DVB/DVD/Blu-ray 1080i, MPEG-2 i TS): avfläta först – annars kodas kammen in i H.264-bilden,
+  // som märks progressiv. deint=interlaced rör bara bilder som är märkta som flätade.
+  if (/^(tt|bb|tb|bt)$/.test(v?.field || '')) sw.push('yadif=mode=0:deint=interlaced');
   // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare x264-läge nedan
   const big = HW === 'none' && (v?.height || 0) > 1100;
   if (h) sw.push(big ? `scale=-2:${h}:flags=bilinear` : `scale=-2:${h}`);
@@ -604,6 +610,14 @@ function videoArgs(it, d, fromStart) {
   return { pre, filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
 }
 
+// Omkodning: ljudet får aldrig börja före bilden (tidsstämplarna sätts inte om, se avoid_negative_ts nedan).
+// - Kopierat ljud: ffmpeg tar annars med ljudpaketen från nyckelbilden före -ss (efter spolning upp till en hel
+//   GOP, flera sekunder, som överlappade föregående segment) och AAC-ljudets inledande ram från MP4-filer.
+// - Omkodat ljud: AAC-kodarens inledande ram (1024 prov) får negativ tid. Det fick TS-muxern för första segmentet
+//   att skjuta fram hela segmentet ~0,02 s, så att det överlappade nästa (vid 50 bilder/s en hel bild).
+//   Ljudet läggs i stället 1024 prov senare (ca 0,02 s, omärkbart) i alla körningar.
+const transcodeAudio = (d) => d.audio === '' ? [] : d.audioMode === 'copy' ? ['-copypriorss:a', '0'] : ['-af', 'asetpts=PTS+1024/SR/TB'];
+
 function audioArgs(d) {
   const map = d.audio !== '' ? ['-map', `0:${parseInt(d.audio)}`] : ['-map', '0:a:0?'];
   if (d.audioMode === 'copy') return [...map, '-c:a', 'copy'];
@@ -617,6 +631,11 @@ const segExt = (s) => s.d.fmt === 'fmp4' ? 'm4s' : 'ts';
 const segFile = (s, n) => path.join(s.dir, `seg_${String(n).padStart(5, '0')}.${segExt(s)}`);
 const initFile = (s) => { try { const f = fs.readdirSync(s.dir).find(x => /^init_\d+\.mp4$/.test(x)); return f ? path.join(s.dir, f) : null; } catch { return null; } };
 
+// Remux efter spolning: bilden kopieras från nyckelbilden före -ss, men konverterat ljud (AC-3/DTS → AAC) klipptes
+// exakt vid -ss – de första ~0,25 s av segmentet blev tysta och ljudet glappade mot föregående segment.
+// Utan exakt sökning avkodas ljudet från samma ställe som bilden.
+const REMUX_SEEK = ['-noaccurate_seek'];
+
 function startFfmpeg(s, it, n) {
   stopProc(s);
   const d = s.d;
@@ -629,7 +648,7 @@ function startFfmpeg(s, it, n) {
     // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6)] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
       '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
       '-output_ts_offset', ss.toFixed(6),
       '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
@@ -644,7 +663,7 @@ function startFfmpeg(s, it, n) {
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segs.slice(n + 1).map(x => Math.max(0.001, x.start - ss - 0.005).toFixed(3));
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6)] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
       '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
@@ -655,10 +674,10 @@ function startFfmpeg(s, it, n) {
     const va = videoArgs(it, d, n === 0);
     const times = segs.slice(n + 1).map(x => Math.max(0.001, x.start - t - 0.005).toFixed(3));
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
-      ...va.filter, ...va.map, ...audioArgs(d), ...va.enc, '-sn', '-dn',
-      // avoid_negative_ts: B-bilder ger negativ DTS i början; utan detta förskjuts hela körningen ~0,08 s
-      // och segmenten från en omstart (spolning) skulle inte passa ihop med de första. (Segment 0 börjar ändå
-      // ~0,08 s sent – TS-muxern inuti skjuter fram det – ett överlapp som spelarna hanterar.)
+      ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d), ...va.enc, '-sn', '-dn',
+      // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
+      // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
+      // börjar aldrig före 0 (transcodeAudio), så inget behöver förskjutas.
       '-output_ts_offset', String(t), '-muxdelay', '0', '-muxpreload', '0', '-avoid_negative_ts', 'disabled',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
