@@ -241,3 +241,24 @@ test('tonmappning fungerar även när bilderna saknar färginformation (som efte
   const p = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=color_transfer,pix_fmt', '-of', 'csv=p=0', out]).toString().trim();
   assert.equal(p, 'yuv420p,bt709');
 });
+
+test('HEVC i fMP4: initsegmentet får Apples tagg även när ffmpeg skrev hev1', async (t) => {
+  const st = await import('../server/stream.js');
+  const src = path.join(dir, 'hev1.mp4');
+  try { ff('-f', 'lavfi', '-i', 'testsrc2=s=128x72:r=24:d=1', '-c:v', 'libx265', '-x265-params', 'log-level=error', '-tag:v', 'hev1', '-movflags', '+frag_keyframe+empty_moov', '-frames:v', '1', src); }
+  catch { return t.skip('libx265 saknas'); }
+  const moov = fs.readFileSync(src);
+  const tag = (b) => { const f = path.join(dir, 'tagged.mp4'); fs.writeFileSync(f, b);
+    return execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=codec_tag_string,codec_name', '-of', 'csv=p=0', f]).toString().trim(); };
+  assert.equal(tag(moov), 'hevc,hev1');
+  assert.equal(tag(st.hevcTag(Buffer.from(moov), 'dvh1')), 'hevc,dvh1');
+  assert.equal(tag(st.hevcTag(Buffer.from(moov), 'hvc1')), 'hevc,hvc1');
+  // hvcC: alla parameteruppsättningar markerade som kompletta
+  const b = st.hevcTag(Buffer.from(moov), 'hvc1'), c = b.indexOf('hvcC') + 4;
+  let q = c + 23;
+  for (let i = 0; i < b[c + 22]; i++) { assert.ok(b[q] & 0x80, `array ${i} komplett`); const n = b.readUInt16BE(q + 1); q += 3; for (let j = 0; j < n; j++) q += 2 + b.readUInt16BE(q); }
+  // ljud och annat lämnas orört
+  const aac = path.join(dir, 'aac.mp4');
+  ff('-f', 'lavfi', '-i', 'sine=d=0.2', '-c:a', 'aac', aac);
+  assert.deepEqual(st.hevcTag(fs.readFileSync(aac), 'dvh1'), fs.readFileSync(aac));
+});

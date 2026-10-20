@@ -843,7 +843,36 @@ export async function serveInit(req, res, it, query, userId) {
     s.last = Date.now();
     await new Promise(r => setTimeout(r, 100));
   }
-  sendSegment(req, res, initFile(s), 'video/mp4');
+  let buf; try { buf = fs.readFileSync(initFile(s)); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
+  buf = hevcTag(buf, s.d.tag || 'hvc1');
+  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
+  res.end(req.method === 'HEAD' ? undefined : buf);
+}
+
+// ffmpeg 5.1:s mov-muxer känner inte till dvh1 och skriver då hev1, som Apple inte spelar. Sätt provpostens
+// typ till önskad tagg och markera parameteruppsättningarna i hvcC som kompletta (krävs för hvc1/dvh1 –
+// ffmpeg lägger alltid VPS/SPS/PPS där vid kopiering). Rör bara HEVC-poster; övrigt lämnas orört.
+export function hevcTag(buf, tag) {
+  const HEVC = ['hev1', 'hvc1', 'dvh1', 'dvhe'];
+  for (let o = buf.indexOf('stsd'); o >= 4; o = buf.indexOf('stsd', o + 4)) {
+    const e = o + 12; // 4 typ + 4 version/flaggor + 4 antal → första postens storlek
+    if (e + 8 > buf.length) break;
+    const type = buf.toString('latin1', e + 4, e + 8);
+    if (!HEVC.includes(type) || type === tag) continue;
+    const end = Math.min(buf.length, e + buf.readUInt32BE(e));
+    buf.write(tag, e + 4, 'latin1');
+    // hvcC ligger efter VisualSampleEntry (78 byte) – leta efter den inom posten
+    const h = buf.indexOf('hvcC', e + 8);
+    if (h < 0 || h + 27 > end) continue;
+    const c = h + 4; // början på HEVCDecoderConfigurationRecord
+    let q = c + 23;
+    for (let i = 0, n = buf[c + 22]; i < n && q + 3 <= end; i++) {
+      buf[q] |= 0x80;
+      const cnt = buf.readUInt16BE(q + 1); q += 3;
+      for (let j = 0; j < cnt && q + 2 <= end; j++) q += 2 + buf.readUInt16BE(q);
+    }
+  }
+  return buf;
 }
 
 export async function serveSegment(req, res, it, n, query, userId) {
