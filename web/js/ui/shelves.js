@@ -86,7 +86,13 @@ function onKey(e) {
   const from = e.target;
   if (!from?.matches?.('.card > .clink') || !main.contains(from)) return;
   const to = nearest(from, d);
-  if (!to) return;
+  if (!to) {
+    // ↑ från översta raden: till området ovanför korten som tar emot fokus (data-nav-up, t.ex. Utvalt på startsidan)
+    const up = e.key === 'ArrowUp' && main.querySelector('[data-nav-up]');
+    const t = up && [...up.querySelectorAll('button, a[href]')].find(x => !x.disabled && !x.closest('[inert]'));
+    if (t) { e.preventDefault(); t.focus({ preventScroll: true }); up.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); }
+    return;
+  }
   e.preventDefault();
   to.focus({ preventScroll: true });
   to.closest('.card').scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });

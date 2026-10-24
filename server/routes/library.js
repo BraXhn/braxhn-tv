@@ -18,9 +18,10 @@ import * as screen from '../screentime.js';
 import * as follows from '../follows.js';
 import * as ccol from '../customcollections.js';
 import * as calendar from '../calendar.js';
+import * as homes from '../homeshelves.js';
 import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
-import { insideMedia, MEDIA_ROOT, ctx, listItems, recommend, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
+import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
 
 // Bibliotek
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
@@ -96,7 +97,6 @@ route('GET', '/api/home', user, (c) => {
     return row;
   });
   const watchlist = listItems(uid, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 30);
-  const recommended = recommend(uid, 20);
   const forYou = listItems(uid, follows.FOR_YOU_WHERE, [], follows.FOR_YOU_ORDER, 30);
   // Egna samlingar med "Visa på startsidan" (nytt fält – apparna läser det inte)
   const customCollections = ccol.homeShelves(c.user, !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)));
@@ -104,7 +104,22 @@ route('GET', '/api/home', user, (c) => {
   const today = calendar.ymd();
   const upcoming = calendar.entries(uid, today, calendar.addDays(today, 6), { allowed: (x) => allowedFor(uid, x), kid: maxAgeOf(uid) != null,
     sonarrList: calendar.sonarrCached(), limit: 30 });
-  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming });
+  // Tematiska hyllor, Utvalt och användarens ordning (nya fält – apparna läser dem inte). Dolda hyllor räknas inte.
+  // Rekommenderat för dig räknas och cachas tillsammans med dem (themed).
+  const homeLayout = homes.getLayout(uid);
+  const off = new Set(homeLayout.hidden);
+  const th = homes.themed(uid, { hidden: homeLayout.hero === 'off' ? [...homeLayout.hidden, 'hero'] : homeLayout.hidden });
+  const recommended = th.recommended;
+  const featured = homeLayout.hero === 'off' ? [] : homes.featured(uid, recommended, th.heroIds);
+  const listening = off.has('listening') ? [] : homes.listening(uid);
+  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming,
+    featured, because: th.because, topRated: th.topRated, hiddenGems: th.hiddenGems, shortTonight: th.shortTonight, onThisDay: th.onThisDay,
+    genreOfDay: th.genreOfDay, listening, homeLayout });
+});
+// Startsidans ordning, dolda hyllor och Utvalt per användare (följer med mellan enheter)
+route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayout(c.user.id)));
+route('PUT', '/api/me/home-layout', user, async (c) => {
+  try { send(c.res, 200, homes.setLayout(c.user.id, await readJson(c.req))); } catch (e) { fail(c.res, 400, e.message); }
 });
 const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title' };
 route('GET', '/api/libraries/:id/items', user, (c) => {

@@ -17,6 +17,7 @@ import * as bookmeta from './bookmeta.js';
 import * as follows from './follows.js';
 import * as calendar from './calendar.js';
 import { allowedFor, clearRecommendations } from './http/context.js';
+import { clearHome } from './homeshelves.js';
 import * as colors from './imgcolor.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
@@ -43,7 +44,7 @@ hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 // Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
-hooks.afterScan = () => { clearRecommendations(); refreshKeys(null, Infinity); return arr.markAvailable(); };
+hooks.afterScan = () => { clearRecommendations(); clearHome(); refreshKeys(null, Infinity); return arr.markAvailable(); };
 // Metadata och kapitel från nätet hämtas i bakgrunden efter skanningen (väntar inte – skanningskön går vidare)
 hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
