@@ -137,6 +137,48 @@ t('remux: segmentgränser följer nyckelbilder, även efter spolning', async () 
   }
 });
 
+t('nattläge och tydligare dialog: ljudet omkodas med filter, bilden kopieras (TS och fMP4)', async () => {
+  const items = (await req('/api/libraries/1/items')).data.items;
+  const probe = (f) => execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,codec_tag_string,channels,width', '-of', 'csv=p=0', f]).toString();
+  // H.264 + AC-3 till en enhet som klarar AC-3: utan nattläge skickas ljudet orört
+  const rf = items.find(i => i.title === 'Remux Film');
+  const caps = 'c=mp4&v=h264&a=aac,ac3';
+  const plain = (await req(`/api/items/${rf.id}/playback?${caps}`)).data;
+  assert.equal(plain.mode, 'remux'); assert.match(plain.url, /am=copy/); assert.doesNotMatch(plain.url, /night=/);
+  const pb = (await req(`/api/items/${rf.id}/playback?${caps}&night=1`)).data;
+  assert.equal(pb.mode, 'remux'); assert.match(pb.url, /am=aac/); assert.match(pb.url, /night=1/);
+  assert.ok(pb.reasons.includes('nattläge'), pb.reasons.join(', '));
+  const idx = pb.url.replace('master.m3u8', 'index.m3u8');
+  assert.match((await req(pb.url)).data.toString(), /index\.m3u8\?.*night=1/);
+  for (const n of [0, 2]) {
+    const r = await req(idx.replace('index.m3u8', `seg-${n}.ts`));
+    assert.equal(r.status, 200);
+    const f = path.join(ROOT, `night${n}.ts`); fs.writeFileSync(f, r.data);
+    const info = probe(f);
+    assert.match(info, /^h264,.*640$/m, info);      // bilden kopierad i originalstorlek
+    assert.match(info, /^aac,.*,2$/m, info);          // AC-3 omkodat till AAC stereo
+  }
+  // MP4 som annars spelas direkt går via HLS (filen har för få nyckelbilder för remux och omkodas)
+  const direct = items.find(i => i.title === 'Direkt');
+  const dp = (await req(`/api/items/${direct.id}/playback?dialog=1`)).data;
+  assert.notEqual(dp.mode, 'direct'); assert.match(dp.url, /dialog=1/);
+  const ds = await req(dp.url.replace('master.m3u8', 'seg-0.ts'));
+  assert.equal(ds.status, 200);
+  const df = path.join(ROOT, 'dialog.ts'); fs.writeFileSync(df, ds.data);
+  assert.match(probe(df), /^aac,.*,2$/m);
+  // HEVC + E-AC-3 5.1 till Apple-enhet: fMP4 med kopierad HEVC och dialogförstärkt AAC stereo (centerkanalen)
+  const hf = items.find(i => i.title === 'Hevc Film');
+  const hp = (await req(`/api/items/${hf.id}/playback?c=mp4&v=h264,hevc&a=aac,ac3,eac3&hdr=1&dialog=1&night=1`)).data;
+  assert.equal(hp.mode, 'remux'); assert.match(hp.url, /fmt=fmp4/); assert.match(hp.url, /am=aac/);
+  const q = hp.url.split('?')[1];
+  const init = (await req(`/api/stream/${hf.id}/hls/init.mp4?${q}`)).data;
+  const seg = (await req(`/api/stream/${hf.id}/hls/seg-1.m4s?${q}`)).data;
+  assert.ok(init.length > 500 && seg.length > 1000);
+  const f = path.join(ROOT, 'dialog.mp4'); fs.writeFileSync(f, Buffer.concat([init, seg]));
+  const info = probe(f);
+  assert.match(info, /^hevc,hvc1,640$/m, info); assert.match(info, /^aac,.*,2$/m, info);
+});
+
 t('intro hittas automatiskt', async () => {
   for (let i = 0; i < 90; i++) {
     const show = (await req('/api/libraries/2/items')).data.items[0];

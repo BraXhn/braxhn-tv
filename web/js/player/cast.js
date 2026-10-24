@@ -1,6 +1,7 @@
 // Chromecast
 import { $$, api, status, sxe, toast } from '../core.js';
 import { P, closePlayer } from './video.js';
+import { serverFxParams } from './comfort.js';
 
 // ---------- Chromecast ----------
 export let castReady = false;
@@ -26,7 +27,7 @@ export async function castItem(it, position) {
   const sess = ctx.getCurrentSession(); if (!sess) return;
   // Default Media Receiver: H.264/VP8/VP9 + AAC/MP3/Opus i MP4/WebM eller HLS
   const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: P?.audio || '', q: P?.q === 'auto' ? '' : (P?.q || ''),
-    ...(it.version ? { version: it.version } : {}) }), { bg: true });
+    ...(it.version ? { version: it.version } : {}), ...serverFxParams(true) }), { bg: true }); // nattläge/dialog: servern filtrerar
   const origin = status.publicUrl || location.origin;
   const mi = new chrome.cast.media.MediaInfo(origin + p.url, p.mime);
   mi.streamType = chrome.cast.media.StreamType.BUFFERED;

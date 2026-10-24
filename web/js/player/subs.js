@@ -1,6 +1,7 @@
 // Undertexter i videospelaren, inklusive bildundertexter (PGS)
 import { $, $$, esc, toast } from '../core.js';
 import { P } from './video.js';
+import { subScale, subStyle } from './comfort.js';
 
 export function setSubs() {
   if (!P) return;
@@ -36,7 +37,10 @@ export function setSubs() {
 export function textStop(cur) {
   const g = cur?.txt; if (!g) return;
   clearTimeout(g.timer);
-  $('#vid', cur.el)?.removeEventListener('seeked', g.seek);
+  const v = $('#vid', cur.el);
+  v?.removeEventListener('seeked', g.seek);
+  v?.removeEventListener('webkitbeginfullscreen', g.fs); v?.removeEventListener('webkitendfullscreen', g.fs);
+  const box = $('#subtxt', cur.el); if (box) box.textContent = '';
   if (g.blob) URL.revokeObjectURL(g.blob);
   cur.txt = null;
 }
@@ -44,8 +48,27 @@ function textShow(sub) {
   const cur = P; if (!cur) return;
   textStop(cur);
   const v = $('#vid', cur.el);
-  const g = cur.txt = { sub, timer: null, blob: null, done: false };
+  const g = cur.txt = { sub, timer: null, blob: null, done: false, track: null };
   const live = () => P === cur && cur.txt === g;
+  // Texten ritas av spelaren själv (storlek, färg, bakgrund och lyft över kontrollerna enligt användarens val).
+  // Bara i iPhones egen helskärm för video – där syns inget ovanpå – visar webbläsaren spåret (::cue i style.css).
+  const box = $('#subtxt', cur.el);
+  const native = () => !box || !!v.webkitDisplayingFullscreen;
+  const render = () => {
+    if (!live() || !box) return;
+    const cues = native() ? [] : [...(g.track?.activeCues || [])];
+    box.textContent = '';
+    // Rader som undertexten själv placerat högt upp i bilden (skyltar) ritas överst
+    box.classList.toggle('top', cues.length > 0 && cues.every(c => typeof c.line === 'number' && (c.snapToLines ? c.line >= 0 : c.line < 40)));
+    for (const c of cues) {
+      const line = document.createElement('div'), span = document.createElement('span');
+      // getCueAsHTML ger bara textnoder och kursiv/fet/understruken – ingen HTML från filen tolkas
+      try { span.append(c.getCueAsHTML()); } catch { span.textContent = String(c.text || '').replace(/<[^>]+>/g, ''); }
+      line.append(span); box.append(line);
+    }
+  };
+  g.fs = () => { if (g.track) g.track.mode = native() ? 'showing' : 'hidden'; render(); };
+  v.addEventListener('webkitbeginfullscreen', g.fs); v.addEventListener('webkitendfullscreen', g.fs);
   const base = sub.url + (sub.url.includes('?') ? '&' : '?') + (cur.offset ? 'offset=' + cur.offset + '&' : '') + 'live=1';
   const load = async () => {
     clearTimeout(g.timer);
@@ -59,16 +82,19 @@ function textShow(sub) {
     const url = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
     const old = [...$$('track', v)].filter(t => t.kind === 'subtitles'), oldBlob = g.blob;
     const t = document.createElement('track');
-    Object.assign(t, { kind: 'subtitles', src: url, default: true, label: sub.label, srclang: sub.lang || 'und' });
+    Object.assign(t, { kind: 'subtitles', src: url, label: sub.label, srclang: sub.lang || 'und' });
     v.append(t); g.blob = url;
+    // Ett spår laddas bara när det inte är avstängt; dolt = webbläsaren ritar inget själv
+    t.track.mode = native() ? 'showing' : 'hidden';
     const show = () => {
       if (!live()) return;
-      t.track.mode = 'showing';
+      t.track.mode = native() ? 'showing' : 'hidden';
+      g.track = t.track; t.track.oncuechange = render; render();
       // Det gamla spåret tas bort först när det nya är laddat (annars blinkar texten bort)
       old.forEach(o => { if (o.track) o.track.mode = 'disabled'; o.remove(); });
       if (oldBlob) URL.revokeObjectURL(oldBlob);
     };
-    t.addEventListener('load', show); setTimeout(() => t.track && t.track.mode !== 'showing' && show(), 300);
+    t.addEventListener('load', show); setTimeout(() => t.track && g.track !== t.track && show(), 300);
     g.done = done;
     if (!done) g.timer = setTimeout(load, /-->/.test(text) ? 4000 : 1000);
   };
@@ -113,7 +139,8 @@ function pgsShow(sub) {
     const k = find(v.currentTime - (cur.offset || 0));
     // Bildens yta i elementet (videon skalas in med svarta kanter)
     const W = g.data.w || v.videoWidth, H = g.data.h || v.videoHeight;
-    const key = `${k}:${v.clientWidth}x${v.clientHeight}:${v.videoWidth}x${v.videoHeight}`;
+    const st = subStyle(), f = subScale(), pos = +st.pos / 100;
+    const key = `${k}:${v.clientWidth}x${v.clientHeight}:${v.videoWidth}x${v.videoHeight}:${st.size}:${st.pos}`;
     if (key === g.shown) return;
     g.shown = key;
     if (k < 0 || !W || !H) { box.innerHTML = ''; return; }
@@ -126,8 +153,21 @@ function pgsShow(sub) {
     const sc = W / H <= ar + 0.01 ? dw / W : dh / H;
     const ox = (v.clientWidth - W * sc) / 2, oy = (v.clientHeight - H * sc) / 2;
     const clamp = (a, lo, hi) => Math.max(lo, Math.min(a, hi));
-    box.innerHTML = g.data.cues[k].i.map(([x, y, w, h, n]) =>
-      `<img alt="" src="${esc(imgUrl(n))}" style="left:${clamp(ox + x * sc, 0, v.clientWidth - w * sc).toFixed(1)}px;top:${clamp(oy + y * sc, 0, v.clientHeight - h * sc).toFixed(1)}px;width:${(w * sc).toFixed(1)}px;height:${(h * sc).toFixed(1)}px">`).join('');
+    // Vald textstorlek: bilderna i nedre halvan skalas runt sin nederkant och mitt och lyfts enligt vald placering;
+    // när kontrollerna syns flyttas de upp över dem (--lift, style.css). Bilder högt upp lämnas orörda.
+    const CW = v.clientWidth, CH = v.clientHeight;
+    const ctlh = $('#ctl', cur.el)?.offsetHeight || 0;
+    box.innerHTML = g.data.cues[k].i.map(([x, y, w, h, n]) => {
+      let bw = w * sc, bh = h * sc, l = ox + x * sc, t = oy + y * sc, lo = '';
+      if (t + bh / 2 > CH / 2) {
+        const cx = l + bw / 2, bot = t + bh - pos * CH;
+        const ff = Math.min(f, Math.max(1, CW * 0.96 / bw)); // aldrig bredare än bilden
+        bw *= ff; bh *= ff; l = cx - bw / 2; t = bot - bh;
+        lo = ` class="lo" style="--lift:${Math.max(0, ctlh + 8 - (CH - clamp(t, 0, CH - bh) - bh)).toFixed(0)}px;`;
+      }
+      const geo = `left:${clamp(l, 0, CW - bw).toFixed(1)}px;top:${clamp(t, 0, CH - bh).toFixed(1)}px;width:${bw.toFixed(1)}px;height:${bh.toFixed(1)}px">`;
+      return `<img alt="" src="${esc(imgUrl(n))}"${lo || ' style="'}${geo}`;
+    }).join('');
     // Hämta de närmaste bilderna i förväg
     for (const c of g.data.cues.slice(k + 1, k + 3)) for (const it of c.i) new Image().src = imgUrl(it[4]);
   };
@@ -148,4 +188,9 @@ function pgsShow(sub) {
   g.seek = () => { if (g.data && !g.data.done) poll(); };
   v.addEventListener('seeked', g.seek);
   poll();
+}
+
+/** Nytt utseende valt: textundertexten följer CSS-variablerna direkt, bildundertexten ritas om */
+export function restyleSubs() {
+  const g = P?.pgs; if (g?.draw) { g.shown = null; g.draw(); }
 }

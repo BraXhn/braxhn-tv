@@ -8,6 +8,7 @@ import { confirmDialog, formDialog, openDialog, promptDialog } from '../ui/dialo
 import { loadingState } from '../ui/states.js';
 import { calendarFeedPanel } from './calendar.js';
 import { loadQr } from './quickconnect.js';
+import { applySubStyle, audioFx, bindSubStyleFields, setAudioFx, subStyleFields, webAudioFx } from '../player/comfort.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
   setup: 'Server konfigurerad', password_changed: 'Lösenord bytt', '2fa_enabled': '2FA aktiverad', '2fa_disabled': '2FA avstängd',
@@ -49,6 +50,14 @@ views.account = async () => {
   <div class="panel"><h2>Årssammanfattning</h2>
     <p class="muted small">Det du har sett och lyssnat på mest under året: titlar, timmar, favoritgenre, musik och ljudböcker.</p>
     <div class="row"><a class="btn" href="#/wrapped/${new Date().getFullYear()}">Visa ${new Date().getFullYear()}</a></div></div>
+  <div class="panel"><h2>Undertexter och ljud i spelaren</h2>
+    <p class="muted small">Gäller filmer och serier i webbläsaren på den här enheten och sparas för ditt konto. Du kan också ändra det under ⚙ medan du tittar.</p>
+    <div class="subprev" id="subprev"><div class="subtxt"><div><span>Så här ser undertexten ut.</span></div></div></div>
+    <div class="row substyle">${subStyleFields('ast')}</div>
+    <div class="row" style="margin-top:10px;gap:18px">
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="anight"> Nattläge – jämnare ljud, svaga ljud lyfts</label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="adialog"> Tydligare dialog – rösterna förstärks</label></div>
+    ${webAudioFx ? '' : '<p class="muted small">I Safari görs nattläge och tydligare dialog av servern: ljudet omkodas, bilden kopieras.</p>'}</div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
       <div class="row"><button class="ghost" id="newrc">Skapa nya reservkoder</button><button class="danger" id="off">Stäng av</button></div>`
@@ -164,6 +173,10 @@ views.account = async () => {
     const password = await promptDialog('Ditt lösenord', { title: 'Skapa nya reservkoder', type: 'password', required: true, okLabel: 'Skapa' }); if (!password) return;
     try { const r = await api('/me/2fa/recovery', { method: 'POST', body: { password } }); showCodes(r.recoveryCodes); } catch (e) { toastErr(e); }
   };
+  const prev = $('#subprev');
+  applySubStyle(prev); bindSubStyleFields(main, () => applySubStyle(prev));
+  const fx = audioFx(); $('#anight').checked = fx.night; $('#adialog').checked = fx.dialog;
+  $('#anight').onchange = $('#adialog').onchange = () => setAudioFx({ night: $('#anight').checked, dialog: $('#adialog').checked });
   await accountExtras();
 };
 

@@ -406,7 +406,9 @@ export function parseCaps(q, ua = '') {
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', sub: String(q.get('sub') || '').slice(0, 10),
     hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || '',
     // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
-    nativeHls: q.get('nhls') === '1'
+    nativeHls: q.get('nhls') === '1',
+    // Tittarkomfort: nattläge (jämnare ljudnivå) och tydligare dialog – ljudet omkodas med filter
+    night: q.get('night') === '1', dialog: q.get('dialog') === '1'
   };
 }
 
@@ -434,7 +436,11 @@ export function decide(it, o) {
   const audioDefault = !aSel || aSel === defAudio;
   let mode, fmt = 'ts', tag = '';
   let am = audioPlan(aSel, o);
-  if (!burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
+  // Nattläge/tydligare dialog: ljudet filtreras och blir AAC stereo, så filen kan inte skickas direkt –
+  // bilden kopieras ändå när det går (remux)
+  const comfort = !!(aSel && (o.night || o.dialog));
+  if (comfort) am = 'aac';
+  if (!comfort && !burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
@@ -455,11 +461,13 @@ export function decide(it, o) {
     else reasons.push('formatet stöds inte direkt');
   }
   if ((mode === 'remux' || mode === 'transcode') && !o.assumeKf) computeKeyframes(it).catch(() => {});
+  if (comfort) reasons.push(o.night && o.dialog ? 'nattläge och tydligare dialog' : o.night ? 'nattläge' : 'tydligare dialog');
   // Utanför hemmet vid omkodning: ljudet blir AAC stereo 128 kbit/s (surround och Dolby tar 0,4–0,6 Mbit/s
   // som behövs bättre till bilden på en mobil uppkoppling)
   let ab = null;
   if (o.remote && mode === 'transcode') { if (am !== 'aac') reasons.push('ljudet blir stereo för mobil uppkoppling'); am = 'aac'; ab = 128; }
-  return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null };
+  return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null,
+    night: comfort && !!o.night, dialog: comfort && !!o.dialog };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
 // Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo
@@ -480,6 +488,8 @@ export function hlsParams(d, o, token) {
   // Anpassningsbar kvalitet: mastern listar även lägre steg (bara vid omkodning med automatisk kvalitet)
   if (d.abr && d.mode === 'transcode') p.set('abr', '1');
   if (d.ab) p.set('ab', String(d.ab));
+  if (d.night) p.set('night', '1');
+  if (d.dialog) p.set('dialog', '1');
   // Uppmätt bandbredd (kbit/s): mastern listar steget som passar först (Apple-enheter börjar på första varianten)
   if (d.startBw) p.set('sbw', String(d.startBw));
   if (o.hlsSubs) p.set('hlssubs', '1');
@@ -496,7 +506,8 @@ function readParams(q) {
     vr: ['PQ', 'HLG'].includes(q.get('vr')) ? q.get('vr') : '',
     pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1',
     ab: [96, 128, 160, 192].includes(+q.get('ab')) ? +q.get('ab') : null,
-    startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null
+    startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null,
+    night: q.get('night') === '1', dialog: q.get('dialog') === '1'
   };
 }
 const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
@@ -674,7 +685,28 @@ function videoArgs(it, d, fromStart) {
 // - Omkodat ljud: AAC-kodarens inledande ram (1024 prov) får negativ tid. Det fick TS-muxern för första segmentet
 //   att skjuta fram hela segmentet ~0,02 s, så att det överlappade nästa (vid 50 bilder/s en hel bild).
 //   Ljudet läggs i stället 1024 prov senare (ca 0,02 s, omärkbart) i alla körningar.
-const transcodeAudio = (d) => d.audio === '' ? [] : d.audioMode === 'copy' ? ['-copypriorss:a', '0'] : ['-af', 'asetpts=PTS+1024/SR/TB'];
+const transcodeAudio = (d, it) => d.audio === '' ? [] : d.audioMode === 'copy' ? ['-copypriorss:a', '0'] : ['-af', [...comfortFilters(d, it), 'asetpts=PTS+1024/SR/TB'].join(',')];
+
+// Nattläge och tydligare dialog. Filtren ändrar inte tidsstämplarna (limiterns 5 ms fördröjning gör ljudet
+// senare, aldrig tidigare än bilden). Surround (5.1/7.1 i standardordning FL FR FC LFE …) mixas ner med
+// centerkanalen – där dialogen ligger – förstärkt; kanalerna anges med nummer eftersom 5.1 och 5.1(side)
+// har olika namn på bakkanalerna (BL/SL) men samma ordning.
+export function comfortFilters(d, it) {
+  if (!d.night && !d.dialog) return [];
+  const a = it ? streamsOf(it).find(x => x.type === 'audio' && String(x.index) === String(d.audio)) : null;
+  const ch = a?.channels || 2;
+  const f = [];
+  if (d.dialog && ch === 6) f.push('pan=stereo|c0=c2+0.30*c0+0.30*c4|c1=c2+0.30*c1+0.30*c5');
+  else if (d.dialog && ch === 8) f.push('pan=stereo|c0=c2+0.30*c0+0.20*c4+0.20*c6|c1=c2+0.30*c1+0.20*c5+0.20*c7');
+  // Talets frekvenser (1–4 kHz) lyfts
+  if (d.dialog) f.push('equalizer=f=2000:t=o:w=2:g=5');
+  // Nattläge: kraftig kompression av höga ljud (explosioner) och lyft av svaga (viskningar)
+  if (d.night) f.push('acompressor=threshold=-30dB:ratio=6:attack=5:release=300:makeup=4');
+  else f.push('acompressor=threshold=-24dB:ratio=3:attack=10:release=250:makeup=2');
+  f.push('alimiter=limit=0.95');
+  return f;
+}
+const comfortArgs = (d, it) => { const f = d.audio !== '' && d.audioMode !== 'copy' ? comfortFilters(d, it) : []; return f.length ? ['-af', f.join(',')] : []; };
 
 function audioArgs(d) {
   const map = d.audio !== '' ? ['-map', `0:${parseInt(d.audio)}`] : ['-map', '0:a:0?'];
@@ -707,7 +739,7 @@ function startFfmpeg(s, it, n) {
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
-      '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
+      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
       '-output_ts_offset', ss.toFixed(6),
       '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
       '-start_number', String(n), '-hls_flags', 'temp_file+independent_segments',
@@ -722,7 +754,7 @@ function startFfmpeg(s, it, n) {
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segTimes(segs, n, ss);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
-      '-map', '0:v:0', ...audioArgs(d), '-c:v', 'copy', '-sn', '-dn',
+      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
@@ -732,7 +764,7 @@ function startFfmpeg(s, it, n) {
     const va = videoArgs(it, d, n === 0);
     const times = segTimes(segs, n, t);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
-      ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d), ...va.enc, '-sn', '-dn',
+      ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
       // börjar aldrig före 0 (transcodeAudio), så inget behöver förskjutas.
@@ -839,7 +871,7 @@ function ensureCapacity(s, userId) {
 function sessionFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.pid ? '-' + d.pid : ''}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0,
