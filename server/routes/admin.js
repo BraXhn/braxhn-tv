@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream';
 import { getSetting, setSetting, all, run, now, get, tx, RESTORE_FILE } from '../db.js';
 import { send, readJson, fail, isLocalReq, isHttps, clientIp, peerIp, isPrivate } from '../util.js';
-import { audit, weakPassword, hashPw, require2faRemote } from '../auth.js';
+import { audit, weakPassword, hashPw, require2faRemote, quickConnectOn } from '../auth.js';
 import { autoSubs, scan } from '../scanner.js';
 import * as st from '../stream.js';
 import * as act from '../activity.js';
@@ -115,7 +115,7 @@ route('GET', '/api/settings', admin, (c) => {
     subAutoMax: +getSetting('sub_auto_max', '10'), subAutoStats: autoSubs,
     remoteQuality: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''),
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
-    adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
+    adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
     watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
@@ -150,6 +150,7 @@ route('PUT', '/api/settings', admin, async (c) => {
     setSetting('trust_vpn_range', b.trustVpnRange ? '1' : '0');
   }
   if (b.require2faRemote != null) setSetting('require_2fa_remote', b.require2faRemote ? '1' : '0');
+  if (b.quickConnect != null) setSetting('quick_connect', b.quickConnect ? '1' : '0');
   if (typeof b.trustedNetworks === 'string') {
     const nets = b.trustedNetworks.split(',').map(s => s.trim()).filter(Boolean);
     if (nets.some(n => !/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$|^[0-9a-f:]+$/i.test(n))) return fail(c.res, 400, 'Ange nät som t.ex. 10.8.0.0/24, kommaseparerade');

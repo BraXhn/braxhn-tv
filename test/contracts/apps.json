@@ -9,6 +9,11 @@
       "optional": { "user": "@UserInfo.ios", "publicUrl": "string" } },
     "LoginResponse.ios": { "källa": "apps/apple/Shared/Models.swift:16",
       "required": { "token": "string", "user": "@UserInfo.ios" } },
+    "QuickConnectStart.ios": { "källa": "apps/apple/Shared/Models.swift:200",
+      "required": { "secret": "string", "code": "string" } },
+    "QuickConnectPoll.ios": { "källa": "apps/apple/Shared/Models.swift:206",
+      "required": { "status": "string" },
+      "optional": { "token": "string", "user": "@UserInfo.ios" } },
     "Library.ios": { "källa": "apps/apple/Shared/Models.swift:21",
       "required": { "id": "integer", "name": "string", "type": "string" },
       "optional": { "count": "integer" } },
@@ -111,6 +116,11 @@
       "optional": { "needsSetup": "boolean", "version": "string", "user": "@UserInfo.android" } },
     "LoginResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:39",
       "required": { "token": "string", "user": "@UserInfo.android" } },
+    "QuickConnectStart.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:325",
+      "required": { "secret": "string", "code": "string" } },
+    "QuickConnectPoll.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:327",
+      "required": { "status": "string" },
+      "optional": { "token": "string", "user": "@UserInfo.android" } },
     "Library.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:40",
       "required": { "id": "integer", "name": "string", "type": "string" },
       "optional": { "count": "integer" } },
@@ -235,24 +245,30 @@
     "POST /api/login": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:111-114", "body": { "name": "$namn", "password": "$lösenord", "app": true }, "svar": "@LoginResponse.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:222-225", "body": { "name": "$namn", "password": "$lösenord", "app": true }, "svar": "@LoginResponse.android" } },
+    "POST /api/quickconnect": {
+      "ios": { "källa": "apps/apple/Shared/AppModel.swift:220-231 (vy: Views.swift:410)", "body": { "app": true, "name": "Apple TV", "device": "tvOS" }, "svar": "@QuickConnectStart.ios" },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:285-298 (vy: MainActivity.kt:499)", "body": { "app": true, "name": "Pixel", "device": "Google TV" }, "svar": "@QuickConnectStart.android" } },
+    "GET /api/quickconnect/:secret": {
+      "ios": { "källa": "apps/apple/Shared/AppModel.swift:235-245", "svar": "@QuickConnectPoll.ios" },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:301-310", "svar": "@QuickConnectPoll.android" } },
     "POST /api/media-token": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:125", "svar": "@TokenResponse.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:235", "svar": "@TokenResponse.android" } },
     "GET /api/home": {
-      "ios": { "källa": "apps/apple/Shared/Views.swift:271", "svar": "@HomeResponse.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:223", "svar": "@HomeResponse.android" } },
+      "ios": { "källa": "apps/apple/Shared/Views.swift:282", "svar": "@HomeResponse.ios" },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:229", "svar": "@HomeResponse.android" } },
     "GET /api/libraries": {
-      "ios": { "källa": "apps/apple/Shared/Views.swift:272, Listen.swift:503, Music.swift:335", "svar": ["@Library.ios"] },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:223, MusicService.kt:272", "svar": ["@Library.android"] } },
+      "ios": { "källa": "apps/apple/Shared/Views.swift:283, Listen.swift:503, Music.swift:335", "svar": ["@Library.ios"] },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:229, MusicService.kt:272", "svar": ["@Library.android"] } },
     "GET /api/libraries/:id/items": {
-      "ios": { "källa": "apps/apple/Shared/Views.swift:332 (sort: Views.swift:310)", "query": [{ "sort": "title" }, { "sort": "added" }, { "sort": "year" }], "svar": "@LibraryItems.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:258 (sort: :262)", "query": [{ "sort": "title" }, { "sort": "added" }, { "sort": "year" }], "svar": "@LibraryItems.android" } },
+      "ios": { "källa": "apps/apple/Shared/Views.swift:343 (sort: Views.swift:321)", "query": [{ "sort": "title" }, { "sort": "added" }, { "sort": "year" }], "svar": "@LibraryItems.ios" },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:264 (sort: :268)", "query": [{ "sort": "title" }, { "sort": "added" }, { "sort": "year" }], "svar": "@LibraryItems.android" } },
     "GET /api/search": {
-      "ios": { "källa": "apps/apple/Shared/Views.swift:357", "query": { "q": "$sök" }, "svar": ["@MediaItem.ios"] },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:277", "query": { "q": "$sök" }, "svar": ["@MediaItem.android"] } },
+      "ios": { "källa": "apps/apple/Shared/Views.swift:368", "query": { "q": "$sök" }, "svar": ["@MediaItem.ios"] },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:283", "query": { "q": "$sök" }, "svar": ["@MediaItem.android"] } },
     "GET /api/items/:id": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:68, Player.swift:127, :147", "svar": "@MediaItem.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:370, PlayerScreen.kt:84, :90", "svar": "@MediaItem.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:376, PlayerScreen.kt:84, :90", "svar": "@MediaItem.android" } },
     "GET /api/items/:id/playback": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:158 (förmågor: AppModel.swift:154-172; tvOS skickar inte nhls)",
         "query": [{ "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1" },
@@ -373,7 +389,7 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:231", "body": { "position": 6 }, "svar": null } },
 
     "GET /api/live/channels": {
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Live.kt:78, MainActivity.kt:92", "svar": "@LiveChannels.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Live.kt:78, MainActivity.kt:93", "svar": "@LiveChannels.android" } },
     "GET /api/live/logo/:cid": {
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Live.kt:95 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
     "POST /api/live/:cid/play": {

@@ -278,6 +278,36 @@ object Api {
     suspend fun setWatched(id: Int, watched: Boolean) {
         post("/api/items/$id/watched", buildJsonObject { put("watched", JsonPrimitive(watched)) })
     }
+
+    // ---- inloggning med kod (sist i objektet så att radhänvisningarna i test/contracts/apps.json står kvar) ----
+
+    /** Startar inloggning med kod: servern ger en sexsiffrig kod som godkänns från en inloggad telefon eller dator. */
+    suspend fun startQuickConnect(serverInput: String): QuickConnectStart {
+        server.value = normalize(serverInput)
+        val st: ServerStatus = get("/api/status")
+        if (st.needsSetup) throw ApiException("Servern är inte konfigurerad – öppna den i en webbläsare först.")
+        val pm = ctx.packageManager
+        val kind = when {
+            pm.hasSystemFeature("android.hardware.type.automotive") -> "Bil"
+            pm.hasSystemFeature("android.software.leanback") -> "Google TV"
+            else -> "Android"
+        }
+        return json.decodeFromString<QuickConnectStart>(request("/api/quickconnect", "POST", body = buildJsonObject {
+            put("app", true); put("name", android.os.Build.MODEL ?: kind); put("device", kind)
+        }))
+    }
+
+    /** Frågar om koden har godkänts. Vid "approved" sparas token som vid vanlig inloggning. Returnerar status. */
+    suspend fun pollQuickConnect(secret: String): String {
+        val r: QuickConnectPoll = get("/api/quickconnect/$secret")
+        val t = r.token
+        if (r.status == "approved" && t != null) {
+            prefs.edit().putString("server", server.value).putString("token", t).apply()
+            token.value = t
+            refreshImageToken(force = true)
+        }
+        return r.status
+    }
 }
 
 fun formatTime(s: Double): String {
@@ -290,3 +320,8 @@ fun formatDuration(s: Double?): String {
     val m = (s / 60).toInt().coerceAtLeast(1)
     return if (m >= 60) "${m / 60} h ${m % 60} min" else "$m min"
 }
+
+/** Inloggning med kod (POST /api/quickconnect): koden visas, nyckeln används för att polla */
+@Serializable data class QuickConnectStart(val secret: String, val code: String)
+/** GET /api/quickconnect/:secret – status pending/approved/expired; token och user bara vid approved */
+@Serializable data class QuickConnectPoll(val status: String, val token: String? = null, val user: UserInfo? = null)

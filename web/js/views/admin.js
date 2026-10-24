@@ -49,6 +49,7 @@ views.admin = async () => {
   </div>
   <div class="panel"><h2>Säkerhet</h2><form id="secform">
     <label class="switch"><input type="checkbox" id="s2fa" ${S.require2faRemote ? 'checked' : ''}> Kräv tvåstegsverifiering för inloggning utanför hemmet</label>
+    <label class="switch"><input type="checkbox" id="sqc" ${S.quickConnect !== false ? 'checked' : ''}> Tillåt inloggning med kod på TV (en inloggad användare godkänner koden från mobilen)</label>
     <label class="switch"><input type="checkbox" id="sadm" ${S.adminAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Tillåt administration från internet <span class="muted">(rekommenderas inte)</span></label>
     <label class="switch"><input type="checkbox" id="svpn" ${S.trustVpnRange ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Räkna VPN-nätet 100.64.0.0/10 (NetBird/Tailscale) som hemma <span class="muted">(behövs normalt inte om VPN:et routas via routern)</span></label>
     <label>Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="kommaseparerade CIDR">
@@ -196,7 +197,7 @@ views.admin = async () => {
   $$('[data-lout]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Logga ut användaren från alla enheter?', { okLabel: 'Logga ut' })) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } }));
   $('#secform').onsubmit = async (e) => {
     e.preventDefault();
-    const body = { require2faRemote: $('#s2fa').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
+    const body = { require2faRemote: $('#s2fa').checked, quickConnect: $('#sqc').checked, trustedNetworks: $('#stn').value, maxTranscodes: $('#smt').value, maxTranscodesUser: $('#smu').value,
       allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked, trickplay: $('#strick').checked, detectRecap: $('#srecap').checked };
     if (!$('#sadm').disabled) body.adminAnywhere = $('#sadm').checked;
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;

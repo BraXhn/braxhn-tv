@@ -195,3 +195,16 @@ struct APIError: LocalizedError {
 struct TokenResponse: Decodable {
     let token: String
 }
+
+/// Inloggning med kod (POST /api/quickconnect): koden visas på skärmen, nyckeln används för att polla
+struct QuickConnectStart: Decodable {
+    let secret: String
+    let code: String
+}
+
+/// Svar från GET /api/quickconnect/:secret – status pending, approved eller expired; token och user bara vid approved
+struct QuickConnectPoll: Decodable {
+    let status: String
+    let token: String?
+    let user: UserInfo?
+}

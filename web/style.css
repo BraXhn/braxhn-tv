@@ -710,3 +710,11 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
 .art .calwhen{left:0;right:auto;border-radius:0 0 4px 0;font-size:11px;font-weight:700}
 .missing{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 .cals{font-size:13px}
+/* Inloggning med kod (TV) och godkännande */
+.auth.qc-login{max-width:460px;text-align:center}
+.qc-code{font-size:clamp(40px,11vw,72px);font-weight:800;letter-spacing:.12em;font-variant-numeric:tabular-nums;color:var(--text);margin:14px 0 10px;white-space:nowrap}
+.qc-qr{background:#fff;display:inline-block;padding:10px;border-radius:8px;margin:4px auto 8px;line-height:0}
+.qc-qr svg{max-width:100%;height:auto}
+.qc-link{word-break:break-all}
+.qc-input{font-size:24px;letter-spacing:.2em;width:9em;font-variant-numeric:tabular-nums}
+.qc-info th{text-align:left;color:var(--dim);font-weight:500;padding-right:14px}
