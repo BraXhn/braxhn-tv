@@ -75,8 +75,9 @@ route('GET', '/api/home', user, (c) => {
   for (const s of shows) {
     if (have.has(s.sid)) continue;
     // Senast sedda avsnittet hämtas separat (som underfråga kördes den en gång per avsnitt – långsamt för långa serier)
-    const last = get(`SELECT MAX(e.season*10000+e.episode) AS m FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=? AND q.watched=1
-      WHERE e.parent_id=?`, uid, s.sid)?.m ?? -1;
+    // CROSS JOIN: seriens avsnitt först, inte alla användarens progress-rader (se PROG i http/context.js)
+    const last = get(`SELECT MAX(e.season*10000+e.episode) AS m FROM items e CROSS JOIN progress q
+      WHERE e.parent_id=? AND q.user_id=? AND q.item_id=e.id AND q.watched=1`, s.sid, uid)?.m ?? -1;
     // Specialavsnitt (säsong 0) föreslås bara när serien inte har några vanliga säsonger
     const next = listItems(uid, `i.parent_id=? AND COALESCE(p.watched,0)=0 AND (i.season*10000+i.episode) > ?
       AND (i.season > 0 OR NOT EXISTS (SELECT 1 FROM items x WHERE x.parent_id=i.parent_id AND x.season > 0))`,

@@ -12,13 +12,34 @@ import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
 import { missingBox } from './calendar.js';
 
+// ---------- "Finns även på" (streamingtjänster för titeln) ----------
+// Här och inte i views/streaming.js: den vyn laddas först när den öppnas, men rutan syns på varje titelsida
+const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Öppna i ${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
+/** Tjänsterna där en titel finns (från /api/items/:id/watch) som HTML, '' om inga */
+export const provBlock = (w) => {
+  if (!w) return '';
+  const sub = [...w.flatrate, ...w.free], pay = [...w.rent, ...w.buy.filter(b => !w.rent.some(r => r.id === b.id))];
+  if (!sub.length && !pay.length) return '';
+  return `${sub.length ? `<div class="provrow"><span class="muted small">Ingår i</span>${provLinks(sub)}</div>` : ''}${pay.length ? `<div class="provrow"><span class="muted small">Hyr/köp</span>${provLinks(pay.slice(0, 6))}</div>` : ''}
+    <div class="muted small" style="margin-top:4px">Uppgifter från JustWatch via TMDB. Öppnas i tjänstens app eller webbplats.</div>`;
+};
+/** Fyller rutan "Finns även på" på titelsidan (anropas av route() när vyn visats) */
+export async function fillWatch() {
+  const el = $('[data-wid]'); if (!el) return;
+  const w = await api(`/items/${el.dataset.wid}/watch`).catch(() => null);
+  const html = provBlock(w);
+  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:15px;margin:14px 0 6px">Finns även på</h3>${html}`;
+}
+
 function heroHtml(it, extra = '') {
   const meta = [it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
     it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
     it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? 'Barntillåten' : it.age + '+'}</span>` : '',
     (it.genres || []).slice(0, 3).map(esc).join(', ')]
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
-  return `<div class="hero">${it.backdrop ? `<div class="bd" style="background-image:url(${heroUrl(`/api/image/${+it.id}/backdrop`)})"></div>` : ''}
+  // Bakgrundens medelfärg (server/imgcolor.js) syns medan bilden laddas
+  const bg = /^#[0-9a-f]{6}$/i.test(it.phBackdrop || '') ? `background-color:${it.phBackdrop};` : '';
+  return `<div class="hero">${it.backdrop ? `<div class="bd" style="${bg}background-image:url(${heroUrl(`/api/image/${+it.id}/backdrop`)})"></div>` : ''}
     <div class="in"><div class="poster card">${art({ ...it, position: 0 }, false, innerWidth <= 700 ? 130 : 210)}</div>
     <div><h1>${esc(it.title)}</h1><div class="meta">${meta}</div>
     ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;

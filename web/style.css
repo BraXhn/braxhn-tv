@@ -129,6 +129,10 @@ label{display:block;font-size:13px;color:var(--dim);margin:12px 0 5px}
 .ep .card .t,.ep .card .s{display:none}
 .art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:10px;text-align:center;overflow:hidden;overflow-wrap:anywhere;
   font-weight:700;font-size:14px;line-height:1.25;background:linear-gradient(150deg,var(--h1),var(--h2));color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+/* Medelfärgen medan bilden laddas: utan titel (som BlurHash) – titeln syns igen om bilden inte gick att hämta */
+.art .ph.c{color:transparent;text-shadow:none}
+.art:not(:has(img)) .ph.c{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+@supports not selector(:has(*)){.art .ph.c{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6)}}
 .art .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,.6)}
 .art .bar i{display:block;height:100%;background:var(--accent)}
 .art .badge,.art .seen{position:absolute;top:0;right:0;min-width:22px;height:22px;padding:0 6px;border-radius:0 0 0 4px;background:rgba(0,0,0,.78);color:#fff;

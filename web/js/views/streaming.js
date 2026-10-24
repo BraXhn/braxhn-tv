@@ -1,25 +1,13 @@
 // Vyer: strömmande tjänster och var en titel finns att se
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, main, me, store, toast, views } from '../core.js';
 import { route } from '../router.js';
 import { REQ_STATUS } from './requests.js';
+import { provBlock } from './item.js';
 import { openDialog } from '../ui/dialog.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
 
 // ---------- streamingtjänster ----------
-const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Öppna i ${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
-const provBlock = (w) => {
-  if (!w) return '';
-  const sub = [...w.flatrate, ...w.free], pay = [...w.rent, ...w.buy.filter(b => !w.rent.some(r => r.id === b.id))];
-  if (!sub.length && !pay.length) return '';
-  return `${sub.length ? `<div class="provrow"><span class="muted small">Ingår i</span>${provLinks(sub)}</div>` : ''}${pay.length ? `<div class="provrow"><span class="muted small">Hyr/köp</span>${provLinks(pay.slice(0, 6))}</div>` : ''}
-    <div class="muted small" style="margin-top:4px">Uppgifter från JustWatch via TMDB. Öppnas i tjänstens app eller webbplats.</div>`;
-};
-export async function fillWatch() {
-  const el = $('[data-wid]'); if (!el) return;
-  const w = await api(`/items/${el.dataset.wid}/watch`).catch(() => null);
-  const html = provBlock(w);
-  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:15px;margin:14px 0 6px">Finns även på</h3>${html}`;
-}
 views.streaming = async () => {
   if (me.kid) { location.hash = '#/'; return; }
   const P_ = await api('/streaming/providers').catch(e => { if (e.aborted) throw e; return { error: e.message }; });

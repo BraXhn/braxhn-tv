@@ -3,7 +3,8 @@
 // Snabb start: appens filer (moduler, stilmall, vendor) laddas från /v/<bygge>/…, där <bygge> är en hash av
 // innehållet i web/. Den adressen ändras aldrig för samma innehåll och cachas därför ett år (immutable) – ett
 // återbesök hämtar ingenting alls. index.html och sw.js har fasta adresser, cachas aldrig och pekar på rätt bygge.
-// Alla moduler förladdas från index.html (modulepreload) i stället för att upptäckas en importnivå i taget.
+// Startens moduler förladdas från index.html (modulepreload) i stället för att upptäckas en importnivå i taget;
+// moduler märkta "// @lazy" (sällan använda vyer, LAZY i web/js/router.js) hämtas först när vyn öppnas.
 // Filerna läses, komprimeras (brotli + gzip) och får sin ETag en gång – inte vid varje förfrågan.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,9 +27,11 @@ function buildId() {
 }
 export const BUILD = buildId();
 const PREFIX = `/v/${BUILD}`;
-// Alla moduler i web/js/ – förladdas från index.html (webbläsaren hämtar dem parallellt direkt)
-const PRELOAD = walk(path.join(WEB, 'js')).filter(f => f.endsWith('.js')).sort()
-  .map(f => `<link rel="modulepreload" href="${PREFIX}/${rel(f)}">`).join('\n');
+// Modulerna i web/js/ som behövs vid start – förladdas från index.html (webbläsaren hämtar dem parallellt direkt).
+// En modul med raden "// @lazy" i början laddas med import() när den behövs och förladdas inte.
+export const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
+export const PRELOAD_FILES = walk(path.join(WEB, 'js')).filter(f => f.endsWith('.js') && !isLazy(fs.readFileSync(f, 'utf8'))).sort().map(rel);
+const PRELOAD = PRELOAD_FILES.map(f => `<link rel="modulepreload" href="${PREFIX}/${f}">`).join('\n');
 
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK)
 const CSP = ["default-src 'self'", "script-src 'self' https://www.gstatic.com",

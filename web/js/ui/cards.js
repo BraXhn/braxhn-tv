@@ -1,5 +1,5 @@
 // Återanvändbara kort och hyllor: titlar, säsonger, samlingar och personer
-import { esc, hue, me, sxe, imgSrc, cardW } from '../core.js';
+import { esc, hue, me, sxe, imgSrc, cardW, routeGen } from '../core.js';
 
 // ---------- kort ----------
 // Titlarna bakom korten som visas just nu – kortens meny (⋮) behöver hela titeln, inte bara id:t
@@ -14,10 +14,25 @@ const SEASONS = new Map();
 export const seasonItem = (show, season) => SEASONS.get(`${+show}:${+season}`);
 
 const PLAY_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-const placeholder = (text) => {
+// Platshållaren: bildens medelfärg från servern (ph, '#rrggbb') medan bilden laddas – som Jellyfins BlurHash –
+// annars en färgplatta med titeln (också när bilden inte går att hämta, se .ph.c i style.css)
+const HEX = /^#[0-9a-f]{6}$/i;
+const placeholder = (text, color) => {
+  if (color && HEX.test(color)) return `<div class="ph c" aria-hidden="true" style="background:${color}">${esc(text)}</div>`;
   const h = hue(text);
   return `<div class="ph" aria-hidden="true" style="--h1:hsl(${h} 30% 30%);--h2:hsl(${(h + 50) % 360} 30% 16%)">${esc(text)}</div>`;
 };
+// De första korten efter en navigering (första hyllan/raden, det man ser direkt) hämtas genast och med hög
+// prioritet; resten laddas när de närmar sig skärmen
+const EAGER = 8;
+let eagerGen = -1, eagerLeft = 0;
+const loadAttr = () => {
+  if (eagerGen !== routeGen) { eagerGen = routeGen; eagerLeft = EAGER; }
+  return eagerLeft-- > 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
+};
+/** Färgen för bilden ett kort visar (pick = poster/thumb/backdrop, own = titelns egen bild, inte seriens) */
+const phOf = (it, pick, own) => !own ? (pick === 'poster' ? it.showPh : null)
+  : pick === 'poster' ? it.ph : pick === 'thumb' ? it.phThumb : pick === 'backdrop' ? it.phBackdrop : null;
 /** Märket uppe till höger: antal osedda avsnitt (mörk ruta) eller ✓ när allt är sett */
 const countBadge = (n) => `<span class="badge" aria-hidden="true">${n}</span>`;
 const seenBadge = () => `<span class="seen" title="Sedd" aria-hidden="true">✓</span>`;
@@ -31,10 +46,11 @@ export function art(it, land, css) {
   let imgId = land && !it.thumb && it.kind === 'episode' && it.show ? null : it.id;
   // Stående avsnittskort (Fortsätt titta): seriens affisch, som i Plex
   if (!land && it.kind === 'episode' && it.show && !it.poster && (it.showPoster || it.showThumb)) { imgId = it.show; pick = it.showPoster ? 'poster' : 'thumb'; }
-  let html = placeholder(it.showTitle || it.title);
+  const show = pick && imgId;
+  let html = placeholder(it.showTitle || it.title, show ? phOf(it, pick, imgId === it.id) : null);
   // width/height ger bildens proportioner i förväg (ingen layoutförskjutning); data-fb tar bort trasiga bilder så att plattan syns.
   // Storleken följer kortet (liggande kort är 1,9 kort breda); rutnätets kort kan bli något bredare än --cw (× 1,2).
-  if (pick && imgId) html += `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${imgId}/${pick}`, css || cardW() * (land ? 1.9 : 1.2))} alt="" width="${land ? 480 : 300}" height="${land ? 270 : 450}" data-fb="1">`;
+  if (show) html += `<img ${loadAttr()} decoding="async" ${imgSrc(`/api/image/${imgId}/${pick}`, css || cardW() * (land ? 1.9 : 1.2))} alt="" width="${land ? 480 : 300}" height="${land ? 270 : 450}" data-fb="1">`;
   if (it.kind === 'show') {
     const left = (it.episodes || 0) - (it.watchedEpisodes || 0);
     if (it.watched) html += seenBadge();
@@ -102,10 +118,10 @@ export function seasonCard(g) {
   const st = g.unwatched > 0 ? `${g.unwatched} ${g.unwatched === 1 ? 'nytt osett avsnitt' : 'nya osedda avsnitt'}` : 'sedd';
   const label = [t, sn, g.latest ? `senaste avsnitt ${g.latest.episode}: ${g.latest.title}` : '', st].filter(Boolean).join(', ');
   const pick = g.showPoster ? 'poster' : g.showThumb ? 'thumb' : '';
-  const img = pick ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+g.show}/${pick}`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : '';
+  const img = pick ? `<img ${loadAttr()} decoding="async" ${imgSrc(`/api/image/${+g.show}/${pick}`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : '';
   const badge = g.unwatched > 0 ? countBadge(g.unwatched) : seenBadge();
   return `<div class="card scard" data-show="${+g.show}" data-season="${+g.season}"><a class="clink" href="#/item/${+g.show}/${+g.season}" aria-label="${esc(label)}">`
-    + `<div class="art">${placeholder(t)}${img}${badge}</div>${textLines(t, s, s2)}</a>`
+    + `<div class="art">${placeholder(t, pick === 'poster' ? g.showPh : null)}${img}${badge}</div>${textLines(t, s, s2)}</a>`
     + overlay({ id: g.show, name: `${t} ${sn}`, play: !!g.next, data: g.next ? `data-cplay="${+g.next.id}" data-pos="${+g.next.position || 0}"` : '', edit: me?.adminHere ? g.show : 0, menu: true })
     + '</div>';
 }
@@ -128,7 +144,7 @@ export function colCard(c) {
   const own = c.kind === 'custom';
   const src = own ? (c.cover ? `/api/image/${+c.cover}/poster` : '') : c.poster ? `/api/collection-image/${+c.id}/poster` : '';
   return `<a class="card${own ? ' ucol' : ''}" href="#/${own ? 'ucollection' : 'collection'}/${+c.id}"><div class="art">${placeholder(c.name)}
-    ${src ? `<img loading="lazy" decoding="async" ${imgSrc(src, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : ''}<span class="badge">${+c.count}</span></div>
+    ${src ? `<img ${loadAttr()} decoding="async" ${imgSrc(src, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : ''}<span class="badge">${+c.count}</span></div>
     <div class="t">${esc(c.name)}</div><div class="s">${c.years?.[0] || ''}${c.years?.[1] && c.years[1] !== c.years[0] ? '–' + c.years[1] : ''}</div></a>`;
 }
 

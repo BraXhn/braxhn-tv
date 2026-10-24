@@ -1,4 +1,5 @@
 // Administration – drift: diskutrymme, import från Plex/Jellyfin, DLNA och Prometheus
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, later, toast } from '../core.js';
 import { confirmDialog } from '../ui/dialog.js';
 import { errorState, loadingState } from '../ui/states.js';

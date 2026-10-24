@@ -84,7 +84,7 @@ test('card: ett namn för länken, menyknapp med aria-label och aria-haspopup, b
   assert.match(h, /<a class="clink" href="#\/item\/7" aria-label="&lt;img[^"]*, 2020, 50 % sett">/);
   assert.match(h, /class="cmenu" data-cmenu="7" aria-haspopup="menu" aria-expanded="false" aria-label="Fler åtgärder för &lt;img/);
   // Bilden hämtas i kortets storlek (standardbredd 125 px × 1,2 → 160 px), inte i full storlek
-  assert.match(h, /<img loading="lazy" decoding="async" src="\/api\/image\/7\/poster\?w=160" alt="" width="300" height="450"/);
+  assert.match(h, /<img loading="(lazy|eager" fetchpriority="high)" decoding="async" src="\/api\/image\/7\/poster\?w=160" alt="" width="300" height="450"/);
   assert.match(card({ ...it, id: 10, kind: 'episode', thumb: true }, true), /src="\/api\/image\/10\/thumb\?w=240"/); // liggande: 1,9 kort
   assert.match(h, /class="bar" aria-hidden="true"/);
   assert.equal(cardItem(7), it);
@@ -149,4 +149,23 @@ test('kortmenyn: valen följer titelns sort och användarens roll', () => {
   assert.ok(!show.includes('Ta bort från Fortsätt titta') && !show.includes('Titta tillsammans…'));
   const ep = labels({ id: 5, kind: 'episode', title: 'Pilot', season: 1, episode: 1, show: 4, position: 0 }, { inWatchlist: false, following: false });
   assert.ok(ep.includes('Markera säsong 1 som sedd') && ep.includes('Gå till serien') && ep.includes('Lägg serien i Min lista'));
+});
+
+test('card: medelfärg som platshållare och de första korten efter en navigering hämtas först', async () => {
+  const { nextRoute } = await import('../web/js/core.js');
+  nextRoute();
+  const html = Array.from({ length: 12 }, (_, i) => card({ id: 100 + i, kind: 'movie', title: 'F' + i, poster: true, ph: '#1a2b3c' })).join('');
+  assert.equal(html.match(/loading="eager" fetchpriority="high"/g).length, 8);
+  assert.equal(html.match(/loading="lazy"/g).length, 4);
+  assert.match(html, /<div class="ph c" aria-hidden="true" style="background:#1a2b3c">F0<\/div>/);
+  // Ny navigering: åter de första åtta
+  nextRoute();
+  assert.match(card({ id: 120, kind: 'movie', title: 'X', poster: true }), /fetchpriority="high"/);
+  // Ogiltig färg ignoreras (ingen HTML-injektion via fältet), och utan bild ingen färg
+  const bad = card({ id: 121, kind: 'movie', title: 'Y', poster: true, ph: 'red;background:url(x)' });
+  assert.doesNotMatch(bad, /class="ph c"/);
+  assert.doesNotMatch(card({ id: 122, kind: 'movie', title: 'Z', poster: false, ph: '#1a2b3c' }), /class="ph c"/);
+  // Stående avsnittskort med seriens affisch: seriens färg
+  assert.match(card({ id: 123, kind: 'episode', title: 'A', show: 5, showTitle: 'S', showPoster: true, ph: '#000000', showPh: '#abcdef', season: 1, episode: 1 }), /background:#abcdef/);
+  assert.match(seasonCard({ show: 6, showTitle: 'S', showPoster: true, showPh: '#123456', season: 1, count: 1, unwatched: 1 }), /background:#123456/);
 });

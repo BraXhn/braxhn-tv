@@ -16,6 +16,7 @@ import * as books from './audiobooks.js';
 import * as follows from './follows.js';
 import * as calendar from './calendar.js';
 import { allowedFor, clearRecommendations } from './http/context.js';
+import * as colors from './imgcolor.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -44,6 +45,8 @@ hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(
 
 // Kalendern: avsnitt och sändningsdatum från TMDB, utspritt (pågående och följda serier en gång per dygn)
 calendar.start();
+// Platshållarfärger för bilder som saknar en (befintliga bibliotek) – i bakgrunden, en bild åt gången
+colors.kick(20000);
 
 // Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)
 setTimeout(() => act.watchLibraries(scan), 5000);

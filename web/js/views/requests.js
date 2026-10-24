@@ -1,4 +1,5 @@
 // Vy: önskningar (filmer och serier som användarna vill ha)
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, main, me, store, toast, views, toastErr } from '../core.js';
 import { route } from '../router.js';
 import { promptDialog } from '../ui/dialog.js';
