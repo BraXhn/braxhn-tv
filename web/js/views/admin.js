@@ -153,6 +153,9 @@ views.admin = async () => {
     <div><label>Max per skanning</label><input id="osam" type="number" min="1" max="100" value="${S.subAutoMax}" style="width:110px"></div></div>
     <label class="switch"><input type="checkbox" id="osah" ${S.subAutoHash ? 'checked' : ''}> Bara exakta träffar (filhash) – rekommenderas, annars kan tiderna vara fel</label>
     <p class="muted small" style="margin:4px 0 0">Hämtade hittills: ${S.subAutoStats.downloaded}${S.subAutoStats.error ? ' · senaste fel: ' + esc(S.subAutoStats.error) : ''}. Gratiskonton får ett begränsat antal nedladdningar per dygn – resten hämtas vid nästa skanning.</p>
+    <h3 style="margin:22px 0 0;font-size:15px">Ljudböcker</h3>
+    <label class="switch"><input type="checkbox" id="bmeta" ${S.bookMeta ? 'checked' : ''}> Hämta beskrivning, omslag, serie och kapitel från nätet (Google Books, Open Library, Audnexus)</label>
+    <p class="muted small" style="margin:4px 0 0">Körs i bakgrunden efter skanningen, en bok i taget. Matchade böcker hämtas inte om – använd <i>Fel bok?</i> på bokens sida.${S.bookMetaStatus?.running ? ` Pågår: ${esc(S.bookMetaStatus.library || '')} ${S.bookMetaStatus.done}/${S.bookMetaStatus.total}.` : ''}${S.bookMetaStatus?.error ? ' Senaste fel: ' + esc(S.bookMetaStatus.error) : ''}</p>
     <h3 style="margin:22px 0 0;font-size:15px">Utanför hemmet</h3>
     <div class="row"><div style="flex:1"><label>Maxkvalitet utanför hemmet (automatisk)</label><select id="rq">
       ${[['orig', 'Original (ingen gräns)'], ['1080', '1080p – 8 Mbit/s'], ['720', '720p – 4 Mbit/s'], ['480', '480p – 1,5 Mbit/s'], ['360', '360p – 0,8 Mbit/s']].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
@@ -275,7 +278,7 @@ views.admin = async () => {
     e.preventDefault();
     const body = { language: $('#lang').value, scanInterval: $('#si').value, osUser: $('#osu').value, subLangs: $('#osl').value,
       remoteQuality: $('#rq').value, publicUrl: $('#pu').value,
-      subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked };
+      subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked, bookMeta: $('#bmeta').checked };
     if ($('#tk').value.trim()) body.tmdbKey = $('#tk').value.trim();
     if ($('#osk').value.trim()) body.osKey = $('#osk').value.trim();
     if ($('#osp').value) body.osPass = $('#osp').value;

@@ -232,6 +232,14 @@ CREATE TABLE IF NOT EXISTS calendar_episodes(show_id INTEGER NOT NULL REFERENCES
   season INTEGER NOT NULL, episode INTEGER NOT NULL, name TEXT, air_date TEXT, PRIMARY KEY(show_id, season, episode));
 CREATE TABLE IF NOT EXISTS calendar_tokens(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   token TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last_used INTEGER);`);
+// Ljudböckernas metadata från nätet (bookmeta.js) och för hand. Egen tabell bredvid books (som skannern äger och skriver om
+// från taggarna): state 0 = inte försökt, 1 = matchad, 2 = ingen träff (tried = senaste försöket); locked = vald för hand
+// ("Fel bok?"), hämtas aldrig om automatiskt; edits = JSON med fält som administratören ändrat ('' = tömt) och som går före allt annat;
+// chapters = kapitel från Audnexus (används bara när filen saknar egna); cover_net = omslaget hämtades från källan.
+db.exec(`CREATE TABLE IF NOT EXISTS book_meta(book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+  state INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0, tried INTEGER, source TEXT, source_id TEXT, src_title TEXT,
+  subtitle TEXT, narrator TEXT, description TEXT, publisher TEXT, year INTEGER, isbn TEXT, asin TEXT, language TEXT, genres TEXT,
+  series TEXT, series_no TEXT, chapters TEXT, cover_net INTEGER NOT NULL DEFAULT 0, edits TEXT);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

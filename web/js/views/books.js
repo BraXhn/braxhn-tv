@@ -1,26 +1,53 @@
 // Vyer: ljudböcker och poddar
-import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, store, toast, views, toastErr } from '../core.js';
+import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, me, store, toast, views, toastErr } from '../core.js';
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
 import { loadLibs, route } from '../router.js';
 import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
-import { confirmDialog, promptDialog } from '../ui/dialog.js';
+import { shelfHtml } from '../ui/cards.js';
+import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 
 // ---------- ljudböcker ----------
 const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:hsl(${hue(String(b.id))} 35% 30%);--h2:hsl(${(hue(String(b.id)) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/audiobooks/cover/${+b.id}`, cls) : `<span>${esc((b.title || '').slice(0, 40))}</span>`}</div>`;
 export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
   <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
-views.books = async (lid) => {
+const seriesLabel = (b) => b.series ? `${b.series}${b.seriesNo ? ` #${b.seriesNo}` : ''}` : '';
+const withNo = (b) => b.seriesNo ? { ...b, author: `#${b.seriesNo} · ${b.author || ''}` } : b;
+// Filter i adressen: #/books/<bibliotek>/serie:<namn> eller /forfattare:<namn> (kodat med encodeURIComponent)
+const filterHash = (lid, kind, name) => `#/books/${+lid}/${encodeURIComponent(`${kind}:${name}`)}`;
+const GROUPS = [['', 'Ingen gruppering'], ['series', 'Per serie'], ['author', 'Per författare']];
+const coll = (a, b) => String(a).localeCompare(String(b), 'sv', { sensitivity: 'base', numeric: true });
+const bySeriesNo = (x, y) => (parseFloat(x.seriesNo) || 1e9) - (parseFloat(y.seriesNo) || 1e9) || coll(x.title, y.title);
+/** Gruppera per serie eller författare: grupper i bokstavsordning, böcker utan serie sist, inom en serie i nummerordning */
+function grouped(list, by) {
+  const m = new Map();
+  for (const b of list) { const k = (by === 'series' ? b.series : b.author) || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(b); }
+  return [...m].sort(([a], [b]) => (!a) - (!b) || coll(a, b)).map(([k, bs]) => [k, by === 'series' && k ? [...bs].sort(bySeriesNo) : bs]);
+}
+views.books = async (lid, filter) => {
   // Utan bibliotek-id (t.ex. #/books): första ljudboksbiblioteket, annars en hänvisning
   if (!lid) { const l = libs.find(x => x.type === 'audiobook'); if (!l) return noLib('ljudböcker', 'Ljudböcker'); location.hash = `#/books/${l.id}`; return; }
-  const sort = store.get('booksort', 'title');
-  const B = await api(`/audiobooks/${lid}?sort=${sort}`);
-  main.innerHTML = `<div class="toolbar"><h1>${esc(B.library.name)}</h1><span class="muted">${B.books.length} böcker</span>
-    <select id="bsort" style="margin-left:auto">${[['title', 'Titel'], ['author', 'Författare'], ['added', 'Senast tillagda'], ['recent', 'Senast lyssnade']].map(([v, n]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    ${B.continue.length ? `<section class="section"><h2>Fortsätt lyssna</h2><div class="shelf">${B.continue.map(bookCard).join('')}</div></section>` : ''}
-    ${B.books.length ? `<div class="grid">${B.books.map(bookCard).join('')}</div>` : emptyState({ icon: '📚', title: 'Inga ljudböcker ännu', html: 'Lägg dem i mappar som <code>Författare/Boktitel/</code> – en .m4b-fil eller flera mp3-filer per bok.' })}`;
-  $('#bsort').onchange = (e) => { store.set('booksort', e.target.value); route(); };
+  let f = null;
+  try { const x = /^(serie|forfattare):(.+)$/s.exec(decodeURIComponent(filter || '')); if (x) f = { kind: x[1], name: x[2] }; } catch {}
+  const sort = store.get('booksort', 'title'), group = f ? '' : store.get('bookgroup', '');
+  const B = await api(`/audiobooks/${lid}?sort=${f ? 'title' : sort}`);
+  const key = (b) => String((f?.kind === 'serie' ? b.series : b.author) || '').toLowerCase();
+  const list = f ? B.books.filter(b => key(b) === f.name.toLowerCase()) : B.books;
+  if (f?.kind === 'serie') list.sort(bySeriesNo);
+  const count = (n) => `${n} ${n === 1 ? 'bok' : 'böcker'}`;
+  const body = !list.length ? emptyState({ icon: '📚', title: f ? 'Inga böcker' : 'Inga ljudböcker ännu', html: f ? '' : 'Lägg dem i mappar som <code>Författare/Boktitel/</code> – en .m4b-fil eller flera mp3-filer per bok.' })
+    : group ? grouped(list, group).map(([k, bs]) => shelfHtml(k || (group === 'series' ? 'Utan serie' : 'Okänd författare'), bs.map(b => bookCard(group === 'series' && k ? withNo(b) : b)).join(''),
+      { more: k ? `<a href="${filterHash(lid, group === 'series' ? 'serie' : 'forfattare', k)}">${count(bs.length)} – visa alla</a>` : `<span class="muted small">${count(bs.length)}</span>` })).join('')
+    : `<div class="grid">${list.map(b => bookCard(f?.kind === 'serie' ? withNo(b) : b)).join('')}</div>`;
+  main.innerHTML = `<div class="toolbar">${f ? `<a class="ghost" href="#/books/${+lid}">← ${esc(B.library.name)}</a><h1>${esc(f.name)}</h1><span class="muted">${f.kind === 'serie' ? 'Serie' : 'Författare'} · ${count(list.length)}</span>`
+    : `<h1>${esc(B.library.name)}</h1><span class="muted">${count(B.books.length)}</span>
+    <div class="row" style="margin-left:auto"><label class="sr-only" for="bgroup">Gruppera</label><select id="bgroup">${GROUPS.map(([v, n]) => `<option value="${v}" ${v === group ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <label class="sr-only" for="bsort">Sortera</label><select id="bsort">${[['title', 'Titel'], ['author', 'Författare'], ['series', 'Serie'], ['added', 'Senast tillagda'], ['recent', 'Senast lyssnade']].map(([v, n]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${n}</option>`).join('')}</select></div>`}</div>
+    ${!f && B.continue.length ? `<section class="section"><h2>Fortsätt lyssna</h2><div class="shelf">${B.continue.map(bookCard).join('')}</div></section>` : ''}
+    ${body}`;
+  if ($('#bsort')) $('#bsort').onchange = (e) => { store.set('booksort', e.target.value); route(); };
+  if ($('#bgroup')) $('#bgroup').onchange = (e) => { store.set('bookgroup', e.target.value); route(); };
 };
 function bookSpoken(b) {
   return { kind: 'book', id: b.id, title: b.title, sub: b.author, link: `#/book/${b.id}`, cover: b.cover ? `/api/audiobooks/cover/${b.id}` : null,
@@ -30,14 +57,21 @@ function bookSpoken(b) {
 views.book = async (id) => {
   const b = await api('/audiobooks/book/' + id);
   const left = b.duration ? b.duration - b.position : 0;
+  const lid = b.library;
+  const facts = [(b.genres || []).join(', '), b.publisher, b.isbn ? `ISBN ${b.isbn}` : ''].filter(Boolean).join(' · ');
   main.innerHTML = `<div class="mhero">${bookCover(b, 'big')}<div><div class="muted small">LJUDBOK</div><h1>${esc(b.title)}</h1>
-    <div class="meta"><span>${esc(b.author || '')}</span>${b.narrator ? `<span>Uppläsare: ${esc(b.narrator)}</span>` : ''}${b.year ? `<span>${b.year}</span>` : ''}<span>${fmtDur(b.duration)}</span>
+    ${b.subtitle ? `<div class="muted">${esc(b.subtitle)}</div>` : ''}
+    <div class="meta">${b.author ? `<a href="${filterHash(lid, 'forfattare', b.author)}">${esc(b.author)}</a>` : ''}${b.narrator ? `<span>Uppläsare: ${esc(b.narrator)}</span>` : ''}${b.year ? `<span>${+b.year}</span>` : ''}<span>${fmtDur(b.duration)}</span>
       ${b.position > 30 ? `<span>${fmtDur(left)} kvar</span>` : ''}${b.finished ? '<span>✓ Utläst</span>' : ''}</div>
+    ${b.series ? `<div class="meta"><span>Serie: <a href="${filterHash(lid, 'serie', b.series)}">${esc(seriesLabel(b))}</a></span></div>` : ''}
     <div class="row"><button class="primary" id="bp">${b.position > 30 ? '▶ Fortsätt' : '▶ Lyssna'}</button>${b.position > 30 || b.finished ? '<button class="ghost" id="bstart">Börja om</button>' : ''}
-      <button class="ghost" id="bmark">🔖 Bokmärke</button>${b.finished ? '' : '<button class="ghost" id="bdone">Markera som utläst</button>'}</div>
-    ${b.description ? `<p class="overview">${esc(b.description)}</p>` : ''}</div></div>
+      <button class="ghost" id="bmark">🔖 Bokmärke</button>${b.finished ? '' : '<button class="ghost" id="bdone">Markera som utläst</button>'}
+      ${me?.is_admin ? '<button class="ghost" id="bmatch">Fel bok?</button><button class="ghost" id="bedit">Redigera</button>' : ''}</div>
+    ${b.description ? `<p class="overview">${esc(b.description)}</p>` : ''}
+    ${facts ? `<p class="muted small">${esc(facts)}</p>` : ''}</div></div>
     ${b.bookmarks.length ? `<section class="section"><h2>Bokmärken</h2><table>${b.bookmarks.map(m => `<tr><td><button class="ghost small" data-bm="${m.position}">${fmtTime(m.position)}</button></td><td>${esc(m.note || '')}</td><td class="muted small">${fmtDate(m.created)}</td><td class="r">${iconButton({ icon: '✕', label: `Ta bort bokmärket vid ${fmtTime(m.position)}`, data: { bmdel: m.id } })}</td></tr>`).join('')}</table></section>` : ''}
-    <section class="section"><h2>Kapitel</h2><table class="tracks">${b.chapters.map((c, i) => `<tr data-chs="${c.start}" class="${c.start <= b.position && b.position < c.end ? 'playing' : ''}"><td class="muted" style="width:40px">${i + 1}</td><td>${esc(c.title)}</td><td class="r muted">${fmtTime(c.end - c.start)}</td></tr>`).join('')}</table></section>
+    <section class="section"><h2>Kapitel${b.chapterSource === 'audnexus' ? ' <span class="muted small">från Audnexus</span>' : ''}</h2><table class="tracks">${b.chapters.map((c, i) => `<tr data-chs="${c.start}" class="${c.start <= b.position && b.position < c.end ? 'playing' : ''}"><td class="muted" style="width:40px">${i + 1}</td><td>${esc(c.title)}</td><td class="r muted">${fmtTime(c.end - c.start)}</td></tr>`).join('')}</table></section>
+    ${b.sameSeries?.length ? shelfHtml(`Fler i serien ${b.series}`, b.sameSeries.map(x => bookCard({ ...x, author: x.seriesNo ? `#${x.seriesNo}` : '' })).join(''), { more: `<a href="${filterHash(lid, 'serie', b.series)}">Visa serien</a>` }) : ''}
     ${b.sameAuthor.length ? `<section class="section"><h2>Mer av ${esc(b.author)}</h2><div class="shelf">${b.sameAuthor.map(x => bookCard({ ...x, author: b.author })).join('')}</div></section>` : ''}`;
   const sp = bookSpoken(b);
   $('#bp').onclick = () => playSpoken(sp);
@@ -51,7 +85,62 @@ views.book = async (id) => {
     await api(`/audiobooks/book/${b.id}/bookmarks`, { method: 'POST', body: { position: pos, note } }); route();
   });
   if ($('#bdone')) $('#bdone').onclick = act(async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: b.duration } }); route(); });
+  if ($('#bmatch')) $('#bmatch').onclick = () => matchBook(b);
+  if ($('#bedit')) $('#bedit').onclick = () => editBook(b);
 };
+
+const SOURCES = { google: 'Google Books', openlibrary: 'Open Library', audnexus: 'Audnexus' };
+/** "Fel bok?": sök på titel och författare (eller ett ASIN) och välj rätt träff – matchningen låses */
+function matchBook(b) {
+  const h = openDialog({ title: 'Välj rätt bok', size: 'wide',
+    body: `<form id="mf" class="row" style="align-items:flex-end"><div style="flex:2;min-width:180px"><label for="mq">Titel eller ASIN</label><input id="mq" value="${esc(b.title)}"></div>
+    <div style="flex:1;min-width:140px"><label for="ma">Författare</label><input id="ma" value="${esc(b.author || '')}"></div><button class="primary">Sök</button></form>
+    <div id="mres" class="matchgrid" aria-live="polite">${loadingState({ kind: 'inline', label: 'Söker…' })}</div>
+    <p class="muted small" id="mlock">${b.meta?.source ? `Matchad mot ${esc(SOURCES[b.meta.source] || b.meta.source)}${b.meta.matchedTitle ? `: ${esc(b.meta.matchedTitle)}` : ''}${b.meta.locked ? ' (låst – ändras inte automatiskt)' : ''}.` : ''}</p>`,
+    actions: [{ label: 'Lås upp (automatisk matchning)', id: 'munlock', onClick: async () => {
+      await api(`/audiobooks/book/${b.id}/match`, { method: 'POST', body: { unlock: true }, bg: true }); toast('Upplåst – matchas automatiskt i bakgrunden'); route();
+    } }, { label: 'Stäng' }] });
+  const d = h.el;
+  $('#munlock', d).hidden = !b.meta?.locked;
+  const search = async () => {
+    $('#mres', d).innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
+    try {
+      const r = await api(`/audiobooks/book/${b.id}/match?title=${encodeURIComponent($('#mq', d).value)}&author=${encodeURIComponent($('#ma', d).value)}`, { bg: true });
+      if (!d.isConnected) return;
+      $('#munlock', d).hidden = !r.locked;
+      const on = (x) => r.current && r.current.source === x.source && r.current.id === x.id;
+      $('#mres', d).innerHTML = r.results.map((x, i) => `<button class="mcard${on(x) ? ' on' : ''}" data-mi="${i}">
+        ${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+        <div><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${+x.year})</span>` : ''}${x.subtitle ? `<div class="muted small">${esc(x.subtitle)}</div>` : ''}
+        <div class="small">${esc(x.authors.join(', '))}${x.narrators.length ? ` · uppläst av ${esc(x.narrators.join(', '))}` : ''}</div>
+        <div class="small muted">${esc([SOURCES[x.source], x.publisher, x.series ? `${x.series}${x.seriesNo ? ' #' + x.seriesNo : ''}` : ''].filter(Boolean).join(' · '))}</div>
+        <div class="small muted">${esc(x.description)}</div></div></button>`).join('') || emptyState({ compact: true, title: 'Inga träffar', text: 'Prova en annan stavning, originaltiteln eller bokens ASIN från Audible.' });
+      $$('[data-mi]', d).forEach(el => el.onclick = async () => {
+        const x = r.results[+el.dataset.mi]; el.disabled = true;
+        try { await api(`/audiobooks/book/${b.id}/match`, { method: 'POST', body: { source: x.source, id: x.id }, bg: true }); toast('Matchat'); h.close(); route(); }
+        catch (e) { toastErr(e); el.disabled = false; }
+      });
+    } catch (e) { if (d.isConnected) $('#mres', d).innerHTML = errorState(e, { compact: true }); }
+  };
+  $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
+  search();
+}
+/** Redigera bokens fält för hand – går före filens taggar och metadata från nätet, även efter omskanning */
+function editBook(b) {
+  const F = [['title', 'Titel'], ['author', 'Författare'], ['narrator', 'Uppläsare'], ['series', 'Serie'], ['seriesNo', 'Nummer i serien'], ['year', 'År'],
+    ['publisher', 'Förlag'], ['isbn', 'ISBN'], ['asin', 'ASIN (från Audible – ger kapitel från Audnexus)'], ['genres', 'Genrer (kommaseparerade)']];
+  const val = (k) => String(k === 'genres' ? (b.genres || []).join(', ') : b[k] ?? '');
+  openDialog({ title: 'Redigera ljudbok', form: true,
+    body: F.map(([k, l]) => `<label for="be-${k}">${esc(l)}</label><input id="be-${k}" value="${esc(val(k))}"${k === 'year' ? ' inputmode="numeric" maxlength="4"' : ''}${k === 'title' || k === 'author' ? ' required' : ''}>`).join('')
+      + `<label for="be-description">Beskrivning</label><textarea id="be-description" rows="5">${esc(b.description || '')}</textarea>
+      <p class="muted small">Ändrade fält gäller före filens taggar och metadata från nätet, även efter omskanning. Ett tomt fält döljer uppgiften.</p>`,
+    actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: async ({ $: q }) => {
+      const body = {};
+      for (const k of [...F.map(x => x[0]), 'description']) { const v = q('#be-' + k).value.trim(); if (v !== val(k).trim()) body[k] = v; }
+      if (Object.keys(body).length) await api(`/audiobooks/book/${b.id}`, { method: 'PUT', body, bg: true });
+      toast('Sparat'); route();
+    } }] });
+}
 
 // ---------- poddar ----------
 export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;

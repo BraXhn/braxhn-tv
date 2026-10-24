@@ -13,6 +13,7 @@ import * as trick from './trickplay.js';
 import * as music from './music.js';
 import * as arr from './arr.js';
 import * as books from './audiobooks.js';
+import * as bookmeta from './bookmeta.js';
 import * as follows from './follows.js';
 import * as calendar from './calendar.js';
 import { allowedFor, clearRecommendations } from './http/context.js';
@@ -40,7 +41,8 @@ hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 // Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
 hooks.afterScan = () => { clearRecommendations(); refreshKeys(null, Infinity); return arr.markAvailable(); };
-hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
+// Metadata och kapitel från nätet hämtas i bakgrunden efter skanningen (väntar inte – skanningskön går vidare)
+hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 
 // Kalendern: avsnitt och sändningsdatum från TMDB, utspritt (pågående och följda serier en gång per dygn)

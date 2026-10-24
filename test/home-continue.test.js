@@ -34,7 +34,7 @@ before(async () => {
   if (!hasFfmpeg) return;
   fs.mkdirSync(MEDIA, { recursive: true });
   srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
-    env: { ...process.env, PORT: String(PORT), CONFIG_DIR: CONFIG, MEDIA_ROOT: MEDIA, TRANSCODE_DIR: path.join(ROOT, 'tc'), HTTPS_PORT: String(PORT + 1), TMDB_API_KEY: '', WATCH_FILES: '0' },
+    env: { ...process.env, PORT: String(PORT), CONFIG_DIR: CONFIG, MEDIA_ROOT: MEDIA, TRANSCODE_DIR: path.join(ROOT, 'tc'), HTTPS_PORT: String(PORT + 1), TMDB_API_KEY: '', WATCH_FILES: '0', BOOK_METADATA: '0' },
     stdio: ['ignore', 'inherit', 'inherit']
   });
   for (let i = 0; i < 50; i++) { try { await fetch(B + '/api/health'); break; } catch { await sleep(200); } }
