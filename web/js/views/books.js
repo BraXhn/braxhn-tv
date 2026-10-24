@@ -9,7 +9,7 @@ import { confirmDialog, promptDialog } from '../ui/dialog.js';
 
 // ---------- ljudböcker ----------
 const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:hsl(${hue(String(b.id))} 35% 30%);--h2:hsl(${(hue(String(b.id)) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/audiobooks/cover/${+b.id}`, cls) : `<span>${esc((b.title || '').slice(0, 40))}</span>`}</div>`;
-const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
+export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
   <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
 views.books = async (lid) => {
   // Utan bibliotek-id (t.ex. #/books): första ljudboksbiblioteket, annars en hänvisning
@@ -54,7 +54,7 @@ views.book = async (id) => {
 };
 
 // ---------- poddar ----------
-const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
+export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
 const epRows = (eps, showPod) => `<table class="tracks">${eps.map((e, i) => `<tr data-ep="${i}"><td style="width:100%"><b>${esc(e.title)}</b>${e.played ? ' <span class="muted">✓</span>' : ''}
   <div class="muted small">${showPod ? esc(e.podcastTitle || '') + ' · ' : ''}${fmtDate(e.published)}${e.duration ? ' · ' + fmtDur(e.duration) : ''}${e.position > 0 && !e.played ? ` · ${fmtDur((e.duration || 0) - e.position)} kvar` : ''}${e.downloaded ? ' · nedladdat' : e.downloading ? ' · laddas ner…' : ''}</div></td>
   <td class="r" style="white-space:nowrap">${iconButton({ icon: '▶', label: `Spela ${e.title}`, data: { epplay: i } })} ${iconButton({ icon: e.played ? '↺' : '✓', label: `${e.played ? 'Markera som ej lyssnad' : 'Markera som lyssnad'}: ${e.title}`, data: { epdone: i } })}</td></tr>`).join('')}</table>`;

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { searchKey, compactKey } from './searchkey.js';
 
 export const CONFIG = process.env.CONFIG_DIR || '/config';
 export const IMAGES = path.join(CONFIG, 'images');
@@ -248,6 +249,9 @@ CREATE INDEX IF NOT EXISTS cc_owner ON custom_collections(owner_id);
 CREATE INDEX IF NOT EXISTS cci_item ON custom_collection_items(item_id);
 CREATE INDEX IF NOT EXISTS calendar_ep_air ON calendar_episodes(air_date);`);
 
+// Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
+addCol('items', 'original_title', 'TEXT');
+
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;
 let ver = db.prepare('PRAGMA user_version').get().user_version;
@@ -275,6 +279,53 @@ if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGM
 // men nya kolumner och tabeller används inte – varna tydligt
 if (ver > LATEST) console.warn(`[db] Databasen kommer från en nyare version av BraXhn TV (schema ${ver} > ${LATEST}). Uppdatera imagen – eller återställ backups/före-uppgradering-*.db om du vill gå tillbaka.`);
 try { db.prepare("INSERT INTO settings(k,v) VALUES('app_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(globalThis.__braxhnAppVersion); } catch {}
+
+// ---- söknycklar (searchkey.js) ----
+// skey = normaliserad titel/namn med ord, skey2 = ev. andra sökbara fält (originaltitel, författare …), skeyc = båda i
+// kompakt form ("spiderman lefabuleux…", för förurvalet i SQL utan replace() per rad). En utlösare i ren SQL
+// nollställer skey när källfälten ändras och refreshKeys() räknar om de nollställda (vid start, efter skanning och
+// före varje sökning). Så hålls nyckeln aktuell vid alla ställen som skriver titlar – även andra anslutningar
+// (tester, sqlite3) och en äldre programversion kan skriva i tabellerna, eftersom utlösaren inte anropar JS.
+const SEARCH_TABLES = new Map(); // tabell → { a: kolumner till skey, b: kolumner till skey2 }
+const ident = (s) => { if (!/^[a-z_]+$/.test(s)) throw new Error('ogiltigt namn: ' + s); return s; };
+/** Gör tabellen sökbar: kolumner via addCol, index, utlösare och nycklar för befintliga rader (i tx). Tabeller som
+ *  skapas i andra moduler anropar den direkt efter sin CREATE TABLE. */
+export function searchKeys(table, a, b = []) {
+  ident(table); [...a, ...b].forEach(ident);
+  addCol(table, 'skey', 'TEXT');
+  if (b.length) addCol(table, 'skey2', 'TEXT');
+  addCol(table, 'skeyc', 'TEXT');
+  const src = [...a, ...b];
+  db.exec(`CREATE INDEX IF NOT EXISTS ${table}_skey ON ${table}(skey);
+    CREATE TRIGGER IF NOT EXISTS ${table}_skey_upd AFTER UPDATE OF ${src.join(', ')} ON ${table}
+    WHEN ${src.map(c => `old.${c} IS NOT new.${c}`).join(' OR ')} BEGIN UPDATE ${table} SET skey=NULL WHERE rowid=new.rowid; END;`);
+  SEARCH_TABLES.set(table, { a, b });
+  const n = refreshKeys(table, Infinity);
+  if (n > 1000) console.log(`[db] söknycklar: ${n} rader i ${table}`);
+}
+const joinKey = (r, cols) => searchKey(cols.map(c => r[c] ?? '').join(' '));
+/** Räkna om nycklar som saknas (nya eller ändrade rader). max = högst så många rader per tabell i det här anropet. */
+export function refreshKeys(only = null, max = 20000) {
+  let n = 0;
+  for (const [t, { a, b }] of SEARCH_TABLES) {
+    if (only && t !== only) continue;
+    for (let left = max; left > 0;) {
+      const rows = stmt(`SELECT rowid AS _id, ${[...a, ...b].join(', ')} FROM ${t} WHERE skey IS NULL LIMIT ?`).all(Math.min(5000, left));
+      if (!rows.length) break;
+      tx(() => {
+        const st = b.length ? stmt(`UPDATE ${t} SET skey=?, skeyc=?, skey2=? WHERE rowid=?`) : stmt(`UPDATE ${t} SET skey=?, skeyc=? WHERE rowid=?`);
+        for (const r of rows) {
+          const k = joinKey(r, a), k2 = b.length ? joinKey(r, b) || null : null;
+          const kc = compactKey(k) + (k2 ? ' ' + compactKey(k2) : '');
+          b.length ? st.run(k, kc, k2, r._id) : st.run(k, kc, r._id);
+        }
+      });
+      n += rows.length; left -= rows.length;
+      if (rows.length < 5000) break;
+    }
+  }
+  return n;
+}
 
 // Låt SQLite uppdatera statistik för frågeplaneraren (billigt; körs vid start och var 12:e timme)
 const optimize = () => { try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[db] optimize:', e.message); } };
@@ -331,3 +382,9 @@ export function setSetting(k, v) {
   settingsCache.delete(k); // läses om från databasen nästa gång (rätt även om en transaktion rullas tillbaka)
 }
 export const now = () => Math.floor(Date.now() / 1000);
+
+// Söknycklar för tabellerna i db.js (övriga moduler anropar searchKeys efter sin CREATE TABLE)
+searchKeys('items', ['title'], ['original_title']);
+searchKeys('artists', ['name']);
+searchKeys('albums', ['title']);
+searchKeys('tracks', ['title']);

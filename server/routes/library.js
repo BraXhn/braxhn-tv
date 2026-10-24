@@ -1,4 +1,4 @@
-// Bibliotek och titlar: bibliotek, skanning, startsida, bläddring, sök, titelsidor, framsteg, matchning,
+// Bibliotek och titlar: bibliotek, skanning, startsida, bläddring, titelsidor, framsteg, matchning,
 // Min lista, samlingar, förhandsbilder, bilder, skådespelare, trailers och årssammanfattning.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -124,12 +124,6 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
     out.offset = offset; out.limit = limit;
   }
   send(c.res, 200, out);
-});
-route('GET', '/api/search', user, (c) => {
-  const q = `%${(c.q.get('q') || '').normalize('NFC').trim()}%`;
-  if (q.length < 3) return send(c.res, 200, []);
-  send(c.res, 200, listItems(c.user.id, `(i.title LIKE ? OR (i.kind='show' AND i.overview LIKE ?))`, [q, q],
-    `CASE i.kind WHEN 'movie' THEN 0 WHEN 'show' THEN 0 ELSE 1 END, i.sort_title`, 60));
 });
 route('GET', '/api/items/:id', user, (c) => {
   const uid = c.user.id, row = get('SELECT * FROM items WHERE id=?', c.p.id);
@@ -398,10 +392,6 @@ function titleExtras(u, it) {
   return { cast: people.castOf(ep ? it.parent_id : it.id), trailers: ep ? [] : trailers.trailersOf(it.id),
     youtube: !ep && u.max_age == null && trailers.youtubeOk(it.trailer_yt) ? it.trailer_yt : null };
 }
-route('GET', '/api/search/people', user, (c) => {
-  const q = String(c.q.get('q') || '').trim().slice(0, 100);
-  send(c.res, 200, q.length < 2 ? [] : people.searchPeople(q, ageFilter(c.user.id), 20));
-});
 route('GET', '/api/people/:pid', user, async (c) => {
   const pid = +c.p.pid;
   if (!people.personRow(pid)) return fail(c.res, 404, 'Finns inte');

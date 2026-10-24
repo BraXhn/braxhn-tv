@@ -65,6 +65,8 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 
 10. **Kalendern** (`server/calendar.js` ↔ TMDB/Sonarr ↔ `routes/calendar.js`): tabellerna `calendar_shows`/`calendar_episodes` fylls i bakgrunden (`refreshDue`, en serie i taget, `CALENDAR_GAP_MS` mellan anropen; pågående/följda varje dygn, avslutade varje månad). Sonarrs kalender cachas i minnet 30 min. Datum är lokala `YYYY-MM-DD` (serverns `TZ`). Kalendern gäller bara serier som finns i biblioteket (+ Sonarr-serier för vuxna). `TMDB_API_URL` pekar testerna mot en låtsasserver.
 
+10. **Söknycklar ↔ titlar** (`server/searchkey.js`, `searchKeys`/`refreshKeys` i `db.js`, `server/search.js`): sökbara tabeller har `skey` (ord), ev. `skey2` (originaltitel, författare …) och `skeyc` (kompakt, för förurvalet). En utlösare i ren SQL nollställer `skey` när källkolumnen ändras; `refreshKeys` fyller i vid start, efter skanning och före varje sökning. Ändras `searchKey()` måste alla nycklar räknas om (sätt `skey=NULL`). Tabeller i andra moduler anropar `searchKeys` direkt efter sin `CREATE TABLE`.
+
 ### Invarianter (bryts de blir det fel – testa dem)
 - All servertext i HTML går genom `esc()`.
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).

@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { db, get, all, run, tx, now, getSetting, IMAGES, searchKeys } from './db.js';
+import { ranked } from './search.js';
 import { probe, AUDIO, makeCover } from './music.js';
 import { listFiles, underFailed } from './util.js';
 
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS book_progress(user_id INTEGER NOT NULL REFERENCES use
 CREATE TABLE IF NOT EXISTS bookmarks(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, position REAL NOT NULL, note TEXT, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS book_probe_fail(path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER);`);
+searchKeys('books', ['title'], ['author', 'narrator', 'series']);
 
 const coverFile = (id) => path.join(IMAGES, `b${id}-cover.jpg`);
 export const coverPath = (id) => { const f = coverFile(id); return fs.existsSync(f) ? f : null; };
@@ -141,6 +143,11 @@ const shape = (b) => ({ id: b.id, title: b.title, author: b.author, narrator: b.
 export function listBooks(libId, uid, sort = 'title') {
   const order = { title: 'b.sort_title', author: 'b.author COLLATE NOCASE, b.sort_title', added: 'b.added DESC', recent: 'p.updated DESC NULLS LAST, b.sort_title' }[sort] || 'b.sort_title';
   return all(`SELECT b.*, p.position, p.finished, p.updated FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.library_id=? ORDER BY ${order}`, uid, libId).map(shape);
+}
+/** Böcker som matchar titeln, eller författaren/uppläsaren/serien (rankas lägre). Q = parseQuery(…) */
+export function searchBooks(Q, uid, limit = 20) {
+  return ranked({ from: 'FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=?', colParams: [uid],
+    cols: 'b.*, p.position, p.finished, p.updated, b.title AS _t', key: 'b.skey', key2: 'b.skey2', year: 'b.year' }, Q, limit).map(shape);
 }
 export function continueBooks(uid, limit = 12) {
   return all(`SELECT b.*, p.position, p.finished, p.updated FROM books b JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.finished=0 AND p.position > 30
