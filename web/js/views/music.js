@@ -1,11 +1,12 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
 import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, routeGen, store, toast, views } from '../core.js';
-import { M, playQueue } from '../audio.js';
+import { M, playQueue, startRadio } from '../audio.js';
 import { route } from '../router.js';
 import { emptyState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { tabsHtml } from '../ui/tabs.js';
+import { similarArtists, stationsHtml, trackMenu } from '../sonic.js';
 
 export const cover = (albumId, has, cls = '') => {
   const h = hue(String(albumId));
@@ -18,7 +19,8 @@ export function trackRows(tracks, opts = {}) {
     <td><b>${esc(t.title)}</b>${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
     <td class="r muted">${fmtTime(t.duration)}</td>
     <td class="r">${iconButton({ icon: t.favorite ? '♥' : '♡', label: `Favorit: ${t.title}`, cls: 'ghost small fav', data: { fav: t.id }, pressed: !!t.favorite })}
-    ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}</td></tr>`).join('')}</table>`;
+    ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}
+    ${iconButton({ icon: '⋮', label: `Mer för ${t.title}`, data: { tmenu: i }, haspopup: 'menu' })}</td></tr>`).join('')}</table>`;
 }
 export function bindTracks(tracks, root = main) {
   $$('[data-ti]', root).forEach(r => keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
@@ -29,8 +31,10 @@ export function bindTracks(tracks, root = main) {
     catch (e) { set(!on); throw e; }
   }));
   $$('[data-addpl]', root).forEach(b => b.onclick = act(() => addToPlaylist([+b.dataset.addpl])));
+  // ⋮: låtradio, liknande låtar, ljudresa (ljudanalysen, sonic.js)
+  $$('[data-tmenu]', root).forEach(b => b.onclick = () => { const t = tracks[+b.dataset.tmenu]; if (t) trackMenu(b, t); });
 }
-async function addToPlaylist(ids) {
+export async function addToPlaylist(ids) {
   const pls = await api('/music/playlists', { bg: true });
   const h = openDialog({ title: 'Lägg till i spellista', closeOnRoute: false,
     body: `<div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
@@ -51,9 +55,11 @@ views.music = async (lid, tab) => {
   let body = '';
   if (tab === 'home') {
     const d = await api(`/music/${lid}/home`);
+    const smartOnly = (d.smart || []).filter(x => !x.station); // stationerna har en egen hylla
     body = `<p class="muted">${d.stats.artists} artister · ${d.stats.albums} album · ${d.stats.tracks} låtar</p>
       ${d.recentlyPlayed.length ? `<section class="section"><h2>Spelat nyligen</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
-      <section class="section"><h2>Smarta listor <a class="btn ghost small" href="#/smartedit/${+lid}/new">+ Ny smart spellista</a></h2>${d.smart?.length ? `<div class="shelf">${d.smart.map(x => smartCard(lid, x)).join('')}</div>` : '<p class="muted">Inga smarta listor med låtar ännu.</p>'}</section>
+      ${stationsHtml(lid, d.smart || [], d.sonic)}
+      <section class="section"><h2>Smarta listor <a class="btn ghost small" href="#/smartedit/${+lid}/new">+ Ny smart spellista</a></h2>${smartOnly.length ? `<div class="shelf">${smartOnly.map(x => smartCard(lid, x)).join('')}</div>` : '<p class="muted">Inga smarta listor med låtar ännu.</p>'}</section>
       <section class="section"><h2>Nytt i biblioteket</h2><div class="shelf">${d.recentAlbums.map(albumCard).join('') || '<p class="muted">Inga album ännu.</p>'}</div></section>
       ${d.favorites.length ? `<section class="section"><h2>Favoriter <button class="ghost small" id="playfav">▶ Spela</button> <button class="ghost small" id="shufav">⤨ Blanda</button></h2>${trackRows(d.favorites, { showCover: true })}</section>` : ''}`;
     main.innerHTML = musicHeader(lid, tabs, tab) + body;
@@ -113,21 +119,24 @@ views.album = async (id) => {
   const a = await api('/music/albums/' + id);
   main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">ALBUM</div><h1>${esc(a.title)}</h1>
     <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
-    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button></div></div></div>
+    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button></div></div></div>
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}`;
   bindTracks(a.trackList);
   $('#pa').onclick = () => playQueue(a.trackList, 0);
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
   $('#aa').onclick = act(() => addToPlaylist(a.trackList.map(t => t.id)));
+  $('#ar').onclick = act(() => startRadio({ albumId: a.id }, a.title));
 };
 views.artist = async (id) => {
   const a = await api('/music/artists/' + id);
   main.innerHTML = `<div class="mhero">${cover(a.albums[0]?.id || a.id, a.albums[0]?.cover, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
-    <div class="row"><button class="primary" id="pp">▶ Spela populära</button></div></div></div>
+    <div class="row"><button class="primary" id="pp">▶ Spela populära</button><button class="ghost" id="arr">📻 Låtradio</button></div></div></div>
     ${a.popular.length ? `<section class="section"><h2>Populärt</h2>${trackRows(a.popular, { showCover: true })}</section>` : ''}
-    <section class="section"><h2>Album</h2><div class="grid">${a.albums.map(albumCard).join('')}</div></section>`;
+    <section class="section"><h2>Album</h2><div class="grid">${a.albums.map(albumCard).join('')}</div></section><div id="simart"></div>`;
   bindTracks(a.popular);
   $('#pp').onclick = () => playQueue(a.popular, 0);
+  $('#arr').onclick = act(() => startRadio({ artistId: a.id }, a.name));
+  similarArtists($('#simart'), a.id);
 };
 views.playlist = async (id) => {
   const p = await api('/music/playlists/' + id);
@@ -156,10 +165,11 @@ function smartCard(lid, x) {
 }
 views.smart = async (lid, sid) => {
   const p = await api(`/music/${encodeURIComponent(lid)}/smart/${encodeURIComponent(sid)}`);
-  main.innerHTML = `<div class="mhero"><div class="cover big plcover">✦</div><div><div class="muted small">SMART LISTA</div><h1>${esc(p.name)}</h1>
+  const station = /^sonic-/.test(String(sid)); // stämningsstation eller låtradio från ljudanalysen
+  main.innerHTML = `<div class="mhero"><div class="cover big plcover">${station ? '📻' : '✦'}</div><div><div class="muted small">${station ? 'STATION' : 'SMART LISTA'}</div><h1>${esc(p.name)}</h1>
     <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span><span>Uppdateras automatiskt</span>${p.custom && !p.mine ? `<span>Delad av ${esc(p.owner || 'någon')}</span>` : p.shared ? '<span>Delad</span>' : ''}</div>
     <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="ap">+ Spellista</button>${p.custom && p.mine ? `<a class="btn ghost" href="#/smartedit/${+lid}/${+p.listId}">Redigera regler</a>` : ''}</div></div></div>
-    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: 'Listan är tom just nu', text: p.custom ? 'Inga låtar matchar reglerna just nu.' : 'Den fylls på automatiskt när du lyssnar.' })}`;
+    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: 'Listan är tom just nu', text: p.custom ? 'Inga låtar matchar reglerna just nu.' : station ? 'Stationen fylls på när ljudanalysen hunnit längre.' : 'Den fylls på automatiskt när du lyssnar.' })}`;
   bindTracks(p.trackList);
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);

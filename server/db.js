@@ -258,6 +258,13 @@ CREATE TABLE IF NOT EXISTS artist_stars(user_id INTEGER NOT NULL REFERENCES user
 addCol('favorites', 'created', 'INTEGER');
 addCol('playlists', 'comment', 'TEXT');
 addCol('playlists', 'changed', 'INTEGER');
+// Ljudanalys av musik (server/sonic.js): ver = analysens version (sonic-dsp.js VERSION), mtime = spårfilens mtime vid
+// analysen (ändrad fil → analyseras om), ok = 0 om filen inte gick att analysera, ms = tid för analysen.
+// vec = egenskaperna som Float32-vektor (DIMS i sonic-dsp.js); bpm/energy (0–100)/speech/key även som kolumner för
+// visning och smarta spellistor.
+db.exec(`CREATE TABLE IF NOT EXISTS track_sonic(track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+  ver INTEGER NOT NULL, mtime INTEGER, analyzed INTEGER NOT NULL, ok INTEGER NOT NULL DEFAULT 1, ms INTEGER,
+  bpm REAL, energy REAL, speech REAL, key TEXT, vec BLOB);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -281,7 +288,8 @@ CREATE INDEX IF NOT EXISTS calendar_ep_air ON calendar_episodes(air_date);
 CREATE INDEX IF NOT EXISTS album_stars_album ON album_stars(album_id);
 CREATE INDEX IF NOT EXISTS artist_stars_artist ON artist_stars(artist_id);
 CREATE INDEX IF NOT EXISTS albums_lib_sort ON albums(library_id, sort_title);
-CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);`);
+CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);
+CREATE INDEX IF NOT EXISTS sonic_ver ON track_sonic(ver);`);
 
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');

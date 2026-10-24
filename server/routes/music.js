@@ -7,13 +7,14 @@ import * as music from '../music.js';
 import * as listen from '../listening.js';
 import * as scrobble from '../scrobble.js';
 import * as smartl from '../smartlists.js';
+import * as sonic from '../sonic.js';
 import { sized } from '../imgsize.js';
-import { route, user, img, audio } from '../http/router.js';
+import { route, user, img, audio, admin } from '../http/router.js';
 import { screenBlock } from '../http/context.js';
 
 // ---------- Musik ----------
 const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget musikbibliotek'); return l; };
-route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id) }); });
+route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id), sonic: sonic.libraryStats(l.id) }); });
 route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
 route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.artists(l.id)); });
 route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.searchMusic(String(c.q.get('q') || '').slice(0, 100), c.user.id, l.id)); });
@@ -126,4 +127,39 @@ route('GET', '/api/me/listening', user, (c) => send(c.res, 200, listen.getPrefs(
 route('PUT', '/api/me/listening', user, async (c) => {
   const b = await readJson(c.req);
   try { send(c.res, 200, listen.setPrefs(c.user.id, b && typeof b === 'object' ? b : {})); } catch (e) { fail(c.res, 400, e.message); }
+});
+
+// ---------- Ljudanalys: liknande låtar/artister, låtradio, ljudresa (server/sonic.js) ----------
+// Musik har ingen åldersgräns och inga bibliotek per användare – samma regler som resten av musik-API:t.
+const ids = (v, max = 1000) => (Array.isArray(v) ? v : []).slice(-max).map(Number).filter(n => Number.isInteger(n) && n > 0);
+route('GET', '/api/music/tracks/:tid/similar', user, (c) => {
+  const t = trackRow(c); if (!t) return;
+  const limit = Math.max(1, Math.min(100, parseInt(c.q.get('limit')) || 30));
+  const list = sonic.similarTracks(t.id, c.user.id, { limit });
+  send(c.res, 200, { id: t.id, title: t.title, analyzed: !!list, profile: sonic.profile(t.id), trackList: list || [] });
+});
+route('GET', '/api/music/artists/:arid/similar', user, (c) => {
+  const list = sonic.similarArtists(+c.p.arid, { limit: Math.max(1, Math.min(50, parseInt(c.q.get('limit')) || 12)) });
+  list ? send(c.res, 200, { artists: list }) : fail(c.res, 404, 'Finns inte');
+});
+// Nästa låtar i en låtradio: { trackId | albumId | artistId, history: [spelade, senaste sist], exclude: [i kön], count }
+route('POST', '/api/music/radio', user, async (c) => {
+  const b = await readJson(c.req, 64 * 1024);
+  const r = sonic.radio({ trackId: +b.trackId || null, albumId: +b.albumId || null, artistId: +b.artistId || null,
+    history: ids(b.history, 200), exclude: ids(b.exclude), count: Math.max(1, Math.min(100, parseInt(b.count) || 25)), uid: c.user.id,
+    seed: Number.isInteger(b.seed) ? b.seed : undefined });
+  r ? send(c.res, 200, r) : fail(c.res, 400, 'Välj en låt, ett album eller en artist att starta radion från');
+});
+// Ljudresa: från en låt till en annan genom vektorrymden
+route('POST', '/api/music/journey', user, async (c) => {
+  const b = await readJson(c.req);
+  if (!get('SELECT 1 FROM tracks WHERE id=?', +b.from) || !get('SELECT 1 FROM tracks WHERE id=?', +b.to)) return fail(c.res, 404, 'Låten finns inte');
+  if (+b.from === +b.to) return fail(c.res, 400, 'Välj två olika låtar');
+  const r = sonic.journey(+b.from, +b.to, c.user.id, { count: parseInt(b.count) || 20 });
+  r ? send(c.res, 200, r) : fail(c.res, 409, 'Båda låtarna måste vara ljudanalyserade först – analysen pågår i bakgrunden');
+});
+// Administration: förlopp och inställningar
+route('GET', '/api/music/sonic', admin, (c) => send(c.res, 200, sonic.status()));
+route('PUT', '/api/music/sonic', admin, async (c) => {
+  try { send(c.res, 200, sonic.configure(await readJson(c.req))); } catch (e) { fail(c.res, 400, e.message); }
 });

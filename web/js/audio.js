@@ -16,7 +16,7 @@ export const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false, se
 export function stopAudio() {
   if (!M.audio) return;
   if (M.spoken) spokenSave();
-  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++;
+  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.radio = null;
   setSleep(0); showLyrics(false);
   stopVideo(M.audio);
   const bar = $('#mbar'); if (bar) bar.hidden = true;
@@ -30,7 +30,7 @@ function ensureBar() {
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
     <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="Föregående" title="Föregående">⏮</button><button class="primary" id="mplay" aria-label="Pausa" title="Pausa">⏸</button><button class="ghost small" id="mnext" aria-label="Nästa" title="Nästa">⏭</button>
-      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="Casta till Chromecast" aria-label="Casta till Chromecast" ${castReady ? '' : 'hidden'}>📺</button></div>
+      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="Casta till Chromecast" aria-label="Casta till Chromecast" ${castReady ? '' : 'hidden'}>📺<button class="ghost small" id="mradio" title="Starta låtradio från låten" aria-label="Starta låtradio från låten" aria-pressed="false">📻</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
     <div class="mright"><select id="mspeed" title="Hastighet" aria-label="Uppspelningshastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="Volym" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">Kö</button><button class="ghost small" id="mx" title="Stäng spelaren" aria-label="Stäng spelaren">✕</button></div>`;
   document.body.append(bar);
@@ -55,6 +55,7 @@ function ensureBar() {
   $('#mvol').oninput = (e) => { store.set('mvol', +e.target.value); applyVolume(); };
   $('#msleep').onclick = sleepDialog;
   $('#mlyr').onclick = toggleLyrics;
+  $('#mradio').onclick = act(() => M.cur?.id ? startRadio({ trackId: M.cur.id }, M.cur.title) : null);
   $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
   $('#mx').onclick = stopAudio;
   $('#mq').onclick = showQueue;
@@ -82,7 +83,7 @@ export function musicSession() {
 }
 // ---------- tal: ljudböcker och poddar (flera filer, global position, hastighet, sparad position) ----------
 function setBarMode(spoken) {
-  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken;
+  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
   $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
   $('#mprev').title = spoken ? `${b} sekunder bakåt` : 'Föregående'; $('#mnext').title = spoken ? `${f} sekunder framåt` : 'Nästa';
@@ -95,7 +96,7 @@ export function playSpoken(s) {
   loadListenPrefs();
   closeAllPlayers();
   if (M.spoken) spokenSave();
-  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title };
+  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null;
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
   M.sfile = null;
   setBarMode(true);
@@ -155,9 +156,12 @@ export function seekTo(t) {
   if (M.transcoded) { M.offset = t; a.src = M.url + (M.url.includes('?') ? '&' : '?') + 'ss=' + t; a.play().catch(() => {}); }
   else { M.offset = 0; a.currentTime = t; }
 }
-export function playQueue(tracks, i) {
+/** Spelar en kö. opts.radio = låtradions start ({ trackId | albumId | artistId }): kön fylls då på av sig själv. */
+export function playQueue(tracks, i, opts = {}) {
   if (!tracks.length) return;
+  M.radio = opts.radio ? { seed: opts.radio, name: opts.radioName || '', loading: false } : null;
   ensureBar();
+  setRadioState();
   if (M.spoken) { spokenSave(); M.spoken = null; }
   setBarMode(false);
   closeAllPlayers();
@@ -183,7 +187,30 @@ async function loadTrack(i) {
   $$('tr[data-ti]').forEach(r => r.classList.toggle('playing', r.dataset.tid === String(t.id)));
   if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || '', album: t.album || '',
     artwork: t.cover ? [{ src: `/api/music/cover/${t.albumId}`, sizes: '600x600', type: 'image/jpeg' }] : [] });
+  if (M.radio && M.queue.length - i <= 3) extendRadio();
   fetch(`/api/music/tracks/${t.id}/played`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+}
+// ---------- låtradio (oändlig kö från ljudanalysen, server/sonic.js) ----------
+const setRadioState = () => { const b = $('#mradio'); if (!b) return; b.classList.toggle('on', !!M.radio); b.setAttribute('aria-pressed', String(!!M.radio)); };
+/** Startar en låtradio från en låt, ett album eller en artist. */
+export async function startRadio(seed, name = '') {
+  const r = await api('/music/radio', { method: 'POST', body: { ...seed, count: 25 }, bg: true });
+  if (!r.trackList.length) return toast('Hittade inga låtar till radion');
+  playQueue(r.trackList, 0, { radio: seed, radioName: r.name || name });
+  toast(r.sonic ? `Låtradio: ${r.name || name}` : `Låtradio: ${r.name || name} (efter genre och artist – ljudanalysen är inte klar)`);
+}
+// Fyller på kön när tre låtar återstår: servern får det som spelats (för drift) och hela kön (inga upprepningar)
+async function extendRadio() {
+  const R = M.radio;
+  if (!R || R.loading) return;
+  R.loading = true;
+  try {
+    const played = M.queue.slice(0, M.idx + 1).map(t => t.id);
+    const r = await api('/music/radio', { method: 'POST', bg: true, body: { ...R.seed, history: played.slice(-30), exclude: M.queue.map(t => t.id).slice(-1000), count: 20 } });
+    if (M.radio !== R) return; // annan kö har startats under tiden
+    const have = new Set(M.queue.map(t => t.id));
+    M.queue = [...M.queue, ...r.trackList.filter(t => !have.has(t.id))];
+  } catch {} finally { R.loading = false; }
 }
 function nextTrack(auto) {
   // Sovtimer "när låten tar slut": stanna i stället för att gå vidare
@@ -193,7 +220,7 @@ function nextTrack(auto) {
   else if (auto) { M.audio.pause(); }
 }
 function showQueue() {
-  const h = openDialog({ title: 'Kö', closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });
+  const h = openDialog({ title: M.radio ? `Kö – låtradio${M.radio.name ? ': ' + M.radio.name : ''}` : 'Kö', closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });
   const d = h.el;
   $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) { r.classList.add('playing'); r.setAttribute('aria-current', 'true'); } keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); h.close(); }; });
   // Fokus på låten som spelas (TV/fjärrkontroll: pilarna går vidare därifrån)
