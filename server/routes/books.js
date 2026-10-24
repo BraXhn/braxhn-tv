@@ -59,6 +59,22 @@ route('POST', '/api/podcasts', user, async (c) => {
   try { const id = await pods.subscribe(url, c.user); audit('podcast_added', { ...ctx(c), detail: String(url).slice(0, 200) }); send(c.res, 200, { id }); }
   catch (e) { fail(c.res, 400, e.message); }
 });
+// Sök i Apples poddkatalog (före /:pid – första matchande route vinner)
+route('GET', '/api/podcasts/search', user, async (c) => {
+  if (c.user.max_age != null) return fail(c.res, 403, 'Barnprofiler kan inte lägga till poddar');
+  try { send(c.res, 200, await pods.search(c.q.get('q'), /^[a-z]{2}$/.test(c.q.get('country') || '') ? c.q.get('country') : 'se')); }
+  catch (e) { fail(c.res, 502, e.message); }
+});
+route('GET', '/api/podcasts/search/art', user, async (c) => {
+  const u = c.q.get('u') || '';
+  if (!pods.artOk(u)) return fail(c.res, 400, 'Ogiltig bildadress');
+  try {
+    const { r } = await pods.safeFetch(u, { timeout: 10000, signal: AbortSignal.timeout(15000) });
+    const type = r.headers.get('content-type') || '';
+    if (!r.ok || !/^image\/(jpeg|png|webp)$/.test(type)) { r.body.resume?.(); return fail(c.res, 404, 'Ingen bild'); }
+    send(c.res, 200, await pods.readLimited(r, 2 << 20), { 'Content-Type': type, 'Cache-Control': 'private, max-age=86400' });
+  } catch { fail(c.res, 404, 'Ingen bild'); }
+});
 route('GET', '/api/podcasts/:pid', user, (c) => {
   const p = pods.podcast(+c.p.pid, c.user.id); if (!p) return fail(c.res, 404, 'Finns inte');
   // Flödesadressen kan innehålla en privat nyckel – visas bara för den som lade till podden och administratörer

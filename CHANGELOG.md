@@ -1,6 +1,9 @@
 # Ändringar
 
 ## Ej utgiven
+- **Sök efter poddar på namn** (Apples poddkatalog, som Audiobookshelf): skriv poddens namn och prenumerera med ett klick – RSS-adressen behöver inte letas upp längre
+- **Serverlogg i Administration** med filter och automatisk uppdatering, loggfiler per dag i `/config/logs` (sju dagar) och knappen *Ladda ner diagnostik*. Fel i webbappen hos användarna (t.ex. i Safari på iPhone) rapporteras till loggen. Nycklar och lösenord maskeras
+- **Kortkommandon:** `?` visar en lista, `/` söker; i spelaren även `j`/`l`, ↑ ↓ för volym och `0`–`9` för att hoppa i filmen
 - **Snabbare start av webbappen:** appens filer hämtas från versionerade adresser (`/v/<bygge>/…`) som cachas för alltid, alla moduler förladdas parallellt i stället för en importnivå i taget, och de första API-anropen (status, bibliotek, startsidan) startar redan medan modulerna laddas. Filerna komprimeras en gång med brotli/gzip i stället för vid varje förfrågan. Vid återbesök hämtas inga filer alls – i mätning med 100 ms fördröjning gick startsidan från 2,0 till 0,5 s
 - Snabbare första visning av nya affischer: en förfrågan väntar högst 0,3 s på att bilden skalas ned och får annars originalet direkt (den nedskalade används nästa gång). Upp till fyra bilder skalas samtidigt på maskiner med många kärnor
 - Stora bibliotek visar de första korten direkt och resten i omgångar, i stället för att rita tusentals kort på en gång

@@ -55,7 +55,35 @@ export async function adminOps() {
     ${O.metrics.fromEnv ? '<p class="small">En token är satt med miljövariabeln <code>METRICS_TOKEN</code>.</p>' : ''}
     <div class="row"><button type="button" class="ghost" id="mtnew">${O.metrics.enabled && !O.metrics.fromEnv ? 'Skapa ny token' : 'Skapa token'}</button>${O.metrics.enabled && !O.metrics.fromEnv ? '<button type="button" class="danger" id="mtoff">Stäng av</button>' : ''}</div>
     <div id="mttok"></div>
+  </div>
+  <div class="panel"><h2>Serverlogg</h2>
+    <p class="muted small">De senaste händelserna i servern, även fel som uppstått i webbappen hos användarna. Sparas också som en fil per dag i <code>/config/logs</code> (sju dagar). Nycklar och lösenord maskeras.</p>
+    <div class="row"><div><label for="lglvl">Visa</label><select id="lglvl"><option value="info">Allt</option><option value="warn">Varningar och fel</option><option value="error">Bara fel</option></select></div>
+      <div style="flex:1;min-width:160px"><label for="lgq">Filtrera</label><input id="lgq" type="search" placeholder="t.ex. hls, ffmpeg, webb"></div>
+      <a class="btn ghost" href="/api/logs/diagnostics" download>Ladda ner diagnostik</a></div>
+    <pre id="lgout" class="logview small" tabindex="0" aria-label="Serverlogg"></pre>
   </div>`;
+
+  // Loggen: hämtas när vyn öppnas och fylls på var 5:e sekund med nya rader
+  let lastId = 0;
+  const LV = { warn: 'lw', error: 'le' };
+  const fmtLine = (l) => `<span class="${LV[l.level] || ''}">${esc(new Date(l.t).toLocaleTimeString('sv-SE'))} ${esc(l.msg)}</span>`;
+  const loadLog = async (reset) => {
+    const out = $('#lgout'); if (!out) return;
+    if (reset) { lastId = 0; out.innerHTML = ''; }
+    const r = await api(`/logs?level=${$('#lglvl').value}&q=${encodeURIComponent($('#lgq').value)}&after=${lastId}&limit=400`).catch(() => null);
+    if (!r || !$('#lgout')) return;
+    const atEnd = out.scrollTop + out.clientHeight >= out.scrollHeight - 20;
+    if (r.lines.length) { out.querySelector(':scope > .muted')?.remove(); lastId = r.lines.at(-1).id; out.insertAdjacentHTML('beforeend', r.lines.map(fmtLine).join('\n') + '\n'); }
+    while (out.childElementCount > 1500) out.firstElementChild.remove();
+    if (!out.childElementCount) out.innerHTML = '<span class="muted">Inga rader.</span>';
+    if (atEnd || reset) out.scrollTop = out.scrollHeight;
+  };
+  const tick = () => later(async () => { await loadLog(false); tick(); }, 5000);
+  let qt = null;
+  $('#lglvl').onchange = () => loadLog(true);
+  $('#lgq').oninput = () => { clearTimeout(qt); qt = setTimeout(() => loadLog(true), 300); };
+  loadLog(true).then(tick);
 
   const showDisk = (D) => { const d = $('#opdisk'); if (d) d.innerHTML = diskTable(D); };
   $('#opdiskf').onsubmit = act(async (e) => { e.preventDefault(); const r = await api('/ops', { method: 'PUT', body: { diskMinPct: $('#opdp').value, diskMinGb: $('#opdg').value } }); showDisk(r.disk); toast('Sparat'); });

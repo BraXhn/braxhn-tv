@@ -3,7 +3,7 @@ import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
 import { loadLibs, route } from '../router.js';
-import { emptyState, noLib } from '../ui/states.js';
+import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
 import { confirmDialog, promptDialog } from '../ui/dialog.js';
 
@@ -68,15 +68,35 @@ views.podcasts = async () => {
   store.set('pods', '1');
   const D = await api('/podcasts');
   main.innerHTML = `<div class="toolbar"><h1>Poddar</h1></div>
-    ${D.canAdd ? `<form id="padd" class="row panel" style="align-items:flex-end"><div style="flex:1;min-width:220px"><label>Prenumerera – klistra in poddens RSS-adress</label><input id="purl" placeholder="https://…/feed.xml" inputmode="url"></div><button class="primary">Lägg till</button></form>
-      <p class="muted small">Tips: RSS-adressen hittar du på poddens webbplats eller genom att söka på poddens namn + "RSS". De senaste avsnitten laddas ner automatiskt.</p>` : ''}
-    ${D.podcasts.length ? `<div class="grid">${D.podcasts.map(p => `<a class="card mcard" href="#/podcast/${p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${p.unplayed ? `${p.unplayed} nya` : esc(p.author || '')}${p.error ? ' · ⚠' : ''}</div></a>`).join('')}</div>` : emptyState({ icon: '🎙', title: 'Inga poddar ännu', text: D.canAdd ? 'Klistra in en podds RSS-adress ovan för att prenumerera.' : '' })}
+    ${D.canAdd ? `<form id="padd" class="row panel" style="align-items:flex-end" role="search"><div style="flex:1;min-width:220px"><label for="purl">Hitta en podd – sök på namnet eller klistra in RSS-adressen</label><input id="purl" type="search" style="width:100%" placeholder="t.ex. Sommar i P1 eller https://…/feed.xml" autocomplete="off"></div><button class="primary">Sök</button></form>
+      <div id="pres" aria-live="polite"></div>
+      <p class="muted small">De senaste avsnitten laddas ner automatiskt när du prenumererar.</p>` : ''}
+    ${D.podcasts.length ? `<div class="grid">${D.podcasts.map(p => `<a class="card mcard" href="#/podcast/${p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${p.unplayed ? `${p.unplayed} nya` : esc(p.author || '')}${p.error ? ' · ⚠' : ''}</div></a>`).join('')}</div>` : emptyState({ icon: '🎙', title: 'Inga poddar ännu', text: D.canAdd ? 'Sök efter en podd ovan och tryck Prenumerera.' : '' })}
     ${D.latest.length ? `<section class="section"><h2>Senaste avsnitten</h2>${epRows(D.latest, true)}</section>` : ''}`;
   bindEps(D.latest);
+  const subscribe = async (url, b) => {
+    const txt = b.textContent; b.disabled = true; b.textContent = 'Hämtar…';
+    try { const r = await api('/podcasts', { method: 'POST', body: { url } }); location.hash = '#/podcast/' + r.id; }
+    catch (er) { toastErr(er); b.disabled = false; b.textContent = txt; }
+  };
   if ($('#padd')) $('#padd').onsubmit = async (e) => {
-    e.preventDefault(); const b = $('#padd button'); b.disabled = true; b.textContent = 'Hämtar…';
-    try { const r = await api('/podcasts', { method: 'POST', body: { url: $('#purl').value } }); location.hash = '#/podcast/' + r.id; }
-    catch (er) { toastErr(er); b.disabled = false; b.textContent = 'Lägg till'; }
+    e.preventDefault();
+    const q = $('#purl').value.trim(), b = $('#padd button');
+    if (!q) return;
+    // En adress prenumereras direkt, annars söks namnet i Apples poddkatalog (som Audiobookshelf)
+    if (/^https?:\/\//i.test(q)) return subscribe(q, b);
+    b.disabled = true; $('#pres').innerHTML = loadingState({ kind: 'list' });
+    try {
+      const res = await api('/podcasts/search?q=' + encodeURIComponent(q));
+      const have = new Set(D.podcasts.map(p => p.url));
+      $('#pres').innerHTML = res.length ? `<section class="section"><h2>Sökträffar</h2><div class="list">${res.map((p, i) => `<div class="row podhit">
+        ${p.art ? `<img class="cover small" loading="lazy" src="/api/podcasts/search/art?u=${encodeURIComponent(p.art)}" alt="" width="52" height="52">` : '<div class="cover small" aria-hidden="true">🎙</div>'}
+        <div style="flex:1;min-width:0"><div class="t">${esc(p.title)}</div><div class="s muted small">${esc([p.author, p.genre, p.episodes ? `${p.episodes} avsnitt` : ''].filter(Boolean).join(' · '))}</div></div>
+        ${have.has(p.feed) ? '<span class="muted small">Prenumererar</span>' : `<button class="ghost" data-psub="${i}">Prenumerera</button>`}</div>`).join('')}</div></section>`
+        : emptyState({ icon: '🔍', title: 'Inga poddar hittades', text: 'Prova ett annat namn, eller klistra in RSS-adressen från poddens webbplats.' });
+      $$('[data-psub]').forEach(x => x.onclick = () => subscribe(res[+x.dataset.psub].feed, x));
+    } catch (er) { if (!er?.aborted) $('#pres').innerHTML = errorState(er); }
+    finally { b.disabled = false; }
   };
   loadLibs().catch(() => {});
 };

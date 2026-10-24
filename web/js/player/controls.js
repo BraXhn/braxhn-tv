@@ -60,8 +60,15 @@ export function keys(e) {
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
   if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
   else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
-  else if (e.key === 'ArrowRight') v.currentTime += 10;
-  else if (e.key === 'ArrowLeft') v.currentTime -= 10;
+  else if (e.key === 'ArrowRight' || e.key === 'l') v.currentTime += 10;
+  else if (e.key === 'ArrowLeft' || e.key === 'j') v.currentTime -= 10;
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    v.volume = Math.max(0, Math.min(1, Math.round((v.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10)); v.muted = v.volume === 0;
+    store.set('pvol', v.volume);
+  }
+  // 0–9: hoppa till 0 %, 10 % … 90 % av filmen (som YouTube)
+  else if (/^[0-9]$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && isFinite(v.duration)) v.currentTime = v.duration * (+e.key / 10);
   else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
   else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
   else if (e.key === 'm') v.muted = !v.muted;
