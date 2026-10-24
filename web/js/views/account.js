@@ -41,7 +41,7 @@ views.account = async () => {
     <h3 style="font-size:15px;margin:0 0 4px">Byt lösenord</h3>
     <form id="pw"><label>Nuvarande lösenord</label><input type="password" id="c" autocomplete="current-password" required>
     <label>Nytt lösenord</label><input type="password" id="n1" autocomplete="new-password" minlength="10" required>
-    <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut.</p>
+    <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut och lösenord för musikappar återkallas.</p>
     <div class="row" style="margin-top:12px"><button class="primary">Byt lösenord</button></div></form>
   </div>
   <div class="panel"><h2>Logga in på TV med kod</h2>
@@ -82,6 +82,7 @@ views.account = async () => {
       <div class="row"><button class="ghost" id="trsync">Synka nu</button><button class="danger" id="troff">Koppla från</button></div>`
     : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
   <div class="panel" id="scrobble" hidden></div>
+  <div class="panel" id="subsonic" hidden></div>
   <div class="panel" id="listenprefs"></div>
   <div class="panel" id="calfeed"></div>
   <div class="panel"><h2>Inloggade enheter</h2>
@@ -98,6 +99,7 @@ views.account = async () => {
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
+  renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
@@ -222,6 +224,51 @@ async function renderScrobble(el, data) {
       else if ($('#lfst', el)) $('#lfst', el).textContent = 'Inloggningen gick ut – försök igen.';
     };
     later(tick, 3000);
+  });
+}
+
+// ---------- musikappar (Subsonic): eget app-lösenord ----------
+Object.assign(EVENTS, { subsonic_password_created: 'Lösenord för musikappar skapat', subsonic_password_revoked: 'Lösenord för musikappar återkallat',
+  subsonic_login_fail: 'Fel lösenord från musikapp', subsonic_denied: 'Musikapp nekad' });
+async function renderSubsonic(el, data) {
+  const S = data || await api('/me/subsonic');
+  if (!el.isConnected || !S.enabled) return;
+  const fmt = (t) => t ? fmtDate(t) : 'aldrig';
+  const server = `${location.origin}`;
+  el.hidden = false;
+  el.innerHTML = `<h2>Musikappar ${S.active ? '<span class="ok-badge">På</span>' : ''}</h2>
+    <p class="muted small">Lyssna på musiken i färdiga musikappar som Symfonium (Android, Android Auto), Amperfy och play:Sub (iPhone och CarPlay), Feishin och Supersonic (dator) eller Sonos via Music Assistant. Apparna använder ett eget lösenord som bara ger tillgång till musiken – inte filmer, serier eller ditt konto.</p>
+    <table><tr><td>Server</td><td><code style="user-select:all">${esc(server)}</code></td></tr>
+      <tr><td>Användarnamn</td><td><code style="user-select:all">${esc(S.username)}</code></td></tr></table>
+    ${S.screenTimeAudio ? '<p class="small"><span class="warn-badge">Obs</span> Profilen har skärmtid för ljud. Musikappar kan inte följa skärmtiden och nekas därför – lyssna i BraXhn TV i stället.</p>' : ''}
+    ${S.active ? `<p class="muted small" style="margin-top:8px">Lösenordet skapades ${fmt(S.created)}${S.createdAtHome ? ' hemifrån' : ''} · senast använt ${fmt(S.lastUsed)}${S.client ? ' av ' + esc(S.client) : ''}. Det visas bara när det skapas – skapa ett nytt om du behöver det igen (det gamla slutar då fungera i alla musikappar).</p>` : ''}
+    <div class="row" style="margin-top:12px"><button class="primary" id="subnew">${S.active ? 'Skapa nytt lösenord' : 'Skapa lösenord för musikappar'}</button>${S.active ? '<button class="danger" id="suboff">Återkalla</button>' : ''}</div>`;
+  const again = (d) => renderSubsonic(el, d).catch(() => {});
+  $('#subnew', el).onclick = async () => {
+    const remote = !S.atHome;
+    const f = await formDialog({ title: S.active ? 'Nytt lösenord för musikappar' : 'Lösenord för musikappar', okLabel: 'Skapa', fields: [
+      { name: 'password', label: S.profile ? 'Huvudkontots lösenord' : 'Ditt lösenord', type: 'password', required: true },
+      ...(remote ? [{ name: 'code', label: 'Kod från autentiseringsappen', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12, required: true,
+        hint: 'Utanför hemmet krävs tvåstegsverifiering för att skapa lösenordet.' }] : [])] });
+    if (!f) return;
+    let r;
+    try { r = await api('/me/subsonic', { method: 'POST', body: { password: f.password, code: f.code } }); } catch (e) { toastErr(e); return; }
+    openDialog({
+      title: 'Ditt lösenord för musikappar',
+      body: `<p class="muted small">Lägg till en Subsonic-server i musikappen (i Symfonium: Lägg till mediaserver → Subsonic) med uppgifterna nedan. Lösenordet visas bara nu – spara det i appen eller i en lösenordshanterare.</p>
+        <label>Serveradress</label><input readonly value="${esc(server)}" class="subcopy" style="font-family:ui-monospace,monospace">
+        <label>Användarnamn</label><input readonly value="${esc(r.username)}" class="subcopy" style="font-family:ui-monospace,monospace">
+        <label>Lösenord</label><input readonly value="${esc(r.password)}" class="subcopy" id="subpw" style="font-family:ui-monospace,monospace">
+        <p class="muted small" style="margin-top:8px">Vissa appar vill ha adressen med <code>/rest</code> på slutet. Utanför hemmet fungerar appen bara om ditt konto får användas utifrån${r.has2fa ? '' : ' (och om administratören kräver tvåstegsverifiering utifrån måste du aktivera den)'}.</p>`,
+      actions: [{ label: 'Kopiera lösenordet', onClick: () => { navigator.clipboard?.writeText(r.password).then(() => toast('Kopierat'), () => toastErr(new Error('Kunde inte kopiera – markera lösenordet och kopiera det själv'))); return false; } },
+        { label: 'Klar', kind: 'primary' }],
+      onClose: () => again()
+    });
+    for (const i of $$('.subcopy')) i.onfocus = () => i.select();
+  };
+  if ($('#suboff', el)) $('#suboff', el).onclick = act(async () => {
+    if (!await confirmDialog('Återkalla lösenordet för musikappar? Alla musikappar som använder det slutar fungera.', { okLabel: 'Återkalla', danger: true })) return;
+    again(await api('/me/subsonic', { method: 'DELETE' })); toast('Lösenordet för musikappar är återkallat');
   });
 }
 

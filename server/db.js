@@ -240,6 +240,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS book_meta(book_id INTEGER PRIMARY KEY REFERE
   state INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0, tried INTEGER, source TEXT, source_id TEXT, src_title TEXT,
   subtitle TEXT, narrator TEXT, description TEXT, publisher TEXT, year INTEGER, isbn TEXT, asin TEXT, language TEXT, genres TEXT,
   series TEXT, series_no TEXT, chapters TEXT, cover_net INTEGER NOT NULL DEFAULT 0, edits TEXT);`);
+// Musikappar (Subsonic/OpenSubsonic, server/subsonic.js): ett app-lösenord per användare/profil. enc = lösenordet krypterat
+// med AES-256-GCM och nyckeln i /config/subsonic.key (md5-inloggningen behöver klartexten), key_hash = SHA-256 för
+// klartext-/apiKey-inloggning. Stjärnor på album och artister (spår använder favorites som webben).
+db.exec(`CREATE TABLE IF NOT EXISTS subsonic_passwords(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enc TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, created_ip TEXT, trusted INTEGER NOT NULL DEFAULT 0,
+  last_used INTEGER, last_ip TEXT, client TEXT);
+CREATE TABLE IF NOT EXISTS album_stars(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE, created INTEGER NOT NULL, PRIMARY KEY(user_id, album_id));
+CREATE TABLE IF NOT EXISTS artist_stars(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE, created INTEGER NOT NULL, PRIMARY KEY(user_id, artist_id));`);
+addCol('favorites', 'created', 'INTEGER');
+addCol('playlists', 'comment', 'TEXT');
+addCol('playlists', 'changed', 'INTEGER');
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -259,7 +272,11 @@ CREATE INDEX IF NOT EXISTS scrobble_due ON scrobble_queue(due, next_try);
 CREATE INDEX IF NOT EXISTS scrobble_user ON scrobble_queue(user_id, due);
 CREATE INDEX IF NOT EXISTS cc_owner ON custom_collections(owner_id);
 CREATE INDEX IF NOT EXISTS cci_item ON custom_collection_items(item_id);
-CREATE INDEX IF NOT EXISTS calendar_ep_air ON calendar_episodes(air_date);`);
+CREATE INDEX IF NOT EXISTS calendar_ep_air ON calendar_episodes(air_date);
+CREATE INDEX IF NOT EXISTS album_stars_album ON album_stars(album_id);
+CREATE INDEX IF NOT EXISTS artist_stars_artist ON artist_stars(artist_id);
+CREATE INDEX IF NOT EXISTS albums_lib_sort ON albums(library_id, sort_title);
+CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);`);
 
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');

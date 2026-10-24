@@ -32,6 +32,7 @@ import './routes/books.js';
 import './routes/integrations.js';
 import './routes/livetv.js';
 import './routes/calendar.js';
+import './routes/subsonic.js'; // /rest/* (musikappar) och /api/me/subsonic
 export { handle } from './http/router.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)

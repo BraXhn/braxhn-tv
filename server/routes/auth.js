@@ -9,6 +9,7 @@ import * as pk from '../passkeys.js';
 import * as updates from '../updates.js';
 import { VERSION } from '../updates.js';
 import * as screen from '../screentime.js';
+import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
 import { allowUnrated, ctx, householdRoot, canManage, setupPending } from '../http/context.js';
 
@@ -113,6 +114,8 @@ route('POST', '/api/me/password', user, async (c) => {
   // Logga ut alla andra enheter
   // alla andra, även media/bildtoken och profilernas sessioner (en profil kan byta tillbaka till kontot)
   run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
+  // Lösenord för musikappar (hushållets) återkallas också – nytt lösenord betyder ofta att det gamla läckt
+  revokeSubsonicHousehold(c.user.parent_id || c.user.id);
   audit('password_changed', ctx(c));
   send(c.res, 200, { ok: true });
 });
@@ -142,6 +145,8 @@ route('POST', '/api/me/2fa/enable', user, async (c) => {
   const rc = newRecoveryCodes();
   run('UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_enabled=1, totp_last=?, recovery=? WHERE id=?', step, JSON.stringify(rc.hashes), c.user.id);
   run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
+  // Lösenord för musikappar (hushållets) återkallas också – nytt lösenord betyder ofta att det gamla läckt
+  revokeSubsonicHousehold(c.user.parent_id || c.user.id);
   audit('2fa_enabled', ctx(c));
   send(c.res, 200, { ok: true, recoveryCodes: rc.codes });
 });
@@ -177,6 +182,8 @@ route('DELETE', '/api/me/sessions/:sid', user, (c) => {
 });
 route('POST', '/api/me/sessions/revoke-others', user, (c) => {
   run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', c.user.id, c.user.tokenHash);
+  // Lösenord för musikappar (hushållets) återkallas också – nytt lösenord betyder ofta att det gamla läckt
+  revokeSubsonicHousehold(c.user.parent_id || c.user.id);
   audit('sessions_revoked_all', ctx(c));
   send(c.res, 200, { ok: true });
 });
