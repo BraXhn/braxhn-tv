@@ -6,7 +6,8 @@ import { castItem, castReady } from './cast.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
-import { pgsStop, setSubs, subBurns, textStop } from './subs.js';
+import { pgsStop, restyleSubs, setSubs, subBurns, textStop } from './subs.js';
+import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, serverFxParams, setAudioFx, stopAudioFx, subStyleFields, thumbStyle, webAudioFx } from './comfort.js';
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { ICON } from '../ui/icons.js';
@@ -16,6 +17,8 @@ export function closeAllPlayers() { playSeq++; closeOverlays(); }
 
 // ---------- spelare ----------
 export let P = null;
+let rate = 1; // uppspelningshastighet – följer med till nästa avsnitt under besöket
+const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 let playSeq = 0; // ökas för varje play() och när alla spelare stängs – äldre anrop avbryter sig själva
 export function loadHls() {
   if (window.Hls) return Promise.resolve(window.Hls);
@@ -69,13 +72,18 @@ export async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+    <button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
       <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
       ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
       <label>Undertexter<select id="ps"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
       ${textSubs.length > 1 ? `<label>Andra undertext<select id="ps2"><option value="">Ingen</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
-      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare" aria-label="Undertexten tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Senare" aria-label="Undertexten senare">+</button></span></div>
+      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare" aria-label="Undertexten tidigare">−</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.5" title="Senare" aria-label="Undertexten senare">+</button></span>
+      <label>Hastighet<select id="prate">${RATES.map(r => `<option value="${r}">${r === 1 ? 'Normal' : String(r).replace('.', ',') + '×'}</option>`).join('')}</select></label>
+      <div class="setgrp"><b>Ljud</b>
+        <label class="chk"><input type="checkbox" id="pnight"> Nattläge <span class="muted">jämnare ljud, svaga ljud lyfts</span></label>
+        <label class="chk"><input type="checkbox" id="pdialog"> Tydligare dialog <span class="muted">rösterna förstärks</span></label></div>
+      <details class="setgrp"><summary>Undertextens utseende</summary>${subStyleFields('pst')}</details></div>
     <div class="ctl" id="ctl">
       <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
         <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
@@ -100,8 +108,23 @@ export async function play(id, start = 0, opts = {}) {
     </div>`;
   overlayOpen(el);
   const v = q('#vid');
+  applySubStyle(el);
   bindControls(cur, v);
   q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
+  q('#prate').value = String(rate);
+  q('#prate').onchange = (e) => { rate = +e.target.value; v.defaultPlaybackRate = v.playbackRate = rate; };
+  v.addEventListener('loadedmetadata', () => { v.defaultPlaybackRate = v.playbackRate = rate; });
+  // Nattläge/tydligare dialog: i webbläsaren med WebAudio, annars (Safari) av servern – då startas strömmen om
+  const fx = audioFx();
+  q('#pnight').checked = fx.night; q('#pdialog').checked = fx.dialog;
+  const fxChange = () => {
+    setAudioFx({ night: q('#pnight').checked, dialog: q('#pdialog').checked });
+    if (webAudioFx) applyAudioFx(v); else reload();
+  };
+  q('#pnight').onchange = fxChange; q('#pdialog').onchange = fxChange;
+  bindSubStyleFields(q('#setp'), () => { applySubStyle(el); restyleSubs(); });
+  const onResize = () => { if (P === cur) measureCtl(el); else window.removeEventListener('resize', onResize); };
+  window.addEventListener('resize', onResize);
   q('#pclose').onclick = () => setMini(true); // fortsätt spela i litet fönster; ⏹ stoppar
   q('#pq').onchange = (e) => { cur.q = e.target.value; store.set('quality', cur.q); reload(); };
   if (q('#pa')) q('#pa').onchange = (e) => { cur.audio = e.target.value; reload(); };
@@ -118,8 +141,13 @@ export async function play(id, start = 0, opts = {}) {
     q('#setp').hidden = true;
     if (!l.hidden) { l.hidden = true; return; }
     const c0 = it.chapters.filter(c => c.start <= v.currentTime).pop();
-    l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === c0 ? 'on' : ''}"><span>${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
+    // Förhandsbild per kapitel ur spolningsbilderna (närmast kapitlets start); utan dem bara text
+    const tw = innerWidth < 500 ? 96 : 128;
+    l.classList.toggle('thumbs', !!cur.tp);
+    l.innerHTML = it.chapters.map((c, i) => `<button data-ch="${i}" class="${c === c0 ? 'on' : ''}">${cur.tp ? `<span class="chimg" style="${thumbStyle(cur.tp, it.id, c.start, tw)}"></span>` : ''}<span class="chtitle">${esc(c.title)}</span><span class="muted">${fmtTime(c.start)}</span></button>`).join('');
     l.hidden = false;
+    $('button.on', l)?.scrollIntoView({ block: 'nearest' });
+    ($('button.on', l) || $('button', l))?.focus({ preventScroll: true });
     $$('[data-ch]', l).forEach(b => b.onclick = () => { v.currentTime = it.chapters[+b.dataset.ch].start + 0.05; l.hidden = true; });
   };
   $$('[data-off]', el).forEach(b => b.onclick = () => { cur.offset = Math.round((cur.offset + +b.dataset.off) * 10) / 10; setSubs(); });
@@ -222,6 +250,7 @@ async function load(start) {
   const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
+  Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
   // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
@@ -289,6 +318,7 @@ async function load(start) {
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
   v.play().catch(() => {});
+  applyAudioFx(v);
 }
 function reload() { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0); }
 
@@ -341,7 +371,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
-  pgsStop(P); textStop(P);
+  pgsStop(P); textStop(P); stopAudioFx(v);
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);

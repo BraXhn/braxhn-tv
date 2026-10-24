@@ -58,7 +58,14 @@ export function keys(e) {
   const v = $('#vid', P.el); if (!v) return;
   // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
-  if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
+  if (e.key.startsWith('Arrow') && moveFocus(e)) return;
+  if (e.key === 'Escape' && (!$('#setp', P.el).hidden || !$('#chlist', P.el).hidden)) {
+    // Stäng inställningar/kapitel först och lämna fokus på knappen som öppnade dem
+    const ch = !$('#chlist', P.el).hidden;
+    $('#setp', P.el).hidden = true; $('#chlist', P.el).hidden = true;
+    $(ch ? '#pchap' : '#cset', P.el)?.focus();
+  }
+  else if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
   else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
   else if (e.key === 'ArrowRight' || e.key === 'l') v.currentTime += 10;
   else if (e.key === 'ArrowLeft' || e.key === 'j') v.currentTime -= 10;
@@ -72,4 +79,27 @@ export function keys(e) {
   else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
   else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
   else if (e.key === 'm') v.muted = !v.muted;
+}
+
+// Fjärrkontroll och tangentbord: när en knapp i spelaren har synligt fokus flyttar pilarna fokus mellan knapparna
+// (vänster/höger i kontrollraden, upp/ner i kapitellistan och inställningarna) i stället för att spola.
+// Efter ett musklick är fokus inte synligt, och då spolar pilarna som vanligt.
+function moveFocus(e) {
+  const t = e.target;
+  if (!t?.matches || !t.matches(':focus-visible')) return false;
+  const box = t.closest('#chlist,#setp,.crow,.pbar'); if (!box) return false;
+  const list = box.matches('#chlist,#setp');
+  const fwd = list ? e.key === 'ArrowDown' : e.key === 'ArrowRight', back = list ? e.key === 'ArrowUp' : e.key === 'ArrowLeft';
+  if (!fwd && !back) {
+    // Upp från kontrollraden: till "Hoppa över" om den syns
+    const sk = $('#pskip', P.el);
+    if (box.matches('.crow') && e.key === 'ArrowUp' && sk && !sk.hidden) { e.preventDefault(); sk.focus(); return true; }
+    return false;
+  }
+  const items = [...box.querySelectorAll('button,select,input,summary')].filter(x => !x.disabled && x.offsetParent !== null);
+  const i = items.indexOf(t);
+  const n = items[i + (fwd ? 1 : -1)];
+  e.preventDefault();
+  n?.focus();
+  return true;
 }
