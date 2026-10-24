@@ -22,12 +22,16 @@ CREATE TABLE IF NOT EXISTS programs(id INTEGER PRIMARY KEY, channel_id INTEGER N
   start INTEGER NOT NULL, stop INTEGER NOT NULL, title TEXT NOT NULL, subtitle TEXT, description TEXT, category TEXT,
   season INTEGER, episode INTEGER, icon TEXT, is_new INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS programs_ch ON programs(channel_id, start);
-CREATE INDEX IF NOT EXISTS programs_title ON programs(title COLLATE NOCASE, start);`);
+CREATE INDEX IF NOT EXISTS programs_title ON programs(title COLLATE NOCASE, start);
+CREATE INDEX IF NOT EXISTS programs_start ON programs(start);`);
 
 // ---------- hjälp ----------
 function localPath(url) {
   const p = url.replace(/^file:\/\//, '');
-  if (!path.resolve(p).startsWith(path.resolve(CONFIG))) throw new Error('Lokala filer måste ligga i /config');
+  // Den verkliga sökvägen (symlänkar följda) måste ligga i /config – inte bara börja likadant (/config2/…)
+  let rel;
+  try { rel = path.relative(fs.realpathSync(CONFIG), fs.realpathSync(p)); } catch { rel = '..'; }
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) throw new Error('Lokala filer måste ligga i /config');
   return p;
 }
 async function fetchText(url, { timeout = 60000, max = 200 << 20 } = {}) {
@@ -415,7 +419,7 @@ export function refreshGuide(tunerId = null) {
       run('DELETE FROM programs WHERE stop < ?', now() - 86400);
       guideState.last = now(); guideState.error = errors.length ? errors.join('; ') : null;
       if (errors.length && errors.length === tuners.length) throw new Error(guideState.error);
-    } finally { guideState.running = false; }
+    } finally { guideState.running = false; longest = null; }
   })().finally(() => { guideRun = null; });
   guideRun = { tunerId, promise };
   return promise;
@@ -431,9 +435,18 @@ export function channelList(includeHidden = false) {
       epgId: c.epg_id, now: progs[0] && progs[0].start <= t ? progs[0] : null, next: progs[0] && progs[0].start > t ? progs[0] : progs[1] || null };
   });
 }
+// Längsta programmet i guiden (sekunder), så att en nedre gräns på start kan använda indexet utan att tappa långa program.
+// Räknas om efter varje guideuppdatering och annars högst var tionde minut.
+let longest = null, longestAt = 0;
+function longestProgram() {
+  if (longest == null || Date.now() - longestAt > 600e3) { longest = get('SELECT COALESCE(MAX(stop - start), 0) AS m FROM programs').m; longestAt = Date.now(); }
+  return longest;
+}
 export function guide(from, to) {
   const chans = all(`SELECT c.id, c.number, c.name, c.logo FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 ORDER BY c.favorite DESC, c.sort, c.name`);
-  const progs = all('SELECT id, channel_id, start, stop, title, subtitle, category, season, episode, is_new FROM programs WHERE stop > ? AND start < ? ORDER BY start', from, to);
+  // Minst ett dygns marginal (program längre än så räknas in via longestProgram)
+  const progs = all('SELECT id, channel_id, start, stop, title, subtitle, category, season, episode, is_new FROM programs WHERE start > ? AND stop > ? AND start < ? ORDER BY start',
+    from - Math.max(86400, longestProgram()) - 1, from, to);
   const by = new Map(chans.map(c => [c.id, []]));
   for (const p of progs) by.get(p.channel_id)?.push({ id: p.id, start: p.start, stop: p.stop, title: p.title, subtitle: p.subtitle, category: p.category, season: p.season, episode: p.episode, isNew: !!p.is_new });
   return chans.map(c => ({ ...c, programs: by.get(c.id) }));

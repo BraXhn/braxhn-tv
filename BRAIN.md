@@ -82,5 +82,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - **TS-remux från början** förskjuts med B-bildernas fördröjning (0,08–0,2 s); efter spolning inte. Varning i sviten.
 - **Dolby Vision profil 5** vid omkodning ger fel färger (ingen IPT→RGB-väg i zscale).
 - **Synkron diskåtkomst** i `subtitlesOf`/`listDir` på förfrågningsvägen: mapplistningen cachas nu 30 s (även saknad mapp; `forgetSubtitles` efter nedladdning/borttagning), så en uppspelning gör högst en `statSync` per mapp och halvminut. Kvar: första förfrågan efter 30 s (och `subKey`:s `statSync` av externa filer, `serveDirect`, `keyframesCached`) blockerar fortfarande om disken sover – asynkront API kräver omskrivning av `decide`/`subtitlesOf` och alla anropare.
+- **Synkron diskåtkomst** i `subtitlesOf`/`listDir` på förfrågningsvägen kan frysa servern när en arraydisk vaknar.
+- **Kortlivade cacher i minnet** (en process): rekommendationskandidater per åldersgräns 5 min (töms efter skanning, `clearRecommendations`), smarta listors översikt 60 s per användare/bibliotek (`listening.js`), TV-guidens längsta program (nedre gräns för `programs_start`, räknas om efter guideuppdatering). Ändringar utanför dessa vägar syns med fördröjning.
 - **iPhone-flikmenyn** (0.9.2) är rättad på trolig orsak, inte bekräftad.
 - **Produktmål:** andra ska kunna installera → i18n (allt är svenska), installationsguide, Community Apps, licens.

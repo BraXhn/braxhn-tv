@@ -170,7 +170,18 @@ export function smartTracks(libId, uid, id, { limit = 200, at = now() } = {}) {
   return rows.map(t => shapeTrack(t, favs));
 }
 /** Översikt för musikhemmet: listor som inte är tomma, med antal och upp till fyra omslag. */
+// Att räkna alla listor kostar flera frågor över hela biblioteket – översikten cachas en minut per användare och bibliotek
+const smartCache = new Map(); // "uid:libId" -> { v, t }
+const SMART_TTL = 60e3;
 export function smartLists(libId, uid) {
+  const k = `${uid}:${libId}`, c = smartCache.get(k);
+  if (c && Date.now() - c.t < SMART_TTL) return c.v;
+  const v = countSmartLists(libId, uid);
+  smartCache.set(k, { v, t: Date.now() });
+  if (smartCache.size > 500) smartCache.delete(smartCache.keys().next().value);
+  return v;
+}
+function countSmartLists(libId, uid) {
   return SMART.map(s => {
     const tracks = smartTracks(libId, uid, s.id);
     const covers = [...new Set(tracks.filter(t => t.cover).map(t => t.albumId))].slice(0, 4);

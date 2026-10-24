@@ -4,6 +4,7 @@ import path from 'node:path';
 import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { notify } from './notify.js';
 import * as offsite from './offsite.js';
+import { AUDIO } from './music.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS plays(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, item_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -131,31 +132,51 @@ setInterval(() => {
 }, 600e3).unref();
 
 // ---------------- filbevakning ----------------
-const VIDEO = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|wmv|mpg|mpeg|flv|ogv|srt|vtt|ass|mp3|flac|m4a|aac|ogg|opus|wav|alac|wma)$/i;
+// Video och undertexter (scanner.js) samt ljud (music.js, som musik- och ljudboksskannern använder)
+const MEDIA_EXT = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts', '.wmv', '.mpg', '.mpeg', '.flv', '.ogv',
+  '.srt', '.vtt', '.ass', ...AUDIO]);
+/** Ska en ändring av filen (relativ till root) ge en skanning? Mediefiler och mappar – även med punkt i namnet
+ *  ("Film.2020") – och borttagna saker utan ändelse räknas, andra filer (bilder, .nfo …) inte. */
+export function watchRelevant(root, file) {
+  if (MEDIA_EXT.has(path.extname(file).toLowerCase())) return true;
+  try { return fs.statSync(path.join(root, file)).isDirectory(); } catch { return !path.extname(file); }
+}
 const watchers = new Map();
 const pending = new Map(); // väntande skanning per bibliotek
+let watchGen = 0;
 export function watchLibraries(onChange) {
   for (const [, w] of watchers) w.close();
   watchers.clear();
   // Ändrade inställningar: gamla väntande skanningar (ev. för borttagna bibliotek) ska inte köras
   for (const [, t] of pending) clearTimeout(t);
   pending.clear();
+  const gen = ++watchGen;
   if (getSetting('watch_enabled', process.env.WATCH_FILES || '1') !== '1') return;
-  for (const lib of all('SELECT * FROM libraries')) {
-    try {
-      const w = fs.watch(lib.path, { recursive: true, persistent: false }, (ev, file) => {
-        if (file && !VIDEO.test(String(file)) && !/^[^.]*$/.test(path.basename(String(file)))) return; // mappar saknar ändelse
-        clearTimeout(pending.get(lib.id));
-        // Vänta tills kopieringen är klar (inga nya händelser på 30 s)
-        const t = setTimeout(() => { pending.delete(lib.id); onChange(lib.id); }, 30000);
-        t.unref();
-        pending.set(lib.id, t);
-      });
-      w.on('error', (e) => { console.warn('[watch]', lib.path, e.message); w.close(); watchers.delete(lib.id); });
-      watchers.set(lib.id, w);
-    } catch (e) {
-      console.warn(`[watch] kan inte bevaka ${lib.path}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`);
-    }
+  // Rekursiv fs.watch går igenom hela mappträdet synkront – körs efter svaret, ett bibliotek per varv i händelseloopen
+  const libs = all('SELECT * FROM libraries');
+  const next = () => {
+    if (gen !== watchGen) return; // ett nyare anrop har tagit över
+    const lib = libs.shift();
+    if (!lib) return;
+    watchOne(lib, onChange);
+    setImmediate(next);
+  };
+  setImmediate(next);
+}
+function watchOne(lib, onChange) {
+  try {
+    const w = fs.watch(lib.path, { recursive: true, persistent: false }, (ev, file) => {
+      if (file && !watchRelevant(lib.path, String(file))) return;
+      clearTimeout(pending.get(lib.id));
+      // Vänta tills kopieringen är klar (inga nya händelser på 30 s)
+      const t = setTimeout(() => { pending.delete(lib.id); onChange(lib.id); }, 30000);
+      t.unref();
+      pending.set(lib.id, t);
+    });
+    w.on('error', (e) => { console.warn('[watch]', lib.path, e.message); w.close(); watchers.delete(lib.id); });
+    watchers.set(lib.id, w);
+  } catch (e) {
+    console.warn(`[watch] kan inte bevaka ${lib.path}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`);
   }
 }
 export const watchingCount = () => watchers.size;

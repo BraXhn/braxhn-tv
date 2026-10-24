@@ -189,8 +189,9 @@ export function musicHome(libId, uid) {
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   return {
     recentAlbums: all(`${ALBUM_SQL} WHERE al.library_id=? ORDER BY al.added DESC LIMIT 24`, libId).map(shapeAlbum),
-    recentlyPlayed: all(`${ALBUM_SQL} WHERE al.library_id=? AND al.id IN (SELECT t.album_id FROM track_plays p JOIN tracks t ON t.id=p.track_id WHERE p.user_id=?
-      GROUP BY t.album_id ORDER BY MAX(p.ts) DESC LIMIT 24)`, libId, uid).map(shapeAlbum),
+    // Senast spelade först; biblioteket filtreras före LIMIT (annars kan andra bibliotek tränga undan albumen)
+    recentlyPlayed: all(`${ALBUM_SQL} JOIN (SELECT t.album_id, MAX(p.ts) AS last FROM track_plays p JOIN tracks t ON t.id=p.track_id
+      WHERE p.user_id=? AND t.library_id=? GROUP BY t.album_id ORDER BY last DESC LIMIT 24) r ON r.album_id=al.id ORDER BY r.last DESC`, uid, libId).map(shapeAlbum),
     favorites: all(`${TRACK_SQL} WHERE t.library_id=? AND t.id IN (SELECT track_id FROM favorites WHERE user_id=?) ORDER BY al.sort_title, t.disc_no, t.track_no LIMIT 500`, libId, uid).map(t => shapeTrack(t, favs)),
     stats: get('SELECT (SELECT COUNT(*) FROM artists WHERE library_id=?) AS artists, (SELECT COUNT(*) FROM albums WHERE library_id=?) AS albums, (SELECT COUNT(*) FROM tracks WHERE library_id=?) AS tracks', libId, libId, libId)
   };

@@ -27,6 +27,14 @@
 - Rättat: köerna för nyckelbildsindexering och undertextläsning kunde släppa fram en körning för mycket, så att fler än tänkt läste disken samtidigt
 - Musik och ljudböcker: högst 3 samtidiga omkodningar per användare och 8 totalt (tidigare obegränsat). Spolning i ett omkodat spår ersätter den gamla körningen. När taket nås får spelaren "För många ljudströmmar omkodas samtidigt just nu"
 - Rättat: offline-status för en film vars fil flyttats eller tagits bort gav serverfel – nu "Filen finns inte längre". Städningen av offline-cachen kan inte längre krascha servern
+- Rättat: "Fortsätt titta" sorteras på när du senast tittade. Nästa avsnitt i en serie du nyss tittat på hamnade förut sist, efter halvsedda filmer från förra veckan
+- Rättat: "Markera som osedd" på en serie lade den i "Fortsätt titta", och efter ett sett specialavsnitt föreslogs nästa specialavsnitt i stället för säsong 1. Specialavsnitt (säsong 0) föreslås nu bara för serier utan vanliga säsonger
+- Rättat: ljudboksbibliotek fick en tom rad "Nytt i …" på startsidan
+- Rättat: "Spelat nyligen" i musiken visade albumen i fel ordning och kunde vara tom om du nyss lyssnat i ett annat musikbibliotek
+- Rättat: barnprofiler kunde se namn, beskrivning och bilder för samlingar med bara filmer över åldersgränsen, och antalet filmer i en samling räknade även dem. Nu syns bara samlingar och filmer som profilen får se
+- Rättat: en lokal TV-guidefil i en mapp som bara börjar som /config (t.ex. /config2) eller via en symlänk ut ur /config godtogs
+- Rättat: filbevakningen missade ljudböcker (.m4b) och flera ljudformat (.oga, .aif/.aiff, .ape, .wv, .mka) samt nya mappar med punkt i namnet (t.ex. "Film.2020"). Bevakningen startas nu efter svaret och ett bibliotek i taget, så att det inte segar när man lägger till eller ändrar bibliotek
+- Snabbare startsida, musikhem och TV-guide: rekommendationernas kandidater och översikten över smarta spellistor sparas en kort stund, och nya index för TV-guiden och nyligen tillagda låtar
 
 ## 0.9.3
 - Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre

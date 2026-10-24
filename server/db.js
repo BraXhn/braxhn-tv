@@ -211,7 +211,8 @@ CREATE INDEX IF NOT EXISTS watchlist_item ON watchlist(item_id);
 CREATE INDEX IF NOT EXISTS tp_track ON track_plays(track_id);
 CREATE INDEX IF NOT EXISTS fav_track ON favorites(track_id);
 CREATE INDEX IF NOT EXISTS pli_track ON playlist_items(track_id);
-CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);`);
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);
+CREATE INDEX IF NOT EXISTS tracks_lib_added ON tracks(library_id, added);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;
