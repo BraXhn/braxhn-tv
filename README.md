@@ -41,6 +41,8 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Förhandsbilder vid spolning** | Miniatyrer visas ovanför tidslinjen när du drar i den (skapas vid skanningen). |
 | **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. Medan du castar styr du från en panel längst ner (spola, paus, ±10 s, volym, ljud- och undertextspår, stopp), framsteget och *sedd* sparas som vanligt, nästa avsnitt köas automatiskt och musik, ljudböcker och poddar kan castas från ljudspelaren. |
 | **Bio-läge** | Som på bio: 1–3 trailers före filmen – för filmer i biblioteket som du inte har sett, helst i liknande genre och efter vad du brukar titta på, och alltid inom profilens åldersgräns. Administratören kan lägga till en egen förfilm (en fil eller en mapp att slumpa från) som spelas sist. *Hoppa över* och *Hoppa över alla*, och en länk till trailerns film. Väljs per person under Mitt konto; gäller i webben när en film startas från början. Bara lokala trailers (inga YouTube-trailers). |
+| **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. |
+| **Spela på…** | Fjärrstyr en annan inloggad webbläsare i hemmet (TV-webbläsaren, datorn): välj *Spela på…* på titelsidan eller i spelaren och styr paus, spolning, ±10 s, ljud- och undertextspår, volym, nästa avsnitt och stopp från telefonen. *Flytta hit* tar över på den egna enheten från samma position. Se [Spela på en annan enhet](#spela-på-en-annan-enhet). |
 | **Utanför hemmet** | Kvaliteten begränsas automatiskt för tittare utanför hemnätet. Inbyggd HTTPS eller omvänd proxy, och appar med token-inloggning. Se nedan. |
 | **Musik** | Album, artister, spellistor, favoriter och sökning. Omslag från `cover.jpg` eller inbäddad bild. Ljudspelare som fortsätter medan du bläddrar, med mediaknappar i telefon och bil. |
 | **Titta tillsammans** | Synkad uppspelning med chatt, även mellan olika hem. Dela en länk – play, paus och spolning följer med för alla. |
@@ -289,6 +291,20 @@ BraXhn TV har ett **Subsonic-API** (version 1.16.1 med OpenSubsonic-tillägg, so
 - **Chromecast:** knappen *📺 Casta* visas i spelaren och i ljudspelaren i Chrome. Googles regler kräver att sidan öppnas via **HTTPS**, alltså alternativ 2 eller 3 ovan. Chromecasten hämtar strömmen själv med en tidsbegränsad länk som gäller 24 timmar och bara för just den titeln (varje köat avsnitt får en egen). Medan du castar visas en panel längst ner med spolning, paus, ±10 s, volym, ljud- och undertextspår och stopp; framsteget sparas var 10:e sekund och vid paus och stopp, så *Fortsätt titta* och *sedd* stämmer. Nästa avsnitt köas på Chromecasten och startar av sig självt. Musik castas med resten av kön, ljudböcker från den sparade positionen (nästa del köas). Trailers i bio-läget spelas inte på Chromecast.
 - **AirPlay:** finns i Safari på Mac/iPhone och i iPhone/iPad-appen. Det fungerar hemma utan HTTPS.
 
+## Spela på en annan enhet
+
+Varje inloggad webbläsare med BraXhn TV öppen syns som en enhet för de andra i hushållet – t.ex. TV:ns webbläsare eller datorn i vardagsrummet. Fungerar utan HTTPS och utan Chromecast (som finns kvar).
+
+1. Öppna BraXhn TV på TV:n/datorn. Byt gärna namn på den: *Spela på… → Den här enheten: … → Byt namn* (t.ex. "Vardagsrums-TV").
+2. På telefonen: öppna en film eller ett avsnitt och tryck **Spela på…** (eller samma knapp i spelaren för att skicka det som spelas just nu, med samma position och spår).
+3. En fjärrkontroll visas längst ner: paus, spola, ±10 s, nästa avsnitt, stopp, ljud- och undertextspår och volym. **Flytta hit** stoppar på TV:n och fortsätter på telefonen där den var.
+
+Bra att veta:
+- Webbläsare spelar inte upp med ljud förrän någon har tryckt på sidan. Visas **Tryck för att starta** på TV:n – tryck en gång (även med fjärrkontrollens OK-knapp). Därefter går det att starta från telefonen så länge sidan är öppen.
+- Mottagaren visar *Styrs från …* så att den som sitter vid TV:n ser vad som händer.
+- **Vem ser vilka enheter:** samma profil ser alltid sina egna. Vuxna profiler i hushållet ser varandras enheter (en förälder kan styra TV:n där barnprofilen är inloggad), men en PIN-skyddad profils enheter syns bara för profilen själv och huvudkontot. Barnprofiler styr bara sina egna enheter. Andra konton – även administratörer – ser inga. En titel startas bara om både den som styr och profilen på mottagaren får se den (åldersgränsen).
+- *Dölj den här enheten för andra* i samma meny om en webbläsare inte ska kunna styras. Musik som spelas på mottagaren kan pausas, spolas och hoppas över, men startas inte på distans än. Apparna kan inte ta emot ännu.
+
 ## Namnge filer
 
 ```
@@ -404,6 +420,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Profiler och åldersgränser | Barnprofiler såg bara tillåtna titlar. |
 | Egna samlingar | Mot en riktig server (`test/custom-collections.test.js`): skapa/ändra/ta bort, privat mot delad, administratör utanför hemnätet nekas, barnprofilens åldersgräns (även omslag och startsidans hylla), sortering, manuell ordning och borttagna titlar/användare. Webben i Chromium vid 375 och 1280 px: hylla på startsidan, samlingssidan, ordning med tangentbordet, kortmenyn och titelsidan. **Otestat:** dra och släpp på pekskärm (mobil Safari stöder inte HTML-dra-och-släpp – använd ↑/↓ där). Apparna visar inte egna samlingar ännu. |
 | Titta tillsammans | Två webbläsare höll synk vid play, paus och spolning. |
+| Spela på… | Två Chromium-webbläsare (telefon 375 px som styr, "TV" 1280 px som tar emot) och en riktig VP9/Opus-testfilm: start, *Tryck för att starta* när uppspelning nekas (spärren simulerad – headless Chromium tillämpar den inte pålitligt), paus, spolning på förloppet och +10 s, volym, *Flytta hit* (samma position ±0,1 s), *Skicka till* från spelaren och stopp, utan konsolfel. Servertester: registrering, behörighet (andra konton, barnprofiler, PIN-profiler, åldersgräns på mottagaren, CSRF, mediatoken), validering, hastighetsbegränsning, statusflöde över SSE och städning av döda anslutningar. **Otestat:** riktiga TV-webbläsare (Tizen, webOS, Android TV), Safari och musik på mottagaren. |
 | Offline, förhandsbilder, säkerhetskopior, filbevakning | Fungerade. |
 | Passkeys | Registrering och inloggning med en mjukvaru-autentiserare, inklusive avvisning av fel domän, fel nyckel och kopierad nyckel. |
 | Installationsguide | Mot en riktig server (`test/setup.test.js`): första kontot gör guiden ej klar, sparat läge (steg klart/överhoppat, hela guiden), äldre installationer utan inställningen, förslag på bibliotek från namn och innehåll (även en nivå ner, t.ex. `data/Movies`), redan tillagda mappar, **skydd mot sökvägar utanför `MEDIA_ROOT`** (`../`, absoluta sökvägar, `..` mitt i och symboliska länkar ut ur mappen), TMDB-test mot en låtsasserver (v3-nyckel, v4-token, fel nyckel, nyckeln sparas inte och syns aldrig i svar), testkodning med processorn och VAAPI utan `/dev/dri`, samt att allt kräver administratör på hemnätet. Hela flödet i Chromium vid 375 och 1280 px med en tom `CONFIG_DIR` och testmappar: första kontot → guiden, förslag och skanning live, testkodning, publik adress, barnprofil och konto, sammanfattning, rutan på startsidan, *Hoppa över guiden* och ←/→/Enter i stegindikatorn. **Otestat:** riktig GPU (Intel/AMD/NVIDIA) i testkodningen, riktig TMDB och riktiga TV-webbläsare/fjärrkontroller. |

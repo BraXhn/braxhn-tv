@@ -4,6 +4,9 @@ export const ICON = {
   play: svg('<path d="M8 5v14l11-7z"/>'), pause: svg('<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'),
   prev: svg('<path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/>'), next: svg('<path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/>'),
   stop: svg('<path d="M6 6h12v12H6z"/>'),
+  fwd10: svg('<path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.5" font-size="7" text-anchor="middle" font-family="sans-serif" font-weight="700">10</text>'),
+  // Spela på en annan enhet (som Cast-ikonen: skärm med vågor i hörnet)
+  remote: svg('<path d="M3 5h18v14h-7v-2h5V7H5v3H3zm0 7a9 9 0 0 1 9 9h-2a7 7 0 0 0-7-7zm0 4a5 5 0 0 1 5 5H6a3 3 0 0 0-3-3zm0 3.5A1.5 1.5 0 0 1 4.5 21H3z"/>'),
   back10: svg('<path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.5" font-size="7" text-anchor="middle" font-family="sans-serif" font-weight="700">10</text>'),
   fwd30: svg('<path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.5" font-size="7" text-anchor="middle" font-family="sans-serif" font-weight="700">30</text>'),
   gear: svg('<path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>'),

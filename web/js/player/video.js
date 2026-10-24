@@ -7,6 +7,7 @@ import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
+import { openRemotePicker, remoteButton } from './remote.js';
 import { pgsStop, restyleSubs, setSubs, subBurns, textStop } from './subs.js';
 import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, serverFxParams, setAudioFx, stopAudioFx, subStyleFields, thumbStyle, webAudioFx } from './comfort.js';
 import { route } from '../router.js';
@@ -71,6 +72,7 @@ export async function play(id, start = 0, opts = {}) {
     <div class="pbar"><button class="ghost small" id="pclose">← Tillbaka</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
+      ${remoteButton('pdevs', 'ghost small')}
       <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button></div>
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
@@ -156,6 +158,8 @@ export async function play(id, start = 0, opts = {}) {
   $$('[data-off]', el).forEach(b => b.onclick = () => { cur.offset = Math.round((cur.offset + +b.dataset.off) * 10) / 10; setSubs(); });
   if (q('#pcast')) q('#pcast').onclick = () => castItem(it, v.currentTime);
   if (q('#pair')) q('#pair').onclick = () => v.webkitShowPlaybackTargetPicker();
+  // Skicka till en annan inloggad webbläsare (samma position och spår); den egna spelaren stängs
+  q('#pdevs').onclick = (e) => { e.stopPropagation(); openRemotePicker(e.currentTarget, { item: it.id, position: v.currentTime, audio: cur.audio, sub: cur.sub, fromPlayer: true }); };
   if (q('#pnext')) q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
   q('#pparty').onclick = async () => {
     if (!cur.party) {
