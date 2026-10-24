@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db, get, all, run, tx, now } from './db.js';
 import { underFailed } from './util.js';
+import { relOf, rootsOf } from './libpaths.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS trailers(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE, path TEXT NOT NULL UNIQUE, size INTEGER, mtime INTEGER, added INTEGER NOT NULL);
@@ -54,7 +55,7 @@ export async function syncTrailers(lib, files, failed = [], showIdFor = () => nu
     let owner = null;
     if (lib.type === 'movie') owner = pickOwner(f, byDir.get(homeDir(f)) || []);
     else {
-      const rel = path.relative(lib.path, f).split(path.sep);
+      const rel = relOf(lib.roots || rootsOf(lib), f).split(path.sep);
       if (rel.length > 1) owner = showIdFor(rel[0]);
     }
     if (!owner) continue;

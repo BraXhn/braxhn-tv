@@ -1,6 +1,6 @@
 // Vyer: startsidan, bibliotek, Min lista och samlingar (sökningen: views/search.js).
 // Startsidans Utvalt-karusell: ui/featured.js, "Anpassa startsidan": views/homecustom.js.
-import { $, act, api, esc, fmtDur, heroUrl, later, libs, main, me, store, views } from '../core.js';
+import { $, act, api, cardW, esc, fmtDur, heroUrl, imgSrc, later, libs, main, me, store, views } from '../core.js';
 import { playSpoken } from '../audio.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
@@ -85,7 +85,9 @@ views.home = async () => {
 
 const FIRST = 60, CHUNK = 240;
 const libCard = (i) => i.kind === 'collection' ? colCard(i) : card(i);
-views.lib = async (id) => {
+views.lib = async (id, folder) => {
+  // Hemvideor: mappar som navigering, liggande kort och datum (fälten home_video/folders från servern)
+  if (libs.find(l => l.id === +id)?.home_video) return homeVideos(id, folder);
   const sort = store.get('sort.' + id, 'title'), filter = store.get('filter.' + id, ''), cols = store.get('cols.' + id, '1');
   const [d, own] = await Promise.all([api(`/libraries/${id}/items?sort=${sort}&filter=${filter}&collections=${cols}`),
     api(`/custom-collections?library=${encodeURIComponent(id)}`).catch(e => { if (e?.aborted) throw e; return []; })]);
@@ -111,6 +113,52 @@ views.lib = async (id) => {
   $('#srt').onchange = (e) => { store.set('sort.' + id, e.target.value); route(); };
   $('#flt').onchange = (e) => { store.set('filter.' + id, e.target.value); route(); };
 };
+
+// ---------- Hemvideor ----------
+const yearSpan = (f) => {
+  const a = f.first ? new Date(f.first * 1000).getFullYear() : null, b = f.latest ? new Date(f.latest * 1000).getFullYear() : null;
+  return a && b && a !== b ? `${a}–${b}` : String(a || b || '');
+};
+/** En undermapp som kort: en av klippens miniatyrer, antal klipp och år */
+function folderCard(libId, f) {
+  const sub = [`${f.count} klipp`, yearSpan(f)].filter(Boolean).join(' · ');
+  return `<a class="card land fcard" href="#/lib/${+libId}/${encodeURIComponent(f.path)}" aria-label="${esc(`Mappen ${f.name}, ${sub}`)}"><div class="art">
+    <div class="ph fph" aria-hidden="true"><span class="ficon">📁</span></div>
+    ${f.cover ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+f.cover}/thumb`, cardW() * 1.9)} alt="" width="480" height="270" data-fb="1">` : ''}
+    <span class="badge">${+f.count}</span></div><div class="t">📁 ${esc(f.name)}</div><div class="s">${esc(sub)}</div></a>`;
+}
+async function homeVideos(id, folderArg) {
+  let folder = '';
+  try { folder = decodeURIComponent(folderArg || ''); } catch {}
+  const sort = store.get('hvsort.' + id, 'date'), filter = store.get('filter.' + id, ''), flat = store.get('hvflat.' + id, '0') === '1';
+  const q = `sort=${encodeURIComponent(sort)}&filter=${encodeURIComponent(filter)}` + (flat ? '' : `&folder=${encodeURIComponent(folder)}`);
+  const d = await api(`/libraries/${id}/items?${q}`);
+  const folders = flat ? [] : d.folders || [];
+  // Brödsmulor: biblioteket, sedan mapparna ner till den här
+  const parts = flat || !folder ? [] : folder.split('/');
+  const crumbs = `<nav class="crumbs" aria-label="Mappar"><a href="#/lib/${+id}">${esc(d.library.name)}</a>${parts.map((p, i) =>
+    ` <span aria-hidden="true">›</span> <a href="#/lib/${+id}/${encodeURIComponent(parts.slice(0, i + 1).join('/'))}"${i === parts.length - 1 ? ' aria-current="page"' : ''}>${esc(p)}</a>`).join('')}</nav>`;
+  const count = d.items.length + folders.reduce((n, f) => n + f.count, 0);
+  main.innerHTML = `<div class="toolbar"><h1>${esc(parts.at(-1) || d.library.name)}</h1><span class="muted">${count} klipp</span>
+    <select id="hvflat" title="Visa mapparna eller alla klipp på en gång" aria-label="Visning"><option value="0">Mappar</option><option value="1">Alla klipp</option></select>
+    <select id="flt" aria-label="Filter"><option value="">Alla</option><option value="unwatched">Osedda</option><option value="watched">Sedda</option></select>
+    <select id="srt" aria-label="Sortering"><option value="date">Datum (nyast först)</option><option value="title">Namn</option><option value="added">Senast tillagda</option></select></div>
+    ${parts.length ? crumbs : ''}
+    ${folders.length ? `<h2 class="sr-only">Mappar</h2><div class="grid wide" id="hvfolders">${folders.map(f => folderCard(id, f)).join('')}</div>` : ''}
+    ${d.items.length ? `${folders.length ? '<h2 class="hvh">Klipp</h2>' : ''}<div class="grid wide" id="libgrid">${d.items.slice(0, FIRST).map(i => card(i, true)).join('')}</div>`
+      : folders.length ? '' : emptyState({ icon: '🎞️', title: filter ? 'Inget som matchar filtret' : 'Inga klipp här', text: filter ? 'Välj Alla för att se alla klipp.' : 'Klippen dyker upp här när biblioteket har skannats.' })}`;
+  const more = (from) => {
+    const g = $('#libgrid');
+    if (!g || from >= d.items.length) return;
+    g.insertAdjacentHTML('beforeend', d.items.slice(from, from + CHUNK).map(i => card(i, true)).join(''));
+    later(() => more(from + CHUNK), 30);
+  };
+  later(() => more(FIRST), 30);
+  $('#srt').value = sort; $('#flt').value = filter; $('#hvflat').value = flat ? '1' : '0';
+  $('#srt').onchange = (e) => { store.set('hvsort.' + id, e.target.value); route(); };
+  $('#flt').onchange = (e) => { store.set('filter.' + id, e.target.value); route(); };
+  $('#hvflat').onchange = (e) => { store.set('hvflat.' + id, e.target.value); if (e.target.value === '1' && folder) location.hash = `#/lib/${+id}`; else route(); };
+}
 
 views.watchlist = async () => {
   const items = await api('/watchlist');

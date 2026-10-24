@@ -4,7 +4,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES } from './db.js';
 import * as jobs from './jobs.js';
-import { listFiles, deletionBlocked, underFailed } from './util.js';
+import { deletionBlocked } from './util.js';
+import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
+import * as localMeta from './localmeta.js';
+import { AGE } from './nfo.js';
 import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
@@ -34,6 +37,8 @@ export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.
 // NFC: filnamn från macOS (SMB) har ofta å/ä/ö som två tecken (NFD) – annars går de inte att söka på eller slå ihop
 const clean = (s) => s.normalize('NFC').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
 const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
+/** Filens sökväg relativt den av bibliotekets mappar den ligger i (lib.roots sätts i början av skanningen) */
+const rel = (lib, f) => relOf(lib.roots || rootsOf(lib), f);
 
 // ---- Blu-ray-mappar (BDMV/STREAM/00000.m2ts …) ----
 // En kopierad skiva innehåller varningstexter, loggor, menyer och trailers som egna klipp. Bara huvudfilmen
@@ -146,6 +151,23 @@ export function parseEpisode(rel) {
   return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season, episode, epTitle: after || null, absolute };
 }
 
+/** Tidpunkt ur en tagg ("2023-06-24T14:03:11.000000Z", "2023-06-24 14:03:11") i sekunder, null om den saknas/är orimlig
+ *  (kameror utan klocka skriver 1904/1970) */
+export function createdAt(v) {
+  if (!v) return null;
+  const s = String(v).trim().slice(0, 40).replace(/^(\d{4}):(\d\d):(\d\d)/, '$1-$2-$3').replace(/^(\d{4}-\d\d-\d\d) /, '$1T');
+  const t = Date.parse(s);
+  return Number.isFinite(t) && t > Date.UTC(1975, 0, 1) && t < Date.now() + 86400e3 ? Math.floor(t / 1000) : null;
+}
+/** Hemvideons datum: inbäddad tagg, annars filens skapelsetid (eller ändringstid om den är tidigare – kopierade filer) */
+function takenOf(info, st) {
+  if (info.created) return info.created;
+  const b = st.birthtimeMs > 0 ? st.birthtimeMs : Infinity;
+  return Math.floor(Math.min(b, st.mtimeMs) / 1000);
+}
+/** Hemvideons titel: filnamnet (punkter och understreck blir mellanslag) */
+const homeTitle = (f) => { const b = path.basename(f, path.extname(f)); return clean(b) || b; };
+
 async function probe(file) {
   try {
     const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json',
@@ -165,7 +187,11 @@ async function probe(file) {
     })).filter(s => ['video', 'audio', 'subtitle'].includes(s.type) && !(s.type === 'video' && ['mjpeg', 'png'].includes(s.codec)));
     const v = streams.find(s => s.type === 'video'), a = streams.find(s => s.type === 'audio');
     const hdr = !v ? null : v.transfer === 'smpte2084' ? (v.dovi ? 'dovi' : 'hdr10') : v.transfer === 'arib-std-b67' ? 'hlg' : v.dovi ? 'dovi' : null;
-    return { hdr,
+    // Inspelningsdatum (hemvideor): creation_time i behållaren eller en ström, Apples creationdate
+    const ft = j.format?.tags || {};
+    const created = createdAt(ft['com.apple.quicktime.creationdate'] || ft.creation_time || ft.date
+      || (j.streams || []).map(s => s.tags?.creation_time).find(Boolean));
+    return { hdr, created,
       duration: parseFloat(j.format?.duration) || null, container: j.format?.format_name || null,
       vcodec: v?.codec || null, acodec: a?.codec || null, width: v?.width || null, height: v?.height || null,
       streams: JSON.stringify(streams)
@@ -203,7 +229,7 @@ function regroupShows(lib) {
   const touched = new Set(), years = new Map();
   tx(() => {
     for (const e of eps) {
-      const p = parseEpisode(path.relative(lib.path, e.path));
+      const p = parseEpisode(rel(lib, e.path));
       if (!p) continue;
       const key = showKey(p.show, p.year);
       if (keyOf.get(e.parent_id) === key.toLowerCase()) continue;
@@ -229,7 +255,7 @@ function backfillSrcNames(lib) {
   if (!rows.length) return;
   tx(() => {
     for (const r of rows) {
-      const p = r.ep && parseEpisode(path.relative(lib.path, r.ep));
+      const p = r.ep && parseEpisode(rel(lib, r.ep));
       if (p?.show) run('UPDATE items SET src_name=? WHERE id=?', showKey(p.show, p.year), r.id);
     }
   });
@@ -240,22 +266,25 @@ function backfillSrcNames(lib) {
  *  raden blir en version, så att promoteVersions flyttar metadata och framsteg). Avsnitt: samma serie, säsong och
  *  riktiga avsnittsnummer i filnamnet (onumrerade avsnitt matchas aldrig – numret är bara namnordningen). */
 function adoptRenamed(lib, missing, known) {
-  const fresh = all('SELECT id, path, version_of FROM items WHERE library_id=? AND path IS NOT NULL', lib.id).filter(r => !known.has(r.path));
+  const fresh = all('SELECT id, path, size, version_of FROM items WHERE library_id=? AND path IS NOT NULL', lib.id).filter(r => !known.has(r.path));
   if (!fresh.length) return;
-  const keyOf = (file) => {
+  const keyOf = (row) => {
+    const file = row.path;
+    // Hemvideor heter ofta likadant (IMG_0001.MOV i flera mappar): flyttad fil känns igen på storleken
+    if (lib.type === 'movie' && lib.home_video) return row.size ? `size:${row.size}` : null;
     if (lib.type === 'movie') return versionKey(parseMovie(file));
-    const p = parseEpisode(path.relative(lib.path, file));
+    const p = parseEpisode(rel(lib, file));
     return p && p.episode != null ? `${showKey(p.show, p.year).toLowerCase()}\u0000${p.season}\u0000${p.episode}` : null;
   };
   const byKey = new Map();
   for (const r of fresh) {
     if (r.version_of != null) continue;
-    const k = keyOf(r.path);
+    const k = keyOf(r);
     if (k && !byKey.has(k)) byKey.set(k, r);
   }
   for (const old of missing) {
     if (old.version_of != null) continue; // en version: framsteget sitter redan på huvudraden
-    const k = keyOf(old.path), nu = k && byKey.get(k);
+    const k = keyOf(old), nu = k && byKey.get(k);
     if (!nu) continue;
     byKey.delete(k);
     if (lib.type === 'movie') run('UPDATE items SET version_of=? WHERE id=?', old.id, nu.id);
@@ -269,7 +298,7 @@ function markGuessedEpisodes(lib) {
   if (lib.type === 'movie' || getSetting(`ep_guess_v1_${lib.id}`, '0') === '1') return;
   const fix = [];
   for (const e of all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND ep_guess=0 AND path IS NOT NULL`, lib.id)) {
-    const p = parseEpisode(path.relative(lib.path, e.path));
+    const p = parseEpisode(rel(lib, e.path));
     if (p && p.episode == null) fix.push([e, p]);
   }
   tx(() => {
@@ -283,8 +312,14 @@ function markGuessedEpisodes(lib) {
 
 async function scanLibrary(lib) {
   status.library = lib.name; status.phase = 'Söker filer'; status.done = 0;
+  const roots = lib.roots = rootsOf(lib);
+  const home = lib.type === 'movie' && !!lib.home_video;
   markGuessedEpisodes(lib);
-  const { files: found, rootOk, failed } = await listFiles(lib.path, isVideo, (n) => SKIP_DIR.test(n));
+  // Alla bibliotekets mappar; NFO-filer och bilder bredvid videofilerna samlas in samtidigt (lokal metadata)
+  const list = await listRoots(roots, (n) => isVideo(n) || localMeta.isSide(n), (n) => SKIP_DIR.test(n));
+  const { failed } = list;
+  const found = [], sideFiles = [];
+  for (const f of list.files) (isVideo(path.basename(f)) ? found : sideFiles).push(f);
   // Trailers ("Film (2020)-trailer.mkv", mappen trailers/) blir inte egna titlar – de kopplas till titeln efteråt
   const trailerFiles = found.filter(isTrailerFile);
   // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
@@ -296,7 +331,7 @@ async function scanLibrary(lib) {
   const unnumberedIndex = (f) => {
     const dir = path.dirname(f);
     if (!dirEps.has(dir)) {
-      const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(path.relative(lib.path, x))]).filter(([, p]) => p);
+      const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(rel(lib, x))]).filter(([, p]) => p);
       const loose = eps.filter(([, p]) => p.episode == null).map(([x]) => x).sort((a, b) => a.localeCompare(b, 'sv'));
       const nums = new Map(loose.filter(x => known.get(x)?.episode != null).map(x => [x, known.get(x).episode]));
       let next = Math.max(0, ...eps.filter(([, p]) => p.episode != null).map(([, p]) => p.episode), ...nums.values());
@@ -305,16 +340,17 @@ async function scanLibrary(lib) {
     }
     return dirEps.get(dir).get(f);
   };
-  if (!rootOk) {
-    // Mappen saknas/går inte att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
-    scanWarning(deletionBlocked({ name: lib.name, rootOk }));
+  if (!list.rootOk) {
+    // Ingen mapp går att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
+    scanWarning(deletionBlocked({ name: lib.name, rootOk: false }));
     return;
   }
-  for (const d of failed) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
+  // En mapp av flera som inte går att läsa varnas för i raderingsskyddet nedan (titlarna där behålls)
+  for (const d of failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime,episode,ep_guess,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
   if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
-  const seen = new Set();
+  const seen = new Set(), touched = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
   // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
   // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.
@@ -341,10 +377,14 @@ async function scanLibrary(lib) {
       }
       if (k && k.size === st.size && k.mtime === mtime) continue;
       const info = await probe(f);
+      touched.add(f);
       // Misslyckad probe (t.ex. disken vaknade för långsamt): spara mtime 0 så att filen läses om vid nästa skanning
       const saveMtime = info.failed ? 0 : mtime;
       if (lib.type === 'movie') {
-        const p = parseMovie(f);
+        // Hemvideor: titel från filnamnet, datum från filen och mappen (navigering i biblioteket)
+        const p = home ? { title: homeTitle(f), year: null } : parseMovie(f);
+        const taken = home ? takenOf(info, st) : null, folder = home ? path.dirname(rel(lib, f)).replace(/^\.$/, '') : null;
+        if (home) p.year = new Date(taken * 1000).getFullYear();
         pending.push(() => {
           if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
             st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
@@ -352,9 +392,10 @@ async function scanLibrary(lib) {
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, saveMtime,
             info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
           run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
+          if (home) run('UPDATE items SET title=?, sort_title=?, year=?, taken=?, folder=? WHERE path=? AND match_locked=0', p.title, sortTitle(p.title), p.year, taken, folder, f);
         });
       } else {
-        const p = parseEpisode(path.relative(lib.path, f));
+        const p = parseEpisode(rel(lib, f));
         if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
         const guess = p.episode == null ? 1 : 0;
         if (guess) p.episode = unnumberedIndex(f);
@@ -377,12 +418,11 @@ async function scanLibrary(lib) {
       }
     }
   } finally { flush(); }
-  // Ta bort försvunna filer och tomma serier – men aldrig om det ser ut som att disken saknas
-  const missing = [...known.values()].filter(r => !seen.has(r.path) && !underFailed(r.path, failed));
-  const blocked = deletionBlocked({ name: lib.name, rootOk, files: files.length, known: known.size, missing: missing.length,
-    allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
-  if (blocked) scanWarning(blocked);
-  else if (missing.length) {
+  // Ta bort försvunna filer och tomma serier – men aldrig om det ser ut som att disken saknas. Skyddet gäller
+  // varje mapp för sig: en saknad disk tar aldrig bort något, inte heller från bibliotekets andra mappar.
+  const missing = removable({ name: lib.name, list, rows: [...known.values()], seen, found: files,
+    allowMass: getSetting('scan_allow_mass_delete', '0') === '1', warn: scanWarning });
+  if (missing.length) {
     let moves = [];
     tx(() => {
       // Omdöpt eller utbytt fil (t.ex. Sonarr/Radarr som byter 720p mot 1080p): den nya filen tar över framsteg och Min lista
@@ -397,13 +437,19 @@ async function scanLibrary(lib) {
     moveImages(moves);
     for (const r of missing) removeImages(r.id);
   }
-  // Filmfiler med samma titel och år blir versioner av samma film
-  groupVersions(lib, parseMovie);
+  // Filmfiler med samma titel och år blir versioner av samma film (inte hemvideor: "IMG_0001" i två mappar är olika klipp)
+  if (!home) groupVersions(lib, parseMovie);
+  // NFO-filer och lokala bilder (före TMDB, som inte skriver över dem)
+  status.phase = 'Läser lokal metadata';
+  const fileTitle = (row) => row.kind === 'show' ? (row.src_name ? { title: row.src_name.replace(/\s\((?:19|20)\d\d\)$/, ''), year: null } : null)
+    : row.kind === 'movie' && row.path ? (home ? { title: homeTitle(row.path), year: null } : parseMovie(row.path)) : null;
+  await localMeta.syncLocal(lib, { roots, side: localMeta.sideIndex(sideFiles), dirs: list.dirs, touched, home, fileTitle, movieDir: (f) => discRoot(f) || path.dirname(f) })
+    .catch(e => console.warn('[scan] lokal metadata:', e.message));
   // Efter grupperingen: en trailer i en mapp med flera versioner hör till filmen
   await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
   await metadata(lib);
   // Nyss matchade filer kan vara samma TMDB-film som en annan fil (t.ex. svensk och engelsk titel) – slå ihop dem
-  groupVersions(lib, parseMovie);
+  if (!home) groupVersions(lib, parseMovie);
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
   if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
@@ -435,6 +481,46 @@ export const hooks = {};
 
 export function removeImages(id) {
   for (const t of ['poster', 'backdrop', 'thumb']) { const f = path.join(IMAGES, `${id}-${t}.jpg`); fs.rm(f, { force: true }, () => {}); dropVariants(f); }
+  // Lokala säsongsaffischer (localmeta.js)
+  fs.rm(path.join(IMAGES, 'season', String(+id)), { recursive: true, force: true }, () => {});
+}
+
+/**
+ * En mapp togs bort från biblioteket: titlarna i den försvinner (filerna på disken rörs inte). Versioner i
+ * bibliotekets andra mappar tar över som huvudrad (med framsteg). Musik och ljudböcker städas av sina skannrar.
+ */
+export function forgetFolder(lib, root, keep = []) {
+  const pre = root + path.sep;
+  // Titlar som också ligger under en kvarvarande mapp (t.ex. /media → /media/Filmer) behålls
+  const kept = (p) => keep.some(k => p === k || p.startsWith(k + path.sep));
+  if (lib.type === 'movie' || lib.type === 'show') {
+    const rows = all(`SELECT id, path FROM items WHERE library_id=? AND path IS NOT NULL AND substr(path, 1, ?)=?`, lib.id, pre.length, pre);
+    const gone = rows.filter(r => !kept(r.path)).map(r => r.id);
+    let moves = [];
+    tx(() => {
+      if (lib.type === 'movie') moves = promoteVersions(gone);
+      for (const id of gone) run('DELETE FROM items WHERE id=?', id);
+      for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
+        run('DELETE FROM items WHERE id=?', s.id); gone.push(s.id);
+      }
+      for (const t of all('SELECT id, path FROM trailers WHERE library_id=? AND substr(path, 1, ?)=?', lib.id, pre.length, pre)) if (!kept(t.path)) run('DELETE FROM trailers WHERE id=?', t.id);
+    });
+    moveImages(moves);
+    for (const id of gone) removeImages(id);
+    return gone.length;
+  }
+  const [table, col] = lib.type === 'music' ? ['tracks', 'path'] : lib.type === 'audiobook' ? ['books', 'key'] : [null, null];
+  if (!table) return 0;
+  let n = 0;
+  tx(() => {
+    for (const r of all(`SELECT id, ${col} AS p FROM ${table} WHERE library_id=? AND (${col}=? OR substr(${col}, 1, ?)=?)`, lib.id, root, pre.length, pre))
+      if (!kept(r.p)) {
+        run(`DELETE FROM ${table} WHERE id=?`, r.id); n++;
+        // Bokens omslag (audiobooks.js coverFile) – annars kunde en ny bok med samma id få det
+        if (table === 'books') fs.rm(path.join(IMAGES, `b${r.id}-cover.jpg`), { force: true }, () => {});
+      }
+  });
+  return n;
 }
 
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
@@ -457,6 +543,8 @@ export async function tmdb(p, params = {}, attempt = 0) {
 }
 async function image(tmdbPath, size, id, type) {
   if (!tmdbPath) return 0;
+  // En lokal bild (poster.jpg, fanart.jpg … bredvid filen) går före TMDB:s
+  if (/^\d+$/.test(String(id)) && localMeta.hasLocal(+id, type)) return 1;
   try {
     const r = await fetch(`https://image.tmdb.org/t/p/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return 0;
@@ -466,9 +554,7 @@ async function image(tmdbPath, size, id, type) {
   } catch { return 0; }
 }
 
-// Åldersgräns: svensk klassning i första hand, annars amerikansk
-const AGE = { SE: { 'Btl': 0, 'BTL': 0, '7': 7, '11': 11, '15': 15 }, US: { 'G': 0, 'PG': 7, 'PG-13': 13, 'R': 17, 'NC-17': 18,
-  'TV-Y': 0, 'TV-Y7': 7, 'TV-G': 0, 'TV-PG': 10, 'TV-14': 14, 'TV-MA': 17 }, DE: { '0': 0, '6': 6, '12': 12, '16': 16, '18': 18 } };
+// Åldersgräns: svensk klassning i första hand, annars amerikansk (tabellen AGE delas med NFO-tolkningen, nfo.js)
 function pickCert(list) {
   for (const c of ['SE', 'US', 'DE']) {
     const e = list.find(x => x.iso_3166_1 === c && x.cert);
@@ -525,7 +611,24 @@ export async function tmdbSearch(kind, query, year) {
 const originalOf = (orig, title) => orig && String(orig).trim() && String(orig).trim() !== String(title).trim() ? String(orig).trim().slice(0, 300) : null;
 // Premiärdatum ('YYYY-MM-DD') – bara ett giltigt datum sparas
 const dateOf = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+/** TMDB-id ur titelns NFO: uniqueid tmdb direkt, annars IMDb-/TVDB-id via TMDB:s /find */
+async function nfoTmdb(item) {
+  const ids = localMeta.nfoIds(item);
+  if (!ids) return null;
+  if (ids.tmdb) return ids.tmdb;
+  const tv = item.kind === 'show';
+  for (const [v, src] of [[ids.imdb, 'imdb_id'], [ids.tvdb, 'tvdb_id']]) {
+    if (!v) continue;
+    try {
+      const r = await tmdb(`/find/${encodeURIComponent(v)}`, { external_source: src });
+      const hit = (tv ? r.tv_results : r.movie_results)?.[0]?.id;
+      if (hit) return hit;
+    } catch (e) { if (/429/.test(e.message)) throw e; }
+  }
+  return null;
+}
 export async function refreshItem(item, tmdbId = null) {
+  if (!tmdbId && !item.match_locked) tmdbId = await nfoTmdb(item);
   if (item.kind === 'movie') {
     let id = tmdbId;
     if (!id) id = (await findBest((q, y) => tmdb('/search/movie', { query: q, ...(y ? { year: y } : {}) }).then(s => s.results || []), item.title, item.year))?.id;
@@ -542,6 +645,7 @@ export async function refreshItem(item, tmdbId = null) {
       d.overview || null, d.vote_average || null, id, poster, backdrop,
       JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, originalOf(d.original_title, d.title || item.title), dateOf(d.release_date), item.id);
     saveExtras(item, d);
+    localMeta.reapplyNfo(item.id); // NFO:ns fält går före TMDB:s
     return true;
   }
   if (item.kind === 'show') {
@@ -557,6 +661,7 @@ export async function refreshItem(item, tmdbId = null) {
       d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop, originalOf(d.original_name, d.name || item.title), dateOf(d.first_air_date), item.id);
     saveExtras(item, d);
+    localMeta.reapplyNfo(item.id);
     remapAbsolute(item, d.seasons || []);
     await matchEpisodes(item, id, d.seasons || []);
     return true;
@@ -580,6 +685,7 @@ async function matchEpisodes(item, id, tmdbSeasons) {
     const name = placeholder(ep.name) ? null : ep.name;
     run(`UPDATE items SET title=COALESCE(?,title),sort_title=COALESCE(?,sort_title),overview=?,rating=?,thumb=MAX(thumb,?),meta_done=1 WHERE id=?`,
       name, name ? sortTitle(name) : null, ep.overview || null, ep.vote_average || null, still, e.id);
+    localMeta.reapplyNfo(e.id);
   };
   const done = new Set();
   for (const sn of new Set(local.filter(e => !e.ep_guess).map(e => e.season))) {
@@ -696,7 +802,8 @@ async function autoSubtitles(lib, st = status) {
 }
 
 async function metadata(lib) {
-  if (!tmdbKey()) return;
+  // Hemvideor söks aldrig i TMDB
+  if (!tmdbKey() || (lib.type === 'movie' && lib.home_video)) return;
   // Bättre matchning (match.js): titlar som tidigare inte hittades får ett nytt försök en gång
   if (getSetting('match_v2', '0') !== '1') {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');

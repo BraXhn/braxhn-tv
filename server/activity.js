@@ -5,6 +5,7 @@ import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
 import { notify } from './notify.js';
 import * as offsite from './offsite.js';
 import { AUDIO } from './music.js';
+import { rootsOf } from './libpaths.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS plays(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, item_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -153,30 +154,33 @@ export function watchLibraries(onChange) {
   const gen = ++watchGen;
   if (getSetting('watch_enabled', process.env.WATCH_FILES || '1') !== '1') return;
   // Rekursiv fs.watch går igenom hela mappträdet synkront – körs efter svaret, ett bibliotek per varv i händelseloopen
-  const libs = all('SELECT * FROM libraries');
+  // En bevakning per mapp (bibliotek kan ha flera mappar, libpaths.js)
+  const jobs = all('SELECT * FROM libraries').flatMap(lib => rootsOf(lib).map(root => [lib, root]));
   const next = () => {
     if (gen !== watchGen) return; // ett nyare anrop har tagit över
-    const lib = libs.shift();
-    if (!lib) return;
-    watchOne(lib, onChange);
+    const job = jobs.shift();
+    if (!job) return;
+    watchOne(job[0], job[1], onChange);
     setImmediate(next);
   };
   setImmediate(next);
 }
-function watchOne(lib, onChange) {
+function watchOne(lib, root, onChange) {
+  const key = `${lib.id}:${root}`;
   try {
-    const w = fs.watch(lib.path, { recursive: true, persistent: false }, (ev, file) => {
-      if (file && !watchRelevant(lib.path, String(file))) return;
+    const w = fs.watch(root, { recursive: true, persistent: false }, (ev, file) => {
+      if (file && !watchRelevant(root, String(file))) return;
       clearTimeout(pending.get(lib.id));
       // Vänta tills kopieringen är klar (inga nya händelser på 30 s)
       const t = setTimeout(() => { pending.delete(lib.id); onChange(lib.id); }, 30000);
       t.unref();
       pending.set(lib.id, t);
     });
-    w.on('error', (e) => { console.warn('[watch]', lib.path, e.message); w.close(); watchers.delete(lib.id); });
-    watchers.set(lib.id, w);
+    w.on('error', (e) => { console.warn('[watch]', root, e.message); w.close(); watchers.delete(key); });
+    watchers.set(key, w);
   } catch (e) {
-    console.warn(`[watch] kan inte bevaka ${lib.path}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`);
+    console.warn(`[watch] kan inte bevaka ${root}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`);
   }
 }
-export const watchingCount = () => watchers.size;
+/** Antal bibliotek med minst en bevakad mapp */
+export const watchingCount = () => new Set([...watchers.keys()].map(k => k.split(':')[0])).size;

@@ -14,6 +14,7 @@ import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
 import { route, admin, adminAnywhere } from '../http/router.js';
 import { insideMedia, MEDIA_ROOT, ctx, setupPending } from '../http/context.js';
+import { librariesWithRoots, rootsOf } from '../libpaths.js';
 
 export const STEPS = ['welcome', 'metadata', 'libraries', 'hardware', 'remote', 'household', 'done'];
 
@@ -26,11 +27,11 @@ const serverTz = () => process.env.TZ || Intl.DateTimeFormat().resolvedOptions()
 
 // Läget som guiden och sammanfattningen visar (inga hemligheter – bara om nycklar finns)
 function checks(c) {
-  const libs = all(`SELECT l.id, l.name, l.type, l.path,
+  const libs = all(`SELECT l.id, l.name, l.type, l.path, l.home_video,
     CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
     WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
     ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count
-    FROM libraries l ORDER BY l.name`);
+    FROM libraries l ORDER BY l.name`).map(l => ({ ...l, paths: rootsOf(l) }));
   const users = all('SELECT id, name, is_admin, parent_id, max_age FROM users ORDER BY name');
   const me = c.user.parent_id || c.user.id;
   return {
@@ -90,6 +91,8 @@ const BY_NAME = [
   ['music', /musik|music|l[åa]tar|mp3|flac/i]
 ];
 const NICE = { movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' };
+// Hemvideor (egna filmer från mobilen/kameran): filmbibliotek utan TMDB, sorterat på datum och mappar
+const HOME = /hemvideo|hem[ ._-]?video|home[ ._-]?vid(eo|eos)?|familje?(film|video)|mobilvideo|egna[ ._-]?(filmer|videor)|videoklipp|camcorder/i;
 const GENERIC = /^(movies?|films?|filmer|tv|tv[ ._-]?shows|shows|series|serier|music|musik|audio[ ._-]?books?|ljudb[öo]cker)$/i;
 
 /** Räknar mediafiler i en mapp (högst 3 nivåer ner och ett begränsat antal poster – stora diskar ska inte väckas helt) */
@@ -139,8 +142,9 @@ function reasonText(g, n) {
 route('GET', '/api/setup/suggest', admin, async (c) => {
   const base = insideMedia(c.q.get('path') || MEDIA_ROOT);
   if (!base) return fail(c.res, 400, `Mappen måste finnas och ligga under ${MEDIA_ROOT}`);
-  const libs = all('SELECT name, path FROM libraries');
-  const covering = (p) => libs.find(l => p === l.path || p.startsWith(l.path + path.sep) || l.path.startsWith(p + path.sep));
+  // Alla bibliotekens mappar (ett bibliotek kan ha flera, libpaths.js)
+  const libs = librariesWithRoots();
+  const covering = (p) => libs.find(l => l.roots.some(r => p === r || p.startsWith(r + path.sep) || r.startsWith(p + path.sep)));
   const out = [];
   const consider = async (dir, label, depth) => {
     // Symboliska länkar som pekar ut ur MEDIA_ROOT hoppas över (samma kontroll som när biblioteket läggs till)
@@ -155,9 +159,11 @@ route('GET', '/api/setup/suggest', admin, async (c) => {
     const n = await sample(real);
     const g = guess(path.basename(dir), n);
     const lib = covering(real);
-    out.push({ name: label, path: real, type: g.type, by: g.by, reason: reasonText(g, n), ...n,
+    const homeVideo = HOME.test(path.basename(dir)) && (!g.type || g.type === 'movie');
+    out.push({ name: label, path: real, type: homeVideo ? 'movie' : g.type, by: g.by || (homeVideo ? 'name' : null), reason: reasonText(g, n), ...n,
       suggestedName: g.type && GENERIC.test(path.basename(dir)) ? NICE[g.type] : path.basename(dir),
-      library: lib ? lib.name : null });
+      // homeVideo: läggs till som hemvideor; library/libraryId: mappen ingår redan i ett bibliotek
+      homeVideo, library: lib ? lib.name : null, libraryId: lib ? lib.id : null });
   };
   const top = await subdirs(base);
   for (const d of top.slice(0, 50)) await consider(path.join(base, d), d, 0);

@@ -286,6 +286,26 @@ CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);`);
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');
 
+// Flera mappar per bibliotek (server/libpaths.js): alla mappar i ordning. Saknas rader gäller libraries.path,
+// som alltid är den första mappen (apparna och äldre versioner läser bara den).
+db.exec(`CREATE TABLE IF NOT EXISTS library_paths(library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  path TEXT NOT NULL, pos INTEGER NOT NULL, PRIMARY KEY(library_id, path));`);
+// Lokal metadata (server/localmeta.js): nfo = 1 läser Kodi/Jellyfin-NFO, home_video = 1 är hemvideor (ingen TMDB,
+// titel från filnamnet, datum från filen, mappar som navigering)
+addCol('libraries', 'nfo', 'INTEGER NOT NULL DEFAULT 1');
+addCol('libraries', 'home_video', 'INTEGER NOT NULL DEFAULT 0');
+// items.nfo = den tolkade NFO-filen (JSON), nfo_sig = fil|ändringstid|storlek, local_img = JSON typ → signatur för lokala bilder
+addCol('items', 'nfo', 'TEXT');
+addCol('items', 'nfo_sig', 'TEXT');
+addCol('items', 'local_img', 'TEXT');
+addCol('items', 'studio', 'TEXT');
+addCol('items', 'premiered', 'TEXT');
+addCol('items', 'imdb_id', 'TEXT');
+// Hemvideor: inspelningsdatum (unix-sekunder) och mappen relativt biblioteksmappen ('' = direkt i mappen)
+addCol('items', 'taken', 'INTEGER');
+addCol('items', 'folder', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS items_folder ON items(library_id, folder)');
+
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;
 let ver = db.prepare('PRAGMA user_version').get().user_version;

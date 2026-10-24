@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, IMAGES, searchKeys } from './db.js';
 import { ranked } from './search.js';
 import { probe, AUDIO, makeCover } from './music.js';
-import { listFiles, underFailed } from './util.js';
+import { underFailed } from './util.js';
+import { rootsOf, listRoots, relOf, under } from './libpaths.js';
 
 const pexec = promisify(execFile);
 db.exec(`CREATE TABLE IF NOT EXISTS books(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
@@ -56,8 +57,8 @@ async function chaptersOf(file) {
 
 /** Får borttagna böcker tas bort? Nej om biblioteksmappen inte går att läsa (t.ex. en NAS som inte är monterad), om inga filer
  *  hittades fast böcker finns, eller om mer än hälften skulle försvinna – annars raderas position och bokmärken för alla. */
-function deletionBlocked(lib, knownCount, foundCount, removeCount) {
-  try { if (!fs.statSync(lib.path).isDirectory()) return 'biblioteksmappen är inte en mapp'; fs.readdirSync(lib.path); }
+function deletionBlocked(root, knownCount, foundCount, removeCount) {
+  try { if (!fs.statSync(root).isDirectory()) return 'biblioteksmappen är inte en mapp'; fs.readdirSync(root); }
   catch (e) { return `biblioteksmappen går inte att läsa (${e.code || e.message})`; }
   if (knownCount > 0 && foundCount === 0) return 'inga ljudböcker hittades';
   if (removeCount > 2 && removeCount > knownCount / 2 && getSetting('scan_allow_mass_delete', '0') !== '1') return `${removeCount} av ${knownCount} böcker skulle tas bort`;
@@ -67,7 +68,9 @@ function deletionBlocked(lib, knownCount, foundCount, removeCount) {
 export async function scanBooks(lib, status) {
   status.phase = 'Söker ljudböcker'; status.done = 0;
   // listFiles läser asynkront och rapporterar mappar som inte gick att läsa – böcker där tas aldrig bort
-  const { files: found, rootOk, failed } = await listFiles(lib.path, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
+  const roots = rootsOf(lib);
+  const list = await listRoots(roots, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
+  const { files: found, failed } = list;
   const groups = groupBooks(found);
   status.total = groups.length; status.phase = 'Läser ljudböcker';
   const known = new Map(all('SELECT id, key FROM books WHERE library_id=?', lib.id).map(r => [r.key, r.id]));
@@ -97,7 +100,7 @@ export async function scanBooks(lib, status) {
     // annars förskjuts kapitel och sparade positioner
     if (bid && infos.length < stats.length) continue;
     const t = infos[0].info.tags;
-    const rel = path.relative(lib.path, g.key).split(path.sep);
+    const rel = relOf(roots, g.key).split(path.sep);
     const folderTitle = path.basename(g.key, path.extname(g.key)).replace(/^\s*\(?\d{4}\)?\s*[-–]\s*/, '');
     const title = String(t.album || (infos.length === 1 ? t.title : '') || folderTitle).slice(0, 300);
     const author = String(t.album_artist || t.albumartist || t.artist || t.author || (rel.length >= 2 ? rel[0] : '') || 'Okänd författare').slice(0, 200);
@@ -120,21 +123,33 @@ export async function scanBooks(lib, status) {
     });
     if (!coverPath(id) && await makeCover(coverFile(id), g.dir, files[0].f, files.some(x => x.info.hasPic))) run('UPDATE books SET cover=1 WHERE id=?', id);
   }
-  const gone = [...known].filter(([k]) => !seen.has(k) && !underFailed(k, failed) && !failed.includes(k));
-  const blocked = !rootOk ? 'biblioteksmappen går inte att läsa'
-    : gone.length ? deletionBlocked(lib, known.size, groups.length, gone.length) : (groups.length ? null : 'inga filer hittades');
-  if (blocked) {
-    if (gone.length || !rootOk) {
-      console.warn(`[böcker] ${lib.name || lib.path}: inga böcker tas bort – ${blocked}`);
-      (status.warnings ||= []).push(`Inga ljudböcker togs bort: ${blocked}`);
+  // Raderingsskyddet gäller varje mapp för sig: en mapp som saknas eller ser tömd ut tar inte bort något, inte heller i de andra
+  const gone = [];
+  for (const st of list.roots) {
+    const mine = [...known].filter(([k]) => under(st.root, k));
+    const g = mine.filter(([k]) => !seen.has(k) && !underFailed(k, failed) && !failed.includes(k));
+    const nGroups = groups.filter(x => under(st.root, x.key)).length;
+    const where = roots.length > 1 ? ` (${st.root})` : '';
+    const blocked = !st.ok ? 'biblioteksmappen går inte att läsa'
+      : g.length ? deletionBlocked(st.root, mine.length, nGroups, g.length) : (nGroups ? null : 'inga filer hittades');
+    if (blocked) {
+      if (g.length || !st.ok) {
+        console.warn(`[böcker] ${lib.name || lib.path}${where}: inga böcker tas bort – ${blocked}`);
+        (status.warnings ||= []).push(`Inga ljudböcker togs bort${where}: ${blocked}`);
+      }
+      continue;
     }
-    return;
+    gone.push(...g);
   }
+  if (!gone.length && !list.rootOk) return;
   tx(() => { for (const [, id] of gone) run('DELETE FROM books WHERE id=?', id); });
   for (const [, id] of gone) fs.rm(coverFile(id), { force: true }, () => {});
   // Glöm misslyckade prober för filer som inte längre finns
-  const root = path.resolve(lib.path) + path.sep;
-  for (const r of all('SELECT path FROM book_probe_fail WHERE substr(path, 1, ?) = ?', root.length, root)) if (!seenFiles.has(r.path)) failDel.run(r.path);
+  for (const st of list.roots) {
+    if (!st.ok) continue;
+    const root = path.resolve(st.root) + path.sep;
+    for (const r of all('SELECT path FROM book_probe_fail WHERE substr(path, 1, ?) = ?', root.length, root)) if (!seenFiles.has(r.path) && !underFailed(r.path, failed)) failDel.run(r.path);
+  }
 }
 
 // ---------- API-hjälp ----------

@@ -22,7 +22,7 @@ export const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p
 // Kolumner som shape() använder – inte tunga fält som streams/chapters (och overview i listvyer)
 const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop, i.thumb, i.duration, i.rating, i.added, i.hdr,
   i.genres, i.cert, i.age, i.collection_id, i.season, i.episode, i.parent_id, i.height,
-  i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay, i.poster_color, i.backdrop_color, i.thumb_color`;
+  i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay, i.poster_color, i.backdrop_color, i.thumb_color, i.taken, i.studio`;
 export const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
 export const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
 function shape(r) {
@@ -33,7 +33,9 @@ function shape(r) {
     genres: (() => { try { return JSON.parse(r.genres || '[]'); } catch { return []; } })(), cert: r.cert || null, age: r.age ?? null,
     collection: r.collection_id || null,
     // Platshållarfärg medan bilden laddas ('#rrggbb', server/imgcolor.js) – bara när den är känd
-    ph: r.poster_color || undefined, phBackdrop: r.backdrop_color || undefined, phThumb: r.thumb_color || undefined
+    ph: r.poster_color || undefined, phBackdrop: r.backdrop_color || undefined, phThumb: r.thumb_color || undefined,
+    // Hemvideor: inspelningsdatum (unix-sekunder); studio ur NFO – nya fält, bara när de finns
+    taken: r.taken ?? undefined, studio: r.studio || undefined
   };
   if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb,
     showPh: r.show_poster_color || undefined });

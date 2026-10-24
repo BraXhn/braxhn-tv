@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { all, getSetting, setSetting, CONFIG } from './db.js';
 import { notify } from './notify.js';
+import { librariesWithRoots } from './libpaths.js';
 import { TRANSCODE, purgeIdle } from './stream.js';
 import { dvrDir } from './dvr.js';
 import { DIR as PODCAST_DIR } from './podcasts.js';
@@ -37,7 +38,7 @@ export function targets() {
     { key: 'dvr', label: 'Inspelningar', path: dvr },
     { key: 'podcasts', label: 'Poddar', path: PODCAST_DIR }
   ];
-  for (const l of all('SELECT id, name, path FROM libraries ORDER BY id')) list.push({ key: 'lib' + l.id, label: 'Bibliotek: ' + l.name, path: l.path });
+  for (const l of librariesWithRoots()) l.roots.forEach((p, i) => list.push({ key: 'lib' + l.id + (i ? '-' + i : ''), label: 'Bibliotek: ' + l.name + (l.roots.length > 1 ? ` (${p})` : ''), path: p }));
   return list.filter(t => t.path);
 }
 
