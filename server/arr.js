@@ -92,7 +92,31 @@ export async function send(reqRow, tvdbOf) {
   return { added: true };
 }
 
+// ---------- kalender och saknade avsnitt (server/calendar.js) ----------
+/** Sonarrs kalender för perioden (YYYY-MM-DD), med serieinformation */
+export const sonarrCalendar = (start, end) => arr('show', `/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeSeries=true&unmonitored=true`);
+/**
+ * Be Sonarr söka efter avsnitt som saknas. eps = [{ season, episode }]. Serien slås upp på TMDB-id (Sonarr v4)
+ * eller TVDB-id. Avsnitt som inte bevakas börjar bevakas, annars hoppar Sonarr över dem.
+ */
+export async function searchEpisodes({ tmdbId, tvdbId }, eps) {
+  const all = await arr('show', '/series');
+  const s = (Array.isArray(all) ? all : []).find(x => (tmdbId && x.tmdbId === +tmdbId) || (tvdbId && x.tvdbId === +tvdbId));
+  if (!s) return { notInSonarr: true, searched: 0 };
+  const want = new Set(eps.map(e => `${+e.season}:${+e.episode}`));
+  const list = await arr('show', `/episode?seriesId=${+s.id}`);
+  const hit = (Array.isArray(list) ? list : []).filter(e => want.has(`${e.seasonNumber}:${e.episodeNumber}`) && !e.hasFile);
+  if (!hit.length) return { searched: 0 };
+  const ids = hit.map(e => e.id);
+  const unmon = hit.filter(e => !e.monitored).map(e => e.id);
+  if (unmon.length) await arr('show', '/episode/monitor', { method: 'PUT', body: { episodeIds: unmon, monitored: true } });
+  await arr('show', '/command', { method: 'POST', body: { name: 'EpisodeSearch', episodeIds: ids } });
+  return { searched: ids.length, series: s.title };
+}
+
 // ---------- önskemål ----------
+/** Får användaren göra önskemål? (påslaget, inte barnprofil, och Radarr/Sonarr kopplat eller önskemål utan dem tillåtna) */
+export const canRequest = (u) => getSetting('requests_enabled', '1') === '1' && u.max_age == null && (configured('movie') || configured('show') || getSetting('requests_without_arr', '1') === '1');
 export function create(user, { kind, tmdbId, title, year, poster, overview }) {
   const ex = get('SELECT * FROM requests WHERE kind=? AND tmdb_id=?', kind, tmdbId);
   if (ex) return { row: ex, existing: true };

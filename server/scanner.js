@@ -437,13 +437,15 @@ export function removeImages(id) {
 }
 
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
+// TMDB_API_URL: annan adress till TMDB:s API (t.ex. en låtsasserver i testerna)
+const TMDB_API = (process.env.TMDB_API_URL || 'https://api.themoviedb.org/3').replace(/\/+$/, '');
 function tmdbKey() { return getSetting('tmdb_key') || process.env.TMDB_API_KEY || ''; }
 export async function tmdb(p, params = {}, attempt = 0) {
   const key = tmdbKey();
   const q = new URLSearchParams({ language: getSetting('language', 'sv-SE'), ...params });
   const headers = { accept: 'application/json' };
   if (key.startsWith('eyJ')) headers.authorization = 'Bearer ' + key; else q.set('api_key', key);
-  const r = await fetch(`https://api.themoviedb.org/3${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) });
+  const r = await fetch(`${TMDB_API}${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) });
   // Begränsat antal omförsök: en spärrad nyckel får inte låsa skanningskön för alltid
   if (r.status === 429 && attempt < 4) {
     const wait = Math.min(30, +r.headers.get('retry-after') || 2) * 1000;

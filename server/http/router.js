@@ -11,7 +11,7 @@
 // /api/music/albums/:aid) ligger i samma fil och i samma inbördes ordning.
 import { getSetting, get } from '../db.js';
 import { clientIp, isPrivate, inCidr, fail, isHttps, send } from '../util.js';
-import { userFromReq, require2faRemote, audit, cookieHeader } from '../auth.js';
+import { userFromReq, calendarUser, require2faRemote, audit, cookieHeader } from '../auth.js';
 import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
 import * as metrics from '../metrics.js';
@@ -33,12 +33,15 @@ export const route = (method, pattern, opts, fn) => {
 //   media – strömmar: tillåter även kortlivad mediatoken (?t=) för just den titeln (p.id)
 //   img   – bilder: tillåter även bildtoken (?t=) för appar
 //   audio – musikströmmar: mediatoken för just det spåret (scope = -spårets id)
+//   calendar – iCal-prenumeration: BARA den personliga kalendertoken (?t=, tabellen calendar_tokens). Kaka,
+//              Bearer och andra token gäller inte där, och kalendertoken gäller ingen annanstans (se auth.js).
 // Routefilerna kan lägga till scope(p) (ljudböcker, poddar, live-TV, inspelningar, trailers): den räknar ut
 // vilket id en mediatoken måste vara utfärdad för, utifrån routens parametrar.
 export const pub = { auth: false }, user = { auth: true }, admin = { auth: true, admin: true };
 export const media = { auth: true, media: true }; // strömmar: tillåter kortlivad mediatoken (?t=) för just den titeln
 export const img = { auth: true, img: true };     // bilder: tillåter bildtoken (?t=) för appar
 export const audio = { auth: true, media: true, music: true }; // musikströmmar: mediatoken för just det spåret
+export const calendar = { auth: true, calendar: true };          // iCal: bara kalendertoken (?t=)
 
 // ---------- betrodda nätverk ----------
 // Hemnät (RFC1918), VPN/CGNAT (100.64.0.0/10, t.ex. NetBird/Tailscale) och egna nät i inställningarna
@@ -97,7 +100,8 @@ export async function handle(req, res) {
     let p;
     try { p = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { return fail(res, 400, 'Ogiltig adress'); }
     // Token i adressen (?t=) tas bara emot på routes som tillåter media- eller bildtoken
-    const c = { req, res, q: url.searchParams, p, user: userFromReq(req, url.searchParams, !!(r.media || r.img)) };
+    // Kalenderroutes slår bara upp kalendertoken – ingen annan inloggning används där
+    const c = { req, res, q: url.searchParams, p, user: r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
     // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
     if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;
@@ -105,7 +109,8 @@ export async function handle(req, res) {
       // Kortlivade token gäller bara där de är avsedda:
       // mediatoken bara på media-/bildroutes och, när den är knuten till en titel, bara för den titeln
       // (routens scope(p), spåret för audio eller annars p.id); bildtoken bara på bildroutes
-      if (u.kind === 'media' && !(r.media || r.img)) c.user = null;
+      if ((u.kind === 'calendar') !== !!r.calendar) c.user = null; // kalendertoken bara på kalenderroutes (och tvärtom)
+      else if (u.kind === 'media' && !(r.media || r.img)) c.user = null;
       else if (u.kind === 'media' && u.scope_item && String(u.scope_item) !== (r.scope ? String(r.scope(p)) : r.music ? String(-(+p.tid)) : String(p.id))) c.user = null;
       else if (u.kind === 'img' && !r.img) c.user = null;
     }

@@ -27,7 +27,7 @@ export async function loadLibs() {
 }
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
-  account: 'Mitt konto', admin: 'Administration', stats: 'Statistik', requests: 'Önskningar', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person' };
+  account: 'Mitt konto', admin: 'Administration', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
   const h = location.hash.slice(2) || '';
@@ -176,6 +176,7 @@ $('#railmore').onclick = (e) => {
   e.stopPropagation();
   openMenu(e.currentTarget, [
     { icon: '🔖', label: 'Min lista', href: '#/watchlist' },
+    { icon: '📅', label: 'Kommande avsnitt', href: '#/calendar' },
     { icon: '✋', label: 'Önskningar', href: '#/requests', hidden: !!me?.kid },
     { icon: '🎁', label: 'Årssammanfattning', href: '#/wrapped' },
     { icon: '👤', label: 'Mitt konto', href: '#/account' },

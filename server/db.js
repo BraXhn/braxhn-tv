@@ -219,6 +219,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS custom_collections(id INTEGER PRIMARY KEY, o
   created INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS custom_collection_items(collection_id INTEGER NOT NULL REFERENCES custom_collections(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, pos INTEGER NOT NULL, added INTEGER NOT NULL, PRIMARY KEY(collection_id,item_id));`);
+// Kalender för kommande och saknade avsnitt (server/calendar.js): seriens status hos TMDB, avsnitten med sändningsdatum
+// och den personliga kalendertoken för iCal-prenumerationen (egen tabell – den är ingen inloggning och når inget annat API)
+db.exec(`CREATE TABLE IF NOT EXISTS calendar_shows(show_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+  tmdb_id INTEGER NOT NULL, status TEXT, network TEXT, next_air TEXT, last_air TEXT, fetched INTEGER NOT NULL DEFAULT 0, error TEXT);
+CREATE TABLE IF NOT EXISTS calendar_episodes(show_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  season INTEGER NOT NULL, episode INTEGER NOT NULL, name TEXT, air_date TEXT, PRIMARY KEY(show_id, season, episode));
+CREATE TABLE IF NOT EXISTS calendar_tokens(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last_used INTEGER);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -237,7 +245,8 @@ CREATE INDEX IF NOT EXISTS tracks_lib_added ON tracks(library_id, added);
 CREATE INDEX IF NOT EXISTS scrobble_due ON scrobble_queue(due, next_try);
 CREATE INDEX IF NOT EXISTS scrobble_user ON scrobble_queue(user_id, due);
 CREATE INDEX IF NOT EXISTS cc_owner ON custom_collections(owner_id);
-CREATE INDEX IF NOT EXISTS cci_item ON custom_collection_items(item_id);`);
+CREATE INDEX IF NOT EXISTS cci_item ON custom_collection_items(item_id);
+CREATE INDEX IF NOT EXISTS calendar_ep_air ON calendar_episodes(air_date);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;

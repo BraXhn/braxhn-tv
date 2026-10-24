@@ -4,6 +4,7 @@ import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { card, colCard, personCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
 import { emptyState } from '../ui/states.js';
+import { upcomingCard } from './calendar.js';
 
 views.home = async () => {
   const [d, cols, own] = await Promise.all([api('/home'), api('/collections').catch(() => []), api('/custom-collections').catch(() => [])]);
@@ -17,6 +18,8 @@ views.home = async () => {
     extra: `<span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">Markera som sedda</a>` });
   if (d.continue.length) html += shelfHtml('Fortsätt titta', d.continue.map(i => card(i)).join(''), { row: 'continue' });
   html += shelf('Min lista', d.watchlist, false, '<a href="#/watchlist">Visa alla</a>', 'watchlist');
+  // Kommer snart: avsnitt de närmaste sju dagarna (fältet upcoming)
+  if (d.upcoming?.length) html += shelfHtml('Kommer snart', d.upcoming.map(upcomingCard).join(''), { more: '<a href="#/calendar">Visa kalendern</a>' });
   html += shelf('Rekommenderat för dig', d.recommended);
   // Egna samlingar med "Visa på startsidan" (ordningen följer samlingens sortering)
   for (const c of d.customCollections || []) html += shelfHtml(c.name, c.items.map(i => card(i)).join(''), { more: `<a href="#/ucollection/${+c.id}">Visa alla</a>` });

@@ -110,6 +110,30 @@ export function userFromReq(req, query, allowQuery = false) {
   return u;
 }
 
+// ---------------- kalenderprenumeration (iCal) ----------------
+// En personlig token per användare som bara gäller /api/calendar.ics (routealternativet calendar i http/router.js).
+// Den lagras hashad i en egen tabell – inte i sessions – så userFromReq hittar den aldrig: den kan inte användas
+// som inloggning mot något annat API, varken i adressen, som kaka eller som Bearer-token.
+export function createCalendarToken(uid) {
+  const token = randomBytes(32).toString('hex');
+  run(`INSERT INTO calendar_tokens(user_id,token,created,last_used) VALUES(?,?,?,NULL)
+    ON CONFLICT(user_id) DO UPDATE SET token=excluded.token, created=excluded.created, last_used=NULL`, uid, sha(token), now());
+  return token;
+}
+export const revokeCalendarToken = (uid) => run('DELETE FROM calendar_tokens WHERE user_id=?', uid).changes > 0;
+export const calendarTokenInfo = (uid) => get('SELECT created, last_used FROM calendar_tokens WHERE user_id=?', uid) || null;
+/** Användaren bakom kalendertoken i ?t= (null om den saknas, är fel eller har återkallats). Aldrig administratör. */
+export function calendarUser(query) {
+  const t = query?.get('t');
+  if (!t || !/^[a-f0-9]{64}$/.test(t)) return null;
+  const h = sha(t);
+  const u = get(`SELECT u.id,u.name,u.remote_allowed,u.totp_enabled,u.parent_id,u.max_age,k.last_used
+    FROM calendar_tokens k JOIN users u ON u.id=k.user_id WHERE k.token=?`, h);
+  if (!u) return null;
+  if (now() - (u.last_used || 0) > 3600) run('UPDATE calendar_tokens SET last_used=? WHERE token=?', now(), h);
+  return { ...u, is_admin: 0, kind: 'calendar', via: 'query', tokenHash: h };
+}
+
 export function listSessions(userId, currentHash) {
   return all(`SELECT rowid AS id, kind, ua, ip, created, last_seen, expires, token FROM sessions
     WHERE user_id=? AND kind IN ('web','app') AND expires > ? ORDER BY last_seen DESC`, userId, now())

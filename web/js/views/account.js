@@ -6,6 +6,7 @@ import { route } from '../router.js';
 import { screenDialog } from '../screentime.js';
 import { confirmDialog, formDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { loadingState } from '../ui/states.js';
+import { calendarFeedPanel } from './calendar.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
   setup: 'Server konfigurerad', password_changed: 'Lösenord bytt', '2fa_enabled': '2FA aktiverad', '2fa_disabled': '2FA avstängd',
@@ -73,6 +74,7 @@ views.account = async () => {
     : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
   <div class="panel" id="scrobble" hidden></div>
   <div class="panel" id="listenprefs"></div>
+  <div class="panel" id="calfeed"></div>
   <div class="panel"><h2>Inloggade enheter</h2>
     <table><tr><th>Enhet</th><th>IP</th><th>Senast aktiv</th><th></th></tr>
     ${sess.map(s => `<tr><td>${esc(device(s.ua))}${s.current ? ' <span class="ok-badge">Den här</span>' : ''}</td><td class="muted">${esc(s.ip || '–')}</td><td class="muted">${fmtDate(s.last_seen)}</td>
@@ -87,6 +89,7 @@ views.account = async () => {
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
+  calendarFeedPanel($('#calfeed')).catch(() => {});
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });

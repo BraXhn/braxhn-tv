@@ -17,7 +17,7 @@ uppdateras**. En app från i våras ska fungera mot nästa års server.
   `true`/`false` som blir `0`/`1`.
 - Relativa adresser (`url`) börjar med `/api/`. Appen lägger själv till serveradressen, och för musikspår även
   `&a=…`, så de adresserna måste redan ha en `?`-del.
-- Behövs en annan form: lägg till ett nytt fält bredvid det gamla (som `seasons` bredvid `items` i `/api/home`)
+- Behövs en annan form: lägg till ett nytt fält bredvid det gamla (som `seasons` bredvid `items` i `/api/home`, eller `upcoming` för hyllan *Kommer snart*)
   och behåll det gamla så länge appar som läser det kan vara installerade.
 - Appar ignorerar okända fält (Swift `Decodable`, Kotlin `ignoreUnknownKeys`), så tillägg är alltid säkra.
 - Nya frågeparametrar ska vara valfria. Utan dem ska svaret vara som förut.
