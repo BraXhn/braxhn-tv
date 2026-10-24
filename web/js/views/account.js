@@ -1,4 +1,4 @@
-// Vy: Mitt konto – lösenord, tvåstegsverifiering, passkeys, profiler, Trakt, enheter, följda serier och nedladdning i appen
+// Vy: Mitt konto – lösenord, tvåstegsverifiering, passkeys, profiler, Trakt, scrobbling, enheter, följda serier och nedladdning i appen
 import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';
@@ -71,6 +71,7 @@ views.account = async () => {
     ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
       <div class="row"><button class="ghost" id="trsync">Synka nu</button><button class="danger" id="troff">Koppla från</button></div>`
     : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
+  <div class="panel" id="scrobble" hidden></div>
   <div class="panel" id="listenprefs"></div>
   <div class="panel"><h2>Inloggade enheter</h2>
     <table><tr><th>Enhet</th><th>IP</th><th>Senast aktiv</th><th></th></tr>
@@ -85,6 +86,7 @@ views.account = async () => {
   };
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
+  renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });
@@ -161,6 +163,51 @@ views.account = async () => {
   };
   await accountExtras();
 };
+
+// ---------- scrobbling av musik (ListenBrainz och Last.fm) ----------
+async function renderScrobble(el, data) {
+  const S = data || await api('/me/scrobble');
+  if (!el.isConnected || !S.allowed) return;
+  const LB = S.listenbrainz, LF = S.lastfm;
+  const status = (x) => `${x.error ? ` <span class="err">${esc(x.error)}</span>` : ''}${x.queued ? ` <span class="muted">${x.queued} ${x.queued === 1 ? 'lyssning väntar' : 'lyssningar väntar'} på att skickas.</span>` : ''}`;
+  const badge = (x) => x.connected ? (x.error ? ' <span class="warn-badge">Fel</span>' : ' <span class="ok-badge">Kopplat</span>') : '';
+  el.hidden = false;
+  el.innerHTML = `<h2>Scrobbling</h2>
+    <p class="muted small">Skicka det du lyssnar på i musiken till ListenBrainz eller Last.fm – från webben och apparna. En låt räknas när du lyssnat på halva den (eller 4 minuter); låtar under 30 sekunder räknas inte. Kopplingen gäller bara den här profilen.</p>
+    <h3 style="font-size:15px;margin:12px 0 4px">ListenBrainz${badge(LB)}</h3>
+    ${LB.connected ? `<p class="muted small">Kopplat som <b>${esc(LB.username || '')}</b>${LB.lastSent ? ', senast skickat ' + fmtDate(LB.lastSent) : ''}.${status(LB)}</p>
+      <div class="row"><button class="danger" id="lboff">Koppla från</button></div>`
+    : `<p class="muted small">Kopiera din användartoken från <a href="https://listenbrainz.org/settings/" target="_blank" rel="noopener">listenbrainz.org/settings</a>.</p>
+      <form id="lbform" class="row" style="align-items:flex-end"><div style="flex:1;min-width:200px"><label for="lbtok">Användartoken</label><input id="lbtok" type="password" autocomplete="off" required maxlength="200"></div>
+      <button class="primary">Koppla ListenBrainz</button></form>`}
+    <h3 style="font-size:15px;margin:18px 0 4px">Last.fm${badge(LF)}</h3>
+    ${!LF.available ? '<p class="muted small">Kräver API-nyckel (se README) – administratören anger den under Administration → Sonarr, Radarr och Trakt.</p>'
+    : LF.connected ? `<p class="muted small">Kopplat som <b>${esc(LF.username || '')}</b>${LF.lastSent ? ', senast skickat ' + fmtDate(LF.lastSent) : ''}.${status(LF)}</p>
+      <div class="row"><button class="danger" id="lfoff">Koppla från</button></div>`
+    : `<div id="lfbox"><p class="muted small">Du loggar in på last.fm och godkänner BraXhn TV.</p><div class="row"><button class="primary" id="lfon">Koppla Last.fm</button></div></div>`}`;
+  const again = (d) => renderScrobble(el, d).catch(() => {});
+  const off = (svc, name) => act(async () => {
+    if (await confirmDialog(`Koppla från ${name}?`, { okLabel: 'Koppla från', danger: true })) again(await api('/me/scrobble/' + svc, { method: 'DELETE' }));
+  });
+  if ($('#lboff', el)) $('#lboff', el).onclick = off('listenbrainz', 'ListenBrainz');
+  if ($('#lfoff', el)) $('#lfoff', el).onclick = off('lastfm', 'Last.fm');
+  if ($('#lbform', el)) $('#lbform', el).onsubmit = async (e) => {
+    e.preventDefault();
+    try { const d = await api('/me/scrobble/listenbrainz', { method: 'PUT', body: { token: $('#lbtok', el).value } }); toast('ListenBrainz kopplat'); again(d); } catch (er) { toastErr(er); }
+  };
+  if ($('#lfon', el)) $('#lfon', el).onclick = act(async () => {
+    const r = await api('/me/scrobble/lastfm/connect', { method: 'POST' });
+    $('#lfbox', el).innerHTML = `<p><a class="btn primary" href="${esc(r.url)}" target="_blank" rel="noopener">Öppna Last.fm och godkänn</a></p><p class="muted small" id="lfst" role="status">Väntar på att du godkänner på last.fm…</p>`;
+    const tick = async () => {
+      const p = await api('/me/scrobble/lastfm/poll', { method: 'POST' }).catch(e => { if (e.aborted) throw e; return { status: 'pending' }; });
+      if (!el.isConnected) return;
+      if (p.status === 'connected') { toast('Last.fm kopplat'); again(); }
+      else if (p.status === 'pending') later(tick, 3000);
+      else if ($('#lfst', el)) $('#lfst', el).textContent = 'Inloggningen gick ut – försök igen.';
+    };
+    later(tick, 3000);
+  });
+}
 
 // ---------- skärmtid, följda serier och automatisk nedladdning ----------
 Object.assign(EVENTS, { screentime_changed: 'Skärmtid ändrad', screentime_extra: 'Extra skärmtid', history_imported: 'Tittarhistorik importerad' });

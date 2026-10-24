@@ -5,6 +5,7 @@ import { fail, send, clientIp, readJson } from '../util.js';
 import { createSession } from '../auth.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
+import * as scrobble from '../scrobble.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio } from '../http/router.js';
 import { screenBlock } from '../http/context.js';
@@ -34,6 +35,8 @@ route('GET', '/api/music/tracks/:tid/play', user, (c) => {
 route('POST', '/api/music/tracks/:tid/played', user, (c) => {
   const t = trackRow(c); if (!t) return;
   run('INSERT INTO track_plays(user_id,track_id,ts) VALUES(?,?,?)', c.user.id, t.id, now());
+  // Webben och apparna anropar detta när ett spår startar: "spelas nu" + väntande lyssning för ListenBrainz/Last.fm
+  scrobble.played(c.user, t.id).catch(() => {});
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/music/tracks/:tid/favorite', user, async (c) => {

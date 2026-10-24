@@ -46,6 +46,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Streamingtjänster** | *Var kan jag se den?* – visar om en titel finns på t.ex. **Prime Video, TV4 Play**, Netflix, SVT Play eller Viaplay och öppnar den i tjänstens app. Bläddra i det som finns på era tjänster. (Innehållet spelas i tjänstens egen app – det är kopieringsskyddat och kan inte läggas in i biblioteket.) |
 | **Sonarr/Radarr** | Webhook gör att nya avsnitt dyker upp direkt efter nedladdning. **Önskningar**: alla i hushållet kan önska filmer/serier, som skickas till Radarr/Sonarr när de godkänts. Visar om titeln redan finns på en av era tjänster. |
 | **Trakt** | Varje person kan koppla sitt Trakt-konto: sett-status synkas åt båda hållen och "tittar nu" visas. |
+| **Scrobbling av musik** | Varje person kan koppla **ListenBrainz** (med sin användartoken) och **Last.fm** under Mitt konto. Det du lyssnar på i webben, iPhone/Apple TV-appen och Android-appen visas som *spelas nu* och räknas när du lyssnat på halva låten eller 4 minuter (låtar under 30 s räknas inte). Lyssningar som inte gick att skicka (inget nät, tjänsten nere) sparas och skickas senare. Barnprofiler kan inte koppla. Se *Scrobbling* nedan. |
 | **Notiser** | Larm till mobilen via ntfy, Pushover, Gotify, Discord, Telegram eller webhook: attacker, spärrade konton, certifikat, säkerhetskopior, inspelningar, önskningar och nya versioner. |
 | **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
@@ -230,6 +231,14 @@ Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i
 - **Direkt skanning:** kopiera webhook-adressen under Administration → *Sonarr, Radarr och Trakt* och lägg in den i Sonarr/Radarr under *Settings → Connect → Webhook*. Ser Sonarr filerna under en annan sökväg (t.ex. `/tv`) anger du `/tv=/media/Serier`.
 - **Önskningar:** fyll i adress och API-nyckel till Radarr/Sonarr och välj kvalitetsprofil och rotmapp. Önskningar från andra än administratörer godkänns först (eller automatiskt om du slår på det).
 
+## Scrobbling (ListenBrainz och Last.fm)
+
+- **ListenBrainz** behöver inget av administratören: varje person kopierar sin *User token* från [listenbrainz.org/settings](https://listenbrainz.org/settings/) och klistrar in den under *Mitt konto → Scrobbling*.
+- **Last.fm** kräver en API-nyckel för servern (en gång): logga in på last.fm, gå till [last.fm/api/account/create](https://www.last.fm/api/account/create), fyll i ett namn (t.ex. *BraXhn TV hemma*) och en beskrivning – *Callback URL* kan lämnas tom. Du får en **API key** och en **Shared secret**. Ange dem under Administration → *Sonarr, Radarr och Trakt* eller som `LASTFM_API_KEY`/`LASTFM_SECRET` i Unraid-mallen. Varje person trycker sedan *Koppla Last.fm* under Mitt konto och godkänner på last.fm.
+- Servern märker när en låt startar (samma anrop som *Spelat nyligen* använder, så apparna behöver inte uppdateras). Startar nästa låt innan halva (eller 4 minuter) har gått räknas den förra som överhoppad. En pausad låt räknas därför ändå när tiden gått.
+- Misslyckade lyssningar försöks igen med ökande väntetid (1 minut upp till 6 timmar). Last.fm tar emot lyssningar upp till 14 dagar bakåt, ListenBrainz skickas upp till 30 dagar; äldre slängs. Gäller kopplingen inte längre visas det under Mitt konto, och lyssningarna väntar tills du kopplar igen.
+- Token och sessionsnycklar sparas i databasen och visas aldrig i webben eller API:t.
+
 ## Säkerhetskopior och återställning
 
 - Lokala kopior görs varje natt i `/config/backups`. Extern, krypterad kopia ställs in under *Statistik → Extern säkerhetskopia*. **Spara lösenfrasen på ett säkert ställe** – utan den går kopian inte att läsa.
@@ -325,6 +334,7 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `UPDATE_CHECK` | 1 | 0 = leta inte efter nya versioner |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |
 | `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | – | Din Trakt-app |
+| `LASTFM_API_KEY` / `LASTFM_SECRET` | – | Last.fm-appens API key och Shared secret för scrobbling (kan även sättas i webbgränssnittet, se *Scrobbling*) |
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `BACKUP_PASSPHRASE` | – | Extern säkerhetskopia |
 | `WATCH_REGION` | SE | Land för *var kan jag se den?* |
 | `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
@@ -360,6 +370,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Live-TV | Simulerad IPTV-källa: M3U + XMLTV kopplades, MPEG-2 flätad bild kodades om till H.264 som HLS, tunergränsen fungerade, serieinspelning hoppade över repriser, inspelning blev MP4. |
 | Ljudböcker och poddar | Kapitel från m4b och flera mp3-filer, position över filgränser i webben, RSS-tolkning, nedladdning och spärr mot lokala adresser. |
 | Sonarr/Radarr, Trakt, notiser | Mot simulerade tjänster: webhook och sökvägsmappning, önskan till Radarr, tvåvägssynk med Trakt, ntfy. |
+| Scrobbling (ListenBrainz, Last.fm) | Mot simulerade tjänster: validering av token, Last.fm-inloggning med signerade anrop (signaturen kontrolleras av låtsasservern), *spelas nu* via samma anrop som webben och apparna gör, regeln 50 %/4 min/30 s, överhoppade låtar, kö med backoff när tjänsten är nere, inga dubbletter, max ålder, utgången koppling, barnprofiler och att token aldrig syns i API-svar. **Otestat:** de riktiga tjänsterna (bl.a. hur Last.fm sorterar parametrar med `[i]` i en sats) och lyssning i apparna. |
 | Säkerhetskopior | Kryptering fram och tillbaka, fel lösenfras nekas, S3-signering mot AWS testvektor, återställning via omstart. |
 | Uppgradering av databasen | Databaser skapade av 0.5.0, 0.5.1, 0.6.1, 0.7.0, 0.8.2 och 0.9.3 (`test/fixtures/db/`) uppgraderas utan att något försvinner: konton, lösenord, framsteg, titlar och alla rader finns kvar, schemat blir det senaste, säkerhetskopian före uppgraderingen tas, en andra start ändrar ingenting, och servern startar och loggar in kontot (även appens gamla token). **Otestat:** databaser från före 0.5 (simuleras bara). |
 | Anpassningsbar kvalitet | Mastern listar rätt steg, och segmentgränser och starttider är identiska mellan stegen (ffprobe). |
@@ -381,7 +392,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 - OpenSubtitles (API:t var inte nåbart härifrån)
 - Chromecast och AirPlay
 - certifikat från Let's Encrypt på riktigt (kräver en publik domän)
-- en riktig HDHomeRun, riktig IPTV, riktiga Sonarr/Radarr, Trakt och S3-lagring (simulerade här)
+- en riktig HDHomeRun, riktig IPTV, riktiga Sonarr/Radarr, Trakt, ListenBrainz, Last.fm och S3-lagring (simulerade här)
 - Google TV-appen på en riktig TV och ljudböcker i bilen
 - passkeys i en riktig webbläsare/telefon
 - offline-nedladdning och musik i en riktig bil

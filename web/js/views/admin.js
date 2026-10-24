@@ -102,6 +102,10 @@ views.admin = async () => {
       <p class="muted small">Skapa en gratis app på <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">trakt.tv/oauth/applications</a> (Redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>). Varje användare kopplar sedan sitt konto under Mitt konto.</p>
       <div class="row"><div style="flex:1;min-width:180px"><label>Client ID</label><input id="trid" value="${esc(IN.traktClientId)}" autocomplete="off"></div>
       <div style="flex:1;min-width:180px"><label>Client Secret</label><input id="trsec" type="password" autocomplete="off" placeholder="${IN.traktSecretSet ? '•••••• (sparad)' : ''}"></div></div>
+      <h3 style="margin:18px 0 0;font-size:15px">Last.fm (scrobbling av musik)</h3>
+      <p class="muted small">Skapa ett API-konto på <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a> (Callback URL kan lämnas tom). Varje användare kopplar sedan sitt Last.fm-konto under Mitt konto. ListenBrainz behöver ingen nyckel här.</p>
+      <div class="row"><div style="flex:1;min-width:180px"><label>API key</label><input id="lfkey" value="${esc(IN.lastfmApiKey || '')}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label>Shared secret</label><input id="lfsec" type="password" autocomplete="off" placeholder="${IN.lastfmSecretSet ? '•••••• (sparad)' : ''}"></div></div>
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button></div></form>
   </div>
   <div class="panel"><h2>Notiser till mobilen</h2>
@@ -242,6 +246,7 @@ views.admin = async () => {
     e.preventDefault();
     const body = { pathMap: $('#inpm').value, requestsEnabled: $('#inre').checked, requestsAuto: $('#inra').checked, traktClientId: $('#trid').value };
     if ($('#trsec').value) body.traktSecret = $('#trsec').value;
+    body.lastfmApiKey = $('#lfkey').value; if ($('#lfsec').value) body.lastfmSecret = $('#lfsec').value;
     for (const k of ['radarr', 'sonarr']) { body[k + 'Url'] = $('#' + k + 'u').value; if ($('#' + k + 'k').value) body[k + 'Key'] = $('#' + k + 'k').value; body[k + 'Profile'] = $('#' + k + 'p').value; body[k + 'Root'] = $('#' + k + 'r').value; }
     try { await api('/integrations', { method: 'PUT', body }); toast('Sparat'); } catch (er) { toastErr(er); }
   };

@@ -1,4 +1,4 @@
-// Streamingtjänster ("var kan jag se den?"), Sonarr/Radarr och önskemål, Trakt och notiser.
+// Streamingtjänster ("var kan jag se den?"), Sonarr/Radarr och önskemål, Trakt, scrobbling (ListenBrainz/Last.fm) och notiser.
 import { get, setSetting, getSetting, all, run } from '../db.js';
 import { fail, send, readJson, clientIp } from '../util.js';
 import { audit, auditHooks } from '../auth.js';
@@ -6,6 +6,7 @@ import { hasTmdb, scan, tmdbSearch, tvdbOf } from '../scanner.js';
 import * as notifier from '../notify.js';
 import * as arr from '../arr.js';
 import * as trakt from '../trakt.js';
+import * as scrobble from '../scrobble.js';
 import * as streaming from '../streaming.js';
 import { route, user, admin, pub } from '../http/router.js';
 import { ctx } from '../http/context.js';
@@ -112,7 +113,8 @@ route('GET', '/api/integrations', admin, (c) => send(c.res, 200, {
   sonarrProfile: +getSetting('sonarr_profile', '0'), sonarrRoot: getSetting('sonarr_root', ''),
   pathMap: getSetting('arr_path_map', process.env.ARR_PATH_MAP || ''), webhookPath: `/api/webhook/arr?key=${arr.webhookKey()}`,
   requestsEnabled: getSetting('requests_enabled', '1') === '1', requestsAuto: getSetting('requests_auto', '0') === '1',
-  traktClientId: getSetting('trakt_client_id', process.env.TRAKT_CLIENT_ID || ''), traktSecretSet: !!getSetting('trakt_client_secret', process.env.TRAKT_CLIENT_SECRET || '')
+  traktClientId: getSetting('trakt_client_id', process.env.TRAKT_CLIENT_ID || ''), traktSecretSet: !!getSetting('trakt_client_secret', process.env.TRAKT_CLIENT_SECRET || ''),
+  lastfmApiKey: getSetting('lastfm_api_key', process.env.LASTFM_API_KEY || ''), lastfmSecretSet: !!getSetting('lastfm_secret', process.env.LASTFM_SECRET || '')
 }));
 route('PUT', '/api/integrations', admin, async (c) => {
   const b = await readJson(c.req);
@@ -131,6 +133,10 @@ route('PUT', '/api/integrations', admin, async (c) => {
   if (b.requestsAuto != null) setSetting('requests_auto', b.requestsAuto ? '1' : '0');
   if (typeof b.traktClientId === 'string') setSetting('trakt_client_id', b.traktClientId.trim());
   if (typeof b.traktSecret === 'string' && b.traktSecret) setSetting('trakt_client_secret', b.traktSecret.trim());
+  const lfKey = getSetting('lastfm_api_key', ''), lfSecret = getSetting('lastfm_secret', '');
+  if (typeof b.lastfmApiKey === 'string') setSetting('lastfm_api_key', b.lastfmApiKey.trim().slice(0, 100));
+  if (typeof b.lastfmSecret === 'string' && b.lastfmSecret) setSetting('lastfm_secret', b.lastfmSecret.trim().slice(0, 100));
+  if (lfKey !== getSetting('lastfm_api_key', '') || lfSecret !== getSetting('lastfm_secret', '')) scrobble.lastfmAppChanged();
   if (b.newWebhookKey) setSetting('arr_webhook_key', '');
   audit('settings_changed', { ...ctx(c), detail: 'integrationer' });
   send(c.res, 200, { ok: true });
@@ -144,6 +150,28 @@ route('POST', '/api/me/trakt/connect', user, async (c) => { try { send(c.res, 20
 route('POST', '/api/me/trakt/poll', user, async (c) => { try { send(c.res, 200, await trakt.pollDevice(c.user.id)); } catch (e) { fail(c.res, 502, e.message); } });
 route('POST', '/api/me/trakt/sync', user, async (c) => { try { send(c.res, 200, await trakt.sync(c.user.id)); } catch (e) { fail(c.res, 502, 'Trakt: ' + e.message); } });
 route('DELETE', '/api/me/trakt', user, (c) => { trakt.disconnect(c.user.id); send(c.res, 200, { ok: true }); });
+
+// Scrobbling av musik (per person; barnprofiler kan inte koppla och ärver ingen koppling). Token/sessionsnyckel lämnas aldrig ut.
+const scrobbleFail = (c, e) => fail(c.res, e.kind === 'temp' ? 502 : 400, e.message);
+const adultOnly = (c) => { if (c.user.max_age == null) return true; fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); return false; };
+route('GET', '/api/me/scrobble', user, (c) => send(c.res, 200, scrobble.info(c.user)));
+route('PUT', '/api/me/scrobble/listenbrainz', user, async (c) => {
+  if (!adultOnly(c)) return;
+  const { token } = await readJson(c.req);
+  try { await scrobble.connectListenBrainz(c.user.id, token); send(c.res, 200, scrobble.info(c.user)); } catch (e) { scrobbleFail(c, e); }
+});
+route('POST', '/api/me/scrobble/lastfm/connect', user, async (c) => {
+  if (!adultOnly(c)) return;
+  try { send(c.res, 200, await scrobble.startLastfm(c.user.id)); } catch (e) { scrobbleFail(c, e); }
+});
+route('POST', '/api/me/scrobble/lastfm/poll', user, async (c) => {
+  if (!adultOnly(c)) return;
+  try { send(c.res, 200, await scrobble.pollLastfm(c.user.id)); } catch (e) { scrobbleFail(c, e); }
+});
+route('DELETE', '/api/me/scrobble/:service', user, (c) => {
+  if (!scrobble.SERVICES.includes(c.p.service)) return fail(c.res, 404, 'Okänd tjänst');
+  scrobble.disconnect(c.user.id, c.p.service); send(c.res, 200, scrobble.info(c.user));
+});
 
 // Notiser och uppdateringar
 auditHooks.push(notifier.onAudit);
