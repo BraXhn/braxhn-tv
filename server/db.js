@@ -198,6 +198,15 @@ addCol('users', 'offline_sync', 'TEXT');
 // "Ta bort från Fortsätt titta" för en serie: döljer nästa avsnitt tills man tittar på serien igen (progress.updated > at)
 db.exec(`CREATE TABLE IF NOT EXISTS continue_hidden(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, at INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));`);
+// Scrobbling av musik per person (ListenBrainz/Last.fm): kopplingen (token/sessionsnyckel – lämnas aldrig ut i API:t)
+// och kön med lyssningar. En rad i kön blir en lyssning när due passerats (spåret spelat ≥ 50 % eller 4 min);
+// raden tas bort när tjänsten tagit emot den, annars nytt försök vid next_try.
+db.exec(`CREATE TABLE IF NOT EXISTS scrobble_accounts(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, service TEXT NOT NULL,
+  secret TEXT NOT NULL, username TEXT, error TEXT, connected INTEGER NOT NULL, last_ok INTEGER, PRIMARY KEY(user_id, service));
+CREATE TABLE IF NOT EXISTS scrobble_queue(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, service TEXT NOT NULL,
+  track_id INTEGER, artist TEXT NOT NULL, title TEXT NOT NULL, album TEXT, album_artist TEXT, duration INTEGER, track_no INTEGER,
+  listened_at INTEGER NOT NULL, due INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0, error TEXT,
+  UNIQUE(user_id, service, listened_at, title));`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -212,7 +221,9 @@ CREATE INDEX IF NOT EXISTS tp_track ON track_plays(track_id);
 CREATE INDEX IF NOT EXISTS fav_track ON favorites(track_id);
 CREATE INDEX IF NOT EXISTS pli_track ON playlist_items(track_id);
 CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);
-CREATE INDEX IF NOT EXISTS tracks_lib_added ON tracks(library_id, added);`);
+CREATE INDEX IF NOT EXISTS tracks_lib_added ON tracks(library_id, added);
+CREATE INDEX IF NOT EXISTS scrobble_due ON scrobble_queue(due, next_try);
+CREATE INDEX IF NOT EXISTS scrobble_user ON scrobble_queue(user_id, due);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;

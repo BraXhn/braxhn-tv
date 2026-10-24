@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- **Scrobbling av musik till ListenBrainz och Last.fm** (som Navidrome): varje person kopplar sina konton under *Mitt konto → Scrobbling* – ListenBrainz med användartoken, Last.fm genom att logga in och godkänna på last.fm (kräver en API-nyckel för servern, `LASTFM_API_KEY`/`LASTFM_SECRET` eller Administration). Låtar från webben och apparna visas som *spelas nu* och räknas efter halva låten eller 4 minuter (inte under 30 s), utan att apparna behöver uppdateras. Lyssningar som inte kunde skickas sparas och skickas senare med ökande väntetid. Barnprofiler kan inte koppla och ärver ingen koppling
 - **Sök efter poddar på namn** (Apples poddkatalog, som Audiobookshelf): skriv poddens namn och prenumerera med ett klick – RSS-adressen behöver inte letas upp längre
 - **Serverlogg i Administration** med filter och automatisk uppdatering, loggfiler per dag i `/config/logs` (sju dagar) och knappen *Ladda ner diagnostik*. Fel i webbappen hos användarna (t.ex. i Safari på iPhone) rapporteras till loggen. Nycklar och lösenord maskeras
 - **Kortkommandon:** `?` visar en lista, `/` söker; i spelaren även `j`/`l`, ↑ ↓ för volym och `0`–`9` för att hoppa i filmen

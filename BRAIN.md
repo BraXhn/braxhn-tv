@@ -61,6 +61,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 8. **CI ↔ Unraid**: push → `:edge`; Actions-knapp → `:latest`/`:beta` + release. Röktest av imagen före publicering.
 
 9. **Loggen** (`server/logs.js`, importeras först i `index.js`): krokar på `console.*` → ringbuffert + `/config/logs/braxhn-<dag>.log`. Allt maskeras med `mask()` – skriv aldrig hemligheter till loggen i förväg i tron att de syns bara i Docker. Webbappens fel → `POST /api/clientlog` (begränsat per användare).
+10. **Scrobbling** (`POST /api/music/tracks/:id/played` → `server/scrobble.js` ↔ ListenBrainz/Last.fm): webben, iOS och Android anropar `/played` när ett spår **startar** – det enda servern vet om musiklyssning. Varje start = "spelas nu" + rad i `scrobble_queue` med `due` = start + min(50 %, 4 min); nästa start före `due` raderar raden (överhoppad). Kön skickas var 30:e sekund (`processQueue`), fel → `next_try` med backoff, `auth`-fel stoppar kontot (`scrobble_accounts.error`) tills det kopplas igen. Unikt per (person, tjänst, starttid, titel). Barnprofiler (`max_age`) scrobblar aldrig. `secret` (token/sessionsnyckel) lämnas aldrig ut i API-svar. Bas-adresser via `LISTENBRAINZ_API`/`LASTFM_API`/`LASTFM_AUTH_URL` (tester).
 
 ### Invarianter (bryts de blir det fel – testa dem)
 - All servertext i HTML går genom `esc()`.
