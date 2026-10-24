@@ -658,3 +658,20 @@ kbd{display:inline-block;min-width:1.6em;padding:1px 6px;border:1px solid var(--
 /* Serverlogg i Administration */
 .logview{max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;font-family:ui-monospace,monospace}
 .logview .lw{color:#e8c46a}.logview .le{color:#ff8a7a}
+
+/* ---- Smarta spellistor med egna regler (views/music.js, redigeraren) ---- */
+.smartedit h1{font-size:22px;margin-bottom:var(--sp-2)}
+.smarthead{margin:var(--sp-4) 0 var(--sp-2)}
+.smartmatch{width:auto!important}
+.smartrule{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.smartrule>select{flex:1 1 150px;max-width:220px}
+.smartval{display:flex;flex:2 1 220px;gap:8px;align-items:center;min-width:0}
+.smartval input{flex:1 1 90px;min-width:0}
+.smartedit input[type=date]{padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:inherit;width:100%}
+.smartgroup{border:1px solid var(--line);border-radius:10px;padding:6px 12px 10px;margin:10px 0}
+.smartgroup legend{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--dim);padding:0 6px}
+.smartopts{align-items:flex-end;margin-top:var(--sp-3)}
+.smartopts>div{flex:1 1 140px}
+.smartshare{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--text)}
+.smartprev{font-weight:600;margin:var(--sp-3) 0}
+@media (max-width:600px){.smartrule>select{max-width:none}}

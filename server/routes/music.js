@@ -6,6 +6,7 @@ import { createSession } from '../auth.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
 import * as scrobble from '../scrobble.js';
+import * as smartl from '../smartlists.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio } from '../http/router.js';
 import { screenBlock } from '../http/context.js';
@@ -88,7 +89,37 @@ route('GET', '/api/music/:lib/smart', user, (c) => { const l = musicLib(c); if (
 route('GET', '/api/music/:lib/smart/:sid', user, (c) => {
   const l = musicLib(c); if (!l) return;
   const trackList = listen.smartTracks(l.id, c.user.id, c.p.sid);
-  trackList ? send(c.res, 200, { id: c.p.sid, name: listen.smartName(c.p.sid), trackList }) : fail(c.res, 404, 'Listan finns inte');
+  if (!trackList) return fail(c.res, 404, 'Listan finns inte');
+  // Egen/delad lista: samma fält som de fasta, plus vem som äger den (tillägg)
+  const cl = /^u\d+$/.test(c.p.sid) ? smartl.getFor(+c.p.sid.slice(1), c.user.id) : null;
+  send(c.res, 200, { id: c.p.sid, name: listen.smartName(c.p.sid, c.user.id), trackList,
+    ...(cl ? { custom: true, listId: cl.id, mine: cl.mine, shared: cl.shared, owner: cl.mine ? null : cl.owner } : {}) });
+});
+// ---------- Smarta spellistor med egna regler (privata, kan delas med alla på servern) ----------
+// Fält och operatorer är vitlistade i server/smartlists.js; ogiltiga regler ger 400 med svensk text.
+route('GET', '/api/music/smartlists', user, (c) => send(c.res, 200, { lists: smartl.listFor(c.user.id), ...smartl.catalog() }));
+route('POST', '/api/music/smartlists/preview', user, async (c) => {
+  const b = await readJson(c.req, 64 * 1024);
+  const def = smartl.normalize(b);
+  const tracks = smartl.evaluate(def, c.user.id);
+  send(c.res, 200, { count: tracks.length, matches: smartl.countMatches(def, c.user.id), duration: tracks.reduce((a, t) => a + (t.duration || 0), 0),
+    trackList: c.q.get('tracks') === '1' ? tracks : tracks.slice(0, 10) });
+});
+route('POST', '/api/music/smartlists', user, async (c) => {
+  const id = smartl.create(c.user.id, await readJson(c.req, 64 * 1024));
+  listen.clearSmartCache();
+  send(c.res, 200, { id });
+});
+route('GET', '/api/music/smartlists/:id', user, (c) => { const l = smartl.getFor(+c.p.id, c.user.id); l ? send(c.res, 200, l) : fail(c.res, 404, 'Finns inte'); });
+route('PUT', '/api/music/smartlists/:id', user, async (c) => {
+  const ok = smartl.update(+c.p.id, c.user.id, await readJson(c.req, 64 * 1024));
+  listen.clearSmartCache();
+  ok ? send(c.res, 200, { ok: true }) : fail(c.res, 404, 'Finns inte');
+});
+route('DELETE', '/api/music/smartlists/:id', user, (c) => {
+  const ok = smartl.remove(+c.p.id, c.user.id);
+  listen.clearSmartCache();
+  ok ? send(c.res, 200, { ok: true }) : fail(c.res, 404, 'Finns inte');
 });
 route('GET', '/api/music/tracks/:tid/lyrics', user, async (c) => { const t = trackRow(c); if (t) send(c.res, 200, await listen.lyricsFor(t)); });
 route('GET', '/api/me/listening', user, (c) => send(c.res, 200, listen.getPrefs(c.user.id)));
