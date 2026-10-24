@@ -523,6 +523,8 @@ export async function tmdbSearch(kind, query, year) {
 
 // Originaltiteln sparas bara när den skiljer sig från titeln (sökbar via items.skey2)
 const originalOf = (orig, title) => orig && String(orig).trim() && String(orig).trim() !== String(title).trim() ? String(orig).trim().slice(0, 300) : null;
+// Premiärdatum ('YYYY-MM-DD') – bara ett giltigt datum sparas
+const dateOf = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
 export async function refreshItem(item, tmdbId = null) {
   if (item.kind === 'movie') {
     let id = tmdbId;
@@ -535,10 +537,10 @@ export async function refreshItem(item, tmdbId = null) {
     const { cert, age } = pickCert(certs);
     const coll = await saveCollection(d.belongs_to_collection).catch(() => null);
     run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,
-      genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age), collection_id=?, original_title=? WHERE id=?`,
+      genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age), collection_id=?, original_title=?, released=COALESCE(?,released) WHERE id=?`,
       d.title || item.title, sortTitle(d.title || item.title), parseInt(d.release_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop,
-      JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, originalOf(d.original_title, d.title || item.title), item.id);
+      JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, originalOf(d.original_title, d.title || item.title), dateOf(d.release_date), item.id);
     saveExtras(item, d);
     return true;
   }
@@ -551,9 +553,9 @@ export async function refreshItem(item, tmdbId = null) {
     run('UPDATE items SET genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age) WHERE id=?', JSON.stringify((d.genres || []).map(g => g.name)), cert, age, item.id);
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
-    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,original_title=? WHERE id=?`,
+    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,original_title=?,released=COALESCE(?,released) WHERE id=?`,
       d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
-      d.overview || null, d.vote_average || null, id, poster, backdrop, originalOf(d.original_name, d.name || item.title), item.id);
+      d.overview || null, d.vote_average || null, id, poster, backdrop, originalOf(d.original_name, d.name || item.title), dateOf(d.first_air_date), item.id);
     saveExtras(item, d);
     remapAbsolute(item, d.seasons || []);
     await matchEpisodes(item, id, d.seasons || []);

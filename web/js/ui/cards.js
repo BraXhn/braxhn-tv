@@ -76,8 +76,9 @@ function lines(it, land) {
     if (land) return [land && it.showTitle ? it.showTitle : it.title, `${sxe(it)}${land && it.showTitle ? ' · ' + it.title : ''}`, ''];
     return [it.showTitle || it.title, it.showTitle ? it.title : '', se(it.season, it.episode)];
   }
-  if (it.kind === 'show') return [it.title, it.seasons > 1 ? `${it.seasons} säsonger` : it.seasons === 1 ? '1 säsong' : it.year ? String(it.year) : '', ''];
-  return [it.title, it.year ? String(it.year) : '', ''];
+  // note: egen rad 2 från hyllan (t.ex. "Premiär för 30 år sedan" i Den här dagen)
+  if (it.kind === 'show') return [it.title, it.note || (it.seasons > 1 ? `${it.seasons} säsonger` : it.seasons === 1 ? '1 säsong' : it.year ? String(it.year) : ''), ''];
+  return [it.title, it.note || (it.year ? String(it.year) : ''), ''];
 }
 /** Knapparna ovanpå bilden: ▶ i mitten, ✎ nere till vänster (administratörer) och ⋮ nere till höger */
 function overlay({ id, name, play, edit, menu, data = '' }) {

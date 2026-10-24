@@ -202,6 +202,9 @@ addCol('users', 'cinema', 'TEXT');
 addCol('items', 'poster_color', 'TEXT');
 addCol('items', 'backdrop_color', 'TEXT');
 addCol('items', 'thumb_color', 'TEXT');
+// Premiärdatum från TMDB ('YYYY-MM-DD', hyllan "Den här dagen") och startsidans egen ordning per användare (JSON, server/homeshelves.js)
+addCol('items', 'released', 'TEXT');
+addCol('users', 'home_layout', 'TEXT');
 // "Ta bort från Fortsätt titta" för en serie: döljer nästa avsnitt tills man tittar på serien igen (progress.updated > at)
 db.exec(`CREATE TABLE IF NOT EXISTS continue_hidden(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, at INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));`);

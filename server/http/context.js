@@ -155,12 +155,13 @@ function candidates(age) {
   return rows;
 }
 // Poängsättning sker på lätta kolumner; bara de bästa hämtas sedan i sin helhet
-export function recommend(uid, limit) {
+/** seenIds: redan uträknade sedda/påbörjade titlar (Set, ändras) – annars frågas databasen */
+export function recommend(uid, limit, seenIds = null) {
   const w = genreProfile(uid);
   if (!Object.keys(w).length) return [];
   const age = ageFilter(uid);
   // Titlar man redan börjat på/sett (serier räknas via sina avsnitt) och titlar i Min lista hoppas över
-  const seen = new Set(all(`SELECT DISTINCT COALESCE(e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
+  const seen = seenIds || new Set(all(`SELECT DISTINCT COALESCE(e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
     WHERE q.user_id=? AND (q.watched=1 OR q.position > 0)`, uid).map(r => r.id));
   for (const r of all('SELECT item_id FROM watchlist WHERE user_id=?', uid)) seen.add(r.item_id);
   const cands = candidates(age).filter(r => !seen.has(r.id)).slice(0, 3000);
