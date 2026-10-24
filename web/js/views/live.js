@@ -5,7 +5,7 @@ import { route } from '../router.js';
 import { choiceDialog, confirmDialog, openDialog } from '../ui/dialog.js';
 import { emptyState } from '../ui/states.js';
 
-const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
+export const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
 function loadLogos() {}
 views.live = async () => {
   const D = await api('/live/channels');
@@ -48,7 +48,7 @@ views.guide = async (dayOffset) => {
   });
   loadLogos();
 };
-async function programDialog(id) {
+export async function programDialog(id) {
   let p;
   try { p = await api('/live/programs/' + id); } catch (e) { toastErr(e); return; }
   const nowT = Date.now() / 1000, onNow = p.start <= nowT && p.stop > nowT;

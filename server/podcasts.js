@@ -8,7 +8,8 @@ import https from 'node:https';
 import net from 'node:net';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
-import { db, get, all, run, now, getSetting, CONFIG, IMAGES } from './db.js';
+import { db, get, all, run, now, getSetting, CONFIG, IMAGES, searchKeys } from './db.js';
+import { ranked } from './search.js';
 import { streamFile } from './util.js';
 import * as jobs from './jobs.js';
 
@@ -31,6 +32,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS pe_guid ON podcast_episodes(podcast_id, guid);
 CREATE INDEX IF NOT EXISTS pe_pub ON podcast_episodes(podcast_id, published DESC);
 CREATE TABLE IF NOT EXISTS podcast_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, episode_id INTEGER NOT NULL REFERENCES podcast_episodes(id) ON DELETE CASCADE,
   position REAL NOT NULL DEFAULT 0, played INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, PRIMARY KEY(user_id, episode_id));`);
+searchKeys('podcasts', ['title'], ['author']);
+searchKeys('podcast_episodes', ['title']);
 // Nedladdningar som avbröts av en omstart: nollställ flaggan (annars laddas avsnittet aldrig ner) och ta bort halvfärdiga filer
 run('UPDATE podcast_episodes SET downloading=0 WHERE downloading!=0');
 try { for (const f of fs.readdirSync(DIR)) if (f.endsWith('.part')) fs.rmSync(path.join(DIR, f), { force: true }); } catch {}
@@ -319,6 +322,12 @@ export const list = (uid) => all(`SELECT p.*, (SELECT COUNT(*) FROM podcast_epis
   .map(p => ({ id: p.id, title: p.title, author: p.author, image: !!p.image, episodes: p.episodes, unplayed: p.unplayed, latest: p.latest, error: p.error }));
 const epShape = (e) => ({ id: e.id, podcast: e.podcast_id, podcastTitle: e.ptitle, title: e.title, description: e.description, published: e.published, duration: e.duration,
   downloaded: !!e.file, downloading: !!e.downloading, position: e.position || 0, played: !!e.played });
+/** Poddar (titel, eller upphovsperson – rankas lägre) och avsnitt (titel) som matchar. Q = parseQuery(…) */
+export const searchPodcasts = (Q, limit = 20) => ranked({ from: 'FROM podcasts p', cols: 'p.id, p.title, p.author, p.image, p.title AS _t', key: 'p.skey', key2: 'p.skey2' }, Q, limit)
+  .map(p => ({ id: p.id, title: p.title, author: p.author, image: !!p.image }));
+export const searchEpisodes = (Q, uid, limit = 20) => ranked({ from: `FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id
+    LEFT JOIN podcast_progress q ON q.episode_id=e.id AND q.user_id=?`, colParams: [uid],
+  cols: 'e.*, p.title AS ptitle, q.position, q.played, e.title AS _t', key: 'e.skey', pop: 'e.published' }, Q, limit).map(epShape);
 export function podcast(id, uid) {
   const p = get('SELECT * FROM podcasts WHERE id=?', id); if (!p) return null;
   return { id: p.id, title: p.title, author: p.author, description: p.description, link: p.link, url: p.url, image: !!p.image, keep: p.keep, error: p.error, lastFetch: p.last_fetch,

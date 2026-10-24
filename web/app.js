@@ -16,6 +16,7 @@ import './js/views/login.js';
 import './js/views/quickconnect.js';
 import './js/views/home.js';
 import './js/views/collections.js';
+import './js/views/search.js';
 import './js/views/item.js';
 import './js/views/person.js';
 import './js/views/wrapped.js';

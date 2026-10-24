@@ -7,7 +7,9 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
-import { db, get, all, run, now, getSetting, CONFIG } from './db.js';
+import { db, get, all, run, now, getSetting, CONFIG, searchKeys } from './db.js';
+import { searchKey, compactKey } from './searchkey.js';
+import { ranked, parseQuery } from './search.js';
 import { TRANSCODE, liveEncoder } from './stream.js';
 import { send, fail, streamFile } from './util.js';
 import { listSize, rewritePlaylist, enforceCap, SEG_RE, segNum } from './timeshift.js';
@@ -24,6 +26,8 @@ CREATE TABLE IF NOT EXISTS programs(id INTEGER PRIMARY KEY, channel_id INTEGER N
 CREATE INDEX IF NOT EXISTS programs_ch ON programs(channel_id, start);
 CREATE INDEX IF NOT EXISTS programs_title ON programs(title COLLATE NOCASE, start);
 CREATE INDEX IF NOT EXISTS programs_start ON programs(start);`);
+searchKeys('channels', ['name']);
+searchKeys('programs', ['title']);
 
 // ---------- hjälp ----------
 function localPath(url) {
@@ -269,9 +273,10 @@ export const guideState = { running: false, last: null, error: null };
 const KEEP_BACK = 3 * 3600; // så här långt bakåt behålls/ersätts program (pågående långa program räknas med)
 const CHUNK = 5000;
 let insertStmt = null;
-const insertProgram = () => insertStmt ||= db.prepare('INSERT INTO programs(channel_id,start,stop,title,subtitle,description,category,season,episode,icon,is_new) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+const insertProgram = () => insertStmt ||= db.prepare('INSERT INTO programs(channel_id,start,stop,title,subtitle,description,category,season,episode,icon,is_new,skey,skeyc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
+const progKeys = (t) => { const k = searchKey(String(t).slice(0, 300)); return [k, compactKey(k)]; };
 const insRow = (chId, p) => insertProgram().run(chId, p.start, p.stop, String(p.title).slice(0, 300), p.subtitle?.slice(0, 300) || null, p.description?.slice(0, 3000) || null,
-  p.category?.slice(0, 80) || null, p.season ?? null, p.episode ?? null, p.icon || null, p.isNew ? 1 : 0);
+  p.category?.slice(0, 80) || null, p.season ?? null, p.episode ?? null, p.icon || null, p.isNew ? 1 : 0, ...progKeys(p.title));
 const yieldLoop = () => new Promise(setImmediate);
 function inTx(fn) {
   db.exec('BEGIN');
@@ -452,8 +457,18 @@ export function guide(from, to) {
   return chans.map(c => ({ ...c, programs: by.get(c.id) }));
 }
 export const program = (id) => get('SELECT p.*, c.name AS channel_name, c.number AS channel_number FROM programs p JOIN channels c ON c.id=p.channel_id WHERE p.id=?', id);
-export const searchPrograms = (q) => all(`SELECT p.id, p.channel_id, p.start, p.stop, p.title, p.subtitle, p.season, p.episode, c.name AS channel FROM programs p JOIN channels c ON c.id=p.channel_id
-  WHERE p.title LIKE ? AND p.stop > ? ORDER BY p.start LIMIT 100`, '%' + q.replace(/[%_]/g, '') + '%', now());
+/** Program i guiden som inte har slutat (rankad matchning på titeln, search.js). byTime: i sändningsordning (som tidigare) */
+export function searchPrograms(q, { limit = 100, byTime = true } = {}) {
+  const r = ranked({ from: 'FROM programs p JOIN channels c ON c.id=p.channel_id JOIN tuners t ON t.id=c.tuner_id',
+    cols: 'p.id, p.channel_id, p.start, p.stop, p.title, p.subtitle, p.season, p.episode, c.name AS channel, p.title AS _t',
+    key: 'p.skey', pop: '-p.start', where: 'p.stop > ? AND t.enabled=1 AND c.hidden=0', params: [now()] }, typeof q === 'string' ? parseQuery(q) : q, limit);
+  if (byTime) r.sort((a, b) => a.start - b.start);
+  return r.map(({ _k, _s, _n, _t, ...p }) => p);
+}
+/** Kanaler (synliga, från aktiva källor) som matchar namnet */
+export const searchChannels = (q, limit = 20) => ranked({ from: 'FROM channels c JOIN tuners t ON t.id=c.tuner_id',
+  cols: 'c.id, c.number, c.name, c.logo, c.name AS _t', key: 'c.skey', pop: 'c.favorite', where: 't.enabled=1 AND c.hidden=0' }, typeof q === 'string' ? parseQuery(q) : q, limit)
+  .map(c => ({ id: c.id, number: c.number, name: c.name, logo: !!c.logo }));
 
 // ---------- tuner-hantering ----------
 /** Antal använda tuners per källa (live + inspelningar) */

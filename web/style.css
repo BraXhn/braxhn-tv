@@ -718,3 +718,9 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
 .qc-link{word-break:break-all}
 .qc-input{font-size:24px;letter-spacing:.2em;width:9em;font-variant-numeric:tabular-nums}
 .qc-info th{text-align:left;color:var(--dim);font-weight:500;padding-right:14px}
+/* Sökningen (views/search.js): rader för poddavsnitt, TV-program och kanaler */
+.slist{display:flex;flex-direction:column;gap:2px;max-width:760px}
+.srow{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-sm);background:none;border:0;color:var(--text);text-decoration:none;min-height:var(--touch);width:100%;font:inherit;cursor:pointer;box-sizing:border-box}
+.srow:hover,.srow:focus-visible{background:var(--bg3)}
+.srow b{overflow-wrap:anywhere}
+.srow.chrow{flex-direction:row;align-items:center;gap:var(--sp-2);width:auto;background:var(--bg2)}

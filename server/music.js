@@ -5,6 +5,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
 import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { ranked, parseQuery } from './search.js';
 import { send, fail, listFiles, deletionBlocked, underFailed, streamFile } from './util.js';
 import { parseReplayGain, scheduleLoudness } from './listening.js';
 
@@ -143,12 +144,15 @@ export async function scanMusic(lib, status) {
 }
 
 // ---------------- API-hjälpare ----------------
-const ALBUM_SQL = `SELECT al.id, al.title, al.year, al.genre, al.cover, al.added, al.library_id, ar.id AS artist_id, ar.name AS artist,
-  (SELECT COUNT(*) FROM tracks t WHERE t.album_id=al.id) AS tracks, (SELECT SUM(duration) FROM tracks t WHERE t.album_id=al.id) AS duration
-  FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id`;
+const ALBUM_COLS = `al.id, al.title, al.year, al.genre, al.cover, al.added, al.library_id, ar.id AS artist_id, ar.name AS artist,
+  (SELECT COUNT(*) FROM tracks t WHERE t.album_id=al.id) AS tracks, (SELECT SUM(duration) FROM tracks t WHERE t.album_id=al.id) AS duration`;
+const ALBUM_FROM = 'FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id';
+const ALBUM_SQL = `SELECT ${ALBUM_COLS} ${ALBUM_FROM}`;
 const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
-export const TRACK_SQL = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
-  t.rg_track, t.rg_album, t.rg_peak FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id`;
+const TRACK_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
+  t.rg_track, t.rg_album, t.rg_peak`;
+const TRACK_FROM = 'FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id';
+export const TRACK_SQL = `SELECT ${TRACK_COLS} ${TRACK_FROM}`;
 export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
   albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined,
   // Jämn ljudnivå: dB mot -18 LUFS (spårets värde, annars albumets) och toppvärde (linjärt) – null om okänt
@@ -176,13 +180,26 @@ export function artist(id, uid) {
   const popular = all(`${TRACK_SQL} WHERE t.artist_id=? OR al.artist_id=? ORDER BY (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id) DESC, t.title LIMIT 10`, id, id).map(t => shapeTrack(t, favs));
   return { id: a.id, name: a.name, albums: all(`${ALBUM_SQL} WHERE al.artist_id=? ORDER BY al.year DESC`, id).map(shapeAlbum), popular };
 }
-export function searchMusic(q, uid) {
-  const like = `%${q}%`;
+/**
+ * Sök artister, album och låtar (rankat, se search.js). libId = bara det biblioteket (null = alla musikbibliotek).
+ * Album hittas även på artistens namn och låtar på "artist låt" (sekundär nyckel, rankas lägre).
+ * limits = högsta antal per grupp. Fälten är desamma som tidigare (apparna läser dem).
+ */
+export function searchMusic(q, uid, libId = null, limits = { artists: 20, albums: 30, tracks: 50 }) {
+  const Q = typeof q === 'string' ? parseQuery(q) : q;
+  if (Q.empty) return { artists: [], albums: [], tracks: [] };
+  const lib = (a) => libId == null ? { where: '1', params: [] } : { where: `${a}.library_id=?`, params: [libId] };
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
+  const la = lib('ar'), lb = lib('al'), lt = lib('t');
   return {
-    artists: all(`SELECT id, name FROM artists WHERE name LIKE ? AND EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=artists.id) LIMIT 20`, like),
-    albums: all(`${ALBUM_SQL} WHERE al.title LIKE ? OR ar.name LIKE ? LIMIT 30`, like, like).map(shapeAlbum),
-    tracks: all(`${TRACK_SQL} WHERE t.title LIKE ? LIMIT 50`, like).map(t => shapeTrack(t, favs))
+    artists: ranked({ from: 'FROM artists ar', cols: 'ar.id, ar.name, ar.name AS _t', key: 'ar.skey',
+      pop: '(SELECT COUNT(*) FROM albums a WHERE a.artist_id=ar.id)',
+      where: `${la.where} AND EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=ar.id)`, params: la.params }, Q, limits.artists)
+      .map(r => ({ id: r.id, name: r.name })),
+    albums: ranked({ from: ALBUM_FROM, cols: `${ALBUM_COLS}, al.title AS _t`, key: 'al.skey', key2: 'ar.skey', blob: "al.skeyc || ' ' || COALESCE(ar.skeyc, '')", year: 'al.year',
+      where: lb.where, params: lb.params }, Q, limits.albums).map(shapeAlbum),
+    tracks: ranked({ from: TRACK_FROM, cols: `${TRACK_COLS}, t.title AS _t`, key: 't.skey', key2: "COALESCE(ar.skey, '') || ' ' || t.skey", blob: "t.skeyc || ' ' || COALESCE(ar.skeyc, '')",
+      where: lt.where, params: lt.params }, Q, limits.tracks).map(t => shapeTrack(t, favs))
   };
 }
 export function musicHome(libId, uid) {

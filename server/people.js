@@ -2,7 +2,8 @@
 // people.id är TMDB:s person-id. Rollistan sparas per titel (filmer och serier) i item_people.
 import fs from 'node:fs';
 import path from 'node:path';
-import { db, get, all, run, tx, now, getSetting, IMAGES } from './db.js';
+import { db, get, all, run, tx, now, getSetting, IMAGES, searchKeys } from './db.js';
+import { ranked, parseQuery } from './search.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS people(id INTEGER PRIMARY KEY, name TEXT NOT NULL, profile_path TEXT, bio TEXT,
   birthday TEXT, deathday TEXT, birthplace TEXT, bio_fetched INTEGER NOT NULL DEFAULT 0);
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS item_people(item_id INTEGER NOT NULL REFERENCES items
   person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE, role TEXT NOT NULL, character TEXT, ord INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(item_id, role, person_id));
 CREATE INDEX IF NOT EXISTS item_people_person ON item_people(person_id);`);
+searchKeys('people', ['name']);
 
 export const MAX_CAST = 20;
 const BIO_TTL = 30 * 86400;
@@ -59,11 +61,13 @@ export function castOf(itemId) {
 
 /** Personer vars namn matchar – bara de som finns i titlar profilen får se. age = ageFilter(uid) från http/context.js */
 export function searchPeople(q, age, limit = 20) {
-  const like = `%${String(q).trim().replace(/[%_\\]/g, '\\$&')}%`;
-  return all(`SELECT p.id, p.name, p.profile_path, COUNT(DISTINCT i.id) AS n FROM people p JOIN item_people ip ON ip.person_id=p.id
-    JOIN items i ON i.id=ip.item_id LEFT JOIN items s ON s.id=i.parent_id WHERE p.name LIKE ? ESCAPE '\\' AND i.version_of IS NULL${age.sql}
-    GROUP BY p.id ORDER BY n DESC, p.name LIMIT ?`, like, ...age.params, limit)
-    .map(r => ({ id: r.id, name: r.name, image: !!r.profile_path, titles: r.n }));
+  // Rankad matchning (search.js): exakt namn först, sedan början av namnet/ord, vid lika poäng flest titlar
+  const visible = `(SELECT COUNT(DISTINCT i.id) FROM item_people ip JOIN items i ON i.id=ip.item_id LEFT JOIN items s ON s.id=i.parent_id
+    WHERE ip.person_id=p.id AND i.version_of IS NULL${age.sql})`;
+  return ranked({ from: 'FROM people p', cols: 'p.id, p.name, p.name AS _t, p.profile_path', key: 'p.skey', pop: visible, colParams: age.params,
+    where: `EXISTS (SELECT 1 FROM item_people ip JOIN items i ON i.id=ip.item_id LEFT JOIN items s ON s.id=i.parent_id
+      WHERE ip.person_id=p.id AND i.version_of IS NULL${age.sql})`, params: age.params }, typeof q === 'string' ? parseQuery(q) : q, limit)
+    .map(r => ({ id: r.id, name: r.name, image: !!r.profile_path, titles: r._n }));
 }
 
 /** Personens roller per titel: Map(item_id → [{role, character}]) */

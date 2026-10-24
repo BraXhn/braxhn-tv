@@ -20,7 +20,7 @@ export function trackRows(tracks, opts = {}) {
     <td class="r">${iconButton({ icon: t.favorite ? '♥' : '♡', label: `Favorit: ${t.title}`, cls: 'ghost small fav', data: { fav: t.id }, pressed: !!t.favorite })}
     ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}</td></tr>`).join('')}</table>`;
 }
-function bindTracks(tracks, root = main) {
+export function bindTracks(tracks, root = main) {
   $$('[data-ti]', root).forEach(r => keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
   $$('[data-fav]', root).forEach(b => b.onclick = act(async () => {
     const set = (v) => { b.setAttribute('aria-pressed', String(v)); b.firstElementChild.textContent = v ? '♥' : '♡'; };

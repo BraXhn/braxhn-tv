@@ -159,8 +159,7 @@ $('#install').onclick = async () => {
 $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
 
 $('#logout').onclick = async () => { stopAudio(); stopActivity(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
-let qt;
-$('#q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { const q = e.target.value.trim(); location.hash = q ? '#/search/' + encodeURIComponent(q) : '#/'; }, 300); };
+// Sökfältet (resultat medan man skriver, piltangenter, senaste sökningar) sköts av views/search.js
 
 // ---------- sidomenyn ----------
 // Ikoner som standard; ☰ fäller ut menyn med namnen (sparas i webbläsaren)

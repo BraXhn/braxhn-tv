@@ -4,7 +4,7 @@
 //   http/context.js  – hjälpfunktioner som flera routefiler delar
 //   routes/*.js      – alla /api-routes, grupperade per område
 // server/index.js startar http/https-servrarna med handle().
-import { getSetting } from './db.js';
+import { getSetting, refreshKeys } from './db.js';
 import { hooks, scan, status as scanStatus } from './scanner.js';
 import * as st from './stream.js';
 import { detectMarkers } from './intro.js';
@@ -21,6 +21,7 @@ import './routes/auth.js';
 import './routes/admin.js';
 import './routes/library.js';
 import './routes/collections.js';
+import './routes/search.js';
 import './routes/music.js';
 import './routes/playback.js';
 import './routes/social.js';
@@ -36,7 +37,8 @@ hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
-hooks.afterScan = () => { clearRecommendations(); return arr.markAvailable(); };
+// Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
+hooks.afterScan = () => { clearRecommendations(); refreshKeys(null, Infinity); return arr.markAvailable(); };
 hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 

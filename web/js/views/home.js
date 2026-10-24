@@ -1,8 +1,8 @@
-// Vyer: startsidan, bibliotek, sökning, Min lista och samlingar
+// Vyer: startsidan, bibliotek, Min lista och samlingar (sökningen: views/search.js)
 import { $, act, api, esc, heroUrl, later, libs, main, me, store, views } from '../core.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
-import { card, colCard, personCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
+import { card, colCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
 import { emptyState } from '../ui/states.js';
 import { upcomingCard } from './calendar.js';
 
@@ -66,19 +66,6 @@ views.lib = async (id) => {
   if ($('#cols')) { $('#cols').value = cols; $('#cols').onchange = (e) => { store.set('cols.' + id, e.target.value); route(); }; }
   $('#srt').onchange = (e) => { store.set('sort.' + id, e.target.value); route(); };
   $('#flt').onchange = (e) => { store.set('filter.' + id, e.target.value); route(); };
-};
-
-views.search = async (q) => {
-  try { q = decodeURIComponent(q || ''); } catch { q = q || ''; }
-  if ($('#q').value !== q && document.activeElement !== $('#q')) $('#q').value = q;
-  const [r, ppl] = q.length >= 1 ? await Promise.all([api('/search?q=' + encodeURIComponent(q)),
-    api('/search/people?q=' + encodeURIComponent(q)).catch(e => { if (e?.aborted) throw e; return []; })]) : [[], []];
-  const top = r.filter(i => i.kind !== 'episode'), eps = r.filter(i => i.kind === 'episode');
-  main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1></div>
-    ${top.length ? `<section class="section"><h2>Filmer och serier</h2><div class="grid">${top.map(i => card(i)).join('')}</div></section>` : ''}
-    ${ppl.length ? `<section class="section"><h2>Personer</h2><div class="shelf people">${ppl.map(p => personCard(p, `${p.titles} ${p.titles === 1 ? 'titel' : 'titlar'}`)).join('')}</div></section>` : ''}
-    ${eps.length ? `<section class="section"><h2>Avsnitt</h2><div class="grid">${eps.map(i => card(i, true)).join('')}</div></section>` : ''}
-    ${!r.length && !ppl.length ? emptyState({ icon: '🔍', title: 'Inga träffar', text: q.length < 3 ? 'Skriv minst tre tecken.' : 'Prova en annan stavning eller en del av titeln.' }) : ''}`;
 };
 
 views.watchlist = async () => {
