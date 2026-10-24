@@ -4,6 +4,7 @@ import { fail, send, readJson, clientIp } from '../util.js';
 import { audit, auditHooks } from '../auth.js';
 import { hasTmdb, scan, tmdbSearch, tvdbOf } from '../scanner.js';
 import * as notifier from '../notify.js';
+import * as webhooks from '../webhooks.js';
 import * as arr from '../arr.js';
 import * as trakt from '../trakt.js';
 import * as scrobble from '../scrobble.js';
@@ -86,6 +87,7 @@ route('POST', '/api/requests', user, async (c) => {
   const { row, existing } = arr.create(c.user, { kind, tmdbId: +tmdbId, title, year: +year || null, poster, overview });
   if (existing) return send(c.res, 200, reqShape(row));
   audit('request_created', { ...ctx(c), detail: `${title} (${kind})` });
+  webhooks.emit('request.new', { user: { id: c.user.id, name: c.user.name }, request: { id: row.id, kind, title, year: +year || null, tmdbId: +tmdbId, status: row.status || 'pending' } }, { userId: c.user.id });
   if (c.user.is_admin || getSetting('requests_auto', '0') === '1') { try { await sendRequest(row); } catch (e) { return fail(c.res, 502, e.message); } }
   else notifier.notify('request', 'Ny önskan', `${c.user.name} önskar ${kind === 'movie' ? 'filmen' : 'serien'} ${title}${year ? ` (${year})` : ''}.`);
   send(c.res, 200, reqShape(get('SELECT * FROM requests WHERE id=?', row.id)));

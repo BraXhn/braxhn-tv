@@ -8,6 +8,7 @@ import { liveEncoder, activeTranscodes } from './stream.js';
 import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts, activeLive } from './livetv.js';
 import * as comskip from './comskip.js';
 import { notify } from './notify.js';
+import * as webhooks from './webhooks.js';
 import { fail, streamFile } from './util.js';
 import * as jobs from './jobs.js';
 
@@ -222,6 +223,7 @@ function postProcess(id, ts) {
           run("UPDATE recordings SET status='done', file=?, size=? WHERE id=?", mp4, st.size, id);
           const rec = get('SELECT * FROM recordings WHERE id=?', id);
           notify('dvr', 'Inspelning klar', `${rec.title}${rec.subtitle ? ' – ' + rec.subtitle : ''} (${rec.channel_name}) finns att titta på.`, { priority: 2 });
+          webhooks.emit('recording.done', { recording: { id: rec.id, title: rec.title, subtitle: rec.subtitle || null, channel: rec.channel_name || null, start: rec.start, stop: rec.stop, size: st.size } });
           comskip.enqueue(id); // reklamavbrott letas i bakgrunden
           enforceKeep(rec.rule_id);
         } catch (e) { retry = false; console.warn('[dvr] efterbearbetning:', e.message); }

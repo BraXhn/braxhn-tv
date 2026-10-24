@@ -978,3 +978,27 @@ body.hascast main{padding-bottom:110px}
 /* Meddelanden ovanför castpanelen – annars täcker de panelens knappar */
 body.hascast #toast{bottom:calc(var(--casth,110px) + 12px + env(safe-area-inset-bottom))}
 @media (max-width:760px){body.hascast:has(#tabbar:not([hidden])) #toast{bottom:calc(var(--casth,170px) + 70px + env(safe-area-inset-bottom))}}
+/* Tittarstatistik, Min historik och webhooks (views/history.js, views/webhooks.js) */
+.chart{display:block;width:100%;height:auto;max-height:220px;overflow:visible}
+.chart .ch-bar{fill:var(--accent)}
+.chart .ch-hit{fill:transparent}
+.chart .ch-g:hover .ch-bar{opacity:.75}
+.chart .ch-base{stroke:var(--line);stroke-width:1}
+.chart .ch-lab{fill:var(--dim);font-size:11px}
+.tablewrap{overflow-x:auto;max-width:100%}
+.hist td{vertical-align:top}
+.nowrap{white-space:nowrap}
+.linkbtn{background:none;border:0;padding:0;color:inherit;font:inherit;text-align:left;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;min-height:0}
+.linkbtn:hover{color:var(--accent)}
+.filters{align-items:flex-end;margin-bottom:12px}
+.filters>div{min-width:120px}
+.whsecret{font-family:ui-monospace,monospace;word-break:break-all;background:var(--bg2);padding:10px;border-radius:var(--r-sm);user-select:all}
+@media (max-width:600px){
+  .filters>div{flex:1 1 140px}
+  /* Historiken som kort i stället för tabell: titel och datum överst, resten under */
+  .hist thead{display:none}
+  .hist tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .hist td{display:block;border:0;padding:0;grid-column:1}
+  .hist td.r{grid-column:2;grid-row:1 / span 3;align-self:center}
+}
+fieldset.plain{border:0;padding:0;margin:12px 0}fieldset.plain legend{font-size:13px;color:var(--dim);margin-bottom:6px;padding:0}

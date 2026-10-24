@@ -352,6 +352,7 @@ async function scanLibrary(lib) {
   if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
   const seen = new Set(), touched = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
+  const newMovies = []; // nyskapade filmer (webhooken library.new)
   // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
   // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.
   const pending = []; let flushed = Date.now();
@@ -388,9 +389,9 @@ async function scanLibrary(lib) {
         pending.push(() => {
           if (k) run(`UPDATE items SET size=?,mtime=?,duration=?,container=?,vcodec=?,acodec=?,width=?,height=?,streams=?,thumb=0,trickplay=0 WHERE id=?`,
             st.size, saveMtime, info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, k.id);
-          else run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
+          else newMovies.push(Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,path,size,mtime,duration,container,vcodec,acodec,width,height,streams,added)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, 'movie', p.title, sortTitle(p.title), p.year, f, st.size, saveMtime,
-            info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now());
+            info.duration, info.container, info.vcodec, info.acodec, info.width, info.height, info.streams, now()).lastInsertRowid));
           run('UPDATE items SET hdr=? WHERE path=?', info.hdr, f);
           if (home) run('UPDATE items SET title=?, sort_title=?, year=?, taken=?, folder=? WHERE path=? AND match_locked=0', p.title, sortTitle(p.title), p.year, taken, folder, f);
         });
@@ -453,6 +454,11 @@ async function scanLibrary(lib) {
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
   if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
+  // Webhooks (library.new): nya filmer (inte nya versioner av en film som redan fanns) och avsnitt
+  if (newMovies.length || newEpisodes.length) {
+    const ids = [...newMovies, ...newEpisodes].filter(id => get('SELECT 1 FROM items WHERE id=? AND version_of IS NULL', id));
+    try { if (ids.length) hooks.newItems?.(ids); } catch (e) { console.warn('[scan] webhooks för nya titlar:', e.message); }
+  }
 }
 
 /** Tunga analyser (minuter–timmar för stora bibliotek). Körs i en egen bakgrundskö så att skanning
@@ -893,7 +899,7 @@ export function scan(libId = null) {
   queue = queue.then(async () => {
     queued.delete(key); status.queued = queued.size;
     const libs = libId ? all('SELECT * FROM libraries WHERE id=?', libId) : all('SELECT * FROM libraries');
-    status.running = true; status.started = now(); status.warnings = [];
+    status.running = true; status.started = now(); status.warnings = []; status.scanned = libs.map(l => l.name);
     try {
       for (const l of libs) {
         // Ett fel i ett bibliotek ska inte hoppa över resten

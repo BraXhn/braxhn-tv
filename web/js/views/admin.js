@@ -179,7 +179,8 @@ views.admin = async (sec) => {
       <div class="row"><div style="flex:1;min-width:180px"><label>Token/nyckel <span class="muted small">(Pushover app-token, Telegram bot-token, Gotify app-token)</span></label><input id="not" type="password" placeholder="${NO.tokenSet ? '•••••• (sparad)' : ''}" autocomplete="off"></div>
       <div style="flex:1;min-width:180px"><label>Mottagare <span class="muted small">(Pushover user key / Telegram chat-id)</span></label><input id="nous" value="${esc(NO.user)}"></div></div>
       <label>Skicka notis vid</label>${Object.entries(NO.allEvents).map(([k, v]) => `<label class="switch"><input type="checkbox" data-nev="${k}" ${NO.events.includes(k) ? 'checked' : ''}> ${esc(v)}</label>`).join('')}
-      <div class="row" style="margin-top:12px"><button class="primary">Spara</button><button type="button" class="ghost" id="notest">Skicka testnotis</button></div></form>
+      <div class="row" style="margin-top:12px"><button class="primary">Spara</button><button type="button" class="ghost" id="notest">Skicka testnotis</button><a class="btn" href="#/webhooks/server">Webhooks för händelser</a></div></form>
+    <p class="muted small">Webhooks skickar uppspelningar (start, paus, stopp, sedd), nya titlar, skanningar, önskningar, inspelningar och nya versioner till Home Assistant, n8n, Discord eller ntfy.</p>
     ${NO.recent.length ? `<details style="margin-top:10px"><summary class="muted small">Senaste notiser</summary><table>${NO.recent.map(n => `<tr><td class="muted small">${new Date(n.at).toLocaleString('sv-SE')}</td><td>${esc(n.title)}</td><td class="muted small">${esc(n.message)}</td></tr>`).join('')}</table></details>` : ''}
   </div>
   <div class="panel" id="adm-acme"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>

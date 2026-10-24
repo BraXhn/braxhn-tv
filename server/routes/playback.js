@@ -120,7 +120,10 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', startAt / it.duration * 100).catch(() => {});
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
   if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
+  // Uppskattad bithastighet (kbit/s) för statistiken: omkodningens steg, annars filens genomsnitt
+  const kbps = d.mode === 'transcode' && st.QUALITIES[d.q]?.br ? st.QUALITIES[d.q].br : it.size && it.duration ? Math.round(it.size * 8 / it.duration / 1000) : null;
+  if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons,
+    start: Math.max(0, +c.q.get('start') || 0), kbps });
   const allSubs = st.subtitlesOf(it);
   const subs = allSubs.filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
@@ -206,6 +209,8 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // Utan pid (apparna) stoppas alla användarens sessioner av titeln som förut.
   const pid = /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
   for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid);
+  // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden
+  if (row) act.clientStop(c.user.id, ver.mainOf(row).id);
   send(c.res, 200, { ok: true });
 });
 

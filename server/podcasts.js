@@ -48,23 +48,34 @@ for (const [a, n] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127
 for (const [a, n] of [['::', 128], ['::1', 128], ['::ffff:0:0', 96], ['64:ff9b::', 96], ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]]) BLOCK6.addSubnet(a, n, 'ipv6');
 export const blockedIp = (ip) => { const v = net.isIP(ip); return !v || (v === 4 ? BLOCK4.check(ip, 'ipv4') : BLOCK6.check(ip, 'ipv6')); };
 const allowPrivate = () => process.env.PODCAST_ALLOW_PRIVATE === '1';
-function checkedLookup(host, opts, cb) {
+// Hemnätet (RFC 1918, VPN/CGNAT och IPv6 ULA) – får nås bara när administratören uttryckligen tillåtit det för en
+// webhook (Home Assistant på hemnätet). Loopback (servern själv/containern), länklokala adresser (169.254.169.254 =
+// molnens metadatatjänst), multicast och "inbäddade" IPv4-i-IPv6-adresser spärras alltid: där finns tjänster som inte
+// kräver inloggning från samma maskin, och ingen hemautomation behöver dem.
+const LAN4 = new net.BlockList(), LAN6 = new net.BlockList();
+for (const [a, n] of [['10.0.0.0', 8], ['172.16.0.0', 12], ['192.168.0.0', 16], ['100.64.0.0', 10]]) LAN4.addSubnet(a, n, 'ipv4');
+LAN6.addSubnet('fc00::', 7, 'ipv6');
+const lanIp = (ip) => { const v = net.isIP(ip); return v === 4 ? LAN4.check(ip, 'ipv4') : v === 6 ? LAN6.check(ip, 'ipv6') : false; };
+/** Spärrad adress? allowLocal = hemnätet tillåtet (men aldrig loopback, länklokalt eller multicast) */
+export const blockedFor = (ip, allowLocal = false) => blockedIp(ip) && !(allowLocal && lanIp(ip));
+const lookupWith = (allowLocal) => (host, opts, cb) => {
   dns.lookup(host, { all: true }).then(addrs => {
-    const bad = !allowPrivate() && addrs.find(a => blockedIp(a.address));
+    const bad = !allowPrivate() && addrs.find(a => blockedFor(a.address, allowLocal));
     if (bad || !addrs.length) return cb(Object.assign(new Error('Adressen pekar på ett lokalt nätverk och tillåts inte'), { code: 'EBLOCKED' }));
     if (opts?.all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family);
   }, cb);
-}
-function request(url, headers, timeout, signal, method = 'GET', body = null) {
+};
+const checkedLookup = lookupWith(false), lanLookup = lookupWith(true);
+function request(url, headers, timeout, signal, method = 'GET', body = null, allowLocal = false) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason || new Error('Tidsgränsen överskreds'));
     const u = new URL(url);
     if (!['http:', 'https:'].includes(u.protocol)) return reject(new Error('Bara http/https stöds'));
     if (u.username || u.password) return reject(new Error('Adresser med inloggning stöds inte'));
     const host = u.hostname.replace(/^\[|\]$/g, '');
-    if (net.isIP(host) && blockedIp(host) && !allowPrivate()) return reject(new Error('Adressen pekar på ett lokalt nätverk och tillåts inte'));
+    if (net.isIP(host) && blockedFor(host, allowLocal) && !allowPrivate()) return reject(new Error('Adressen pekar på ett lokalt nätverk och tillåts inte'));
     const mod = u.protocol === 'https:' ? https : http;
-    const req = mod.request(u, { method, headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: checkedLookup, timeout, signal }, (res) => {
+    const req = mod.request(u, { method, headers: { 'User-Agent': 'BraXhnTV/1.0 (podcast)', ...headers }, lookup: allowLocal ? lanLookup : checkedLookup, timeout, signal }, (res) => {
       resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return Array.isArray(v) ? v[0] : v ?? null; } }, body: res });
     });
     req.on('timeout', () => req.destroy(new Error('Tidsgränsen överskreds')));
@@ -83,9 +94,10 @@ export async function safeFetch(u, { headers = {}, timeout = 30000, signal } = {
   }
   throw new Error('För många omdirigeringar');
 }
-/** POST till en användarangiven adress (t.ex. personlig ntfy/webhook) med samma skydd – följer inga omdirigeringar. */
-export async function safePost(u, body, { headers = {}, timeout = 15000 } = {}) {
-  const r = await request(String(u), { 'Content-Length': String(Buffer.byteLength(body)), ...headers }, timeout, AbortSignal.timeout(timeout + 5000), 'POST', body);
+/** POST till en användarangiven adress (t.ex. personlig ntfy/webhook) med samma skydd – följer inga omdirigeringar.
+ *  allowLocal: adresser i hemnätet tillåts (bara webhooks som administratören uttryckligen tillåtit, se blockedFor). */
+export async function safePost(u, body, { headers = {}, timeout = 15000, allowLocal = false } = {}) {
+  const r = await request(String(u), { 'Content-Length': String(Buffer.byteLength(body)), ...headers }, timeout, AbortSignal.timeout(timeout + 5000), 'POST', body, allowLocal);
   const text = (await readLimited(r, 64 << 10).catch(() => Buffer.alloc(0))).toString('utf8');
   return { status: r.status, ok: r.ok, text };
 }

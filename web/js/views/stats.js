@@ -15,7 +15,7 @@ views.stats = async () => {
   const maxDay = Math.max(1, ...S.days.map(d => d.n));
   const modeName = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' };
   main.innerHTML = `
-  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span><a class="btn small" href="#/wrapped/${new Date().getFullYear()}">Årssammanfattning</a></div>
+  <div class="toolbar"><h1>Statistik</h1><span class="muted">Senaste 30 dagarna</span><a class="btn small" href="#/playstats">Tittarstatistik och historik</a><a class="btn small" href="#/wrapped/${new Date().getFullYear()}">Årssammanfattning</a></div>
   <div class="panel"><h2>Spelas nu <span class="muted small" id="nowcount"></span></h2><div id="now">${loadingState({ kind: 'inline' })}</div></div>
   <div class="tiles">
     <div class="tile"><b>${L.movies}</b><span>filmer</span></div><div class="tile"><b>${L.shows}</b><span>serier</span></div>
