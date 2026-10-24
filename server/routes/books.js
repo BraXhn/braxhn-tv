@@ -41,8 +41,8 @@ const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res,
 const BOOK_SCOPE = 2e9, POD_SCOPE = 3e9;
 const bookStream = { auth: true, media: true, scope: (p) => BOOK_SCOPE + (books.fileRow(+p.fid)?.book_id || 0) };
 const podStream = { auth: true, media: true, scope: (p) => POD_SCOPE + (+p.eid) };
-route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q); });
-route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q); });
+route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q, c.user.id); });
+route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q, c.user.id); });
 route('GET', '/api/audiobooks/book/:bid/play', user, (c) => {
   const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
   if (screenBlock(c, { audio: true })) return;

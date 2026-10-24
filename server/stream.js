@@ -102,17 +102,29 @@ const videoOf = (it) => streamsOf(it).find(s => s.type === 'video');
 const is10bit = (v) => /10|12/.test(v?.pix || '');
 
 // ---------------- undertexter ----------------
-// Mapplistningar cachas per mapp och läses om bara när mappens ändringstid ändras (ny/borttagen fil)
+// Mapplistningar cachas per mapp och läses om bara när mappens ändringstid ändras (ny/borttagen fil).
+// Ändringstiden kontrolleras högst var 30:e sekund: en uppspelningsförfrågan frågar efter undertexterna
+// många gånger, och varje diskåtkomst kan hänga i flera sekunder när en arraydisk vaknar. Saknad mapp
+// (vanligast: inga nedladdade undertexter) cachas också. Ny extern .srt syns därför inom 30 s.
 const dirCache = new Map();
+const DIR_TTL = 30e3;
 function listDir(dir) {
-  const mtime = fs.statSync(dir).mtimeMs; // kastar om mappen saknas
+  const now = Date.now();
   const c = dirCache.get(dir);
-  if (c && c.mtime === mtime) return c.files;
-  const files = fs.readdirSync(dir);
+  if (c && now - c.at < DIR_TTL) return c.files;
+  let mtime;
+  try { mtime = fs.statSync(dir).mtimeMs; } catch { mtime = null; } // mappen saknas
+  if (c && c.mtime === mtime) { c.at = now; return c.files; }
+  const files = mtime == null ? [] : fs.readdirSync(dir);
   dirCache.delete(dir);
-  dirCache.set(dir, { mtime, files });
+  dirCache.set(dir, { mtime, files, at: now });
   if (dirCache.size > 2000) dirCache.delete(dirCache.keys().next().value);
   return files;
+}
+/** Glöm cachade mapplistningar för en titel (efter nedladdning eller borttagning av en undertext) */
+export function forgetSubtitles(it) {
+  dirCache.delete(path.dirname(it.path));
+  dirCache.delete(path.join(SUBS_DIR, String(it.id)));
 }
 export function subtitlesOf(it) {
   const out = [];
@@ -146,9 +158,10 @@ export function subtitlesOf(it) {
 // Undertexter extraheras en gång per fil och cachas (inbäddade spår kräver att hela filen läses)
 let subActive = 0; const subWait = [];
 async function subSlot(fn) {
-  if (subActive >= 2) await new Promise(r => subWait.push(r));
-  subActive++;
-  try { return await fn(); } finally { subActive--; subWait.shift()?.(); }
+  // Platsen lämnas över direkt till nästa väntande (räknaren minskar inte emellan) – annars kan en ny
+  // anropare ta den innan den väckta hinner köra, och då körs tre samtidigt
+  if (subActive >= 2) await new Promise(r => subWait.push(r)); else subActive++;
+  try { return await fn(); } finally { const next = subWait.shift(); if (next) next(); else subActive--; }
 }
 const subRunning = new Map();
 const subKey = (it, sub) => `${it.id}-${it.mtime}-${sub.id}${sub.file ? '-' + (fs.statSync(sub.file).mtimeMs | 0) : ''}`;
@@ -190,7 +203,7 @@ function liveVtt(it, sub, t) {
   const key = subKey(it, sub);
   let j = liveSubs.get(key);
   if (!j) {
-    j = { cues: [], done: false, error: null };
+    j = { cues: [], done: false, error: null, last: Date.now() };
     const forget = (ms) => setTimeout(() => { if (liveSubs.get(key) === j) liveSubs.delete(key); }, ms).unref();
     j.reader = new SubReader({
       file: it.path, stream: +sub.id.slice(1), format: 'webvtt', duration: it.duration || 0, title: it.title,
@@ -210,9 +223,16 @@ function liveVtt(it, sub, t) {
     });
     liveSubs.set(key, j);
   }
+  j.last = Date.now();
   j.reader.want(t);
   return j;
 }
+// Läsningar som ingen frågat efter på 30 min och som inte blivit klara tas bort (läsaren stoppar ffmpeg
+// efter två minuter utan frågor, men cues och läsarens timer låg annars kvar i minnet för alltid)
+export function sweepLiveSubs(now = Date.now()) {
+  for (const [k, j] of liveSubs) if (!j.done && now - j.last > 30 * 60e3) { j.reader.close(); j.done = true; liveSubs.delete(k); }
+}
+setInterval(sweepLiveSubs, 60e3).unref();
 function shiftVtt(vtt, offset) {
   if (!offset) return vtt;
   const fmt = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`; };
@@ -291,25 +311,46 @@ export const keyframesCached = (it) => kfMem.get(it.id)?.mtime === it.mtime || f
 export const kfCacheSize = () => kfMem.size;
 const kfRunning = new Map();
 const kfQueued = new Map(); // id → väntande plats i kön (bakgrundsanalys)
+// Platser för indexering: bakgrundsanalysen högst två, den som tryckt på Spela upp till tre.
+// kfWait: [{ go, priority }] – prioriterade först. En plats som frigörs lämnas direkt över till första
+// väntande som ryms i sin egen gräns (en bakgrundsväntare får aldrig en prioriterad plats).
 let kfActive = 0; const kfWait = [];
+const kfFits = (priority) => kfActive < (priority ? 3 : 2);
+function kfAcquire(id, priority) {
+  if (kfFits(priority)) { kfActive++; return null; }
+  return new Promise(go => {
+    const w = { go, priority };
+    if (priority) kfWait.unshift(w); else { kfWait.push(w); kfQueued.set(id, w); }
+  });
+}
+function kfWake() {
+  for (let i = 0; i < kfWait.length; i++) {
+    const w = kfWait[i];
+    if (!kfFits(w.priority)) continue;
+    kfWait.splice(i, 1);
+    kfActive++; // räknas redan här så att ingen ny anropare hinner ta platsen innan den väckta kör
+    w.go();
+    return;
+  }
+}
+function kfRelease() { kfActive--; kfWake(); }
 export function computeKeyframes(it, { priority = false } = {}) {
   if (!['h264', 'hevc'].includes(it.vcodec)) return Promise.resolve(null); // remux: H.264 (TS) och HEVC (fMP4)
   if (keyframesReady(it)) return Promise.resolve(keyframesReady(it));
   if (kfRunning.has(it.id)) {
     // Bakgrundsanalysen har redan köat filen – den som tryckt på Spela ska inte vänta på kön
-    const r = kfQueued.get(it.id);
-    if (priority && r) {
-      const i = kfWait.indexOf(r); if (i >= 0) kfWait.splice(i, 1);
+    const w = kfQueued.get(it.id);
+    if (priority && w) {
       kfQueued.delete(it.id);
-      if (kfActive < 3) r(); else kfWait.unshift(r);
+      const i = kfWait.indexOf(w);
+      if (i >= 0) { kfWait.splice(i, 1); w.priority = true; kfWait.unshift(w); kfWake(); }
     }
     return kfRunning.get(it.id);
   }
   const p = (async () => {
     // Bakgrundsanalysen använder högst två samtidigt; den som just tryckt på Spela får en egen plats direkt
-    if (priority ? kfActive >= 3 : kfActive >= 2) await new Promise(r => { if (priority) kfWait.unshift(r); else { kfWait.push(r); kfQueued.set(it.id, r); } });
+    await kfAcquire(it.id, priority);
     kfQueued.delete(it.id);
-    kfActive++;
     try {
       // Snabba vägen: filens eget index (MKV Cues / MP4 moov) – sekunder i stället för att läsa hela filen.
       // fMP4-remux (HEVC) delar på varje nyckelbild och kräver en komplett lista; TS (H.264) klarar ett urval.
@@ -337,7 +378,7 @@ export function computeKeyframes(it, { priority = false } = {}) {
       kfRemember(it.id, it.mtime, kf);
       return kf;
     } catch (e) { console.warn('[keyframes]', it.path, e.message); return null; }
-    finally { kfRunning.delete(it.id); kfActive--; kfWait.shift()?.(); }
+    finally { kfRunning.delete(it.id); kfRelease(); }
   })();
   kfRunning.set(it.id, p);
   return p;
@@ -942,8 +983,10 @@ setInterval(() => {
   }
 }, 15000).unref();
 
-export function stopUserSessions(itemId, userId) {
-  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`)) stopProc(s);
+/** Stoppar användarens sessioner av titeln. Med pid bara den uppspelningen (t.ex. webbspelaren som stängs
+ *  medan Chromecast fortsätter med en egen session); utan pid alla (appar och adminens stopp). */
+export function stopUserSessions(itemId, userId, pid = '') {
+  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) stopProc(s);
 }
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
 jobs.addSource(() => [...sessions.values()].filter(s => s.proc && !s.paused).map(s => ({
@@ -979,3 +1022,4 @@ export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = nu
 
 // För tester
 export const _segs = { trimBehind, highestFile, videoArgs };
+export const _slots = { subSlot, kfAcquire, kfRelease, kf: () => ({ active: kfActive, waiting: kfWait.length }), listDir, liveSubs, sessions };

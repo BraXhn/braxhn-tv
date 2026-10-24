@@ -23,11 +23,14 @@ function originalOk(it) {
   return /\.(mp4|m4v|mov)$/i.test(it.path) && v && ['h264', 'hevc'].includes(v.codec) && !/10/.test(v.pix || '') && (!a || a.codec === 'aac');
 }
 
+// Filen finns inte (längre): routen svarar 404
+const GONE = () => ({ status: 'missing', error: 'Filen finns inte längre' });
 export function status(it, q = '720') {
   if (!Q[q]) q = '720';
-  if (q === 'orig' && originalOk(it)) return { status: 'ready', original: true, size: fs.statSync(it.path).size };
+  // Originalfilen kan ha flyttats eller tagits bort sedan skanningen (eller disken svarar inte)
+  if (q === 'orig' && originalOk(it)) { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } }
   const key = keyOf(it, q), f = fileOf(key);
-  if (fs.existsSync(f) && !jobs.get(key)) { fs.utimesSync(f, new Date(), new Date()); return { status: 'ready', size: fs.statSync(f).size }; }
+  if (!jobs.get(key)) { try { fs.utimesSync(f, new Date(), new Date()); return { status: 'ready', size: fs.statSync(f).size }; } catch {} }
   const j = jobs.get(key);
   if (j) return { status: j.status, progress: j.progress, error: j.error };
   return { status: 'none' };
@@ -37,6 +40,7 @@ export function start(it, q = '720') {
   if (!Q[q]) q = '720';
   const st = status(it, q);
   if (st.status !== 'none' && st.status !== 'error') return st;
+  if (!fs.existsSync(it.path)) return GONE();
   const key = keyOf(it, q);
   const job = { status: 'queued', progress: 0 };
   jobs.set(key, job);
@@ -116,14 +120,19 @@ export function serveFile(req, res, it, q) {
 }
 
 // Håll cachen under gränsen (standard 50 GB) och rensa filer som inte använts på 14 dagar
+// Körs från en timer och efter varje klar fil: ett fel här (fil borttagen under tiden, disken borta) får aldrig
+// krascha servern eller märka en färdig nedladdning som misslyckad
 export function cleanup() {
+  try { prune(); } catch (e) { console.warn('[offline] kunde inte städa cachen:', e.message); }
+}
+function prune() {
   const maxBytes = (+getSetting('offline_max_gb', '50')) * 1e9;
   // Kvarlämnade .part-filer (t.ex. efter en krasch) som inte hör till ett pågående jobb
   for (const f of fs.readdirSync(DIR)) {
     if (!f.endsWith('.part')) continue;
     try { if (Date.now() - fs.statSync(path.join(DIR, f)).mtimeMs > 86400e3) fs.rmSync(path.join(DIR, f), { force: true }); } catch {}
   }
-  let files = fs.readdirSync(DIR).filter(f => f.endsWith('.mp4')).map(f => { const st = fs.statSync(path.join(DIR, f)); return { f, size: st.size, t: st.mtimeMs }; });
+  let files = fs.readdirSync(DIR).filter(f => f.endsWith('.mp4')).flatMap(f => { try { const st = fs.statSync(path.join(DIR, f)); return [{ f, size: st.size, t: st.mtimeMs }]; } catch { return []; } });
   for (const x of files) if (Date.now() - x.t > 14 * 86400e3) fs.rmSync(path.join(DIR, x.f), { force: true });
   files = files.filter(x => Date.now() - x.t <= 14 * 86400e3).sort((a, b) => a.t - b.t);
   let total = files.reduce((s, x) => s + x.size, 0);
