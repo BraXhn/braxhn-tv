@@ -359,6 +359,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Ljudböcker och poddar | Kapitel från m4b och flera mp3-filer, position över filgränser i webben, RSS-tolkning, nedladdning och spärr mot lokala adresser. |
 | Sonarr/Radarr, Trakt, notiser | Mot simulerade tjänster: webhook och sökvägsmappning, önskan till Radarr, tvåvägssynk med Trakt, ntfy. |
 | Säkerhetskopior | Kryptering fram och tillbaka, fel lösenfras nekas, S3-signering mot AWS testvektor, återställning via omstart. |
+| Uppgradering av databasen | Databaser skapade av 0.5.0, 0.5.1, 0.6.1, 0.7.0, 0.8.2 och 0.9.3 (`test/fixtures/db/`) uppgraderas utan att något försvinner: konton, lösenord, framsteg, titlar och alla rader finns kvar, schemat blir det senaste, säkerhetskopian före uppgraderingen tas, en andra start ändrar ingenting, och servern startar och loggar in kontot (även appens gamla token). **Otestat:** databaser från före 0.5 (simuleras bara). |
 | Anpassningsbar kvalitet | Mastern listar rätt steg, och segmentgränser och starttider är identiska mellan stegen (ffprobe). |
 | Flera versioner, trailers | Gruppering, automatiskt val, versionsväljare och trailerknapp i webben; en kvarvarande version tar över när huvudfilen försvinner. |
 | Timeshift och reklam | Lång live-lista mot en simulerad direktsändning, disktak och städning; reklamavbrott hittades i en syntetisk fil med lockbeten. |

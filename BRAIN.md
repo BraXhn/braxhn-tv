@@ -68,6 +68,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - Native HLS (Safari/iOS-appen) får aldrig AC-3/E-AC-3 i TS – inte heller surround som konverteras.
 - Omkodat ljud börjar aldrig före bilden (`transcodeAudio`); utan det överlappar första segmentet nästa.
 - Skannrar tar aldrig bort innehåll när biblioteket ser borttappat ut.
+- En databas från en äldre version uppgraderas utan att en rad försvinner (`test/upgrade.test.js`). Ny utgåva med schemaändring: lägg till versionen i `test/fixtures/db/make.mjs` och kör skriptet. Tabeller i andra moduler än `db.js` skapas med `CREATE TABLE IF NOT EXISTS` utan `addCol` – en ny kolumn där når aldrig befintliga databaser (testet jämför mot en ny databas och fångar det).
 - Inga npm-beroenden; tredjepartsfiler bara i `web/vendor` med checksumma.
 - `/api`-fält som apparna läser ändras aldrig bakåtinkompatibelt.
 
