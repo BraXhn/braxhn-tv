@@ -42,6 +42,8 @@ struct ItemDetailView: View {
     @State private var season: Int = -1
     @State private var audio: Int = -1
     @State private var subtitle: String = ""
+    /// Min lista efter att användaren tryckt (nil = som servern sa i item.inWatchlist)
+    @State private var inList: Bool?
 
     var body: some View {
         Group {
@@ -67,6 +69,7 @@ struct ItemDetailView: View {
         do {
             let it: MediaItem = try await model.get("/api/items/\(id)")
             item = it
+            inList = nil
             if season < 0 { season = it.next?.season ?? it.children?.first?.season ?? 1 }
             if audio < 0 { audio = (it.audio?.first { $0.default == true } ?? it.audio?.first)?.index ?? -1 }
             if subtitle.isEmpty, let subs = it.subtitles {
@@ -134,9 +137,12 @@ struct ItemDetailView: View {
                     Task { try? await model.post("/api/items/\(it.id)/watched", ["watched": !(it.watched ?? false)]); await load() }
                 }.buttonStyle(.bordered)
             }
-            #if os(iOS)
-            DownloadButton(item: it)
-            #endif
+            HStack(spacing: 14) {
+                watchlistButton(it)
+                #if os(iOS)
+                DownloadButton(item: it)
+                #endif
+            }
             HStack(spacing: 14) {
                 if let a = it.audio, a.count > 1 {
                     OptionButton<Int>(title: "Ljud", options: a.map { ($0.index, $0.label) }, selection: $audio)
@@ -163,6 +169,7 @@ struct ItemDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+            watchlistButton(it)
             if let o = it.overview { Text(o).foregroundStyle(.secondary) }
             if let c = castLine(it.cast) { Text(c).font(.callout).foregroundStyle(.secondary) }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -218,3 +225,22 @@ struct DownloadButton: View {
     }
 }
 #endif
+
+// MARK: - Min lista
+
+// (sist i filen så att radhänvisningarna i test/contracts/apps.json står kvar)
+extension ItemDetailView {
+    /// Lägg till/ta bort i Min lista – bara filmer och serier, och bara när servern skickar inWatchlist
+    @MainActor @ViewBuilder func watchlistButton(_ it: MediaItem) -> some View {
+        if !it.isEpisode, let on = inList ?? it.inWatchlist {
+            Button {
+                Task {
+                    do { try await model.setWatchlist(it.id, !on); inList = !on } catch {}
+                }
+            } label: {
+                Label(on ? "I Min lista" : "Min lista", systemImage: on ? "checkmark" : "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}

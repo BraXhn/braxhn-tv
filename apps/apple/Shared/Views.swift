@@ -3,6 +3,7 @@ import SwiftUI
 enum Route: Hashable {
     case item(Int)
     case library(Library)
+    case watchlist
 }
 
 extension View {
@@ -11,6 +12,7 @@ extension View {
             switch r {
             case .item(let id): ItemDetailView(id: id)
             case .library(let l): LibraryView(library: l)
+            case .watchlist: WatchlistView()
             }
         }
     }
@@ -40,6 +42,8 @@ struct RootView: View {
 }
 
 struct MainTabs: View {
+    /// Profilbyte bygger om alla flikar (ingen vy från förra profilen ligger kvar)
+    @ObservedObject private var profiles = ProfileEvents.shared
     private var miniPlayerPadding: CGFloat {
         #if os(tvOS)
         return 20
@@ -49,7 +53,7 @@ struct MainTabs: View {
     }
     var body: some View {
         ZStack(alignment: .bottom) {
-            tabs
+            tabs.id(profiles.generation)
             VStack(spacing: 6) { MiniPlayer(); SpokenMiniPlayer() }.padding(.bottom, miniPlayerPadding)
         }
     }
@@ -59,6 +63,8 @@ struct MainTabs: View {
                 .tabItem { Label("Hem", systemImage: "house") }
             NavigationStack { SearchView().withRoutes() }
                 .tabItem { Label("Sök", systemImage: "magnifyingglass") }
+            NavigationStack { LiveView() }
+                .tabItem { Label("Live-TV", systemImage: "antenna.radiowaves.left.and.right") }
             NavigationStack { MusicView() }
                 .tabItem { Label("Musik", systemImage: "music.note") }
             NavigationStack { ListenView() }
@@ -249,6 +255,11 @@ struct HomeView: View {
                 if !libs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
+                            NavigationLink(value: Route.watchlist) {
+                                Label("Min lista", systemImage: "bookmark")
+                                    .padding(.horizontal, 16).padding(.vertical, 10)
+                            }
+                            .buttonStyle(.bordered)
                             ForEach(libs) { l in
                                 NavigationLink(value: Route.library(l)) {
                                     Label(l.name, systemImage: l.type == "show" ? "tv" : "film")
@@ -261,11 +272,8 @@ struct HomeView: View {
                     }
                 }
                 if let h = home {
-                    if let f = h.forYou, !f.isEmpty { Shelf(title: "Nytt för dig", items: f, landscape: true) }
-                    if !h.continueWatching.isEmpty { Shelf(title: "Fortsätt titta", items: h.continueWatching, landscape: true) }
-                    ForEach(h.rows) { r in
-                        if !r.items.isEmpty { Shelf(title: r.title, items: r.items) }
-                    }
+                    // Hyllorna i användarens ordning (Home.swift); äldre servrar ger bara Nytt för dig, Fortsätt titta och biblioteken
+                    HomeShelves(home: h)
                 } else if error == nil {
                     ProgressView().frame(maxWidth: .infinity).padding(60)
                 }
@@ -374,6 +382,8 @@ struct SearchView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage("nightMode") private var nightMode = false
+    @AppStorage("clearDialog") private var clearDialog = false
     private let qualities: [(key: String, name: String)] = [("auto", "Automatisk"), ("orig", "Original"), ("1080", "1080p"), ("720", "720p"), ("480", "480p"), ("360", "360p")]
     private let langs: [(key: String, name: String)] = [("", "Inga"), ("sv", "Svenska"), ("en", "Engelska"), ("no", "Norska"), ("da", "Danska"), ("fi", "Finska")]
 
@@ -382,6 +392,7 @@ struct SettingsView: View {
             Section("Server") {
                 LabeledContent("Adress", value: model.server)
                 LabeledContent("Inloggad som", value: model.user?.name ?? "–")
+                NavigationLink(destination: ProfilesView()) { Text("Byt profil") }
             }
             Section("Kvalitet") {
                 ForEach(qualities, id: \.key) { o in
@@ -392,6 +403,14 @@ struct SettingsView: View {
                 ForEach(langs, id: \.key) { o in
                     Button { model.subtitleLang = o.key } label: { HStack { Text(o.name); Spacer(); if model.subtitleLang == o.key { Image(systemName: "checkmark") } } }
                 }
+            }
+            Section {
+                Button { nightMode.toggle() } label: { HStack { Text("Nattläge"); Spacer(); Text(nightMode ? "På" : "Av").foregroundStyle(.secondary) } }
+                Button { clearDialog.toggle() } label: { HStack { Text("Tydligare dialog"); Spacer(); Text(clearDialog ? "På" : "Av").foregroundStyle(.secondary) } }
+            } header: {
+                Text("Ljud i filmer och serier")
+            } footer: {
+                Text("Nattläge jämnar ut ljudnivån så att explosioner inte väcker grannarna, tydligare dialog lyfter rösterna. Servern filtrerar ljudet (stereo). Kan också ändras i spelaren.")
             }
             ListenSettingsSection()
             Section {

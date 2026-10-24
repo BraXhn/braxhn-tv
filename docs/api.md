@@ -82,3 +82,17 @@ Formatet beskrivs i [test/contracts/README.md](../test/contracts/README.md).
 
 Ett obligatoriskt fält i en ny appversion är bara säkert om alla servrar som kan köra appen redan skickar det.
 Välj valfritt (med standardvärde) om du är osäker. Det gäller också för fält som läggs till i servern samtidigt.
+
+### Valfria tillägg som iOS/tvOS-appen läser
+
+- Startsidans nyare hyllor i `/api/home` (`watchlist`, `recommended`, `customCollections`, `upcoming`, `because`,
+  `topRated`, `hiddenGems`, `shortTonight`, `onThisDay`, `genreOfDay`, `listening` och `homeLayout`) avkodas med
+  `try?` var för sig (`HomeResponse` i `Models.swift`): saknas ett fält, eller har det oväntad form, blir det bara en
+  hylla mindre. De står som inbäddade objekt under `optional` i kontraktet. Appen visar hyllorna i ordningen i
+  `homeLayout.order` (id:n som i `server/homeshelves.js`) och hoppar över `homeLayout.hidden`.
+- `POST /api/profiles/switch` svarar `401` med `needPin`/`needPassword` vid fel PIN – appen loggar inte ut på det
+  svaret (alla andra `401` med apptoken loggar ut).
+- Bio-läge: appen läser `GET /api/me/cinema` innan en film startas från början och skickar `cinema=1` bara när
+  `trailers > 0` eller `preroll` är på (och `prerollAvailable` inte är `false`). Svarar servern inte (äldre server)
+  är bio-läget av. Endpointen saknas i kontraktet tills den finns i servern som testet startar; lägg då till den
+  (`Home.swift:76`, `AppModel.swift:275-278`).
