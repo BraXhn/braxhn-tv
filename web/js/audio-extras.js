@@ -87,7 +87,10 @@ export async function loadLyrics() {
   try { d = await api(`/music/tracks/${t.id}/lyrics`, { bg: true }); } catch { d = { lines: [] }; }
   if (seq !== LY.seq) return; // en annan låt hann starta
   LY.data = d;
+  // source: lrc/tag = egen fil, lrclib = hämtad från LRCLIB (server/musicmeta.js)
   $('#lybody').innerHTML = d.lines.length ? d.lines.map((l, i) => `<p data-ly="${i}" class="${d.synced ? 'sync' : ''}">${esc(l.text) || '&nbsp;'}</p>`).join('')
+      + (d.source === 'lrclib' ? '<p class="muted small lysrc">Text från LRCLIB</p>' : '')
+    : d.instrumental ? '<p class="muted">Instrumental – ingen text.</p>'
     : '<p class="muted">Ingen text hittades. Lägg en .lrc-fil med samma namn bredvid ljudfilen, eller bädda in texten i filens taggar.</p>';
   if (d.synced) $$('[data-ly]', $('#lybody')).forEach(p => keyClick(p).onclick = () => seekTo(d.lines[+p.dataset.ly].t));
   lyricsTick();

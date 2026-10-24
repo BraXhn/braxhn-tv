@@ -14,6 +14,7 @@ import * as music from './music.js';
 import * as arr from './arr.js';
 import * as books from './audiobooks.js';
 import * as bookmeta from './bookmeta.js';
+import * as musicmeta from './musicmeta.js';
 import * as follows from './follows.js';
 import * as calendar from './calendar.js';
 import { allowedFor, clearRecommendations } from './http/context.js';
@@ -45,7 +46,8 @@ export { handle } from './http/router.js';
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
-hooks.music = (lib, status) => music.scanMusic(lib, status);
+// Artistbilder, biografier och albumtyper från nätet hämtas i bakgrunden efter musikskanningen (skanningen väntar inte)
+hooks.music = async (lib, status) => { await music.scanMusic(lib, status); musicmeta.queue(lib.id); };
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 // Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
 hooks.afterScan = () => {

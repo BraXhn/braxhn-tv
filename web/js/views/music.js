@@ -7,6 +7,7 @@ import { iconButton } from '../ui/buttons.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { tabsHtml } from '../ui/tabs.js';
 import { similarArtists, stationsHtml, trackMenu } from '../sonic.js';
+import { KIND_LABEL, albumGroups, artistArt, artistCard, bindBio, bioHtml, facts, heroBg, isAdmin, linksHtml, matchArtist, relatedHtml } from '../musicinfo.js';
 
 export const cover = (albumId, has, cls = '') => {
   const h = hue(String(albumId));
@@ -77,7 +78,7 @@ views.music = async (lid, tab) => {
   }
   if (tab === 'artists') {
     const a = await api(`/music/${lid}/artists`);
-    body = `<div class="grid">${a.map(x => `<a class="card mcard" href="#/artist/${x.id}">${cover(x.cover_album || x.id, !!x.cover_album, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.albums} album</div></a>`).join('')}</div>`;
+    body = `<div class="grid">${a.map(x => artistCard(x)).join('')}</div>`;
   }
   if (tab === 'playlists') {
     const [p, sm] = await Promise.all([api('/music/playlists'), api('/music/smartlists')]);
@@ -117,25 +118,50 @@ document.addEventListener('keydown', act(async (e) => {
 
 views.album = async (id) => {
   const a = await api('/music/albums/' + id);
-  main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">ALBUM</div><h1>${esc(a.title)}</h1>
+  const kind = a.type && a.type !== 'album' ? KIND_LABEL[a.type] : null;
+  const released = a.info?.released && /^\d{4}-\d{2}-\d{2}$/.test(a.info.released) ? a.info.released : null;
+  main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">${esc((kind || 'Album').toUpperCase())}</div><h1>${esc(a.title)}</h1>
     <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
     <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button></div></div></div>
-    ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}`;
+    ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
+    ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
+    ${released || a.info?.mbid ? `<p class="muted small" style="margin-top:14px">${released ? `Utgivet ${esc(released)}` : ''}${a.info?.mbid ? `${released ? ' · ' : ''}<a href="https://musicbrainz.org/release-group/${esc(a.info.mbid)}" target="_blank" rel="noopener noreferrer">MusicBrainz ↗</a>` : ''}</p>` : ''}`;
   bindTracks(a.trackList);
+  bindBio('albio');
   $('#pa').onclick = () => playQueue(a.trackList, 0);
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
   $('#aa').onclick = act(() => addToPlaylist(a.trackList.map(t => t.id)));
   $('#ar').onclick = act(() => startRadio({ albumId: a.id }, a.title));
 };
+// Artistsidan som i Plexamp/Apple Music: stor bild, fakta, biografi som fälls ut, Populärt, album per typ,
+// liknande (ljudanalysen) och relaterade (MusicBrainz/Last.fm) artister, länkar
 views.artist = async (id) => {
   const a = await api('/music/artists/' + id);
-  main.innerHTML = `<div class="mhero">${cover(a.albums[0]?.id || a.id, a.albums[0]?.cover, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
-    <div class="row"><button class="primary" id="pp">▶ Spela populära</button><button class="ghost" id="arr">📻 Låtradio</button></div></div></div>
-    ${a.popular.length ? `<section class="section"><h2>Populärt</h2>${trackRows(a.popular, { showCover: true })}</section>` : ''}
-    <section class="section"><h2>Album</h2><div class="grid">${a.albums.map(albumCard).join('')}</div></section><div id="simart"></div>`;
-  bindTracks(a.popular);
-  $('#pp').onclick = () => playQueue(a.popular, 0);
+  const i = a.info, f = facts(i);
+  const POP = 5;
+  const allTracks = () => a.popular;
+  main.innerHTML = `<div class="arhero${a.backdrop ? ' hasbg' : ''}">${heroBg(a)}<div class="mhero">${artistArt({ ...a, cover_album: a.albums.find(x => x.cover)?.id }, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
+    ${f.length || i?.genres?.length ? `<div class="meta">${f.map(x => `<span>${esc(x)}</span>`).join('')}${(i?.genres || []).slice(0, 4).map(g => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
+    <div class="row"><button class="primary" id="pp">▶ Spela populära</button><button class="ghost" id="arr">📻 Låtradio</button>${a.albums.length > 1 ? '<button class="ghost" id="ash">⤨ Blanda allt</button>' : ''}${isAdmin() ? '<button class="ghost" id="amatch">Fel artist?</button>' : ''}</div></div></div></div>
+    ${i?.bio ? bioHtml(i.bio, i.bioLang, i.bioUrl) : ''}
+    ${a.popular.length ? `<section class="section"><h2>Populärt</h2><div id="poprows">${trackRows(a.popular.slice(0, POP), { showCover: true })}</div>${a.popular.length > POP ? '<button class="ghost small" id="popmore" aria-expanded="false">Visa fler</button>' : ''}</section>` : ''}
+    ${albumGroups(a.albums, albumCard)}
+    <div id="simart"></div>${relatedHtml(a.related)}${linksHtml(i?.links)}`;
+  bindTracks(a.popular.slice(0, POP), $('#poprows') || main);
+  bindBio();
+  if ($('#popmore')) $('#popmore').onclick = (e) => {
+    const open = e.currentTarget.getAttribute('aria-expanded') !== 'true';
+    const list = open ? a.popular : a.popular.slice(0, POP);
+    $('#poprows').innerHTML = trackRows(list, { showCover: true }); bindTracks(list, $('#poprows'));
+    e.currentTarget.textContent = open ? 'Visa färre' : 'Visa fler'; e.currentTarget.setAttribute('aria-expanded', String(open));
+  };
+  $('#pp').onclick = () => playQueue(allTracks(), 0);
   $('#arr').onclick = act(() => startRadio({ artistId: a.id }, a.name));
+  if ($('#ash')) $('#ash').onclick = act(async () => {
+    const lists = await Promise.all(a.albums.slice(0, 25).map(x => api('/music/albums/' + x.id, { bg: true })));
+    playQueue(shuffle(lists.flatMap(x => x.trackList)), 0);
+  });
+  if ($('#amatch')) $('#amatch').onclick = () => matchArtist(a, () => route());
   similarArtists($('#simart'), a.id);
 };
 views.playlist = async (id) => {

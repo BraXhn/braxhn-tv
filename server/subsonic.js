@@ -150,12 +150,16 @@ export function authenticate(P, { ip, trusted, client }) {
 const BAD_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 export const xmlEsc = (v) => String(v).replace(BAD_XML, '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
 const XML_NAME = /^[A-Za-z_][\w.-]*$/;
+/** Ett textfält som ska bli ett eget element i XML (<biography>…</biography>) men en vanlig sträng i JSON (artistInfo, albumInfo) */
+export class Elem { constructor(v) { this.v = v; } toJSON() { return this.v; } }
+export const elem = (v) => v == null || v === '' ? undefined : new Elem(v);
 function xmlNode(name, obj) {
   if (!XML_NAME.test(name)) throw new Error('ogiltigt elementnamn ' + name);
   let attrs = '', kids = '', text = null;
   for (const [k, v] of Object.entries(obj)) {
     if (v == null) continue;
     if (k === 'value' && typeof v !== 'object') { text = v; continue; }
+    if (v instanceof Elem) { if (!XML_NAME.test(k)) throw new Error('ogiltigt elementnamn ' + k); kids += `<${k}>${xmlEsc(v.v)}</${k}>`; continue; }
     if (Array.isArray(v)) { for (const x of v) if (x != null) kids += typeof x === 'object' ? xmlNode(k, x) : `<${k}>${xmlEsc(x)}</${k}>`; }
     else if (typeof v === 'object') kids += xmlNode(k, v);
     else { if (!XML_NAME.test(k)) throw new Error('ogiltigt attributnamn ' + k); attrs += ` ${k}="${xmlEsc(v)}"`; }
@@ -163,6 +167,7 @@ function xmlNode(name, obj) {
   return kids || text != null ? `<${name}${attrs}>${text != null ? xmlEsc(text) : ''}${kids}</${name}>` : `<${name}${attrs}/>`;
 }
 const prune = (v) => {
+  if (v instanceof Elem) return v.v;
   if (Array.isArray(v)) return v.filter(x => x != null).map(prune);
   if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) if (x != null) o[k] = prune(x); return o; }
   return v;
