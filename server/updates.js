@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getSetting } from './db.js';
 import { notify } from './notify.js';
+import * as webhooks from './webhooks.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -37,6 +38,7 @@ export async function check() {
       const md = await (await fetch(`${raw}/CHANGELOG.md`, { signal: AbortSignal.timeout(15000) })).text().catch(() => '');
       state.notes = notesBetween(md, VERSION, pkg.version);
       notify('update', `Version ${pkg.version} finns`, `Du kör ${VERSION}. Uppdatera containern i Unraid (Check for updates → Apply update).`, { key: 'upd:' + pkg.version, minInterval: 7 * 86400 });
+      webhooks.updateAvailable({ current: VERSION, latest: pkg.version, notes: state.notes });
     } else state.notes = '';
   } catch (e) { state.error = e.message; }
   return state;

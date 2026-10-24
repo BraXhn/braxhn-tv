@@ -265,6 +265,26 @@ addCol('playlists', 'changed', 'INTEGER');
 db.exec(`CREATE TABLE IF NOT EXISTS track_sonic(track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
   ver INTEGER NOT NULL, mtime INTEGER, analyzed INTEGER NOT NULL, ok INTEGER NOT NULL DEFAULT 1, ms INTEGER,
   bpm REAL, energy REAL, speech REAL, key TEXT, vec BLOB);`);
+// Uppspelningshistorik (activity.js, playstats.js). Tabellen skapades tidigare i activity.js – den skapas här så att
+// de nya kolumnerna når befintliga databaser. En rad = en tittning (samma titel inom 30 min slås ihop): ts = start,
+// ended = senaste aktivitet, played = sekunder som faktiskt spelats, pos_start/pos_end = position i filen,
+// kbps = uppskattad bithastighet (omkodningens steg eller filens), title/kind/show_*/library_id = kopia av titeln
+// (historiken finns kvar när filen tas bort).
+db.exec(`CREATE TABLE IF NOT EXISTS plays(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, item_id INTEGER NOT NULL, ts INTEGER NOT NULL,
+  mode TEXT, remote INTEGER, device TEXT);`);
+for (const [c, def] of [['ended', 'INTEGER'], ['played', 'REAL NOT NULL DEFAULT 0'], ['pos_start', 'REAL'], ['pos_end', 'REAL'], ['ip', 'TEXT'],
+  ['quality', 'TEXT'], ['kbps', 'INTEGER'], ['duration', 'REAL'], ['title', 'TEXT'], ['kind', 'TEXT'], ['year', 'INTEGER'], ['season', 'INTEGER'],
+  ['episode', 'INTEGER'], ['show_id', 'INTEGER'], ['show_title', 'TEXT'], ['library_id', 'INTEGER']]) addCol('plays', c, def);
+// Webhooks (webhooks.js): user_id NULL = serverns (administratören, alla händelser), annars personens egna händelser.
+// secret = HMAC-nyckeln för X-BraXhn-Signature (visas bara när den skapas). allow_local = administratören har uttryckligen
+// tillåtit en adress i hemnätet (Home Assistant). Kön har omförsök med backoff; loggen sparar de senaste leveranserna.
+db.exec(`CREATE TABLE IF NOT EXISTS webhooks(id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  url TEXT NOT NULL, events TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'json', secret TEXT NOT NULL, allow_local INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1, created INTEGER NOT NULL, last_ok INTEGER, last_error TEXT);
+CREATE TABLE IF NOT EXISTS webhook_queue(id INTEGER PRIMARY KEY, hook_id INTEGER NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE, event TEXT NOT NULL,
+  body TEXT NOT NULL, created INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0, error TEXT);
+CREATE TABLE IF NOT EXISTS webhook_log(id INTEGER PRIMARY KEY, hook_id INTEGER NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE, event TEXT NOT NULL,
+  ts INTEGER NOT NULL, status INTEGER, ok INTEGER NOT NULL, error TEXT, attempt INTEGER NOT NULL, ms INTEGER);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -289,7 +309,15 @@ CREATE INDEX IF NOT EXISTS album_stars_album ON album_stars(album_id);
 CREATE INDEX IF NOT EXISTS artist_stars_artist ON artist_stars(artist_id);
 CREATE INDEX IF NOT EXISTS albums_lib_sort ON albums(library_id, sort_title);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);
-CREATE INDEX IF NOT EXISTS sonic_ver ON track_sonic(ver);`);
+CREATE INDEX IF NOT EXISTS sonic_ver ON track_sonic(ver);
+CREATE INDEX IF NOT EXISTS plays_ts ON plays(ts);
+CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, ts);
+CREATE INDEX IF NOT EXISTS plays_item ON plays(item_id);
+CREATE INDEX IF NOT EXISTS plays_show ON plays(show_id);
+CREATE INDEX IF NOT EXISTS webhooks_user ON webhooks(user_id);
+CREATE INDEX IF NOT EXISTS whq_due ON webhook_queue(next_try);
+CREATE INDEX IF NOT EXISTS whq_hook ON webhook_queue(hook_id, id);
+CREATE INDEX IF NOT EXISTS whlog_hook ON webhook_log(hook_id, id);`);
 
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');

@@ -55,6 +55,9 @@ views.account = async () => {
   <div class="panel"><h2>Startsidan</h2>
     <p class="muted small">Välj vilka hyllor som visas, i vilken ordning, och om Utvalt ska synas överst. Gäller ditt konto på alla enheter.</p>
     <div class="row"><button type="button" class="ghost" id="homecust">Anpassa startsidan</button></div></div>
+  <div class="panel"><h2>Min historik</h2>
+    <p class="muted small">Allt du har tittat på, med datum – sökbart${me.kid ? '' : ', och du kan ta bort enskilda rader'}.</p>
+    <div class="row"><a class="btn" href="#/history">Visa min historik</a>${me.kid ? '' : '<a class="btn" href="#/webhooks">Webhooks</a>'}</div></div>
   <div class="panel"><h2>Undertexter och ljud i spelaren</h2>
     <p class="muted small">Gäller filmer och serier i webbläsaren på den här enheten och sparas för ditt konto. Du kan också ändra det under ⚙ medan du tittar.</p>
     <div class="subprev" id="subprev"><div class="subtxt"><div><span>Så här ser undertexten ut.</span></div></div></div>

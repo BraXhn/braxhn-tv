@@ -20,6 +20,8 @@ import { allowedFor, clearRecommendations } from './http/context.js';
 import { clearHome } from './homeshelves.js';
 import * as colors from './imgcolor.js';
 import * as sonic from './sonic.js';
+import * as webhooks from './webhooks.js';
+import { metadataOf, itemMeta } from './activity.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -36,6 +38,7 @@ import './routes/livetv.js';
 import './routes/calendar.js';
 import './routes/subsonic.js'; // /rest/* (musikappar) och /api/me/subsonic
 import './routes/remote.js';
+import './routes/history.js';
 export { handle } from './http/router.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
@@ -45,10 +48,29 @@ hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 // Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
-hooks.afterScan = () => { clearRecommendations(); clearHome(); refreshKeys(null, Infinity); return arr.markAvailable(); };
+hooks.afterScan = () => {
+  clearRecommendations(); clearHome(); refreshKeys(null, Infinity);
+  webhooks.emit('library.scan.done', { scan: { libraries: scanStatus.scanned || [], started: scanStatus.started, seconds: Math.max(0, (scanStatus.last || 0) - (scanStatus.started || 0)), warnings: scanStatus.warnings || [] } });
+  return arr.markAvailable();
+};
 // Metadata och kapitel från nätet hämtas i bakgrunden efter skanningen (väntar inte – skanningskön går vidare)
 hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
+// Webhooks för nya titlar: en händelse per film/avsnitt – många nya avsnitt av samma serie (säsongspaket) blir en händelse
+hooks.newItems = (ids) => {
+  const rows = ids.map(itemMeta).filter(Boolean);
+  const byShow = new Map();
+  for (const r of rows) {
+    if (r.kind !== 'episode') { webhooks.emit('library.new', { metadata: metadataOf(r) }, { visibleTo: (uid) => allowedFor(uid, r) }); continue; }
+    if (!byShow.has(r.show_id)) byShow.set(r.show_id, []);
+    byShow.get(r.show_id).push(r);
+  }
+  for (const list of byShow.values()) {
+    const first = list.sort((a, b) => a.season - b.season || a.episode - b.episode)[0];
+    const meta = { ...metadataOf(first), ...(list.length > 1 ? { newEpisodes: list.length, episodes: list.slice(0, 50).map(e => ({ id: e.id, season: e.season, episode: e.episode, title: e.title })) } : {}) };
+    webhooks.emit('library.new', { metadata: meta }, { visibleTo: (uid) => list.some(e => allowedFor(uid, e)) });
+  }
+};
 
 // Kalendern: avsnitt och sändningsdatum från TMDB, utspritt (pågående och följda serier en gång per dygn)
 calendar.start();
