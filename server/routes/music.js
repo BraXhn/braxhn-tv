@@ -45,6 +45,9 @@ route('GET', '/api/music/artists/:arid', user, (c) => {
 });
 // Artistbild och bakgrund (från nätet eller artist.jpg i mappen)
 const artistImage = (kind) => async (c) => {
+  // Bara artister i bibliotek som användaren får se (rättigheter per användare)
+  const lib = get('SELECT library_id FROM artists WHERE id=?', +c.p.arid)?.library_id;
+  if (lib == null || !libOk(c.user.id, lib)) return fail(c.res, 404, 'Ingen bild');
   const f = mmeta.photoPath(+c.p.arid, kind);
   if (!f) return fail(c.res, 404, 'Ingen bild');
   fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
