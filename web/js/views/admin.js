@@ -7,13 +7,15 @@ import { adminOps } from './admin-ops.js';
 import { confirmDialog, promptDialog } from '../ui/dialog.js';
 import { emptyState, errorState } from '../ui/states.js';
 
-views.admin = async () => {
+views.admin = async (sec) => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = emptyState({ icon: '🔒', title: 'Administration är spärrad härifrån', text: 'Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).' }); return; }
   const [IN, LT, L, U, S, SC, AU, AC, NO, UP] = await Promise.all([api('/integrations'), api('/live/tuners'), api('/libraries'), api('/users'), api('/settings'), api('/security-check'), api('/audit?limit=60'), api('/acme'), api('/notify'), api('/updates')]);
   const lvl = { ok: '✓', info: 'ℹ', warn: '!', bad: '✕' };
   main.innerHTML = `
-  <div class="panel"><h2>Säkerhetskontroll</h2>
+  <div class="panel row" style="justify-content:space-between"><div><b>Installationsguiden</b><div class="muted small">Bibliotek, metadata, omkodning, åtkomst utanför hemmet och hushållet – steg för steg.</div></div>
+    <a class="btn ghost" href="#/setup/welcome">Kör guiden igen</a></div>
+  <div class="panel" id="adm-security"><h2>Säkerhetskontroll</h2>
     <div class="checks">${SC.map(i => `<div class="check ${i.level}"><span class="dot">${lvl[i.level]}</span><div><b>${esc(i.title)}</b>${i.detail ? `<div class="muted small">${esc(i.detail)}</div>` : ''}</div></div>`).join('')}</div>
   </div>
   <div class="panel"><h2>Bibliotek</h2>
@@ -120,7 +122,7 @@ views.admin = async () => {
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button><button type="button" class="ghost" id="notest">Skicka testnotis</button></div></form>
     ${NO.recent.length ? `<details style="margin-top:10px"><summary class="muted small">Senaste notiser</summary><table>${NO.recent.map(n => `<tr><td class="muted small">${new Date(n.at).toLocaleString('sv-SE')}</td><td>${esc(n.title)}</td><td class="muted small">${esc(n.message)}</td></tr>`).join('')}</table></details>` : ''}
   </div>
-  <div class="panel"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>
+  <div class="panel" id="adm-acme"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>
     <p class="muted small">Inbyggt gratis certifikat som förnyas automatiskt. Kräver ett domännamn som pekar på din publika IP (t.ex. via DuckDNS eller din DNS-leverantör) och att port <b>80</b> i routern vidarebefordras till BraXhn TV:s port 8420 under valideringen. HTTPS serveras på port ${AC.httpsPort} – vidarebefordra 443 dit. Använder du redan en omvänd proxy (Nginx Proxy Manager, SWAG) behövs inte detta.</p>
     ${AC.cert ? `<p class="small">Certifikat för <b>${esc(AC.cert.san || AC.cert.subject)}</b> från ${esc(AC.cert.issuer || '')}, gäller till ${esc(AC.cert.validTo)}.</p>` : ''}
     <form id="acmeform"><div class="row"><div style="flex:1;min-width:180px"><label>Domän</label><input id="acd" value="${esc(AC.domain)}" placeholder="tv.dindomän.se"></div>
@@ -306,4 +308,7 @@ views.admin = async () => {
   }
   poll();
   adminOps().catch(e => { toastErr(e); });
+  // #/admin/security, #/admin/acme (länkar från installationsguiden): visa avsnittet
+  // (efter att route() skrollat till toppen)
+  if (sec && /^[a-z]+$/.test(sec)) later(() => $('#adm-' + sec)?.scrollIntoView(), 50);
 };

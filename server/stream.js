@@ -54,10 +54,30 @@ export function disableHw(reason) {
   hwStatus.error = String(reason || '').trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400);
   HW = 'none'; hwStatus.active = 'none';
 }
-// Snabbtest vid start: koda två bildrutor med den valda hårdvaran
+/** ffmpeg-argument som kodar en testbild med valt läge (none = processorn, libx264) */
+export function hwTestArgs(mode, size = '256x144', dur = 0.2) {
+  const src = ['-f', 'lavfi', '-i', `testsrc2=s=${size}:d=${dur}:r=25`];
+  return { vaapi: ['-vaapi_device', process.env.VAAPI_DEVICE || '/dev/dri/renderD128', ...src, '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi'],
+    nvenc: [...src, '-c:v', 'h264_nvenc'], qsv: [...src, '-vf', 'format=nv12', '-c:v', 'h264_qsv'],
+    none: [...src, '-c:v', 'libx264', '-preset', process.env.X264_PRESET || 'veryfast'] }[mode] || null;
+}
+/**
+ * Kort testkodning (installationsguiden): 720p i några sekunder med valt läge. Ändrar inte vad servern använder.
+ * @returns {Promise<{ ok: boolean, mode: string, ms: number, fps: number, error?: string, hint?: string|null }>}
+ */
+export function testEncode(mode, seconds = 4) {
+  const args = hwTestArgs(mode, '1280x720', seconds);
+  if (!args) return Promise.resolve({ ok: false, mode, ms: 0, fps: 0, error: 'Okänt läge', hint: null });
+  const t0 = Date.now();
+  return new Promise(res => execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', ...args, '-f', 'null', '-'], { timeout: 60000 }, (e, _o, stderr) => {
+    const ms = Date.now() - t0;
+    if (e) { const err = String(stderr || e.message).trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400); return res({ ok: false, mode, ms, fps: 0, error: err, hint: hwHint(err) }); }
+    res({ ok: true, mode, ms, fps: Math.round(seconds * 25 / (ms / 1000)) });
+  }));
+}
+// Snabbtest vid start: koda några bildrutor med den valda hårdvaran
 if (HW !== 'none') {
-  const enc = { vaapi: ['-vaapi_device', process.env.VAAPI_DEVICE || '/dev/dri/renderD128', '-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi'],
-    nvenc: ['-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-c:v', 'h264_nvenc'], qsv: ['-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.2', '-vf', 'format=nv12', '-c:v', 'h264_qsv'] }[HW];
+  const enc = hwTestArgs(HW);
   if (!enc) disableHw(`okänt värde HWACCEL=${HW}`);
   else execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e, _o, stderr) => {
     if (e) disableHw(stderr || e.message); else console.log(`[hårdvara] ${HW} fungerar`);

@@ -1,6 +1,6 @@
 // Status, första kontot, inloggning, lösenord, tvåstegsverifiering, sessioner, passkeys och profiler (hushåll).
 import crypto from 'node:crypto';
-import { get, getSetting, run, now, all } from '../db.js';
+import { get, getSetting, setSetting, run, now, all } from '../db.js';
 import { send, fail, readJson, clientIp, isHttps, isPrivate } from '../util.js';
 import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey,
   quickConnectOn, qcCreate, qcFind, qcFindCode, qcApprove, qcRemove, QC_TTL } from '../auth.js';
@@ -10,7 +10,7 @@ import * as updates from '../updates.js';
 import { VERSION } from '../updates.js';
 import * as screen from '../screentime.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
-import { allowUnrated, ctx, householdRoot, canManage } from '../http/context.js';
+import { allowUnrated, ctx, householdRoot, canManage, setupPending } from '../http/context.js';
 
 // Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
 route('GET', '/api/health', pub, (c) => {
@@ -32,6 +32,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
+    // Installationsguiden är inte klar: startsidan visar "Slutför installationen" (bara för administratörer som får administrera här)
+    setupPending: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) && setupPending(),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,
     streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.status(c.user.id),
     liveTv: (c.user.max_age == null || allowUnrated()) && !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') } : null
@@ -48,6 +50,7 @@ route('POST', '/api/setup', pub, async (c) => {
   const r = run('INSERT INTO users(name,pass,is_admin,created,pw_changed) SELECT ?,?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM users)', name.trim(), hash, now(), now());
   if (!r.changes) return fail(c.res, 403, 'Redan konfigurerad');
   const id = Number(r.lastInsertRowid);
+  setSetting('setup_done', '0'); // installationsguiden (#/setup) väntar
   audit('setup', { user: { id, name }, ip: clientIp(c.req) });
   send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(id, 'web', { ua: c.req.headers['user-agent'], ip: clientIp(c.req) }), isHttps(c.req)) });
 });

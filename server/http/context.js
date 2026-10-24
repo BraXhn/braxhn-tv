@@ -102,6 +102,10 @@ export function insideMedia(p) {
 }
 export const ctx = (c) => ({ user: c.user, ip: clientIp(c.req) });
 
+// Installationsguiden (server/routes/setup.js): inte klar sedan första kontot skapades (setup_done=0).
+// Äldre installationer har ingen inställning – där räknas guiden som klar om det redan finns bibliotek.
+export const setupPending = () => { const v = getSetting('setup_done', ''); return v === '0' || (v === '' && !get('SELECT 1 FROM libraries LIMIT 1')); };
+
 // ---------- Profiler (hushåll) ----------
 // Huvudkontot i hushållet, och om den inloggade får hantera hushållets profiler
 export const householdRoot = (u) => u.parent_id || u.id;

@@ -23,6 +23,7 @@ import './js/views/person.js';
 import './js/views/account.js';
 import './js/views/books.js';
 import './js/views/calendar.js';
+import './js/views/setup.js';
 import './js/views/music.js';
 
 // Fel i appen rapporteras till serverloggen (Administration → Logg) – bara egna skript och högst fem per sidvisning
