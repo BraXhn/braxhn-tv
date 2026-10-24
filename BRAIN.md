@@ -37,6 +37,10 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - **Mönster:** `-segment_times` relativt i ffmpeg 6.x, absolut i 5.1 → fel segment efter spolning i Docker-imagen. Lokalt (6.1) syntes inget.
 - **Används när:** externa verktyg, bibliotek, webbläsare – mät beteendet vid start i stället för att läsa versionsnumret.
 
+> Sammanslagning som "behåll båda" måste kontrolleras som ny kod.
+- **Mönster:** parallella grenar slogs ihop automatiskt → dubbla `send()` i /api/home, ett saknat `}` i style.css gjorde all ny CSS mobil-only (fångades av webbläsartester, nu även av `npm run verify`).
+- **Används när:** cherry-pick/merge av parallellt arbete, konfliktlösning med skript.
+
 ## Topologi
 
 ### Ankare (hög centralitet – ändra med störst försiktighet)
