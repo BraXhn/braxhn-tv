@@ -306,6 +306,56 @@ body.hasbar main{padding-bottom:110px}
 #mbar .mright{display:flex;gap:8px;align-items:center;justify-content:flex-end}
 #mbar #mvol{width:100px;padding:0}
 #mbar #mrep.on{border-color:var(--accent)}
+/* "Spela på…": fjärrkontrollpanelen (styr en annan enhet) – ligger ovanför ljudspelaren och det lilla fönstret */
+.playon svg{width:18px;height:18px;flex:none}
+.playon{display:inline-flex;align-items:center;gap:6px}
+#rbar{position:fixed;left:0;right:0;bottom:0;z-index:41;background:rgba(30,31,34,.98);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,auto) auto;grid-template-areas:'left mid right x';gap:16px;align-items:center;padding:10px 20px;transform:translateY(var(--vv-shift,0px))}
+#rbar .rleft{grid-area:left}#rbar .rmid{grid-area:mid}#rbar .rright{grid-area:right}#rbar #rx{grid-area:x}
+#top:not([hidden]) ~ #rbar{left:var(--rail-w)}
+body.hasrbar main{padding-bottom:120px}
+body.hasrbar #toast{bottom:calc(100px + env(safe-area-inset-bottom))}
+body.hasrbar.hasbar #toast,body.hasrbar.hasmini #toast{bottom:calc(180px + env(safe-area-inset-bottom))}
+body.hasrbar.hasbar #rbar,body.hasrbar.hasmini #rbar{bottom:84px}
+body.hasrbar.hasbar main,body.hasrbar.hasmini main{padding-bottom:200px}
+#rbar .rleft{display:flex;gap:12px;align-items:center;min-width:0}
+#rbar .ricon{color:var(--accent);display:flex}
+#rbar .rtxt{display:flex;flex-direction:column;min-width:0}
+#rbar .rsub{color:var(--dim);font-size:13px}
+#rbar #rhere{white-space:nowrap}
+#rbar .rtxt b,#rbar .rtxt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#rbar .rmid{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+#rbar .rctl{justify-content:center;flex-wrap:nowrap}
+#rbar #rplay{width:44px;height:44px;border-radius:50%;justify-content:center;padding:0}
+#rbar .rseek{display:flex;align-items:center;gap:10px;width:100%}
+#rbar .track{flex:1;height:5px;background:rgba(255,255,255,.2);border-radius:3px;position:relative;cursor:pointer}
+#rbar .track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
+#rbar .rright{display:flex;gap:8px;align-items:center;justify-content:flex-end;min-width:0}
+#rbar .rright select{width:auto;max-width:150px;padding:6px 8px;font-size:13px}
+#rbar #rvol{width:90px;padding:0}
+#player .rbadge{background:rgba(20,22,30,.85);border:1px solid var(--accent);color:#fff;border-radius:999px;padding:4px 10px;white-space:nowrap}
+/* Webbläsaren nekade uppspelning utan tryck: stor startknapp mitt på skärmen (även för TV-fjärrkontroll) */
+.rtap{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:flex;flex-direction:column;align-items:center;gap:10px;
+  max-width:min(420px,calc(100vw - 32px));padding:28px 32px;border-radius:18px;border:2px solid var(--accent);background:rgba(20,21,23,.94);color:var(--text);text-align:center}
+.rtap svg{width:72px;height:72px;color:var(--accent)}
+.rtap b{font-size:22px}
+.rtap span{color:var(--dim);font-size:14px}
+.rtap:focus-visible{outline:3px solid var(--focus);outline-offset:4px}
+@media (max-width:760px){
+  #rbar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'left x' 'mid mid' 'right right';gap:6px 10px;padding:8px 12px}
+  #top:not([hidden]) ~ #rbar{left:0}
+  #rbar .rright{justify-content:flex-start;flex-wrap:wrap}
+  #rbar .rright select{flex:1 1 40%;max-width:none}
+  #rbar #rvol{display:none}
+  #rbar .rseek span{font-size:12px}
+  body:has(#tabbar:not([hidden])) #rbar{bottom:calc(58px + env(safe-area-inset-bottom))}
+  body.hasrbar.hasbar:has(#tabbar:not([hidden])) #rbar,body.hasrbar.hasmini:has(#tabbar:not([hidden])) #rbar{bottom:calc(132px + env(safe-area-inset-bottom))}
+  body.hasrbar:has(#tabbar:not([hidden])) main{padding-bottom:calc(280px + env(safe-area-inset-bottom))}
+  body.hasrbar:has(#tabbar:not([hidden])) #toast{bottom:calc(270px + env(safe-area-inset-bottom))}
+  body.hasrbar.hasbar:has(#tabbar:not([hidden])) #toast,body.hasrbar.hasmini:has(#tabbar:not([hidden])) #toast{bottom:calc(346px + env(safe-area-inset-bottom))}
+  #player .playon span{display:none}
+  #player .rbadge{display:none}
+}
 /* Lyssning: sovtimer, låttext och smarta listor */
 #mbar #msleep.on,#mbar #mlyr.on{border-color:var(--accent);color:var(--accent)}
 #lyrics{position:fixed;right:20px;bottom:96px;z-index:39;width:min(420px,calc(100vw - 40px));max-height:min(60vh,560px);display:flex;flex-direction:column;

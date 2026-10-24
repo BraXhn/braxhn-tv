@@ -3,6 +3,7 @@ import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, main, me, resL
 import { capsQuery } from '../player/caps.js';
 import { LP, RP } from '../player/live.js';
 import { stopVideo } from '../player/overlay.js';
+import { openRemotePicker, remoteButton } from '../player/remote.js';
 import { P, startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { art, card, castShelf, shelf } from '../ui/cards.js';
@@ -55,6 +56,7 @@ views.item = async (id, season) => {
   const actions = `<div class="row">
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
+    ${remoteButton('playon')}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
     <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
@@ -94,6 +96,7 @@ views.item = async (id, season) => {
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
   $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play, verSel ? { version: verSel } : {}));
+  $('#playon').onclick = (e) => openRemotePicker(e.currentTarget, { item: it.id, position: resume ? it.position : 0 });
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) {
     $('#refresh').onclick = () => refreshMeta(it);

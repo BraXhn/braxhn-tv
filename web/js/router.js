@@ -10,6 +10,7 @@ import { fillWatch } from './views/item.js';
 import { openDialog } from './ui/dialog.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
 import { startActivity, stopActivity } from './ui/activity.js';
+import { startRemote, stopRemote } from './player/remote.js';
 import { RAIL_ICON } from './ui/icons.js';
 import { openMenu } from './ui/menu.js';
 
@@ -51,7 +52,7 @@ function sessionStorageSet(k) { try { sessionStorage.setItem(k, '1'); } catch {}
 export async function boot() {
   const st = await api('/status');
   setLogin(st);
-  if (!me) return false;
+  if (!me) { stopRemote(); return false; }
   $('#top').hidden = false;
   $('#userbtn').innerHTML = `<span class="avatar" aria-hidden="true">${me.kid ? '🧸' : esc((me.name || '?').slice(0, 1).toUpperCase())}</span><span class="uname">${esc(me.name)}</span><span class="caret" aria-hidden="true">▾</span>`;
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
@@ -62,6 +63,7 @@ export async function boot() {
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
   if (st.remote) setTimeout(() => measureBandwidth(), 3000);
   if (me.adminHere) startActivity(); else stopActivity();
+  startRemote(); // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();
   return true;
@@ -169,7 +171,7 @@ $('#install').onclick = async () => {
 // Flikmenyn: Sök fokuserar sökfältet i stället för att byta sida
 $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
 
-$('#logout').onclick = async () => { stopAudio(); stopActivity(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
+$('#logout').onclick = async () => { stopAudio(); stopActivity(); stopRemote(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
 // Sökfältet (resultat medan man skriver, piltangenter, senaste sökningar) sköts av views/search.js
 
 // ---------- sidomenyn ----------
