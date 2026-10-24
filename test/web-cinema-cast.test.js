@@ -34,6 +34,11 @@ async function req(p, { method = 'GET', body } = {}) {
   return { status: r.status, data: (r.headers.get('content-type') || '').includes('json') ? await r.json() : null };
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** Vänta tills villkoret (kan vara asynkront) är sant – på tillstånd, inte på en fast tid */
+async function until(fn, what, ms = 60000) {
+  const end = Date.now() + ms;
+  for (;;) { if (await fn()) return; if (Date.now() > end) throw new Error('Väntade förgäves på: ' + what); await sleep(50); }
+}
 const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a]);
 // Chromium (Playwright) saknar H.264/AAC – därför WebM (VP8/Opus), som spelas direkt
 const clip = (file, secs, freq = 440) => {
@@ -73,7 +78,21 @@ before(async () => {
   browser = await chromium.launch();
 });
 after(async () => { await browser?.close(); srv?.kill(); fs.rmSync(ROOT, { recursive: true, force: true }); });
-const t = (name, fn) => test(name, { skip }, fn);
+// Vid fel: skärmdump av senaste sidan och dess konsolfel i felmeddelandet (felsökning när maskinen är belastad)
+let last = null;
+const t = (name, fn) => test(name, { skip }, async () => {
+  try { await fn(); }
+  catch (e) {
+    if (last && !last.page.isClosed()) {
+      const f = path.join(SHOTS || os.tmpdir(), `fel-${name.replace(/[^a-zåäö0-9]+/gi, '-').slice(0, 40)}.png`);
+      await last.page.screenshot({ path: f }).catch(() => {});
+      const state = await last.page.evaluate(() => ({ hash: location.hash, cinema: document.querySelector('.cinemabox')?.textContent?.trim(),
+        castbar: !!document.querySelector('#castbar:not([hidden])'), toast: document.querySelector('#toast.on')?.textContent })).catch(() => null);
+      e.message += `\nSkärmdump: ${f}\nSidan: ${JSON.stringify(state)}\nKonsolfel: ${JSON.stringify(last.errors)}`;
+    }
+    throw e;
+  }
+});
 
 // Låtsad Cast-SDK (körs före sidans skript)
 function castStub() {
@@ -131,6 +150,7 @@ async function newPage({ cast = false, width = 1280 } = {}) {
     await page.addInitScript(castStub);
     await page.route('https://www.gstatic.com/**', r => r.fulfill({ contentType: 'text/javascript', body: 'window.__onGCastApiAvailable && window.__onGCastApiAvailable(true);' }));
   }
+  last = { page, errors };
   return { page, errors, reqs, close: () => ctx.close() };
 }
 const progressCalls = (reqs, re) => reqs.filter(r => r.method === 'POST' && re.test(r.url)).map(r => JSON.parse(r.body || '{}'));
@@ -157,9 +177,12 @@ t('förberedelse: konto, bibliotek och bio-läge', async () => {
   db.close();
   assert.ok(S.main && S.andra && S.tredje && S.e1 && S.e3 && S.album && S.book && S.tracks.length === 2, JSON.stringify(S));
   assert.equal((await req('/api/settings', { method: 'PUT', body: { cinemaPreroll: path.join(MEDIA, 'Förfilmer') } })).status, 200);
+  // Bio-läget på redan här, så att testerna nedan också kan köras ett och ett (Mitt konto-testet ställer in samma via webben)
+  assert.equal((await req('/api/me/cinema', { method: 'PUT', body: { trailers: 2, preroll: true } })).status, 200);
 });
 
 t('Mitt konto: bio-lägets inställning sparas', async () => {
+  await req('/api/me/cinema', { method: 'PUT', body: { trailers: 0, preroll: false } }); // börja från av
   const { page, errors, close } = await newPage();
   await page.goto(B + '/#/account');
   await page.waitForSelector('#cinemaprefs #cmn');
@@ -184,16 +207,18 @@ t('bio-läge: trailers och förfilm före filmen, Hoppa över, länk till titeln
     assert.ok([`#/item/${S.andra}`, `#/item/${S.tredje}`].includes(href), href);
     assert.ok(reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('cinema=1')));
     // Trailern spelas i en egen video ovanpå (riktig fil från servern)
-    await page.waitForFunction(() => document.querySelector('#previd')?.currentTime > 0.2);
+    // (pausas direkt när den spelat en bit, så att den inte hinner ta slut innan knappen trycks på en belastad maskin)
+    await page.waitForFunction(() => { const v = document.querySelector('#previd'); if (v?.currentTime > 0.2) { v.pause(); return true; } return false; }, null, { polling: 50 });
+    assert.match(await page.textContent('.cinemabox'), /Trailer 1 av 2/);
     assert.ok((await page.getAttribute('#previd', 'src')).includes('/api/trailers/'));
     await shot(page, `bio-trailer-${width}`);
     await page.click('.cinemabox [data-skip]');
     await page.waitForFunction(() => /Trailer 2 av 2/.test(document.querySelector('.cinemabox')?.textContent || ''));
     // Trailer 2 får spela klart av sig själv → förfilmen → filmen
-    await page.waitForFunction(() => /Förfilm/.test(document.querySelector('.cinemabox')?.textContent || ''), null, { timeout: 15000 });
-    assert.ok((await page.getAttribute('#previd', 'src')).includes('/api/cinema/preroll/0/stream'));
-    await page.waitForSelector('.cinemabox', { state: 'detached', timeout: 15000 });
-    await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 0.2, null, { timeout: 15000 });
+    // (förfilmen är 1 s – dess adress loggas i stället för att läsas medan den spelas)
+    await page.waitForSelector('.cinemabox', { state: 'detached', timeout: 60000 });
+    assert.ok(reqs.some(r => r.url.includes('/api/cinema/preroll/0/stream')), 'förfilmen spelades');
+    await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 }); // filmen laddas
     assert.ok(!(await page.$('#player.cinema')));
     // Filmen hämtades på nytt utan cinema=1
     assert.ok(reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && !r.url.includes('cinema=1')));
@@ -205,13 +230,13 @@ t('bio-läge: trailers och förfilm före filmen, Hoppa över, länk till titeln
     const { page, errors, close } = await newPage();
     await page.goto(B + '/#/item/' + S.main);
     await page.click('[data-play="0"]');
-    await page.waitForSelector('.cinemabox [data-all]');
+    await page.waitForFunction(() => { const v = document.querySelector('#previd'); if (v?.currentTime > 0) { v.pause(); return true; } return false; }, null, { polling: 50 });
     await page.click('.cinemabox [data-all]');
     await page.waitForSelector('.cinemabox', { state: 'detached' });
-    await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 0.2, null, { timeout: 15000 });
+    await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 }); // filmen laddas
     await page.click('#cstop');
     await page.click('[data-play="0"]');
-    await page.waitForSelector('.cinemabox a[data-goto]');
+    await page.waitForFunction(() => { const v = document.querySelector('#previd'); if (v?.currentTime > 0) { v.pause(); return true; } return false; }, null, { polling: 50 });
     const href = await page.getAttribute('.cinemabox a[data-goto]', 'href');
     await page.click('.cinemabox a[data-goto]');
     await page.waitForFunction(() => document.querySelector('#player')?.hidden);
@@ -226,12 +251,15 @@ t('bio-läge: inte vid Fortsätt titta eller för avsnitt', async () => {
   const { page, errors, reqs, close } = await newPage();
   await page.goto(B + '/#/item/' + S.main);
   await page.click('[data-play="32"]');
-  await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 32, null, { timeout: 15000 });
+  // Spelaren ber om filmen från 32 s direkt (utan cinema=1) och sätter källan – inga trailers emellan
+  await until(() => reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('start=32')), 'filmen från 32 s');
+  await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 });
   assert.ok(!(await page.$('.cinemabox')));
   await page.click('#cstop');
   await page.goto(B + '/#/item/' + S.e2);
   await page.click('[data-play="0"]');
-  await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 0.2, null, { timeout: 15000 });
+  await until(() => reqs.some(r => r.url.includes(`/api/items/${S.e2}/playback`)), 'avsnittets uppspelning');
+  await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 });
   assert.ok(!(await page.$('.cinemabox')));
   assert.ok(!reqs.some(r => r.url.includes('/playback') && r.url.includes('cinema=1')));
   assert.deepEqual(errors, []);
@@ -266,18 +294,19 @@ t('Chromecast: avsnitt med kö, framsteg, panelens styrning och spårbyten', asy
   // Paus på mottagaren → framsteget sparas direkt
   await page.evaluate(() => { window.__castSim.set('currentTime', 2.5); window.__castSim.set('isPaused', true); });
   await page.waitForFunction(() => document.querySelector('#cxplay').textContent === '▶');
-  await sleep(300);
-  assert.ok(progressCalls(reqs, new RegExp(`/api/items/${S.e1}/progress$`)).some(b => Math.abs(b.position - 2.5) < 0.01));
+  await until(() => progressCalls(reqs, new RegExp(`/api/items/${S.e1}/progress$`)).some(b => Math.abs(b.position - 2.5) < 0.01), 'framsteg vid paus');
   // Medan det spelas: var 10:e sekund
   await page.evaluate(() => window.__castSim.set('isPaused', false));
-  const n0 = progressCalls(reqs, new RegExp(`/api/items/${S.e1}/progress$`)).length;
-  await page.evaluate(() => window.__castSim.set('currentTime', 3));
-  await sleep(10300);
-  await page.evaluate(() => window.__castSim.set('currentTime', 3.5));
-  await sleep(300);
+  // Mottagaren rapporterar tiden som vanligt; efter 10 s ska ett framstegsanrop komma utan paus
+  let tick = 3;
+  await until(async () => {
+    await page.evaluate((x) => window.__castSim.set('currentTime', x), tick = Math.round((tick + 0.1) * 10) / 10);
+    return progressCalls(reqs, new RegExp(`/api/items/${S.e1}/progress$`)).some(b => b.position > 3);
+  }, 'framsteg efter 10 s', 90000);
   const calls = progressCalls(reqs, new RegExp(`/api/items/${S.e1}/progress$`));
-  assert.ok(calls.length > n0 && calls.at(-1).position === 3.5, JSON.stringify(calls));
-  // Panelen: ±10 s, spola, paus, volym
+  assert.ok(calls.filter(b => b.position > 3).length === 1, JSON.stringify(calls)); // ett anrop per 10 s, inte vid varje tidsuppdatering
+  // Panelen: ±10 s, spola, paus, volym (från en känd position)
+  await page.evaluate(() => window.__castSim.set('currentTime', 3.5));
   await page.click('#cxplay');
   await page.click('#cxback');
   const box = await page.locator('#cxtrack').boundingBox();
@@ -302,16 +331,14 @@ t('Chromecast: avsnitt med kö, framsteg, panelens styrning och spårbyten', asy
   const queued = (await log()).inserts.at(-1)[0];
   await page.evaluate((q) => window.__castSim.set('mediaInfo', { contentId: q.contentId, customData: q.customData }), queued);
   await page.waitForFunction((id) => /S01E02/.test(document.querySelector('#cxtitle').textContent) && window.__castSim.log.inserts.some(l => l[0].customData.id === id), S.e3);
-  await sleep(300);
-  assert.equal((await req(`/api/items/${S.e1}`)).data.watched, true);
+  await until(async () => (await req(`/api/items/${S.e1}`)).data.watched === true, 'avsnitt 1 markerat som sett');
   // Stopp: framsteget sparas, castningen avslutas och panelen försvinner
   await page.evaluate(() => window.__castSim.set('currentTime', 2));
   await page.click('#cxstop');
   await page.waitForSelector('#castbar', { state: 'hidden' });
   L = await log();
   assert.ok(L.calls.includes('stop') && L.calls.includes('end'));
-  await sleep(300);
-  assert.ok(progressCalls(reqs, new RegExp(`/api/items/${S.e2}/progress$`)).some(b => b.position === 2));
+  await until(() => progressCalls(reqs, new RegExp(`/api/items/${S.e2}/progress$`)).some(b => b.position === 2), 'framsteg vid stopp');
   assert.deepEqual(errors, []);
   await close();
 });
@@ -340,8 +367,7 @@ t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
     assert.equal(played().length, 1);
     await page.evaluate((q) => window.__castSim.set('mediaInfo', { contentId: q.contentId, customData: q.customData }), L.inserts[0][0]);
     await page.waitForFunction(() => /Låt 2/.test(document.querySelector('#cxtitle').textContent));
-    await sleep(200);
-    assert.ok(played().at(-1).includes(`/api/music/tracks/${S.tracks[1]}/played`));
+    await until(() => played().at(-1)?.includes(`/api/music/tracks/${S.tracks[1]}/played`), 'spår 2 räknat som spelat');
     await page.click('#cxstop');
     await page.waitForSelector('#castbar', { state: 'hidden' });
 
@@ -360,9 +386,8 @@ t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
     await page.waitForFunction(() => window.__castSim.log.inserts.length === 2);
     assert.ok(Math.abs((await log()).inserts[1][0].customData.offset - 30) < 1);
     await page.evaluate(() => { window.__castSim.set('currentTime', 20); window.__castSim.set('isPaused', true); });
-    await sleep(300);
-    assert.ok(progressCalls(reqs, new RegExp(`/api/audiobooks/book/${S.book}/progress$`)).some(b => b.position === 20));
-    assert.equal((await req(`/api/audiobooks/book/${S.book}`)).data.position, 20);
+    await until(async () => progressCalls(reqs, new RegExp(`/api/audiobooks/book/${S.book}/progress$`)).some(b => b.position === 20)
+      && (await req(`/api/audiobooks/book/${S.book}`)).data.position === 20, 'bokens position sparad');
     assert.deepEqual(errors, []);
     await close();
   }

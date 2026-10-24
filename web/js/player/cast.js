@@ -295,6 +295,8 @@ function paint() {
   if (!bar) return;
   bar.hidden = !on;
   if (!on) return;
+  // Panelens höjd (meddelanden läggs ovanför den, style.css)
+  if (bar.offsetHeight) document.body.style.setProperty('--casth', bar.offsetHeight + 'px');
   const cur = C.cur, p = C.player;
   const sess = C.ctx.getCurrentSession();
   $('#cxtitle').textContent = cur.title || '';
