@@ -7,12 +7,13 @@ import { screenDialog } from '../screentime.js';
 import { confirmDialog, formDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { loadingState } from '../ui/states.js';
 import { calendarFeedPanel } from './calendar.js';
+import { loadQr } from './quickconnect.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
   setup: 'Server konfigurerad', password_changed: 'Lösenord bytt', '2fa_enabled': '2FA aktiverad', '2fa_disabled': '2FA avstängd',
   '2fa_recovery_used': 'Reservkod använd', '2fa_recovery_regenerated': 'Nya reservkoder', session_revoked: 'Enhet utloggad', sessions_revoked_all: 'Alla enheter utloggade',
   user_created: 'Användare skapad', user_updated: 'Användare ändrad', user_deleted: 'Användare borttagen', settings_changed: 'Inställningar ändrade',
-  admin_denied: 'Admin nekad (utifrån)', passkey_added: 'Passkey tillagd', passkey_removed: 'Passkey borttagen', passkey_add_fail: 'Passkey misslyckades', acme_obtain: 'Certifikat begärt', library_added: 'Bibliotek tillagt', library_removed: 'Bibliotek borttaget' };
+  admin_denied: 'Admin nekad (utifrån)', passkey_added: 'Passkey tillagd', passkey_removed: 'Passkey borttagen', passkey_add_fail: 'Passkey misslyckades', acme_obtain: 'Certifikat begärt', quickconnect_approved: 'Inloggning med kod godkänd', quickconnect_fail: 'Fel kod för TV-inloggning', quickconnect_denied: 'TV-inloggning nekad', library_added: 'Bibliotek tillagt', library_removed: 'Bibliotek borttaget' };
 const device = (ua) => {
   ua = ua || '';
   if (/BraXhnTV-Android|Android.*Automotive/i.test(ua)) return 'Android-app';
@@ -21,10 +22,6 @@ const device = (ua) => {
   const o = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : '';
   return `${b}${o ? ' på ' + o : ''}`;
 };
-function loadQr() {
-  if (window.qrcode) return Promise.resolve(window.qrcode);
-  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = new URL('../../vendor/qrcode.min.js', import.meta.url).href; s.onload = () => ok(window.qrcode); s.onerror = no; document.head.append(s); });
-}
 function showCodes(codes) {
   openDialog({
     title: 'Dina reservkoder',
@@ -46,6 +43,9 @@ views.account = async () => {
     <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut.</p>
     <div class="row" style="margin-top:12px"><button class="primary">Byt lösenord</button></div></form>
   </div>
+  <div class="panel"><h2>Logga in på TV med kod</h2>
+    <p class="muted small">Slipp skriva lösenord med fjärrkontrollen: välj <b>Logga in med kod</b> på TV:n eller i TV-appen och godkänn koden här. TV:n loggas in på den profil du använder nu.</p>
+    <div class="row"><a class="btn primary" href="#/quickconnect">Godkänn inloggning på TV</a></div></div>
   <div class="panel"><h2>Årssammanfattning</h2>
     <p class="muted small">Det du har sett och lyssnat på mest under året: titlar, timmar, favoritgenre, musik och ljudböcker.</p>
     <div class="row"><a class="btn" href="#/wrapped/${new Date().getFullYear()}">Visa ${new Date().getFullYear()}</a></div></div>

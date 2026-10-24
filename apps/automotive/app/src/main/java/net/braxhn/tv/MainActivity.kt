@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.put
+import java.io.IOException
 
 val Accent = Color(0xFFFF6B4A)
 val Bg = Color(0xFF0D0F14)
@@ -134,7 +135,9 @@ fun LoginScreen() {
     var needCode by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var withCode by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    if (withCode) { QuickConnectScreen(server, onCancel = { withCode = false }); return }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 520.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(72.dp))
@@ -161,6 +164,9 @@ fun LoginScreen() {
             }, enabled = !busy && server.isNotBlank() && name.isNotBlank(), modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text("Logga in", fontSize = 18.sp)
             }
+            // På TV och i bilen: godkänn en kod från telefonen i stället för att skriva lösenord
+            OutlinedButton(onClick = { error = null; withCode = true }, enabled = !busy && server.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Logga in med kod", fontSize = 18.sp) }
         }
     }
 }
@@ -481,6 +487,52 @@ fun DownloadsList(push: (Screen) -> Unit) {
                 // Spelas direkt från filen – fungerar utan nät (titelsidan kräver servern)
                 TextButton(onClick = { push(Screen.Play(r.id, 0.0, null, null)) }) { Text("Spela") }
                 TextButton(onClick = { Downloads.remove(r.id) }) { Text("Ta bort") }
+            }
+        }
+    }
+}
+
+// ---------------- inloggning med kod ----------------
+
+/** Inloggning med kod: visar koden och frågar servern var 3:e sekund tills den godkänts eller gått ut. */
+@Composable
+fun QuickConnectScreen(serverInput: String, onCancel: () -> Unit) {
+    var code by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableStateOf(0) }
+    BackHandler { onCancel() }
+    LaunchedEffect(attempt) {
+        code = null; message = null
+        val start = try { Api.startQuickConnect(serverInput) } catch (e: Exception) { message = e.message ?: e.toString(); null }
+        if (start != null) {
+            code = start.code
+            while (true) {
+                delay(3000)
+                try {
+                    when (Api.pollQuickConnect(start.secret)) {
+                        "approved" -> break // token sparad – appen byter till startsidan
+                        "expired" -> { message = "Koden har gått ut."; break }
+                    }
+                } catch (e: ApiException) { message = e.message; break } // servern nekade – sluta fråga
+                catch (e: IOException) { } // tillfälligt nätverksfel: försök igen
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 640.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Logga in med kod", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            val c = code
+            if (c != null) {
+                Text("Öppna BraXhn TV på telefonen eller datorn, välj Godkänn inloggning på TV i menyn och ange koden:", color = Color.Gray, fontSize = 16.sp)
+                Text(if (c.length == 6) c.substring(0, 3) + " " + c.substring(3) else c, fontSize = 64.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)
+                Text(Api.server.value + "/#/quickconnect", color = Color.Gray, fontSize = 14.sp)
+            }
+            val m = message
+            if (m != null) Text(m, color = if (c != null) Color.Gray else Color(0xFFFF5D6C))
+            else CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (m != null) Button(onClick = { attempt++ }, modifier = Modifier.height(56.dp)) { Text("Ny kod", fontSize = 18.sp) }
+                OutlinedButton(onClick = onCancel, modifier = Modifier.height(56.dp)) { Text("Avbryt", fontSize = 18.sp) }
             }
         }
     }

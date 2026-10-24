@@ -278,6 +278,14 @@ const CASES = {
   'GET /api/status': () => [{}, { auth: false }],
   'POST /api/login': () => [{ auth: false }],
   'POST /api/media-token': () => [{}],
+  'POST /api/quickconnect': () => [{ auth: false }],
+  // Inloggning med kod: en väntande och en godkänd begäran (godkänd av admin, token lämnas ut en gång)
+  'GET /api/quickconnect/:secret': async () => {
+    const start = async () => ok(await srv.req('/api/quickconnect', { method: 'POST', body: { app: true, name: 'Kontrakt' }, auth: false }), 'kod');
+    const pending = await start(), approved = await start();
+    ok(await srv.req('/api/quickconnect/approve', { method: 'POST', body: { code: approved.code, confirm: true } }), 'godkänn kod');
+    return [{ p: { secret: pending.secret }, auth: false }, { p: { secret: approved.secret }, auth: false }];
+  },
   'GET /api/home': () => [{}],
   'GET /api/libraries': () => [{}],
   'GET /api/libraries/:id/items': () => [{ p: { id: S.movieLib } }, { p: { id: S.showLib } }],

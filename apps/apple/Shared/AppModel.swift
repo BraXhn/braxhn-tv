@@ -211,3 +211,36 @@ func formatDuration(_ s: Double?) -> String {
     let m = max(1, Int((s / 60).rounded()))
     return m >= 60 ? "\(m / 60) h \(m % 60) min" : "\(m) min"
 }
+
+// MARK: - Inloggning med kod
+
+// (sist i filen så att radhänvisningarna i test/contracts/apps.json står kvar; private-medlemmar nås från samma fil)
+extension AppModel {
+    /// Startar inloggning med kod: servern ger en sexsiffrig kod som godkänns från en inloggad telefon eller dator.
+    func startQuickConnect(server s: String) async throws -> QuickConnectStart {
+        let base = normalized(s)
+        server = base
+        let status: ServerStatus = try await get("/api/status")
+        if status.needsSetup { throw APIError(message: "Servern är inte konfigurerad än – öppna den i en webbläsare först.") }
+        #if os(tvOS)
+        let body: [String: Any] = ["app": true, "name": "Apple TV", "device": "tvOS"]
+        #else
+        let body: [String: Any] = ["app": true, "name": "iPhone/iPad", "device": "iOS"]
+        #endif
+        let data = try await request("/api/quickconnect", method: "POST", body: body)
+        return try JSONDecoder().decode(QuickConnectStart.self, from: data)
+    }
+
+    /// Frågar om koden har godkänts. Vid "approved" sparas token som vid vanlig inloggning. Returnerar status.
+    func pollQuickConnect(secret: String) async throws -> String {
+        let r: QuickConnectPoll = try await get("/api/quickconnect/\(secret)")
+        if r.status == "approved", let t = r.token, let u = r.user {
+            UserDefaults.standard.set(server, forKey: "server")
+            Keychain.save("token", t)
+            token = t
+            user = u
+            await refreshImageToken(force: true)
+        }
+        return r.status
+    }
+}

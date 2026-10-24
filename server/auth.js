@@ -1,4 +1,4 @@
-import { randomBytes, scrypt, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
+import { randomBytes, randomInt, scrypt, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
 import { get, all, run, now, getSetting } from './db.js';
 import { cookies, clean } from './util.js';
 
@@ -255,3 +255,40 @@ export function audit(event, { user = null, ip = null, detail = null } = {}) {
 setInterval(() => run('DELETE FROM audit WHERE id <= (SELECT MAX(id) - 5000 FROM audit)'), 3600e3).unref();
 
 export const require2faRemote = () => getSetting('require_2fa_remote', '0') === '1';
+
+// ---------------- snabbinloggning med kod (TV-enheter) ----------------
+// Flödet: enheten skapar en begäran (hemlig nyckel + sexsiffrig kod), en inloggad användare anger koden och
+// godkänner, enheten pollar med nyckeln och får sin token/kaka exakt en gång. Begärandena ligger bara i minnet:
+// de gäller 5 minuter och behöver inte överleva en omstart. Ingen token skapas förrän enheten hämtar den.
+// Nyckeln lagras som SHA-256 (som sessionerna).
+export const QC_TTL = 300;
+const qcBySecret = new Map(); // sha(nyckel) → begäran
+const qcByCode = new Map();   // kod → väntande begäran
+export const quickConnectOn = () => getSetting('quick_connect', '1') === '1';
+const qcDrop = (r) => { qcBySecret.delete(r.key); if (qcByCode.get(r.code) === r) qcByCode.delete(r.code); };
+const qcLive = (r) => { if (r && r.expires <= now()) { qcDrop(r); return null; } return r || null; };
+const qcSweep = () => { for (const r of [...qcBySecret.values()]) qcLive(r); };
+/** Ny begäran. Returnerar { secret, code, expires } eller null om för många väntar. */
+export function qcCreate({ ip, trusted, name, device, app, remember }) {
+  qcSweep();
+  if (qcBySecret.size >= 1000) return null;
+  let code;
+  do code = String(randomInt(0, 1e6)).padStart(6, '0'); while (qcByCode.has(code));
+  const secret = randomBytes(32).toString('hex');
+  const r = { key: sha(secret), code, ip, trusted: !!trusted, name: clean(name, 60).trim() || null, device: clean(device, 30).trim() || null,
+    app: !!app, remember: remember !== false, created: now(), expires: now() + QC_TTL, userId: null, approvedBy: null };
+  qcBySecret.set(r.key, r); qcByCode.set(code, r);
+  return { secret, code, expires: r.expires };
+}
+/** Begäran för enhetens hemliga nyckel (null om okänd eller utgången). */
+export const qcFind = (secret) => /^[a-f0-9]{64}$/.test(String(secret)) ? qcLive(qcBySecret.get(sha(secret))) : null;
+/** Väntande begäran för en kod (null om okänd, utgången eller redan godkänd). */
+export function qcFindCode(code) {
+  const r = qcLive(qcByCode.get(String(code || '').replace(/\D/g, '')));
+  return r && !r.userId ? r : null;
+}
+/** Godkänn för en användare (profil). Koden kan inte användas igen. */
+export function qcApprove(r, userId, approvedBy) { r.userId = userId; r.approvedBy = approvedBy; qcByCode.delete(r.code); }
+/** Tar bort begäran (token utlämnad eller enheten nekad) – synkront, så att två pollningar aldrig båda får en token. */
+export const qcRemove = (r) => qcDrop(r);
+setInterval(qcSweep, 60e3).unref();

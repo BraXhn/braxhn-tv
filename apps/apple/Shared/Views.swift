@@ -84,6 +84,7 @@ struct LoginView: View {
     @State private var needCode = false
     @State private var error: String?
     @State private var busy = false
+    @State private var showCode = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -130,9 +131,19 @@ struct LoginView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(busy || server.isEmpty || name.isEmpty)
+            Button {
+                showCode = true
+            } label: {
+                Text("Logga in med kod").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(busy || server.isEmpty)
         }
         .padding(32)
         .frame(maxWidth: 520)
+        .sheet(isPresented: $showCode) {
+            QuickConnectView(server: server).environmentObject(model)
+        }
     }
 }
 
@@ -389,5 +400,83 @@ struct SettingsView: View {
             Section { Text("BraXhn TV – fri mediaserver utan prenumeration").font(.footnote).foregroundStyle(.secondary) }
         }
         .navigationTitle("Inställningar")
+    }
+}
+
+// MARK: - Inloggning med kod
+
+/// Inloggning med kod: visar en sexsiffrig kod som godkänns på en inloggad telefon eller dator
+/// (menyn → Godkänn inloggning på TV) och frågar servern var 3:e sekund tills den godkänts eller gått ut.
+struct QuickConnectView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let server: String
+    @State private var code: String?
+    @State private var secret: String?
+    @State private var message: String?
+    @State private var attempt = 0
+
+    private var spacedCode: String {
+        guard let c = code, c.count == 6 else { return code ?? "" }
+        return String(c.prefix(3)) + " " + String(c.suffix(3))
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Logga in med kod").font(.title.bold())
+            if let c = code {
+                Text("Öppna BraXhn TV på telefonen eller datorn, välj Godkänn inloggning på TV i menyn och ange koden:")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
+                Text(spacedCode)
+                    .font(.system(size: 72, weight: .heavy, design: .rounded))
+                    .accessibilityLabel(c.map { String($0) }.joined(separator: " "))
+                Text(model.server + "/#/quickconnect").font(.footnote).foregroundStyle(.secondary)
+                if let m = message { Text(m).foregroundStyle(.secondary) }
+                else { ProgressView() }
+            } else if let m = message {
+                Text(m).foregroundStyle(.red).multilineTextAlignment(.center)
+            } else {
+                ProgressView()
+            }
+            HStack(spacing: 20) {
+                if message != nil {
+                    Button("Ny kod") { attempt += 1 }
+                        .buttonStyle(.borderedProminent)
+                }
+                Button("Avbryt") { dismiss() }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(40)
+        .frame(maxWidth: 700)
+        .task(id: attempt) { await run() }
+    }
+
+    @MainActor private func run() async {
+        code = nil; secret = nil; message = nil
+        do {
+            let r = try await model.startQuickConnect(server: server)
+            code = r.code
+            secret = r.secret
+        } catch {
+            message = error.localizedDescription
+            return
+        }
+        guard let s = secret else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if Task.isCancelled { return }
+            do {
+                let status = try await model.pollQuickConnect(secret: s)
+                if status == "approved" { dismiss(); return }
+                if status == "expired" { message = "Koden har gått ut."; return }
+            } catch let e as APIError {
+                // Servern nekade (t.ex. kontot får bara användas hemma) – sluta fråga
+                message = e.message
+                return
+            } catch {
+                // Tillfälligt nätverksfel: försök igen vid nästa varv
+            }
+        }
     }
 }

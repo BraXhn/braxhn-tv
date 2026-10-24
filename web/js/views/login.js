@@ -5,6 +5,7 @@ import { stopAudio } from '../audio.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
 import { boot } from '../router.js';
 import { promptDialog } from '../ui/dialog.js';
+import { codeLogin } from './quickconnect.js';
 
 views.login = async () => {
   const st = await api('/status');
@@ -21,7 +22,9 @@ views.login = async () => {
     <div class="err" id="e"></div>
     ${setup ? '' : `<label class="remember"><input type="checkbox" id="rem" ${store.get('remember', '1') === '1' ? 'checked' : ''}> Håll mig inloggad i 30 dagar</label>`}
     <button class="primary">${setup ? 'Skapa konto' : 'Logga in'}</button>
-    ${!setup && passkeyOk() ? '<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>' : ''}</form>`;
+    ${!setup && passkeyOk() ? '<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>' : ''}
+    ${!setup && st.quickConnect ? '<button type="button" class="ghost" id="qcl" style="width:100%;margin-top:10px">Logga in med kod</button><p class="muted small" style="margin-top:6px">Bra på TV: godkänn en kod från telefonen i stället för att skriva lösenord.</p>' : ''}</form>`;
+  if ($('#qcl')) $('#qcl').onclick = () => codeLogin({ remember: remember(), onCancel: () => views.login() });
   if ($('#pkl')) $('#pkl').onclick = async () => {
     try { await passkeyLogin(remember()); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); }
     catch (e) { $('#e').textContent = e.name === 'NotAllowedError' ? 'Avbrutet' : e.message; }

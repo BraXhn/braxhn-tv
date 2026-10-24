@@ -2,7 +2,8 @@
 import crypto from 'node:crypto';
 import { get, getSetting, run, now, all } from '../db.js';
 import { send, fail, readJson, clientIp, isHttps, isPrivate } from '../util.js';
-import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey } from '../auth.js';
+import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey,
+  quickConnectOn, qcCreate, qcFind, qcFindCode, qcApprove, qcRemove, QC_TTL } from '../auth.js';
 import { hasTmdb } from '../scanner.js';
 import * as pk from '../passkeys.js';
 import * as updates from '../updates.js';
@@ -26,6 +27,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   // Utanför hemmet: webbspelaren mäter då uppkopplingen och anpassar kvaliteten
   remote: c.user ? !isPrivate(clientIp(c.req)) : undefined,
   publicUrl: getSetting('public_url', process.env.PUBLIC_URL || '') || null,
+  quickConnect: quickConnectOn(), // "Logga in med kod" på inloggningssidan
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
@@ -232,6 +234,89 @@ route('POST', '/api/passkey/login', pub, async (c) => {
   const keep = b.remember !== false;
   send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
 });
+// ---------- Snabbinloggning med kod (TV-enheter, som Jellyfins Quick Connect) ----------
+// 1. Enheten: POST /api/quickconnect → { secret, code }. Koden visas på TV:n, nyckeln behåller enheten.
+// 2. Inloggad användare: POST /api/quickconnect/approve { code } visar enhet och IP, { code, confirm: true } godkänner
+//    för den aktuella profilen (barnprofil → barnprofilens åldersgräns).
+// 3. Enheten pollar GET /api/quickconnect/:secret tills status är approved (token eller kaka, exakt en gång) eller expired.
+// Samma regler som /api/login: konton utan fjärråtkomst och krav på tvåstegsverifiering utifrån gäller även här.
+const qcRate = new Map(); // ip → antal nya begäranden de senaste 10 minuterna
+const qcFails = new Map(); // användar-id → tider för felaktiga koder
+setInterval(() => qcRate.clear(), 600e3).unref();
+const QC_OFF = 'Inloggning med kod är avstängd på servern';
+/** Varför kontot inte får loggas in på enheten (samma regler som inloggning och routern), annars null. */
+function qcDenied(u, trusted) {
+  if (trusted) return null;
+  if (!u.remote_allowed) return 'Ditt konto får bara användas på hemnätverket';
+  if (require2faRemote()) {
+    const owner = u.parent_id || u.id;
+    const has = u.totp_enabled || (u.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', u.parent_id)?.totp_enabled) || pk.hasPasskey(owner);
+    if (!has) return 'Tvåstegsverifiering krävs för inloggning utanför hemmet. Aktivera den under Mitt konto från hemnätet.';
+  }
+  return null;
+}
+const qcInfo = (r) => ({ name: r.name, device: r.device, ip: r.ip, created: r.created, expires: r.expires });
+route('POST', '/api/quickconnect', pub, async (c) => {
+  if (!quickConnectOn()) return fail(c.res, 403, QC_OFF);
+  const ip = clientIp(c.req), k = ipKey(ip);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  if (!qcRate.has(k) && qcRate.size >= 10000) qcRate.clear();
+  const n = (qcRate.get(k) || 0) + 1;
+  if (n > 20) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  qcRate.set(k, n);
+  const b = await readJson(c.req);
+  const r = qcCreate({ ip, trusted: isTrusted(c.req), name: b.name, device: b.device, app: !!b.app, remember: b.remember });
+  if (!r) return fail(c.res, 503, 'Servern är upptagen – försök igen om en stund');
+  send(c.res, 200, { ...r, ttl: QC_TTL, interval: 3 });
+});
+route('POST', '/api/quickconnect/approve', user, async (c) => {
+  if (!quickConnectOn()) return fail(c.res, 403, QC_OFF);
+  const ip = clientIp(c.req);
+  const tooMany = () => fail(c.res, 429, 'För många felaktiga koder – vänta en stund och försök igen');
+  if (ipBlocked(ip)) return tooMany();
+  const fails = (qcFails.get(c.user.id) || []).filter(t => Date.now() - t < 600e3);
+  if (fails.length >= 5) return tooMany();
+  const { code, confirm } = await readJson(c.req);
+  const r = qcFindCode(code);
+  if (!r) {
+    // Felaktiga koder räknas både per användare och per IP (skydd mot att gissa sex siffror)
+    qcFails.set(c.user.id, [...fails, Date.now()]); noteFail(ip);
+    audit('quickconnect_fail', { ...ctx(c), detail: 'fel eller utgången kod' });
+    return fail(c.res, 404, 'Koden finns inte eller har gått ut – kontrollera siffrorna på TV:n');
+  }
+  const u = get('SELECT * FROM users WHERE id=?', c.user.id);
+  const denied = qcDenied(u, r.trusted);
+  if (denied) { audit('quickconnect_denied', { ...ctx(c), detail: `${r.name || 'okänd enhet'} från ${r.ip}: ${denied}` }); return fail(c.res, 403, denied); }
+  if (confirm !== true) return send(c.res, 200, { ok: true, approved: false, ...qcInfo(r), profile: u.name });
+  qcApprove(r, u.id, ip);
+  qcFails.delete(c.user.id);
+  audit('quickconnect_approved', { ...ctx(c), detail: `${r.name || 'okänd enhet'}${r.device ? ' (' + r.device + ')' : ''} från ${r.ip}` });
+  send(c.res, 200, { ok: true, approved: true, ...qcInfo(r), profile: u.name });
+});
+route('GET', '/api/quickconnect/:secret', pub, (c) => {
+  if (!quickConnectOn()) return fail(c.res, 403, QC_OFF);
+  const r = qcFind(c.p.secret);
+  if (!r) return send(c.res, 200, { status: 'expired' });
+  // Kakan för webben sätts bara för ett anrop från sidan själv (inte via en länk eller bild från en annan webbplats)
+  if (!r.app) {
+    const site = c.req.headers['sec-fetch-site'];
+    if (c.req.headers['x-requested-with'] !== 'BraXhnTV' || (site && site !== 'same-origin')) return fail(c.res, 403, 'Förfrågan från annan webbplats nekades');
+  }
+  if (!r.userId) return send(c.res, 200, { status: 'pending', expires: r.expires });
+  const ip = clientIp(c.req);
+  const u = get('SELECT * FROM users WHERE id=?', r.userId);
+  if (!u) { qcRemove(r); return send(c.res, 200, { status: 'expired' }); }
+  // Enheten får inte ha bytt till ett nät utanför hemmet sedan begäran skapades
+  const denied = qcDenied(u, r.trusted && isTrusted(c.req));
+  if (denied) { qcRemove(r); audit('login_denied', { ip, user: u, detail: 'kod: ' + denied }); return fail(c.res, 403, denied); }
+  qcRemove(r); // token lämnas ut exakt en gång
+  audit('login_ok', { ip, user: u, detail: (r.app ? 'app' : 'webb') + ', kod' + (r.name ? ' – ' + r.name : '') });
+  const meta = { ua: c.req.headers['user-agent'], ip };
+  const out = { status: 'approved', ok: true };
+  if (r.app) return send(c.res, 200, { ...out, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin } });
+  send(c.res, 200, out, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: r.remember }), isHttps(c.req), r.remember) });
+});
+
 // ---------- Profiler (hushåll) ----------
 const profileOut = (p, rootId) => ({ id: p.id, name: p.name, owner: p.id === rootId, kid: p.max_age != null, maxAge: p.max_age, hasPin: !!p.pin, color: p.color || null });
 route('GET', '/api/profiles', user, (c) => {
