@@ -974,3 +974,6 @@ body.hascast main{padding-bottom:110px}
 .stationcover[data-st="sonic-focus"]{background:linear-gradient(135deg,hsl(160 35% 30%),hsl(190 40% 14%))}
 .stationcover[data-st="sonic-party"]{background:linear-gradient(135deg,hsl(310 55% 40%),hsl(270 50% 18%))}
 #mradio.on{color:var(--accent)}
+/* Meddelanden ovanför castpanelen – annars täcker de panelens knappar */
+body.hascast #toast{bottom:calc(var(--casth,110px) + 12px + env(safe-area-inset-bottom))}
+@media (max-width:760px){body.hascast:has(#tabbar:not([hidden])) #toast{bottom:calc(var(--casth,170px) + 70px + env(safe-area-inset-bottom))}}
