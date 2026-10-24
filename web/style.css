@@ -1002,3 +1002,17 @@ body.hascast #toast{bottom:calc(var(--casth,110px) + 12px + env(safe-area-inset-
   .hist td.r{grid-column:2;grid-row:1 / span 3;align-self:center}
 }
 fieldset.plain{border:0;padding:0;margin:12px 0}fieldset.plain legend{font-size:13px;color:var(--dim);margin-bottom:6px;padding:0}
+/* Uppspelningsval (Mitt konto) och automatisk överhoppning i spelaren */
+.pph{font-size:15px;margin:18px 0 2px}
+.pplangs{border:0;padding:0;margin:12px 0 0;min-width:0}
+.pplangs legend{font-size:13px;color:var(--dim);padding:0;margin-bottom:5px}
+.pplangs .row{gap:10px}
+.pplang{display:flex;align-items:center;gap:6px;margin:0;flex:1 1 140px;min-width:0}
+.pplang select{flex:1;min-width:0}
+.ppgrid{gap:0 18px;align-items:flex-end}
+.ppgrid>div{flex:1 1 240px;min-width:0;max-width:440px}
+.ppchk{margin-top:8px}
+.ppchk label{margin:8px 0}
+#player .skipcd{position:absolute;right:28px;width:max-content;max-width:calc(100% - 56px);bottom:calc(var(--ctlh) + 76px);display:flex;align-items:center;gap:12px;padding:8px 8px 8px 16px;
+  border-radius:10px;background:rgba(27,28,31,.9);color:#fff;font-weight:600;font-size:15px}
+#player.mini .skipcd,#player.cinema .skipcd{display:none}

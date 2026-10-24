@@ -46,6 +46,31 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 - När `preroll` finns förstartar servern inte filmen. Hämta gärna `/playback` igen (utan `cinema=1`) när kön är slut,
   annars startar omkodningen först när spelaren börjar hämta filmen.
 
+## Uppspelningsval per konto: `/api/me/playback-prefs`
+
+`GET`/`PUT /api/me/playback-prefs` (PUT ändrar bara fälten som skickas):
+
+```json
+{ "audioLangs": ["sv", "en", "orig"], "subMode": "foreign", "subLangs": ["sv"], "sdh": "avoid",
+  "skipIntro": true, "skipRecap": false, "skipCredits": false, "autoNext": true, "nextCountdown": 8,
+  "qualityHome": "auto", "qualityRemote": "720", "saved": true, "remoteCap": "1080" }
+```
+
+- Språk är ISO 639-1 (`sv`, `en`); trebokstavskoder (`swe`) tas emot och skrivs om. `orig` i `audioLangs` = filens
+  standardspår (originalspråket i de flesta filer). Kommentarsspår och ljudbeskrivning väljs aldrig automatiskt.
+- `subMode`: `off` (inga), `forced` (bara tvingade), `foreign` (hela undertexter när ljudet inte är på något av mina
+  språk – `subLangs` och `audioLangs` – annars tvingade), `always`. `sdh`: `avoid` eller `prefer`.
+- `qualityHome`/`qualityRemote`: `auto`, `orig`, `1080`, `720`, `480`, `360`. Gäller när klienten inte skickar `q`;
+  utanför hemmet aldrig över administratörens tak (`remoteCap`). `saved` = valen har sparats någon gång.
+
+`/api/items/:id/playback` använder valen när klienten inte själv valt (inga ändrade fält, bara tillägg):
+utan `audio=` spelas det föredragna ljudspåret, utan `q` (eller `q=auto`) gäller standardkvaliteten. Nya fält:
+`defaultAudio` (spårets `index` eller `null`), `defaultSub` (ett `id` i `subtitles` eller `null` – visa den från
+början om appen inte har ett eget val), `autoSkip` (`{ intro, recap, credits }`, bool: hoppa över automatiskt efter
+en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna börjar) och `autoNext`
+(`{ enabled: bool, countdown: heltal sekunder }`). `/api/items/:id` har också `defaultAudio`/`defaultSub`, där
+`defaultSub` kan vara en PGS-bildundertext (webbspelaren ritar dem själv).
+
 ## Kö på Chromecast: `queue=1`
 
 `/api/items/:id/playback?cast=1&queue=1` ger samma svar som vanligt (med en egen mediatoken för titeln) men räknas

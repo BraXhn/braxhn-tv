@@ -154,7 +154,7 @@ export function subtitlesOf(it) {
     if (!bitmap && !TEXT_SUBS.has(s.codec)) continue;
     out.push({
       // PGS (Blu-ray) visas som bilder i webbspelaren; övriga bildformat bränns in
-      id: 'e' + s.index, lang: s.lang, forced: s.forced, hi: !!s.hi, bitmap, pgs: s.codec === 'hdmv_pgs_subtitle', source: 'embedded',
+      id: 'e' + s.index, lang: s.lang, forced: s.forced, hi: !!s.hi, ...(s.comment ? { comment: true } : {}), bitmap, pgs: s.codec === 'hdmv_pgs_subtitle', source: 'embedded',
       label: [s.title, s.lang].filter(Boolean).join(' · ') + (bitmap ? ' (bild)' : '') || `Spår ${s.index}`
     });
   }

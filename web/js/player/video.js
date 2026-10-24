@@ -9,6 +9,8 @@ import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './
 import { joinParty } from './party.js';
 import { openRemotePicker, remoteButton } from './remote.js';
 import { pgsStop, restyleSubs, setSubs, subBurns, textStop } from './subs.js';
+import { SKIP_DELAY, nextPlan, skipPlan } from './autoskip.js';
+import { migrateLocalPrefs } from './playprefs.js';
 import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, serverFxParams, setAudioFx, stopAudioFx, subStyleFields, thumbStyle, webAudioFx } from './comfort.js';
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
@@ -20,6 +22,8 @@ export function closeAllPlayers() { playSeq++; closeOverlays(); }
 // ---------- spelare ----------
 export let P = null;
 let rate = 1; // uppspelningshastighet – följer med till nästa avsnitt under besöket
+// Kvalitet vald under ⚙ – gäller resten av besöket. Auto = kontots standardkvalitet (Mitt konto → Uppspelning).
+let quality = 'auto';
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 let playSeq = 0; // ökas för varje play() och när alla spelare stängs – äldre anrop avbryter sig själva
 export function loadHls() {
@@ -36,13 +40,14 @@ export function startPlay(b, ...args) {
 export async function play(id, start = 0, opts = {}) {
   const seq = ++playSeq;
   let it;
+  await migrateLocalPrefs(); // en gång: gamla webbläsarval (undertextspråk, kvalitet) flyttas till kontot
+  if (seq !== playSeq) return;
   try {
     // Flera versioner: hämta spårlistan (ljud/undertexter) för den version som faktiskt spelas
     const want = opts.version || store.get('version.' + id, '');
     it = await api('/items/' + id + (want ? '?version=' + encodeURIComponent(want) : ''), { bg: true });
     if (it.versions && !it.versions.some(v => String(v.id) === String(want))) {
-      const q = store.get('quality', 'auto');
-      const p = await api(`/items/${id}/playback?${capsQuery({ q: q === 'auto' ? '' : q })}&info=1`, { bg: true });
+      const p = await api(`/items/${id}/playback?${capsQuery({ q: quality === 'auto' ? '' : quality })}&info=1`, { bg: true });
       if (p.version && p.version !== it.version) it = await api(`/items/${id}?version=${p.version}`, { bg: true });
     }
   }
@@ -56,13 +61,13 @@ export async function play(id, start = 0, opts = {}) {
   closeOverlays();
   const el = $('#player');
   const q = (s) => $(s, el);
-  const audios = it.audio, defAudio = audios.find(a => a.default) || audios[0];
-  const subPref = store.get('sublang', '');
+  // Förvalda spår: servern väljer efter kontots uppspelningsval (språk, undertextläge, SDH – aldrig kommentarsspår)
+  const audios = it.audio, defAudio = audios.find(a => it.defaultAudio != null && a.index === it.defaultAudio) || audios.find(a => a.default) || audios[0];
   const textSubs = it.subtitles.filter(s => !s.bitmap);
-  const defSub = textSubs.find(s => s.forced) || (subPref && textSubs.find(s => s.lang === subPref));
+  const defSub = it.defaultSub ? it.subtitles.find(s => s.id === it.defaultSub) : null;
   const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
-  const cur = P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
-    party: partyId, es: keepParty, applying: false, tok: null, lmd: null,
+  const cur = P = { it, el, q: quality, audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
+    party: partyId, es: keepParty, applying: false, tok: null, lmd: null, skipDone: new Set(), skipTimer: null,
     // Bio-läge: trailers före filmen – bara filmer som startas från början (inte avsnitt, Fortsätt titta eller Titta tillsammans)
     cinema: it.kind === 'movie' && !(start > 0) && !partyId && !opts.noCinema, pre: null };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
@@ -77,7 +82,7 @@ export async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">Avbryt</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
       <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
       ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
@@ -131,11 +136,11 @@ export async function play(id, start = 0, opts = {}) {
   const onResize = () => { if (P === cur) measureCtl(el); else window.removeEventListener('resize', onResize); };
   window.addEventListener('resize', onResize);
   q('#pclose').onclick = () => setMini(true); // fortsätt spela i litet fönster; ⏹ stoppar
-  q('#pq').onchange = (e) => { cur.q = e.target.value; store.set('quality', cur.q); reload(); };
+  q('#pq').onchange = (e) => { cur.q = quality = e.target.value; reload(); };
   if (q('#pa')) q('#pa').onchange = (e) => { cur.audio = e.target.value; reload(); };
   q('#ps').onchange = (e) => {
     const prev = it.subtitles.find(x => x.id === cur.sub), s = it.subtitles.find(x => x.id === e.target.value);
-    cur.sub = e.target.value; store.set('sublang', s?.lang || ''); cur.offset = 0;
+    cur.sub = e.target.value; cur.offset = 0;
     // Bildundertexter som inte är PGS bränns in av servern => ny ström. Text och PGS byts direkt.
     if (subBurns(s) || subBurns(prev)) reload(); else setSubs();
   };
@@ -228,20 +233,47 @@ export async function play(id, start = 0, opts = {}) {
   await load(start);
 }
 
+// Knappen för sammanfattning/intro/eftertexter. Med automatisk överhoppning (kontots val) visas först
+// "Hoppar över intro… Avbryt" i SKIP_DELAY sekunder; varje del hoppas över högst en gång per uppspelning.
+const SKIP_TEXT = { recap: ['Hoppa över sammanfattning ⏭', 'Hoppar över sammanfattningen…'], intro: ['Hoppa över intro ⏭', 'Hoppar över intro…'],
+  credits: ['Nästa avsnitt ⏭', 'Nästa avsnitt startar…'] };
+function stopSkipCountdown(cur) {
+  if (!cur) return;
+  clearInterval(cur.skipTimer); cur.skipTimer = null;
+  const box = $('#pskipcd', cur.el); if (box) box.hidden = true;
+}
+function doSkip(cur, plan) {
+  stopSkipCountdown(cur);
+  cur.skipDone.add(plan.kind);
+  const v = $('#vid', cur.el), b = $('#pskip', cur.el);
+  if (b) b.hidden = true;
+  if (plan.to === 'next') { if (P === cur && cur.it.nextId) { sendProgress(true); goNext(cur.it.nextId); } }
+  else if (v) v.currentTime = plan.to;
+}
 function markers() {
   if (!P) return;
-  const v = $('#vid', P.el), b = $('#pskip', P.el), pb = P.pb; if (!v || !b || !pb) return;
-  const t = v.currentTime;
-  if (pb.recap && t >= pb.recap.start && t < pb.recap.end - 1) {
-    if (b.dataset.k !== 'recap') { b.dataset.k = 'recap'; b.textContent = 'Hoppa över sammanfattning ⏭'; b.onclick = () => { v.currentTime = pb.recap.end; b.hidden = true; }; }
-    b.hidden = false;
-  } else if (pb.intro && t >= pb.intro.start && t < pb.intro.end - 1) {
-    if (b.dataset.k !== 'intro') { b.dataset.k = 'intro'; b.textContent = 'Hoppa över intro ⏭'; b.onclick = () => { v.currentTime = pb.intro.end; b.hidden = true; }; }
-    b.hidden = false;
-  } else if (pb.credits && P.it.nextId && t >= pb.credits && t < pb.credits + 60) {
-    if (b.dataset.k !== 'credits') { b.dataset.k = 'credits'; b.textContent = 'Nästa avsnitt ⏭'; b.onclick = () => { if (!P) return; sendProgress(true); goNext(P.it.nextId); }; }
-    b.hidden = false;
-  } else { b.hidden = true; b.dataset.k = ''; }
+  const cur = P, v = $('#vid', cur.el), b = $('#pskip', cur.el), pb = cur.pb; if (!v || !b || !pb) return;
+  const plan = skipPlan(pb, v.currentTime, { hasNext: !!cur.it.nextId, done: cur.skipDone });
+  if (!plan) { b.hidden = true; b.dataset.k = ''; stopSkipCountdown(cur); return; }
+  if (b.dataset.k !== plan.kind) {
+    stopSkipCountdown(cur);
+    b.dataset.k = plan.kind; b.textContent = SKIP_TEXT[plan.kind][0];
+    b.onclick = () => doSkip(cur, plan);
+    if (plan.auto && !cur.party) startSkipCountdown(cur, plan, v); // i ett rum styr ingen automatik de andras bild
+  }
+  b.hidden = false;
+}
+function startSkipCountdown(cur, plan, v) {
+  const box = $('#pskipcd', cur.el), t = $('#pskipt', cur.el); if (!box || !t) return;
+  let n = SKIP_DELAY;
+  const show = () => { t.textContent = `${SKIP_TEXT[plan.kind][1]} ${n}`; };
+  show(); box.hidden = false;
+  $('#pskipx', cur.el).onclick = () => { cur.skipDone.add(plan.kind); stopSkipCountdown(cur); };
+  cur.skipTimer = setInterval(() => {
+    if (P !== cur) return stopSkipCountdown(cur);
+    if (v.paused || cur.mini) return; // pausad eller litet fönster: nedräkningen väntar
+    if (--n <= 0) doSkip(cur, plan); else show();
+  }, 1000);
 }
 
 async function load(start) {
@@ -357,17 +389,20 @@ function sendProgress(final = false) {
 function onEnded() {
   sendProgress(true);
   const cur = P, { it } = cur;
-  if (!it.nextId) return closePlayer();
+  stopSkipCountdown(cur);
+  const plan = nextPlan(cur.pb, !!it.nextId);
+  if (!plan) return closePlayer();
+  if (plan.auto && plan.seconds === 0) return goNext(it.nextId);
   const box = document.createElement('div'); box.className = 'next';
-  let n = 8;
-  box.innerHTML = `<b>Nästa avsnitt om <span class="cd">${n}</span> s</b><div class="row"><button class="primary small" data-go>Spela nu</button><button class="ghost small" data-stay>Avbryt</button></div>`;
+  let n = plan.seconds;
+  box.innerHTML = `<b>${plan.auto ? `Nästa avsnitt om <span class="cd">${n}</span> s` : 'Nästa avsnitt'}</b><div class="row"><button class="primary small" data-go>Spela nu</button><button class="ghost small" data-stay>${plan.auto ? 'Avbryt' : 'Stäng'}</button></div>`;
   cur.el.append(box);
   clearInterval(cur.nextTimer);
-  const t = cur.nextTimer = setInterval(() => {
+  const t = cur.nextTimer = plan.auto ? setInterval(() => {
     if (P !== cur) return clearInterval(t);
     n--; $('.cd', box).textContent = n;
     if (n <= 0) { clearInterval(t); goNext(it.nextId); }
-  }, 1000);
+  }, 1000) : null;
   $('[data-go]', box).onclick = () => { clearInterval(t); goNext(it.nextId); };
   $('[data-stay]', box).onclick = () => { clearInterval(t); box.remove(); };
 }
@@ -384,7 +419,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   if (!P) return;
   if (P.es) { P.es.close(); P.es = null; }
   sendProgress(true);
-  clearInterval(P.nextTimer);
+  clearInterval(P.nextTimer); clearInterval(P.skipTimer);
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   const el = P.el, v = $('#vid', el), id = P.it.id;
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner

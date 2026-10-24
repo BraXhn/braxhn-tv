@@ -1,4 +1,4 @@
-// Vy: Mitt konto – lösenord, tvåstegsverifiering, passkeys, profiler, Trakt, scrobbling, enheter, följda serier och nedladdning i appen
+// Vy: Mitt konto – lösenord, uppspelningsval, tvåstegsverifiering, passkeys, profiler, Trakt, scrobbling, enheter, följda serier och nedladdning i appen
 import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';
@@ -9,6 +9,7 @@ import { loadingState } from '../ui/states.js';
 import { calendarFeedPanel } from './calendar.js';
 import { loadQr } from './quickconnect.js';
 import { renderCinemaPrefs } from '../player/cinema.js';
+import { renderPlaybackPrefs } from '../player/playprefs.js';
 import { openHomeCustomizer } from './homecustom.js';
 import { applySubStyle, audioFx, bindSubStyleFields, setAudioFx, subStyleFields, webAudioFx } from '../player/comfort.js';
 
@@ -66,6 +67,7 @@ views.account = async () => {
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="anight"> Nattläge – jämnare ljud, svaga ljud lyfts</label>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="adialog"> Tydligare dialog – rösterna förstärks</label></div>
     ${webAudioFx ? '' : '<p class="muted small">I Safari görs nattläge och tydligare dialog av servern: ljudet omkodas, bilden kopieras.</p>'}</div>
+  <div class="panel" id="pbprefs"></div>
   <div class="panel" id="cinemaprefs"></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
@@ -110,6 +112,7 @@ views.account = async () => {
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
+  renderPlaybackPrefs($('#pbprefs')).catch(e => { if (!e?.aborted && $('#pbprefs')) $('#pbprefs').hidden = true; });
   renderCinemaPrefs($('#cinemaprefs')).catch(e => { if (!e?.aborted && $('#cinemaprefs')) $('#cinemaprefs').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
