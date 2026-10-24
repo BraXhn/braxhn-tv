@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream';
 import net from 'node:net';
+import os from 'node:os';
+import { spawn as spawnProc } from 'node:child_process';
 // Text som lönar sig att komprimera (bibliotekslistor i JSON är ~15 ggr mindre med gzip)
 const COMPRESSIBLE = /^(application\/(json|javascript|manifest\+json|vnd\.apple\.mpegurl)|text\/|image\/svg)/;
 // Svar över ASYNC_MIN komprimeras utanför händelseloopen (zlib i trådpoolen): ett bibliotek med tusentals titlar
@@ -210,4 +212,16 @@ export function streamFile(req, res, file, size, headers = {}, { ranges = true }
   res.writeHead(code, h);
   if (req.method === 'HEAD' || size <= 0) return res.end();
   pipeline(fs.createReadStream(file, { start, end }), res, () => {});
+}
+
+// Bakgrundsjobb (förhandsbilder, intro-detektering, platshållarfärger …) körs med lägsta prioritet – processor (nice 19)
+// och disk (ionice "idle", om verktyget finns) – så att strömning och omkodning alltid går före.
+let ioniceOk = null;
+export function lowPriority(child) {
+  const pid = child?.pid;
+  if (!pid) return child;
+  try { os.setPriority(pid, 19); } catch {}
+  if (ioniceOk == null) ioniceOk = String(process.env.PATH || '').split(path.delimiter).some(d => { try { return fs.statSync(path.join(d, 'ionice')).isFile(); } catch { return false; } });
+  if (ioniceOk) { try { spawnProc('ionice', ['-c', '3', '-p', String(pid)], { stdio: 'ignore' }).on('error', () => {}); } catch {} }
+  return child;
 }

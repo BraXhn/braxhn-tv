@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { lowPriority } from './util.js';
 import { all, run, tx, IMAGES } from './db.js';
 
 export const TYPES = ['poster', 'backdrop', 'thumb'];
@@ -26,13 +27,13 @@ export function averageColors(files) {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file',
     ...files.flatMap(f => ['-i', f]), '-filter_complex', graph, '-map', '[o]', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'];
   return new Promise((resolve) => {
-    execFile('ffmpeg', args, { encoding: 'buffer', timeout: 15000 + n * 2000, maxBuffer: 3 * n + 1024 }, async (e, out) => {
+    lowPriority(execFile('ffmpeg', args, { encoding: 'buffer', timeout: 15000 + n * 2000, maxBuffer: 3 * n + 1024 }, async (e, out) => {
       if (!e && out?.length >= 3 * n) return resolve(files.map((_, i) => hex(out, i * 3)));
       if (n === 1) return resolve([null]);
       const res = [];
       for (const f of files) res.push((await averageColors([f]))[0]);
       resolve(res);
-    });
+    }));
   });
 }
 /** Medelfärgen av en bild som '#rrggbb', null vid fel */
