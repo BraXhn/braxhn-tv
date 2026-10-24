@@ -128,6 +128,21 @@ export function itemsByIds(uid, ids) {
   const byId = new Map(rows.map(r => [r.id, r]));
   return ids.map(id => byId.get(id)).filter(Boolean);
 }
+// Kandidaterna (alla filmer/serier med genrer, tolkade) cachas en stund per åldersgräns – startsidan frågar ofta.
+// Skanningen tömmer cachen (clearRecommendations via skannerns afterScan-krok).
+const candCache = new Map(); // åldersfiltrets parametrar -> { rows, t }
+const CAND_TTL = 5 * 60e3;
+export function clearRecommendations() { candCache.clear(); }
+function candidates(age) {
+  const k = age.params.join(','), c = candCache.get(k);
+  if (c && Date.now() - c.t < CAND_TTL) return c.rows;
+  const rows = all(`SELECT i.id, i.genres, i.rating FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    WHERE i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'${MAIN_ONLY}${age.sql} ORDER BY i.added DESC`, ...age.params)
+    .map(r => ({ id: r.id, rating: r.rating, g: parseGenres(r.genres) }));
+  candCache.set(k, { rows, t: Date.now() });
+  if (candCache.size > 50) candCache.delete(candCache.keys().next().value);
+  return rows;
+}
 // Poängsättning sker på lätta kolumner; bara de bästa hämtas sedan i sin helhet
 export function recommend(uid, limit) {
   const w = genreProfile(uid);
@@ -137,11 +152,9 @@ export function recommend(uid, limit) {
   const seen = new Set(all(`SELECT DISTINCT COALESCE(e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
     WHERE q.user_id=? AND (q.watched=1 OR q.position > 0)`, uid).map(r => r.id));
   for (const r of all('SELECT item_id FROM watchlist WHERE user_id=?', uid)) seen.add(r.item_id);
-  const cands = all(`SELECT i.id, i.genres, i.rating FROM items i LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.kind IN ('movie','show') AND i.genres IS NOT NULL AND i.genres != '[]'${MAIN_ONLY}${age.sql} ORDER BY i.added DESC`, ...age.params)
-    .filter(r => !seen.has(r.id)).slice(0, 3000);
+  const cands = candidates(age).filter(r => !seen.has(r.id)).slice(0, 3000);
   const total = Object.values(w).reduce((a, b) => a + b, 0);
-  const top = cands.map(r => { const g = parseGenres(r.genres); return { id: r.id, score: g.reduce((a, x) => a + (w[x] || 0) / total, 0) / Math.sqrt(g.length || 1) + (r.rating || 6) / 50 }; })
+  const top = cands.map(r => ({ id: r.id, score: r.g.reduce((a, x) => a + (w[x] || 0) / total, 0) / Math.sqrt(r.g.length || 1) + (r.rating || 6) / 50 }))
     .filter(x => x.score > 0.2).sort((a, b) => b.score - a.score).slice(0, limit).map(x => x.id);
   return itemsByIds(uid, top);
 }

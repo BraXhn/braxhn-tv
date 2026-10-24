@@ -14,7 +14,7 @@ import * as music from './music.js';
 import * as arr from './arr.js';
 import * as books from './audiobooks.js';
 import * as follows from './follows.js';
-import { allowedFor } from './http/context.js';
+import { allowedFor, clearRecommendations } from './http/context.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -33,7 +33,7 @@ hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 hooks.music = (lib, status) => music.scanMusic(lib, status);
 hooks.subtitlesOf = (it) => st.subtitlesOf(it);
-hooks.afterScan = () => arr.markAvailable();
+hooks.afterScan = () => { clearRecommendations(); return arr.markAvailable(); };
 hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 

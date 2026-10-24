@@ -55,13 +55,18 @@ route('GET', '/api/fs', admin, (c) => {
 });
 
 // Bläddra
+const CONTINUE_MAX = 20;
 route('GET', '/api/home', user, (c) => {
   const uid = c.user.id;
   // Även sedda titlar som man börjat se om (position > 0) räknas
-  const cont = listItems(uid, `i.kind IN('movie','episode') AND p.position > 0`, [], 'p.updated DESC', 20);
-  // "Nästa avsnitt" för serier man håller på med
+  const cont = listItems(uid, `i.kind IN('movie','episode') AND p.position > 0`, [], 'p.updated DESC', CONTINUE_MAX);
+  // Senaste aktivitet per titel: halvsedda efter sitt framsteg, "nästa avsnitt" efter seriens senaste tittande
+  const at = new Map(cont.length ? all(`SELECT item_id, updated FROM progress WHERE user_id=? AND item_id IN (${cont.map(() => '?').join(',')})`,
+    uid, ...cont.map(x => x.id)).map(r => [r.item_id, r.updated]) : []);
+  // "Nästa avsnitt" för serier man håller på med. Bara sedda/påbörjade avsnitt räknas – att markera som osedd
+  // skriver också framsteg (position 0) men betyder inte att man håller på med serien.
   const shows = all(`SELECT e.parent_id AS sid, MAX(p.updated) AS t FROM progress p JOIN items e ON e.id=p.item_id
-    WHERE p.user_id=? AND e.kind='episode' GROUP BY e.parent_id
+    WHERE p.user_id=? AND e.kind='episode' AND (p.watched=1 OR p.position > 0) GROUP BY e.parent_id
     HAVING MAX(p.updated) > COALESCE((SELECT h.at FROM continue_hidden h WHERE h.user_id=p.user_id AND h.item_id=e.parent_id), -1)
     ORDER BY t DESC LIMIT 20`, uid);
   const have = new Set(cont.map(x => x.show).filter(Boolean));
@@ -70,11 +75,17 @@ route('GET', '/api/home', user, (c) => {
     // Senast sedda avsnittet hämtas separat (som underfråga kördes den en gång per avsnitt – långsamt för långa serier)
     const last = get(`SELECT MAX(e.season*10000+e.episode) AS m FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=? AND q.watched=1
       WHERE e.parent_id=?`, uid, s.sid)?.m ?? -1;
-    const next = listItems(uid, `i.parent_id=? AND COALESCE(p.watched,0)=0 AND (i.season*10000+i.episode) > ?`,
+    // Specialavsnitt (säsong 0) föreslås bara när serien inte har några vanliga säsonger
+    const next = listItems(uid, `i.parent_id=? AND COALESCE(p.watched,0)=0 AND (i.season*10000+i.episode) > ?
+      AND (i.season > 0 OR NOT EXISTS (SELECT 1 FROM items x WHERE x.parent_id=i.parent_id AND x.season > 0))`,
       [s.sid, last], 'i.season, i.episode', 1)[0];
-    if (next) cont.push(next);
+    if (next) { cont.push(next); at.set(next.id, s.t); }
   }
-  const rows = all("SELECT * FROM libraries WHERE type != 'music' ORDER BY name").map(l => {
+  // Allt sorteras ihop på senaste aktivitet (ett nyss sett avsnitts serie före en halvsedd film från förra veckan)
+  cont.sort((a, b) => (at.get(b.id) || 0) - (at.get(a.id) || 0));
+  cont.length = Math.min(cont.length, CONTINUE_MAX);
+  // Musik och ljudböcker har egna startsidor (och inga titlar i items)
+  const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook') ORDER BY name").map(l => {
     const row = { library: l, title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
     // Serier: nya avsnitt grupperade per säsong (nytt fält – items är oförändrat för apparna)
     if (l.type === 'show') row.seasons = groupNewEpisodes(listItems(uid, `i.library_id=? AND i.kind='episode'`, [l.id],
@@ -310,20 +321,26 @@ function collapseCollections(items) {
   return out;
 }
 route('GET', '/api/collections', user, (c) => {
-  const cols = all(`SELECT c.*, COUNT(i.id) AS n, MIN(i.year) AS y0, MAX(i.year) AS y1 FROM collections c JOIN items i ON i.collection_id=c.id AND i.kind='movie' AND i.version_of IS NULL
-    GROUP BY c.id HAVING n >= 2 ORDER BY c.name`);
-  // dölj samlingar där profilen inte får se något (en fråga för alla samlingar)
+  // En samling är minst två filmer; antal och år räknas bara på det profilen får se (v = synlig för profilen)
   const age = ageFilter(c.user.id);
-  const visible = new Set(all(`SELECT DISTINCT i.collection_id AS id FROM items i LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.collection_id IS NOT NULL${MAIN_ONLY}${age.sql}`, ...age.params).map(r => r.id));
-  send(c.res, 200, cols.filter(col => visible.has(col.id)).map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
+  const cols = all(`SELECT c.*, COUNT(*) AS total, SUM(m.v) AS n, MIN(CASE WHEN m.v THEN m.y END) AS y0, MAX(CASE WHEN m.v THEN m.y END) AS y1
+    FROM collections c JOIN (SELECT i.collection_id AS cid, i.year AS y, (1${age.sql}) AS v FROM items i LEFT JOIN items s ON s.id=i.parent_id
+      WHERE i.collection_id IS NOT NULL AND i.kind='movie'${MAIN_ONLY}) m ON m.cid=c.id
+    GROUP BY c.id HAVING total >= 2 AND n > 0 ORDER BY c.name`, ...age.params);
+  send(c.res, 200, cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
     count: col.n, years: [col.y0, col.y1], visible: true })));
 });
+/** Får profilen se någon film i samlingen? (annars ska varken namn, beskrivning eller bilder synas) */
+const collectionVisible = (uid, cid) => {
+  const age = ageFilter(uid);
+  return !!get(`SELECT 1 FROM items i LEFT JOIN items s ON s.id=i.parent_id WHERE i.collection_id=? AND i.kind='movie'${MAIN_ONLY}${age.sql} LIMIT 1`, cid, ...age.params);
+};
 route('GET', '/api/collections/:cid', user, (c) => {
   const col = get('SELECT * FROM collections WHERE id=?', +c.p.cid);
   if (!col) return fail(c.res, 404, 'Finns inte');
-  send(c.res, 200, { id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
-    items: listItems(c.user.id, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 100) });
+  const items = listItems(c.user.id, 'i.collection_id=? AND i.kind=\'movie\'', [col.id], 'i.year', 100);
+  if (!items.length) return fail(c.res, 404, 'Finns inte');
+  send(c.res, 200, { id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop, items });
 });
 
 // Förhandsbilder vid spolning
@@ -345,6 +362,7 @@ route('GET', '/api/items/:id/trickplay/:n', img, (c) => {
 // ?w= ger bilden nedskalad till en av de fasta bredderna (imgsize.js) – behörighetskontrollerna görs först
 route('GET', '/api/collection-image/:cid/:type', img, async (c) => {
   if (!['poster', 'backdrop'].includes(c.p.type)) return fail(c.res, 404, '');
+  if (maxAgeOf(c.user.id) != null && !collectionVisible(c.user.id, +c.p.cid)) return fail(c.res, 404, 'Ingen bild');
   fs.readFile(await sized(path.join(IMAGES, `c${+c.p.cid}-${c.p.type}.jpg`), c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild')
     : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
 });
