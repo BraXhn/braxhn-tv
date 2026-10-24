@@ -176,6 +176,17 @@ test('webbklienten: service workern cachar alla moduler i web/js/ och alla impor
   }
 });
 
+test('webbklienten: style.css har lika många { som } (ett ostängt @media-block slukar resten av filen)', () => {
+  const css = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  let depth = 0, line = 1;
+  for (const ch of css) {
+    if (ch === '\n') line++;
+    else if (ch === '{') depth++;
+    else if (ch === '}') { depth--; assert.ok(depth >= 0, `för många } på rad ${line}`); }
+  }
+  assert.equal(depth, 0, 'ostängt block i style.css');
+});
+
 test('startsidan: nya avsnitt grupperas per serie och säsong (nyast först)', async () => {
   const { groupNewEpisodes } = await import('../server/http/context.js');
   const ep = (id, show, season, episode, watched = false) => ({ id, kind: 'episode', show, showTitle: 'Serie ' + show, season, episode, title: `Avsnitt ${episode}`, watched, position: 0, added: 100 - id });

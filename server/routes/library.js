@@ -21,6 +21,7 @@ import * as follows from '../follows.js';
 import * as ccol from '../customcollections.js';
 import * as calendar from '../calendar.js';
 import * as homes from '../homeshelves.js';
+import * as playprefs from '../playprefs.js';
 import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
 import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
@@ -230,6 +231,10 @@ route('GET', '/api/items/:id', user, (c) => {
       width: file.width, height: file.height, hdr: file.hdr || null, chapters: chaptersOf(file),
       audio: st.streamsOf(file).filter(s => s.type === 'audio'), subtitles: st.subtitlesOf(file).map(({ file, ...s }) => s)
     });
+    // Förvalda spår enligt kontots uppspelningsval (webbspelaren; PGS ritas av webbspelaren utan inbränning)
+    const prefs = playprefs.getPrefs(uid), a = playprefs.pickAudio(out.audio, prefs);
+    out.defaultAudio = a ? a.index : null;
+    out.defaultSub = playprefs.pickSub(out.subtitles, a, prefs, { pgs: true })?.id ?? null;
     if (it.kind === 'episode') {
       const sib = all(`SELECT id FROM items WHERE parent_id=? ORDER BY season, episode`, it.parent_id).map(r => r.id);
       const i = sib.indexOf(it.id);

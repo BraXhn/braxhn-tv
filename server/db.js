@@ -198,6 +198,9 @@ addCol('users', 'notify_personal', 'TEXT');
 addCol('users', 'offline_sync', 'TEXT');
 // Bio-läge: trailers/förfilm före filmer (JSON per användare, server/cinema.js)
 addCol('users', 'cinema', 'TEXT');
+// Uppspelningsval: ljud-/undertextspråk, undertextläge, automatisk överhoppning, nästa avsnitt och standardkvalitet
+// (JSON per användare, server/playprefs.js)
+addCol('users', 'playback_prefs', 'TEXT');
 // Platshållarfärg per bild ('#rrggbb', '' = kunde inte läsas, NULL = inte uträknad) – server/imgcolor.js
 addCol('items', 'poster_color', 'TEXT');
 addCol('items', 'backdrop_color', 'TEXT');

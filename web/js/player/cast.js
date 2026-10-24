@@ -5,7 +5,7 @@
 //   webbspelaren (var 10:e sekund, vid paus, när titeln byts och när uppspelningen slutar).
 // - Kontrollpanelen (#castbar, som mini-spelaren) styr mottagaren: spola, paus, ±10 s, volym, ljud- och undertextspår, stopp.
 // Vilken titel som spelas står i MediaInfo.customData (bx: 1) – så hittar en omladdad sida tillbaka till en pågående cast.
-import { $, api, esc, fmtTime, status, store, sxe, toast, toastErr } from '../core.js';
+import { $, api, esc, fmtTime, status, sxe, toast, toastErr } from '../core.js';
 import { P, closePlayer } from './video.js';
 import { serverFxParams } from './comfort.js';
 import { M, spokenPos, stopAudio } from '../audio.js';
@@ -100,7 +100,8 @@ async function session() {
 }
 const promise = (fn) => new Promise((ok, no) => fn(ok, no));
 /** MediaInfo för en film/ett avsnitt (en egen mediatoken per titel). queue: köas för senare (ingen förstart på servern). */
-async function videoMedia(it, { audio = '', sub = '', subLang = '', queue = false } = {}) {
+// sub: undertextens id, '' = inga, utelämnad = kontots förval (defaultSub från servern)
+async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
   const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: audio || '',
     q: P?.q && P.q !== 'auto' ? P.q : '', ...(it.version ? { version: it.version } : {}), ...(queue ? { queue: '1' } : {}), ...serverFxParams(true) }), { bg: true }); // nattläge/dialog: servern filtrerar
   const o = origin();
@@ -116,9 +117,9 @@ async function videoMedia(it, { audio = '', sub = '', subLang = '', queue = fals
     t.trackContentId = o + s.url; t.trackContentType = 'text/vtt'; t.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
     t.name = s.label; t.language = s.lang || 'und'; return t;
   });
-  const si = sub ? p.subtitles.findIndex(s => s.id === sub) : subLang ? p.subtitles.findIndex(s => s.lang === subLang) : -1;
-  const forced = p.subtitles.findIndex(s => s.forced);
-  const active = si >= 0 ? [si + 1] : forced >= 0 && !sub ? [forced + 1] : [];
+  const want = sub ?? p.defaultSub ?? '';
+  const si = want ? p.subtitles.findIndex(s => s.id === want) : -1;
+  const active = si >= 0 ? [si + 1] : [];
   mi.customData = { bx: 1, kind: 'video', id: it.id, version: it.version || null, title, sub: it.kind !== 'episode' && it.year ? String(it.year) : '',
     duration: p.duration || it.duration || 0, nextId: it.nextId || null, audio: p.audioSelected != null ? String(p.audioSelected) : String(audio || ''),
     audios: (p.audio || []).map(a => ({ i: a.index, l: [a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ') })),
@@ -130,7 +131,7 @@ export async function castItem(it, position, opts = {}) {
   if (!castReady) return toast('Chromecast kräver Chrome och att servern nås via HTTPS');
   const sess = await session(); if (!sess) return;
   let m;
-  try { m = await videoMedia(it, { audio: opts.audio ?? P?.audio ?? '', sub: opts.sub ?? P?.sub ?? '', subLang: store.get('sublang', '') }); }
+  try { m = await videoMedia(it, { audio: opts.audio ?? P?.audio ?? '', sub: opts.sub ?? P?.sub }); }
   catch (e) { return toastErr(e); }
   const req = new chrome.cast.media.LoadRequest(m.info);
   req.currentTime = position || 0; req.autoplay = true;
@@ -153,7 +154,7 @@ async function queueNext(nextId) {
   C.queued.add(nextId);
   try {
     const nx = await api('/items/' + nextId, { bg: true });
-    const m = await videoMedia(nx, { subLang: store.get('sublang', ''), queue: true });
+    const m = await videoMedia(nx, { queue: true });
     const media = C.ctx.getCurrentSession()?.getMediaSession(); if (!media) throw new Error('ingen mediesession');
     const qi = new chrome.cast.media.QueueItem(m.info);
     qi.autoplay = true; qi.preloadTime = 20;

@@ -16,6 +16,7 @@ import * as ver from '../versions.js';
 import { route, user, media, admin } from '../http/router.js';
 import { mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia } from '../http/context.js';
 import * as cinema from '../cinema.js';
+import * as pp from '../playprefs.js';
 import { TRAILER_SCOPE } from '../trailers.js';
 import crypto from 'node:crypto';
 
@@ -64,6 +65,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   if (c.q.get('info') !== '1' && screenBlock(c)) return;
   const t0 = Date.now();
+  // Användarens uppspelningsval (Mitt konto): gäller när klienten inte själv valt kvalitet eller ljudspår
+  const prefs = pp.getPrefs(c.user.id);
+  const adminCap = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
   // Ej analyserad film: ta fram nyckelbilderna nu (före bakgrundsanalysen) så att den kan skickas utan
   // omkodning. Filens index räcker oftast (någon sekund); måste hela filen läsas väntar vi högst 10 s –
   // då omkodas den den här gången och nästa gång går den utan omkodning.
@@ -71,7 +75,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     // Bara versioner som faktiskt skulle kunna skickas utan omkodning (rätt kvalitet, ingen inbränning/tonmappning)
     // – annars omkodas filmen ändå och väntan på nyckelbilderna vore bortkastad
     const pre = st.parseCaps(c.q); pre.assumeKf = true;
-    if ((!c.q.get('q') || c.q.get('q') === 'auto') && !isLocalReq(c.req)) pre.q = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
+    if (!c.q.get('q') || c.q.get('q') === 'auto') { const aq = pp.autoQuality(prefs, !isLocalReq(c.req), adminCap); pre.q = aq.cap || aq.q || pre.q; }
     const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v) && st.decide(v, pre).mode !== 'transcode').slice(0, 2);
     if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 10000))]);
     if (c.res.writableEnded || c.req.destroyed) return;
@@ -83,7 +87,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // om klienten mätt sin uppkoppling (bw, kbit/s) eller sparar data (save=1), efter vad som faktiskt ryms
   const auto = !c.q.get('q') || c.q.get('q') === 'auto';
   const bw = Math.max(0, Math.min(1e6, parseInt(c.q.get('bw')) || 0));
-  if (remote && auto) o.q = remoteQuality(getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), bw, c.q.get('save') === '1');
+  // Hemma gäller användarens standardkvalitet (Auto = original), utanför hemmet användarens val inom taket
+  if (auto) { const aq = pp.autoQuality(prefs, remote, adminCap); o.q = remote ? remoteQuality(aq.cap, bw, c.q.get('save') === '1') : aq.q || o.q; }
   o.maxBitrate = st.QUALITIES[o.q]?.br || null;
   // Flera versioner: klientens val (version=<id>) eller den som passar klienten bäst
   const versions = ver.versionsOf(main);
@@ -91,6 +96,10 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const it = asked || ver.chooseVersion(versions, o, st.decide, st.QUALITIES[o.q]?.h || null);
   // Spårval utan angiven version kan komma från huvudfilens spårlista (appar) – översätt till den valda filen
   if (!asked) o = ver.mapTracks(o, main, it, st.streamsOf, st.subtitlesOf);
+  // Inget ljudspår valt av klienten (t.ex. apparna): användarens föredragna språk – aldrig kommentar/syntolkning
+  const audios = st.streamsOf(it).filter(s => s.type === 'audio');
+  const prefAudio = pp.pickAudio(audios, prefs);
+  if (!o.audio && prefAudio && prefAudio !== (audios.find(a => a.default) || audios[0])) o.audio = String(prefAudio.index);
   const d = st.decide(it, o);
   // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
   // Bara utanför hemmet: hemma räcker bandbredden, och byten mellan steg startar om omkodningen i onödan
@@ -125,6 +134,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons,
     start: Math.max(0, +c.q.get('start') || 0), kbps });
   const allSubs = st.subtitlesOf(it);
+  // Förvalda spår enligt användarens val (nya fält): ljudet ovan, undertexten bland textundertexterna (subtitles)
+  const selAudio = audios.find(a => String(a.index) === String(d.audio)) || prefAudio;
+  const defSub = pp.pickSub(allSubs, selAudio, prefs);
   const subs = allSubs.filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
@@ -137,6 +149,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
     audioSelected: d.audio ?? null,
+    defaultAudio: prefAudio ? prefAudio.index : null, defaultSub: defSub ? defSub.id : null,
+    autoSkip: { intro: prefs.skipIntro, recap: prefs.skipRecap, credits: prefs.skipCredits },
+    autoNext: { enabled: prefs.autoNext, countdown: prefs.nextCountdown },
     ...(preroll.length ? { preroll } : {}),
     ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
@@ -178,6 +193,16 @@ route('PUT', '/api/me/cinema', user, async (c) => {
   cinema.setPrefs(c.user.id, b);
   send(c.res, 200, { ...cinema.getPrefs(c.user.id), max: cinema.MAX_TRAILERS, prerollAvailable: cinema.prerollFiles(insideMedia).length > 0 });
 });
+// Uppspelningsval per konto (ljud-/undertextspråk, undertextläge, överhoppning, nästa avsnitt, standardkvalitet)
+route('GET', '/api/me/playback-prefs', user, (c) => send(c.res, 200, playbackPrefsOut(c.user.id)));
+route('PUT', '/api/me/playback-prefs', user, async (c) => {
+  const b = await readJson(c.req);
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return fail(c.res, 400, 'Ogiltiga val');
+  pp.setPrefs(c.user.id, b);
+  send(c.res, 200, playbackPrefsOut(c.user.id));
+});
+// remoteCap = administratörens tak utanför hemmet (visas i Mitt konto)
+const playbackPrefsOut = (uid) => ({ ...pp.getPrefs(uid), remoteCap: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080') });
 route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
 route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
 route('GET', '/api/stream/:id/download', user, (c) => { const it = mediaItem(c); if (it) st.serveDownload(c.req, c.res, it); });
