@@ -16,6 +16,7 @@ import * as wrapped from '../wrapped.js';
 import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
 import * as follows from '../follows.js';
+import * as ccol from '../customcollections.js';
 import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
 import { insideMedia, MEDIA_ROOT, ctx, listItems, recommend, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
@@ -95,7 +96,9 @@ route('GET', '/api/home', user, (c) => {
   const watchlist = listItems(uid, 'i.id IN (SELECT item_id FROM watchlist WHERE user_id=p_uid.uid)', [], '(SELECT added FROM watchlist w WHERE w.user_id=p_uid.uid AND w.item_id=i.id) DESC', 30);
   const recommended = recommend(uid, 20);
   const forYou = listItems(uid, follows.FOR_YOU_WHERE, [], follows.FOR_YOU_ORDER, 30);
-  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou });
+  // Egna samlingar med "Visa på startsidan" (nytt fält – apparna läser det inte)
+  const customCollections = ccol.homeShelves(c.user, !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)));
+  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou, customCollections });
 });
 const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title' };
 route('GET', '/api/libraries/:id/items', user, (c) => {

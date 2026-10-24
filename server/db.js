@@ -212,6 +212,13 @@ CREATE TABLE IF NOT EXISTS scrobble_queue(id INTEGER PRIMARY KEY, user_id INTEGE
 db.exec(`CREATE TABLE IF NOT EXISTS smart_playlists(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL, def TEXT NOT NULL, shared INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS smartpl_user ON smart_playlists(user_id);`);
+// Egna samlingar (filmer och serier): delade (alla profiler, skapas av administratörer) eller privata (bara skaparen).
+// sort: manual (pos), title, year eller added (när titeln lades i samlingen). on_home = visas som hylla på startsidan.
+db.exec(`CREATE TABLE IF NOT EXISTS custom_collections(id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, overview TEXT, shared INTEGER NOT NULL DEFAULT 0, sort TEXT NOT NULL DEFAULT 'manual', on_home INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL, updated INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS custom_collection_items(collection_id INTEGER NOT NULL REFERENCES custom_collections(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, pos INTEGER NOT NULL, added INTEGER NOT NULL, PRIMARY KEY(collection_id,item_id));`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -228,7 +235,9 @@ CREATE INDEX IF NOT EXISTS pli_track ON playlist_items(track_id);
 CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);
 CREATE INDEX IF NOT EXISTS tracks_lib_added ON tracks(library_id, added);
 CREATE INDEX IF NOT EXISTS scrobble_due ON scrobble_queue(due, next_try);
-CREATE INDEX IF NOT EXISTS scrobble_user ON scrobble_queue(user_id, due);`);
+CREATE INDEX IF NOT EXISTS scrobble_user ON scrobble_queue(user_id, due);
+CREATE INDEX IF NOT EXISTS cc_owner ON custom_collections(owner_id);
+CREATE INDEX IF NOT EXISTS cci_item ON custom_collection_items(item_id);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;

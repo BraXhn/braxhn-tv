@@ -123,9 +123,12 @@ export function shelf(title, items, land = false, more = '', row = '') {
 export function shelfHtml(title, cardsHtml, { land = false, more = '', row = '', extra = '' } = {}) {
   return `<section class="section"><h2>${esc(title)}${extra ? ' ' + extra : ''}${more ? ' ' + more : ''}</h2><div class="shelf${land ? ' wide' : ''}"${row ? ` data-row="${esc(row)}"` : ''}>${cardsHtml}</div></section>`;
 }
+/** Kort för en samling: TMDB-samling eller egen samling (kind 'custom', omslaget är första titelns affisch) */
 export function colCard(c) {
-  return `<a class="card" href="#/collection/${c.id}"><div class="art">${placeholder(c.name)}
-    ${c.poster ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/collection-image/${+c.id}/poster`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : ''}<span class="badge">${c.count}</span></div>
+  const own = c.kind === 'custom';
+  const src = own ? (c.cover ? `/api/image/${+c.cover}/poster` : '') : c.poster ? `/api/collection-image/${+c.id}/poster` : '';
+  return `<a class="card${own ? ' ucol' : ''}" href="#/${own ? 'ucollection' : 'collection'}/${+c.id}"><div class="art">${placeholder(c.name)}
+    ${src ? `<img loading="lazy" decoding="async" ${imgSrc(src, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : ''}<span class="badge">${+c.count}</span></div>
     <div class="t">${esc(c.name)}</div><div class="s">${c.years?.[0] || ''}${c.years?.[1] && c.years[1] !== c.years[0] ? '–' + c.years[1] : ''}</div></a>`;
 }
 

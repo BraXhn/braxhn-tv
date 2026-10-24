@@ -6,6 +6,7 @@ import { play, startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { editItem, matchItem, refreshMeta } from '../views/item.js';
 import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
+import { addToCollection } from './collections.js';
 import { closeMenu, contextMenu, openMenu } from './menu.js';
 
 /** Ritar om alla kort för titeln (samma titel kan finnas i flera rader) och behåller fokus */
@@ -72,6 +73,17 @@ async function hideContinue(it, el) {
     if (pos) redraw(Object.assign(it, { position: pos }));
   });
 }
+// Kortet i en egen samling som man får ändra (views/collections.js): ta bort titeln ur samlingen, med Ångra
+const ucolOf = (el) => { const g = el.closest('[data-ucol][data-edit]'); return g ? +g.dataset.ucol : 0; };
+async function removeFromCollection(it, el) {
+  const cid = ucolOf(el), restore = removeCard(el);
+  try { await api(`/custom-collections/${cid}/items/${it.id}`, { method: 'DELETE', bg: true }); }
+  catch (e) { restore(); return toastErr(e); }
+  undoToast('Borttagen från samlingen', async () => {
+    await api(`/custom-collections/${cid}/items`, { method: 'POST', body: { id: it.id }, bg: true });
+    route(); // tillbaka på sin plats i ordningen
+  });
+}
 async function setFollow(it, follow) {
   const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow }, bg: true });
   const name = it.kind === 'episode' ? it.showTitle || 'serien' : it.title;
@@ -98,6 +110,8 @@ export function cardActions(it, st, el) {
     { icon: '✓', label: `Markera säsong ${it.season} som sedd`, hidden: !ep, onSelect: act(() => seasonWatched(it)) },
     { icon: st.inWatchlist ? '−' : '+', label: st.inWatchlist ? 'Ta bort från Min lista' : (ep ? 'Lägg serien i Min lista' : 'Lägg till i Min lista'),
       onSelect: () => setWatchlist(it, el, !st.inWatchlist) },
+    { icon: '▤', label: ep ? 'Lägg serien i en samling…' : 'Lägg till i samling…', onSelect: () => addToCollection(it) },
+    { icon: '−', label: 'Ta bort från samlingen', hidden: !ucolOf(el), onSelect: () => removeFromCollection(it, el) },
     { icon: '✕', label: 'Ta bort från Fortsätt titta', hidden: rowOf(el) !== 'continue' || !media, onSelect: () => hideContinue(it, el) },
     { icon: st.following ? '🔕' : '🔔', label: st.following ? 'Sluta följa serien' : 'Följ serien', hidden: st.following == null,
       onSelect: act(() => setFollow(it, !st.following)) },
