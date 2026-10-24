@@ -8,7 +8,7 @@ import * as party from '../party.js';
 import * as screen from '../screentime.js';
 import * as follows from '../follows.js';
 import { route, user, adminAnywhere, isTrusted } from '../http/router.js';
-import { allowedFor, ctx, householdRoot, canManage, listItems, itemsByIds } from '../http/context.js';
+import { allowedFor, ctx, householdRoot, canManage, listItems, itemsByIds, canDownload } from '../http/context.js';
 
 // ---------- Titta tillsammans ----------
 route('POST', '/api/party', user, async (c) => {
@@ -123,5 +123,13 @@ route('PUT', '/api/me/offline-sync', user, async (c) => send(c.res, 200, follows
 route('GET', '/api/offline/sync', user, (c) => {
   const have = String(c.q.get('have') || '').split(',').filter(Boolean).slice(0, 500);
   const { ids, ...plan } = follows.syncPlan(c.user.id, have);
-  send(c.res, 200, { ...plan, items: itemsByIds(c.user.id, ids) }); // itemsByIds tillämpar profilens åldersgräns
+  // Utan rätt att ladda ner (perms.js): inget att hämta, och det som redan ligger i appen tas bort.
+  // Titlar som profilen inte längre får se (åldersgräns, bibliotek) tas också bort.
+  if (!canDownload(c.user.id)) return send(c.res, 200, { ...plan, enabled: false, items: [], remove: [...new Set(have.map(Number).filter(x => Number.isInteger(x) && x > 0))] });
+  for (const id of have.map(Number)) {
+    if (!Number.isInteger(id) || id <= 0 || plan.remove.includes(id)) continue;
+    const it = get('SELECT id, kind, parent_id, version_of, age, library_id FROM items WHERE id=?', id);
+    if (it && !allowedFor(c.user.id, it)) plan.remove.push(id);
+  }
+  send(c.res, 200, { ...plan, items: itemsByIds(c.user.id, ids) }); // itemsByIds tillämpar profilens åldersgräns och bibliotek
 });

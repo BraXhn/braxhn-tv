@@ -84,7 +84,8 @@ export async function route() {
   leaveFns.clear();
   const h = location.hash.slice(2) || '';
   const [name, arg, arg2] = h.split('/');
-  if (!me && name !== 'login') { rememberPage(); location.hash = '#/login'; return; }
+  // Inbjudningslänken (#/invite/<token>) öppnas utan inloggning – där skapar mottagaren sitt konto
+  if (!me && name !== 'login' && name !== 'invite') { rememberPage(); location.hash = '#/login'; return; }
   // En film i litet fönster fortsätter spela medan man bläddrar – men aldrig efter utloggning eller vid profilval
   // (då skulle framsteget sparas på fel profil, och en barnprofil kunna titta vidare)
   if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
@@ -94,7 +95,7 @@ export async function route() {
   const lazy = v ? null : LAZY.get(name);
   if (!v && !lazy) { location.hash = '#/'; return; }
   // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
-  $('#top').hidden = !me || name === 'login' || name === 'profiles';
+  $('#top').hidden = !me || name === 'login' || name === 'profiles' || name === 'invite';
   $('#tabbar').hidden = $('#top').hidden;
   $('#rail').hidden = $('#top').hidden;
   $$('#tabbar [data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === (name || '')));

@@ -7,7 +7,7 @@
 import { route, user, calendar as cal } from '../http/router.js';
 import { send, fail } from '../util.js';
 import { get } from '../db.js';
-import { allowedFor, maxAgeOf, ctx } from '../http/context.js';
+import { allowedFor, restricted, ctx } from '../http/context.js';
 import { createCalendarToken, revokeCalendarToken, calendarTokenInfo, audit } from '../auth.js';
 import { hasTmdb, tvdbOf } from '../scanner.js';
 import * as arr from '../arr.js';
@@ -15,7 +15,8 @@ import * as calendar from '../calendar.js';
 
 const MAX_SPAN = 92;
 function opts(uid, q, sonarrList) {
-  return { allowed: (s) => allowedFor(uid, s), kid: maxAgeOf(uid) != null, mine: q.get('mine') === '1', sonarrList };
+  // Begränsade konton (åldersgräns eller bara vissa bibliotek) ser inte Sonarrs serier utanför biblioteket
+  return { allowed: (s) => allowedFor(uid, s), kid: restricted(uid), mine: q.get('mine') === '1', sonarrList };
 }
 
 route('GET', '/api/calendar', user, async (c) => {

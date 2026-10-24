@@ -19,8 +19,11 @@ export function diskTable(D) {
 }
 export async function adminOps() {
   if (!$('#opsp')) return;
-  const O = await api('/ops');
+  const [O, L] = await Promise.all([api('/ops'), api('/libraries')]);
   const el = $('#opsp'); if (!el) return;
+  // DLNA visar alla bibliotek (null) eller bara de valda (rättigheter för hela hemnätet – DLNA har ingen inloggning)
+  const dlLibs = O.dlna.libraries;
+  const dlLibOpts = L.map(l => `<label class="switch"><input type="checkbox" data-dllib="${+l.id}" ${dlLibs == null || dlLibs.includes(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('');
   const userOpts = O.users.map(u => `<label class="switch"><input type="checkbox" data-impu="${+u.id}"> ${u.parent_id ? '&nbsp;&nbsp;↳ ' : ''}${esc(u.name)}</label>`).join('');
   el.innerHTML = `
   <div class="panel"><h2>Diskutrymme</h2>
@@ -49,6 +52,7 @@ export async function adminOps() {
     <form id="dlnaf"><label class="switch"><input type="checkbox" id="dlen" ${O.dlna.enabled ? 'checked' : ''}> Dela biblioteket med DLNA</label>
       <div class="row"><div style="flex:1;min-width:180px"><label>Namn på TV:n</label><input id="dlname" value="${esc(O.dlna.name)}" maxlength="60"></div>
       <div><label>Högsta åldersgräns <span class="muted small">(tomt = som huvudkontot${O.dlna.effectiveMaxAge == null ? ': allt' : ''})</span></label><input id="dlage" value="${esc(O.dlna.maxAge)}" placeholder="t.ex. 11" style="width:140px"></div></div>
+      ${L.length ? `<fieldset class="libpick"><legend>Bibliotek som visas</legend>${dlLibOpts}</fieldset>` : ''}
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button></div></form>
   </div>
   <div class="panel"><h2>Prometheus-mätvärden ${O.metrics.enabled ? '<span class="ok-badge">På</span>' : ''}</h2>
@@ -127,7 +131,10 @@ export async function adminOps() {
   // DLNA
   $('#dlnaf').onsubmit = act(async (e) => {
     e.preventDefault();
-    await api('/ops', { method: 'PUT', body: { dlnaEnabled: $('#dlen').checked, dlnaName: $('#dlname').value, dlnaMaxAge: $('#dlage').value } });
+    const picked = $$('[data-dllib]').filter(b => b.checked).map(b => +b.dataset.dllib);
+    // Alla ikryssade = alla bibliotek (även sådana som läggs till senare)
+    const dlnaLibraries = picked.length === L.length ? null : picked;
+    await api('/ops', { method: 'PUT', body: { dlnaEnabled: $('#dlen').checked, dlnaName: $('#dlname').value, dlnaMaxAge: $('#dlage').value, dlnaLibraries } });
     toast('Sparat'); later(adminOps, 1500);
   });
 

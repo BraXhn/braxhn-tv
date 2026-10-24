@@ -10,11 +10,13 @@ import * as trakt from '../trakt.js';
 import * as scrobble from '../scrobble.js';
 import * as streaming from '../streaming.js';
 import { route, user, admin, pub } from '../http/router.js';
-import { ctx } from '../http/context.js';
+import { ctx, allowedFor } from '../http/context.js';
 
+// Titel i biblioteket som användaren får se (annars null – en titel i ett otillåtet bibliotek ska inte avslöjas)
+const visibleId = (uid, id) => { if (!id) return null; const it = get('SELECT id, library_id, age, parent_id, version_of FROM items WHERE id=?', id); return it && allowedFor(uid, it) ? id : null; };
 // ---------- Streamingtjänster ("var kan jag se den?") ----------
 route('GET', '/api/items/:id/watch', user, async (c) => {
-  let it = get('SELECT * FROM items WHERE id=?', +c.p.id); if (!it) return fail(c.res, 404, 'Finns inte');
+  let it = get('SELECT * FROM items WHERE id=?', +c.p.id); if (!it || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Finns inte');
   if (it.kind === 'episode') it = get('SELECT * FROM items WHERE id=?', it.parent_id);
   if (!it?.tmdb_id || !hasTmdb()) return send(c.res, 200, null);
   try { send(c.res, 200, await streaming.providersFor(it.kind, it.tmdb_id, it.title)); } catch { send(c.res, 200, null); }
@@ -32,7 +34,11 @@ route('GET', '/api/streaming/discover', user, async (c) => {
   if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler');
   if (!hasTmdb()) return fail(c.res, 400, 'Kräver en TMDB-nyckel');
   const ids = String(c.q.get('providers') || '').split(',').map(Number).filter(Boolean);
-  try { send(c.res, 200, await streaming.discover(c.q.get('kind') === 'show' ? 'show' : 'movie', ids, parseInt(c.q.get('page')) || 1, parseInt(c.q.get('genre')) || null)); }
+  try {
+    const d = await streaming.discover(c.q.get('kind') === 'show' ? 'show' : 'movie', ids, parseInt(c.q.get('page')) || 1, parseInt(c.q.get('genre')) || null);
+    for (const r of d.results) r.inLibrary = visibleId(c.user.id, r.inLibrary);
+    send(c.res, 200, d);
+  }
   catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
 route('GET', '/api/streaming/title/:kind/:tid', user, async (c) => {
@@ -60,10 +66,10 @@ route('GET', '/api/requests/search', user, async (c) => {
     const res = await tmdbSearch(kind, String(c.q.get('q') || '').slice(0, 100), null);
     const mine = streaming.myProviders().length > 0;
     send(c.res, 200, await Promise.all(res.map(async r => {
-      const lib = get('SELECT id FROM items WHERE tmdb_id=? AND kind=? AND version_of IS NULL', r.id, kind);
+      const lib = { id: visibleId(c.user.id, get('SELECT id FROM items WHERE tmdb_id=? AND kind=? AND version_of IS NULL', r.id, kind)?.id) };
       const rq = get('SELECT status FROM requests WHERE tmdb_id=? AND kind=?', r.id, kind);
       // Finns den redan på en tjänst ni har? Då behöver den inte laddas ner.
-      const streams = mine && !lib ? (await streaming.providersFor(kind, r.id, r.title).catch(() => null))?.onMine || [] : [];
+      const streams = mine && !lib.id ? (await streaming.providersFor(kind, r.id, r.title).catch(() => null))?.onMine || [] : [];
       return { ...r, kind, inLibrary: lib?.id || null, request: rq?.status || null, streaming: streams };
     })));
   } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }

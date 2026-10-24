@@ -116,7 +116,7 @@ export function cardActions(it, st, el) {
     { icon: st.following ? '🔕' : '🔔', label: st.following ? 'Sluta följa serien' : 'Följ serien', hidden: st.following == null,
       onSelect: act(() => setFollow(it, !st.following)) },
     { icon: '👥', label: 'Titta tillsammans…', hidden: !media || !!me?.kid, onSelect: () => play(it.id, pos, { startParty: true }).catch(toastErr) },
-    { icon: '⤓', label: 'Ladda ner filen', hidden: !media, href: `/api/stream/${+it.id}/download`, download: true },
+    { icon: '⤓', label: 'Ladda ner filen', hidden: !media || me?.canDownload === false, href: `/api/stream/${+it.id}/download`, download: true },
     'separator',
     { icon: 'ℹ', label: 'Visa information', href: `#/item/${+it.id}` },
     { icon: '↗', label: 'Gå till serien', hidden: !ep, href: `#/item/${+it.show}` },

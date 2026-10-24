@@ -4,6 +4,7 @@
 // fasta SQL-uttryck hamnar i frågan – klientens text (fältnamn, operator, värden) blir aldrig en del av SQL-texten.
 import { db, get, all, run } from './db.js';
 import { shapeTrack } from './music.js';
+import { libFilter } from './perms.js';
 
 const DAY = 86400;
 export const MAX_RULES = 30, MAX_LISTS = 100, MAX_TRACKS = 5000;
@@ -200,13 +201,16 @@ const SELECT_FROM = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.
  */
 export function compile(def, uid, { at = Math.floor(Date.now() / 1000), seed = 0 } = {}) {
   const P = [uid, uid];
-  const where = groupSql(def.match, def.rules, at, P);
+  const where = `(${groupSql(def.match, def.rules, at, P)})`;
+  // Bara spår i bibliotek som lyssnaren får se (rättigheter per användare) – även i listor som andra delat
+  const lf = libFilter(uid, 't.library_id');
+  P.push(...lf.params);
   const dir = def.order === 'asc' ? 'ASC' : 'DESC';
   let order;
   if (def.sort === 'random') { order = '(t.id * 2654435761 + ?) % 1000003, t.id'; P.push(seed); }
   else order = `${SORTS[def.sort].expr} ${dir}, al.sort_title, t.disc_no, t.track_no, t.id`;
   const limit = def.limit || MAX_TRACKS;
-  return { sql: `${SELECT_FROM} WHERE ${where} ORDER BY ${order} LIMIT ?`, params: [...P, limit], countSql: `SELECT COUNT(*) AS n FROM (${SELECT_FROM} WHERE ${where})`, countParams: P.slice(0, def.sort === 'random' ? -1 : undefined) };
+  return { sql: `${SELECT_FROM} WHERE ${where}${lf.sql} ORDER BY ${order} LIMIT ?`, params: [...P, limit], countSql: `SELECT COUNT(*) AS n FROM (${SELECT_FROM} WHERE ${where}${lf.sql})`, countParams: P.slice(0, def.sort === 'random' ? -1 : undefined) };
 }
 
 /** Kör en definition: spårlista (formad som i resten av musik-API:t). */

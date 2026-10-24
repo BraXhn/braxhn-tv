@@ -24,15 +24,16 @@ import * as homes from '../homeshelves.js';
 import * as playprefs from '../playprefs.js';
 import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
-import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
+import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
 
 // Bibliotek. Fälten i svaret (l.*: id, name, type, path, anime, nfo, home_video, count) läses av apparna – bara tillägg.
 // paths = alla bibliotekets mappar (path är den första).
+// Bara de bibliotek användaren får se (rättigheter per användare, perms.js).
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
   WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
   ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)
-  .map(l => ({ ...l, paths: rootsOf(l) }))));
+  .filter(l => libOk(c.user.id, l.id)).map(l => ({ ...l, paths: rootsOf(l) }))));
 /** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
 function checkPaths(list) {
   const out = [];
@@ -72,7 +73,12 @@ route('DELETE', '/api/libraries/:id', admin, (c) => {
 });
 route('POST', '/api/libraries/:id/scan', admin, (c) => { scan(+c.p.id); send(c.res, 200, { ok: true }); });
 route('POST', '/api/scan', admin, (c) => { scan(); send(c.res, 200, { ok: true }); });
-route('GET', '/api/scan', user, (c) => send(c.res, 200, scanStatus));
+// Status för skanningen; användare som bara får se vissa bibliotek får inte veta namnen på de andra
+route('GET', '/api/scan', user, (c) => {
+  if (!restricted(c.user.id)) return send(c.res, 200, scanStatus);
+  const { library, analysis, warnings, ...rest } = scanStatus;
+  send(c.res, 200, { ...rest, analysis: analysis ? { running: !!analysis.running } : analysis });
+});
 route('GET', '/api/fs', admin, (c) => {
   const p = insideMedia(c.q.get('path') || MEDIA_ROOT);
   if (!p) return fail(c.res, 400, 'Ogiltig sökväg');
@@ -113,7 +119,7 @@ route('GET', '/api/home', user, (c) => {
   cont.sort((a, b) => (at.get(b.id) || 0) - (at.get(a.id) || 0));
   cont.length = Math.min(cont.length, CONTINUE_MAX);
   // Musik och ljudböcker har egna startsidor (och inga titlar i items)
-  const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook') ORDER BY name").map(l => {
+  const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook') ORDER BY name").filter(l => libOk(uid, l.id)).map(l => {
     const row = { library: l, title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
     // Serier: nya avsnitt grupperade per säsong (nytt fält – items är oförändrat för apparna)
     if (l.type === 'show') row.seasons = groupNewEpisodes(listItems(uid, `i.library_id=? AND i.kind='episode'`, [l.id],
@@ -126,7 +132,8 @@ route('GET', '/api/home', user, (c) => {
   const customCollections = ccol.homeShelves(c.user, !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)));
   // Kommer snart: avsnitt de närmaste 7 dagarna (nytt fält)
   const today = calendar.ymd();
-  const upcoming = calendar.entries(uid, today, calendar.addDays(today, 6), { allowed: (x) => allowedFor(uid, x), kid: maxAgeOf(uid) != null,
+  // Begränsade konton (åldersgräns eller bibliotek) ser bara serier i biblioteket, inte Sonarrs övriga
+  const upcoming = calendar.entries(uid, today, calendar.addDays(today, 6), { allowed: (x) => allowedFor(uid, x), kid: restricted(uid),
     sonarrList: calendar.sonarrCached(), limit: 30 });
   // Tematiska hyllor, Utvalt och användarens ordning (nya fält – apparna läser dem inte). Dolda hyllor räknas inte.
   // Rekommenderat för dig räknas och cachas tillsammans med dem (themed).
@@ -175,7 +182,7 @@ function subfolders(uid, libId, f, sort) {
 }
 route('GET', '/api/libraries/:id/items', user, (c) => {
   const lib = get('SELECT * FROM libraries WHERE id=?', c.p.id);
-  if (!lib) return fail(c.res, 404, 'Biblioteket finns inte');
+  if (!lib || !libOk(c.user.id, lib.id)) return fail(c.res, 404, 'Biblioteket finns inte');
   const where = [`i.library_id=?`, `i.kind=?`], params = [lib.id, lib.type];
   const filter = c.q.get('filter');
   if (filter === 'unwatched') where.push(lib.type === 'show' ? 'ep_watched < ep_total' : 'COALESCE(p.watched,0)=0');
@@ -486,15 +493,15 @@ route('GET', '/api/items/:id/trickplay/:n', img, (c) => {
 // ?w= ger bilden nedskalad till en av de fasta bredderna (imgsize.js) – behörighetskontrollerna görs först
 route('GET', '/api/collection-image/:cid/:type', img, async (c) => {
   if (!['poster', 'backdrop'].includes(c.p.type)) return fail(c.res, 404, '');
-  if (maxAgeOf(c.user.id) != null && !collectionVisible(c.user.id, +c.p.cid)) return fail(c.res, 404, 'Ingen bild');
+  if (restricted(c.user.id) && !collectionVisible(c.user.id, +c.p.cid)) return fail(c.res, 404, 'Ingen bild');
   fs.readFile(await sized(path.join(IMAGES, `c${+c.p.cid}-${c.p.type}.jpg`), c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild')
     : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
 });
 route('GET', '/api/image/:id/:type', img, async (c) => {
   // season<N> = lokal säsongsaffisch (season01-poster.jpg bredvid serien, localmeta.js)
   if (!['poster', 'backdrop', 'thumb'].includes(c.p.type) && !/^season\d{1,4}$/.test(c.p.type)) return fail(c.res, 404, '');
-  // Begränsade profiler (barn) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen) från titlar över gränsen
-  if (maxAgeOf(c.user.id) != null && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
+  // Begränsade profiler (barn, eller utan åtkomst till biblioteket) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen)
+  if (restricted(c.user.id) && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
   const f = imageFile(+c.p.id, c.p.type);
   const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
   const w = c.q.get('w');
@@ -527,6 +534,8 @@ route('GET', '/api/people/:pid', user, async (c) => {
   send(c.res, 200, { ...info, items: items.map(i => ({ ...i, roles: roles.get(i.id) || [] })) });
 });
 route('GET', '/api/people/:pid/image', img, async (c) => {
+  // Begränsade: bara personer som finns i en titel profilen får se (som personsidan)
+  if (restricted(c.user.id) && !listItems(c.user.id, `i.kind IN ('movie','show') AND i.id IN (SELECT item_id FROM item_people WHERE person_id=?)`, [+c.p.pid], 'i.id', 1, 0, { slim: true }).length) return fail(c.res, 404, 'Ingen bild');
   const f = await people.personImage(+c.p.pid);
   if (!f) return fail(c.res, 404, 'Ingen bild');
   fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));

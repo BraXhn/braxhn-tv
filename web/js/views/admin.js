@@ -5,6 +5,7 @@ import { boot, loadLibs, route } from '../router.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
+import { adminInvites, editPerms, permsSummary } from './admin-users.js';
 import { emptyState, errorState } from '../ui/states.js';
 import { sonicAdmin } from '../sonic.js';
 
@@ -92,15 +93,17 @@ views.admin = async (sec) => {
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
   </div>
   <div class="panel"><h2>Användare</h2>
-    <table><tr><th>Namn</th><th>Roll</th><th>2FA</th><th>Utanför hemmet</th><th>Senast aktiv</th><th></th></tr>
-    ${U.map(u => `<tr><td>${esc(u.name)}</td><td>${u.is_admin ? 'Admin' : 'Användare'}</td>
-      <td>${u.totp_enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</td>
-      <td><label class="switch"><input type="checkbox" data-remote="${u.id}" ${u.remote_allowed ? 'checked' : ''}> Tillåten</label></td>
+    <p class="muted small">Rättigheter styr vilka bibliotek var och en ser (som delning i Plex), nedladdning, högsta kvalitet utanför hemmet och hur många strömmar som får spelas samtidigt. Profiler ärver kontots rättigheter.</p>
+    <table><tr><th>Namn</th><th>Roll</th><th>2FA</th><th>Utanför hemmet</th><th>Rättigheter</th><th>Senast aktiv</th><th></th></tr>
+    ${U.map(u => `<tr><td>${esc(u.name)}${u.parent_id ? `<div class="muted small">Profil hos ${esc(U.find(x => x.id === u.parent_id)?.name || '?')}${u.max_age != null ? ` · max ${+u.max_age} år` : ''}</div>` : ''}</td><td>${u.is_admin ? 'Admin' : u.parent_id ? 'Profil' : 'Användare'}</td>
+      <td>${u.parent_id ? '' : u.totp_enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</td>
+      <td>${u.parent_id ? '<span class="muted small">Som kontot</span>' : `<label class="switch"><input type="checkbox" data-remote="${u.id}" ${u.remote_allowed ? 'checked' : ''}> Tillåten</label>`}</td>
+      <td class="small">${esc(permsSummary(u, L))}${u.is_admin ? '' : ` <button class="ghost small" data-perms="${u.id}">Ändra</button>`}</td>
       <td class="muted small">${fmtDate(u.last_seen)}</td>
-      <td class="r"><button class="ghost small" data-pw="${u.id}">Nytt lösenord</button>
+      <td class="r">${u.parent_id ? '' : `<button class="ghost small" data-pw="${u.id}">Nytt lösenord</button>`}
       ${u.totp_enabled && u.id !== me.id ? `<button class="ghost small" data-r2fa="${u.id}">Återställ 2FA</button>` : ''}
-      <button class="ghost small" data-lout="${u.id}">Logga ut överallt</button>
-      ${u.id !== me.id ? `<button class="ghost small" data-adm="${u.id}" data-v="${u.is_admin ? 0 : 1}">${u.is_admin ? 'Ta bort admin' : 'Gör till admin'}</button>
+      ${u.parent_id ? '' : `<button class="ghost small" data-lout="${u.id}">Logga ut överallt</button>`}
+      ${u.id !== me.id && !u.parent_id ? `<button class="ghost small" data-adm="${u.id}" data-v="${u.is_admin ? 0 : 1}">${u.is_admin ? 'Ta bort admin' : 'Gör till admin'}</button>
       <button class="danger small" data-udel="${u.id}">Ta bort</button>` : ''}</td></tr>`).join('')}</table>
     <form id="adduser" class="row" style="margin-top:14px;align-items:flex-end">
       <div style="flex:1;min-width:140px"><label>Namn</label><input id="un" required maxlength="64"></div>
@@ -109,6 +112,7 @@ views.admin = async (sec) => {
       <label style="display:flex;gap:6px;align-items:center;margin:0 0 10px"><input type="checkbox" id="ur" checked> Får titta utanför hemmet</label>
       <button class="primary">Lägg till</button></form>
   </div>
+  <div class="panel" id="adm-invites"><h2>Inbjudningar</h2><div id="invp"></div></div>
   <div class="panel"><h2>Säkerhet</h2><form id="secform">
     <label class="switch"><input type="checkbox" id="s2fa" ${S.require2faRemote ? 'checked' : ''}> Kräv tvåstegsverifiering för inloggning utanför hemmet</label>
     <label class="switch"><input type="checkbox" id="sqc" ${S.quickConnect !== false ? 'checked' : ''}> Tillåt inloggning med kod på TV (en inloggad användare godkänner koden från mobilen)</label>
@@ -268,6 +272,8 @@ views.admin = async (sec) => {
     catch (er) { toastErr(er); }
   };
   $$('[data-udel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog(`Ta bort användaren ${U.find(u => u.id === +b.dataset.udel)?.name || ''}?`, { okLabel: 'Ta bort', danger: true })) { await api('/users/' + b.dataset.udel, { method: 'DELETE' }); route(); } }));
+  $$('[data-perms]').forEach(b => b.onclick = act(async () => { if (await editPerms(U.find(u => u.id === +b.dataset.perms), U, L, S)) route(); }));
+  adminInvites(L, S).catch(e => { toastErr(e); });
   $$('[data-remote]').forEach(b => b.onchange = act(async () => { await api('/users/' + b.dataset.remote, { method: 'PUT', body: { remoteAllowed: b.checked } }); toast('Sparat'); }));
   $$('[data-r2fa]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Återställ tvåstegsverifiering för användaren?', { okLabel: 'Återställ', danger: true })) { await api('/users/' + b.dataset.r2fa, { method: 'PUT', body: { reset2fa: true } }); route(); } }));
   $$('[data-lout]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Logga ut användaren från alla enheter?', { okLabel: 'Logga ut' })) { await api('/users/' + b.dataset.lout, { method: 'PUT', body: { logoutAll: true } }); toast('Utloggad'); } }));

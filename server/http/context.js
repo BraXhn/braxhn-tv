@@ -3,10 +3,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSetting, get, all } from '../db.js';
-import { clientIp, fail, send } from '../util.js';
+import { clientIp, fail, send, isLocalReq } from '../util.js';
 import * as act from '../activity.js';
 import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
+import * as st from '../stream.js';
+import { permsOf, libsOf, libOk, libFilter, canDownload, remoteMax } from '../perms.js';
+export { permsOf, libsOf, libOk, libFilter, canDownload, remoteMax };
 
 export const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
 
@@ -48,20 +51,33 @@ function shape(r) {
 // ---------- åldersgräns för profiler ----------
 export const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
 export const maxAgeOf = (uid) => get('SELECT max_age FROM users WHERE id=?', uid)?.max_age ?? null;
-/** Får användaren se titeln? Avsnitt ärver seriens åldersgräns. Okänd ålder döljs för begränsade profiler. */
+/**
+ * Får användaren se titeln? Biblioteksbehörighet (perms.js) och åldersgräns. Avsnitt ärver seriens och filmversioner
+ * huvudradens åldersgräns. Okänd ålder döljs för begränsade profiler. Rader utan library_id (delvisa SELECT) slås upp.
+ */
 export function allowedFor(uid, it) {
-  const max = maxAgeOf(uid);
-  if (max == null || !it) return true;
+  if (!it) return true;
+  const pm = permsOf(uid);
+  if (pm.libs != null) {
+    let lib = it.library_id;
+    if (lib == null && it.id != null) lib = get('SELECT library_id FROM items WHERE id=?', it.id)?.library_id;
+    if (lib == null || !pm.libs.includes(lib)) return false;
+  }
+  const max = pm.maxAge;
+  if (max == null) return true;
   let age = it.age;
   // Avsnitt ärver seriens och filmversioner huvudradens åldersgräns
   const from = it.parent_id || it.version_of;
   if (age == null && from) age = get('SELECT age FROM items WHERE id=?', from)?.age;
   return age == null ? allowUnrated() : age <= max;
 }
-/** Åldersfilter för SQL (alias i = titeln, s = ev. serie) */
+/** Begränsad på något sätt (åldersgräns eller bibliotek)? Då kontrolleras även bilder och liknande billiga routes. */
+export const restricted = (uid) => { const pm = permsOf(uid); return pm.maxAge != null || pm.libs != null; };
+/** Ålders- och biblioteksfilter för SQL (alias i = titeln, s = ev. serie). Alla listfrågor över titlar går genom det. */
 export function ageFilter(uid) {
-  const max = maxAgeOf(uid);
-  return max == null ? { sql: '', params: [] } : { sql: ` AND COALESCE(i.age, s.age, ?) <= ?`, params: [allowUnrated() ? max : 999, max] };
+  const pm = permsOf(uid), max = pm.maxAge;
+  const lib = pm.libs == null ? { sql: '', params: [] } : { sql: ' AND i.library_id IN (SELECT value FROM json_each(?))', params: [JSON.stringify(pm.libs)] };
+  return max == null ? lib : { sql: ` AND COALESCE(i.age, s.age, ?) <= ?${lib.sql}`, params: [allowUnrated() ? max : 999, max, ...lib.params] };
 }
 // Filmversioner (version_of) listas aldrig – bara huvudraden syns i listor, sök och rekommendationer
 export const MAIN_ONLY = ' AND i.version_of IS NULL';
@@ -190,10 +206,16 @@ export const mediaItem = (c) => {
   if (!it) { fail(c.res, 404, 'Finns inte'); return null; }
   if (!allowedFor(c.user.id, it)) { fail(c.res, 403, 'Inte tillgänglig i den här profilen'); return null; }
   if (c.req.url.includes('/api/stream/')) {
+    const p = c.req.url.split('?')[0];
+    // Nedladdning (originalfilen och offline-filen) kräver rättigheten (perms.js)
+    if (/\/(offline-file|download)$/.test(p) && !canDownload(c.user.id)) { fail(c.res, 403, 'Ditt konto får inte ladda ner'); return null; }
+    // Kvalitetstak utanför hemmet per användare: strömmar över taket nekas även om klienten ber om dem direkt
+    const cap = !isLocalReq(c.req) && permsOf(c.user.id).remoteQuality;
+    if (cap && /\/(direct|hls\/[^/]+)$/.test(p) && st.exceedsQuality(it, c.q, cap, /\/direct$/.test(p))) { fail(c.res, 403, `Ditt konto får titta i högst ${cap}p utanför hemmet`); return null; }
     // "Spelas nu" och admins stopp gäller filmen (huvudraden), även när en annan version strömmas
     if (act.isStopped(c.user.id, ver.mainIdOf(it))) { fail(c.res, 403, 'Uppspelningen stoppades av administratören'); return null; }
     // Skärmtid: strömmar nekas när tiden är slut (nedladdningar för offline räknas inte som tittande)
-    if (!/\/(offline-file|download)$/.test(c.req.url.split('?')[0]) && screenBlock(c)) return null;
+    if (!/\/(offline-file|download)$/.test(p) && screenBlock(c)) return null;
     act.touch(c.user.id, ver.mainIdOf(it));
   }
   return it;

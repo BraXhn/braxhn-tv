@@ -10,10 +10,13 @@ import * as smartl from '../smartlists.js';
 import * as sonic from '../sonic.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio, admin } from '../http/router.js';
-import { screenBlock } from '../http/context.js';
+import { screenBlock, libOk } from '../http/context.js';
 
 // ---------- Musik ----------
-const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget musikbibliotek'); return l; };
+// Bibliotek, album, artister och spår kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
+const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l || !libOk(c.user.id, l.id)) { fail(c.res, 404, 'Inget musikbibliotek'); return null; } return l; };
+/** Spår som användaren får se (för spellistor) */
+const trackOk = (uid, id) => { const t = get('SELECT library_id FROM tracks WHERE id=?', +id); return !!t && libOk(uid, t.library_id); };
 route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id), sonic: sonic.libraryStats(l.id) }); });
 route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
 route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.artists(l.id)); });
@@ -21,11 +24,13 @@ route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if 
 route('GET', '/api/music/albums/:aid', user, (c) => { const a = music.album(+c.p.aid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
 route('GET', '/api/music/artists/:arid', user, (c) => { const a = music.artist(+c.p.arid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
 route('GET', '/api/music/cover/:aid', img, async (c) => {
+  const al = get('SELECT library_id FROM albums WHERE id=?', +c.p.aid);
+  if (!al || !libOk(c.user.id, al.library_id)) return fail(c.res, 404, 'Inget omslag');
   const f = music.coverPath(+c.p.aid);
   if (!f) return fail(c.res, 404, 'Inget omslag');
   fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
 });
-const trackRow = (c) => { const t = get('SELECT * FROM tracks WHERE id=?', +c.p.tid); if (!t) fail(c.res, 404, 'Spåret finns inte'); return t; };
+const trackRow = (c) => { const t = get('SELECT * FROM tracks WHERE id=?', +c.p.tid); if (!t || !libOk(c.user.id, t.library_id)) { fail(c.res, 404, 'Spåret finns inte'); return null; } return t; };
 route('GET', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, t, c.q, c.user.id); });
 route('HEAD', '/api/music/tracks/:tid/stream', audio, (c) => { const t = trackRow(c); if (t && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, t, c.q, c.user.id); });
 // Kortlivad länk till ett spår (för appar, Chromecast och AirPlay)
@@ -56,7 +61,7 @@ route('POST', '/api/music/playlists', user, async (c) => {
   if (all('SELECT id FROM playlists WHERE user_id=?', c.user.id).length >= 200) return fail(c.res, 400, 'För många spellistor');
   const id = tx(() => {
     const id = Number(run('INSERT INTO playlists(user_id,name,created) VALUES(?,?,?)', c.user.id, nm, now()).lastInsertRowid);
-    (Array.isArray(trackIds) ? trackIds.slice(0, 5000) : []).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', id, +t, i); });
+    (Array.isArray(trackIds) ? trackIds.slice(0, 5000) : []).forEach((t, i) => { if (trackOk(c.user.id, t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', id, +t, i); });
     return id;
   });
   send(c.res, 200, { id });
@@ -70,7 +75,7 @@ route('PUT', '/api/music/playlists/:pid', user, async (c) => {
   if (Array.isArray(trackIds)) { // ny ordning / nytt innehåll
     tx(() => {
       run('DELETE FROM playlist_items WHERE playlist_id=?', p.id);
-      trackIds.slice(0, 5000).forEach((t, i) => { if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, i); });
+      trackIds.slice(0, 5000).forEach((t, i) => { if (trackOk(c.user.id, t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, i); });
     });
   }
   send(c.res, 200, { ok: true });
@@ -80,7 +85,7 @@ route('POST', '/api/music/playlists/:pid/tracks', user, async (c) => {
   if (!p) return fail(c.res, 404, 'Finns inte');
   const { trackIds } = await readJson(c.req);
   let pos = (get('SELECT MAX(pos) AS m FROM playlist_items WHERE playlist_id=?', p.id).m ?? -1) + 1;
-  tx(() => { for (const t of (Array.isArray(trackIds) ? trackIds : []).slice(0, 2000)) if (get('SELECT 1 FROM tracks WHERE id=?', +t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, pos++); });
+  tx(() => { for (const t of (Array.isArray(trackIds) ? trackIds : []).slice(0, 2000)) if (trackOk(c.user.id, t)) run('INSERT INTO playlist_items(playlist_id,track_id,pos) VALUES(?,?,?)', p.id, +t, pos++); });
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id); send(c.res, 200, { ok: true }); });
@@ -139,12 +144,18 @@ route('GET', '/api/music/tracks/:tid/similar', user, (c) => {
   send(c.res, 200, { id: t.id, title: t.title, analyzed: !!list, profile: sonic.profile(t.id), trackList: list || [] });
 });
 route('GET', '/api/music/artists/:arid/similar', user, (c) => {
+  const ar = get('SELECT library_id FROM artists WHERE id=?', +c.p.arid);
+  if (!ar || !libOk(c.user.id, ar.library_id)) return fail(c.res, 404, 'Finns inte');
   const list = sonic.similarArtists(+c.p.arid, { limit: Math.max(1, Math.min(50, parseInt(c.q.get('limit')) || 12)) });
   list ? send(c.res, 200, { artists: list }) : fail(c.res, 404, 'Finns inte');
 });
 // Nästa låtar i en låtradio: { trackId | albumId | artistId, history: [spelade, senaste sist], exclude: [i kön], count }
 route('POST', '/api/music/radio', user, async (c) => {
   const b = await readJson(c.req, 64 * 1024);
+  // Radions startpunkt måste ligga i ett bibliotek som användaren får se (låtarna filtreras också i sonic.js)
+  for (const [k, t] of [['trackId', 'tracks'], ['albumId', 'albums'], ['artistId', 'artists']]) {
+    if (+b[k] && !libOk(c.user.id, get(`SELECT library_id FROM ${t} WHERE id=?`, +b[k])?.library_id ?? -1)) return fail(c.res, 404, 'Finns inte');
+  }
   const r = sonic.radio({ trackId: +b.trackId || null, albumId: +b.albumId || null, artistId: +b.artistId || null,
     history: ids(b.history, 200), exclude: ids(b.exclude), count: Math.max(1, Math.min(100, parseInt(b.count) || 25)), uid: c.user.id,
     seed: Number.isInteger(b.seed) ? b.seed : undefined });
@@ -153,7 +164,8 @@ route('POST', '/api/music/radio', user, async (c) => {
 // Ljudresa: från en låt till en annan genom vektorrymden
 route('POST', '/api/music/journey', user, async (c) => {
   const b = await readJson(c.req);
-  if (!get('SELECT 1 FROM tracks WHERE id=?', +b.from) || !get('SELECT 1 FROM tracks WHERE id=?', +b.to)) return fail(c.res, 404, 'Låten finns inte');
+  const ok = (id) => { const t = get('SELECT library_id FROM tracks WHERE id=?', +id); return !!t && libOk(c.user.id, t.library_id); };
+  if (!ok(b.from) || !ok(b.to)) return fail(c.res, 404, 'Låten finns inte');
   if (+b.from === +b.to) return fail(c.res, 400, 'Välj två olika låtar');
   const r = sonic.journey(+b.from, +b.to, c.user.id, { count: parseInt(b.count) || 20 });
   r ? send(c.res, 200, r) : fail(c.res, 409, 'Båda låtarna måste vara ljudanalyserade först – analysen pågår i bakgrunden');

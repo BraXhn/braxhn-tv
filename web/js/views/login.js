@@ -48,6 +48,47 @@ views.login = async () => {
   };
 };
 
+// ---------- Inbjudan (#/invite/<token>): mottagaren skapar ett eget konto ----------
+// Rättigheterna (bibliotek, nedladdning …) har administratören valt i inbjudan; servern kontrollerar allt (server/invites.js).
+views.invite = async (token) => {
+  $('#top').hidden = true;
+  const t = /^[a-f0-9]{64}$/.test(token || '') ? token : '';
+  const r = t ? await fetch('/api/invite/' + t).catch(() => null) : null;
+  const d = r ? await r.json().catch(() => ({})) : {};
+  if (!r?.ok) {
+    main.innerHTML = `<div class="auth"><div class="brand"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"></div>
+      <p>${esc(d.error || 'Inbjudan är ogiltig, redan använd eller har gått ut')}</p>
+      <p class="muted small">Be den som skickade länken om en ny.</p><a class="btn ghost" href="#/login">Till inloggningen</a></div>`;
+    return;
+  }
+  main.innerHTML = `<form class="auth" id="f">
+    <div class="brand"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"></div>
+    <p>Du har bjudits in till ${esc(d.name || 'BraXhn TV')}. Välj ett namn och ett lösenord för ditt konto.</p>
+    ${me ? `<p class="muted small">Du är inloggad som ${esc(me.name)}. Skapar du ett konto loggas du in på det i stället.</p>` : ''}
+    ${d.homeOnly && !d.atHome ? '<p class="err">Den här inbjudan gäller bara hemnätverket – öppna länken hemma.</p>' : ''}
+    <label for="n">Användarnamn</label><input id="n" autocomplete="username" required maxlength="64">
+    <label for="p">Lösenord</label><input id="p" type="password" autocomplete="new-password" required minlength="10">
+    <p class="muted small" style="text-align:left;margin-top:6px">Minst 10 tecken med blandade tecken, eller minst 14 tecken.</p>
+    <div class="err" id="e"></div>
+    <label class="remember"><input type="checkbox" id="rem" ${store.get('remember', '1') === '1' ? 'checked' : ''}> Håll mig inloggad i 30 dagar</label>
+    <button class="primary">Skapa konto</button>
+    <p class="muted small" style="margin-top:10px">Giltig till ${esc(new Date(d.expires * 1000).toLocaleDateString('sv-SE'))}. Länken fungerar en gång.</p></form>`;
+  $('#n').focus();
+  $('#f').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const remember = $('#rem').checked;
+    store.set('remember', remember ? '1' : '0');
+    try {
+      const res = await fetch('/api/invite/' + t, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#n').value, password: $('#p').value, remember }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Fel ' + res.status);
+      await boot();
+      toast('Välkommen! Ditt konto är skapat');
+      location.hash = '#/';
+    } catch (e) { $('#e').textContent = e.message; }
+  };
+};
+
 // ---------- Profiler: "Vem tittar?" ----------
 views.profiles = async () => {
   const d = await api('/profiles');

@@ -50,6 +50,7 @@ initCardSize();
 (async () => {
   try { await boot(); } catch {}
   // Djuplänk utan inloggning (t.ex. QR-koden för inloggning med kod): öppnas efter inloggningen
-  if (!me) { rememberPage(); location.hash = '#/login'; if (location.hash === '#/login') route(); }
+  if (!me && location.hash.startsWith('#/invite/')) route(); // inbjudan: skapa konto utan att logga in först
+  else if (!me) { rememberPage(); location.hash = '#/login'; if (location.hash === '#/login') route(); }
   else { if (location.hash === '#/login') location.hash = '#/'; else route(); }
 })();

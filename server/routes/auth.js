@@ -10,8 +10,9 @@ import * as updates from '../updates.js';
 import { VERSION } from '../updates.js';
 import * as screen from '../screentime.js';
 import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
+import * as invites from '../invites.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
-import { allowUnrated, ctx, householdRoot, canManage, setupPending } from '../http/context.js';
+import { allowUnrated, ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
 // Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
 route('GET', '/api/health', pub, (c) => {
@@ -32,6 +33,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
+    // Rättigheter per användare (perms.js): webben döljer nedladdning när den inte är tillåten (nytt fält)
+    canDownload: canDownload(c.user.id),
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
     // Installationsguiden är inte klar: startsidan visar "Slutför installationen" (bara för administratörer som får administrera här)
     setupPending: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) && setupPending(),
@@ -96,6 +99,40 @@ route('POST', '/api/login', pub, async (c) => {
   if (app) return send(c.res, 200, { ok: true, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin }, weakPassword: pwOld });
   const keep = remember !== false; // äldre klienter skickar inget: håll inloggad som förut
   send(c.res, 200, { ok: true, weakPassword: pwOld }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
+});
+// ---------- Inbjudningslänkar (server/invites.js) ----------
+// Länken <adress>/#/invite/<token> öppnar webbens vy för att skapa konto. Gissning spärras som inloggning (ipBlocked/noteFail):
+// ogiltig, använd och utgången inbjudan ger samma svar. Kontot får inbjudans rättigheter och blir aldrig administratör.
+const inviteGone = (c, ip) => { noteFail(ip); audit('invite_invalid', { ip }); return fail(c.res, 404, 'Inbjudan är ogiltig, redan använd eller har gått ut'); };
+route('GET', '/api/invite/:token', pub, (c) => {
+  const ip = clientIp(c.req);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  const r = invites.find(c.p.token);
+  if (!r) return inviteGone(c, ip);
+  const p = invites.normPerms(JSON.parse(r.perms || '{}'));
+  send(c.res, 200, { valid: true, expires: r.expires, name: 'BraXhn TV', homeOnly: !p.remoteAllowed, atHome: isTrusted(c.req) });
+});
+route('POST', '/api/invite/:token', pub, async (c) => {
+  const ip = clientIp(c.req);
+  if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund och försök igen');
+  const r = invites.find(c.p.token);
+  if (!r) return inviteGone(c, ip);
+  const { name, password, app, remember } = await readJson(c.req);
+  const nm = String(name || '').replace(/[\u0000-\u001f]/g, '').trim();
+  if (!nm || nm.length > 64) return fail(c.res, 400, 'Ange ett namn (högst 64 tecken)');
+  const weak = weakPassword(password, nm); if (weak) return fail(c.res, 400, weak);
+  const p = invites.normPerms(JSON.parse(r.perms || '{}'));
+  const remote = !isTrusted(c.req);
+  if (remote && !p.remoteAllowed) return fail(c.res, 403, 'Den här inbjudan gäller bara hemnätverket – öppna länken hemma');
+  if (remote && require2faRemote()) return fail(c.res, 403, 'Servern kräver tvåstegsverifiering utanför hemmet – öppna länken hemma och aktivera den under Mitt konto');
+  let uid;
+  try { uid = invites.accept(c.p.token, nm, await hashPw(String(password))); }
+  catch (e) { if (e.status === 410) return inviteGone(c, ip); return fail(c.res, e.status || 400, e.message); }
+  audit('invite_used', { ip, user: { id: uid, name: nm }, detail: r.note || null });
+  const meta = { ua: c.req.headers['user-agent'], ip };
+  if (app) return send(c.res, 200, { ok: true, token: createSession(uid, 'app', meta), user: { id: uid, name: nm, is_admin: 0 } });
+  const keep = remember !== false;
+  send(c.res, 200, { ok: true }, { 'Set-Cookie': cookieHeader(createSession(uid, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
 });
 route('POST', '/api/logout', user, (c) => {
   run('DELETE FROM sessions WHERE token=?', c.user.tokenHash);
