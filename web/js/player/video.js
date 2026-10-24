@@ -3,6 +3,7 @@ import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr } from '.
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { castItem, castReady } from './cast.js';
+import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
@@ -60,7 +61,9 @@ export async function play(id, start = 0, opts = {}) {
   const defSub = textSubs.find(s => s.forced) || (subPref && textSubs.find(s => s.lang === subPref));
   const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
   const cur = P = { it, el, q: store.get('quality', 'auto'), audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
-    party: partyId, es: keepParty, applying: false, tok: null, lmd: null };
+    party: partyId, es: keepParty, applying: false, tok: null, lmd: null,
+    // Bio-läge: trailers före filmen – bara filmer som startas från början (inte avsnitt, Fortsätt titta eller Titta tillsammans)
+    cinema: it.kind === 'movie' && !(start > 0) && !partyId && !opts.noCinema, pre: null };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
   const chaps = it.chapters || [];
   const line2 = it.kind === 'episode' ? `${sxe(it)} — ${esc(it.title)}` : (it.year || '');
@@ -250,6 +253,7 @@ async function load(start) {
   const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
+  if (cur.cinema) extra.cinema = '1';
   Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
@@ -269,6 +273,17 @@ async function load(start) {
   try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
   catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
   if (!live()) return;
+  if (cur.cinema) {
+    // Bara första gången: kvalitets- och ljudbyten senare ska inte visa trailers igen
+    cur.cinema = false;
+    if (pb.preroll?.length) {
+      if (ctEl) ctEl.textContent = '';
+      await runPreroll(cur, pb.preroll, { live, onClose: () => closePlayer(false) });
+      // Filmen hämtas på nytt (servern förstartar den inte medan trailers spelas)
+      if (live()) load(start);
+      return;
+    }
+  }
   cur.pb = pb;
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
   const pm = $('#pmode', el);

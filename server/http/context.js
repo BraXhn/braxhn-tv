@@ -117,7 +117,8 @@ const profiles = new Map(); // uid -> { w, t }
 const PROFILE_TTL = 5 * 60e3;
 export function invalidateProfile(uid) { profiles.delete(uid); }
 const parseGenres = (g) => { try { const a = JSON.parse(g || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
-function genreProfile(uid) {
+/** Smakprofilen: genre -> vikt ur det användaren sett (och Min lista). Används av rekommendationer och bio-läget. */
+export function genreProfile(uid) {
   const c = profiles.get(uid);
   if (c && Date.now() - c.t < PROFILE_TTL) return c.w;
   const rows = all(`SELECT COALESCE(s.genres, i.genres) AS g, COUNT(*) AS n FROM progress p JOIN items i ON i.id=p.item_id LEFT JOIN items s ON s.id=i.parent_id

@@ -20,7 +20,8 @@ import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import * as mediaImport from '../mediaimport.js';
 import { route, admin, user, adminAnywhere, trustVpn, isTrusted } from '../http/router.js';
-import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile } from '../http/context.js';
+import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile, insideMedia } from '../http/context.js';
+import * as cinema from '../cinema.js';
 import * as jobs from '../jobs.js';
 import * as subsonic from '../subsonic.js';
 import * as logs from '../logs.js';
@@ -122,7 +123,8 @@ route('GET', '/api/settings', admin, (c) => {
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
     watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
     trickplay: getSetting('trickplay', process.env.TRICKPLAY || '1') === '1', detectRecap: getSetting('detect_recap', '1') === '1',
-    bookMeta: bookmeta.enabled(), bookMetaStatus: bookmeta.status
+    bookMeta: bookmeta.enabled(), bookMetaStatus: bookmeta.status,
+    cinemaPreroll: cinema.prerollSetting(), cinemaPrerollFiles: cinema.prerollFiles(insideMedia).length
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -161,6 +163,14 @@ route('PUT', '/api/settings', admin, async (c) => {
     if (nets.some(n => n.includes('/') && parseInt(n.split('/')[1]) < 16)) return fail(c.res, 400, 'För stora nät (minst /16) – annars kan hela internet räknas som hemma');
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
     setSetting('trusted_networks', nets.join(','));
+  }
+  if (typeof b.cinemaPreroll === 'string') {
+    // Bio-lägets förfilm: en videofil eller en mapp att slumpa från, under mediamappen (eller tomt = ingen)
+    const p = b.cinemaPreroll.trim();
+    const err = cinema.checkPreroll(p, insideMedia);
+    if (err) return fail(c.res, 400, err);
+    setSetting('cinema_preroll', p ? insideMedia(p) : '');
+    cinema.forgetPreroll();
   }
   if (b.trickplay != null) setSetting('trickplay', b.trickplay ? '1' : '0');
   if (b.detectRecap != null) setSetting('detect_recap', b.detectRecap ? '1' : '0');

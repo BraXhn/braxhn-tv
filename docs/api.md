@@ -25,6 +25,33 @@ uppdateras**. En app från i våras ska fungera mot nästa års server.
 Om en ny version ändå behövs: lägg den bakom en parameter (t.ex. `?api=2`) eller en ny sökväg och fortsätt svara
 som version 1 utan den. Låt apparna läsa `api` från `/api/status` innan de använder det nya.
 
+## Bio-läge: `preroll` i `/api/items/:id/playback`
+
+Med `cinema=1` (och utan `start`, eller `start` under 1 s) får svaret för en **film** fältet `preroll` när
+användaren slagit på bio-läget under *Mitt konto* (`GET`/`PUT /api/me/cinema`, `{ trailers: 0–3, preroll: bool }`).
+Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av saknas fältet helt – svaret är som förut.
+
+```json
+"preroll": [
+  { "kind": "trailer", "itemId": 12, "trailerId": 3, "title": "Andra", "url": "/api/trailers/3/stream?t=…", "mime": "video/mp4", "duration": 132.5 },
+  { "kind": "preroll", "itemId": null, "title": "Förfilm", "url": "/api/cinema/preroll/0/stream?t=…", "mime": "video/mp4", "duration": 12 }
+]
+```
+
+- Spela posterna i ordning före `url`, med möjlighet att hoppa över en eller alla. `itemId` (bara trailers) är filmen
+  trailern hör till – visa gärna "finns i biblioteket" med en länk till `/api/items/:itemId`.
+- `url` är filen som den är (ingen omkodning): spelaren måste klara formatet, annars hoppar den till nästa post.
+- Med Bearer-token eller `cast=1` har varje `url` en egen mediatoken som bara gäller den trailern eller förfilmen.
+- `duration` (sekunder, decimaltal) kan vara `null` om filen inte gick att läsa – läs den som `Double?`.
+- När `preroll` finns förstartar servern inte filmen. Hämta gärna `/playback` igen (utan `cinema=1`) när kön är slut,
+  annars startar omkodningen först när spelaren börjar hämta filmen.
+
+## Kö på Chromecast: `queue=1`
+
+`/api/items/:id/playback?cast=1&queue=1` ger samma svar som vanligt (med en egen mediatoken för titeln) men räknas
+inte som en uppspelning: ingen förstart av omkodningen, ingen rad under Aktivitet och ingen Trakt-start. Webben köar
+nästa avsnitt så på Chromecasten; apparna kan använda det på samma sätt.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

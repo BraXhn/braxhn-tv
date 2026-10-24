@@ -78,6 +78,8 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - All servertext i HTML går genom `esc()`.
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).
 - Musikappens lösenord (`subsonic_passwords`) gäller bara `/rest/*`, `/rest/*` tar inte emot kaka/Bearer/`?t=` och når bara musik; profiler med skärmtid för ljud nekas (`test/subsonic.test.js`).
+- Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`). Scope-intervall: titel = id, musikspår = −id, ljudbok 2e9+, podd 3e9+, kanal 4e9+, inspelning 5e9+, trailer 6.5e9+ (`trailers.js`), förfilm 7.5e9+ (`cinema.js`) – ett nytt slag av ström får ett eget intervall.
+- Bio-läget (`server/cinema.js`, `preroll` i `/playback?cinema=1`) väljer bara trailers inom profilens åldersgräns (`ageFilter`) och för filmer som användaren inte börjat på; webben spelar dem i en egen `<video id="previd">` så att filmens framsteg aldrig påverkas (`test/cinema-cast.test.js`, `test/web-cinema-cast.test.js`).
 - Kalendertoken (`calendar_tokens`, inte `sessions`) gäller bara routes med alternativet `calendar` (`/api/calendar.ics`), och de routes tar inte emot någon annan inloggning (`test/calendar.test.js`).
 - Barnprofilers åldersgräns (`allowedFor`) kontrolleras på varje route som rör en titel – även bilder och kortåtgärder.
 - Egna samlingar (`server/customcollections.js`, `/api/custom-collections`): privata syns bara för skaparen, delade ändras bara av administratör på betrott nät; en samling utan titel inom profilens åldersgräns syns inte (namn, omslag, hylla) för den som inte får ändra den. Titlar lagras som huvudrad (avsnitt → serie, version → film) och flyttas med `mergeInto`.
@@ -89,6 +91,8 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - Inga npm-beroenden; tredjepartsfiler bara i `web/vendor` med checksumma.
 - `/api`-fält som apparna läser ändras aldrig bakåtinkompatibelt.
 - Egna smarta spellistor (`server/smartlists.js`): regler blir SQL bara via vitlistorna `FIELDS`/`OPS_BY_TYPE`/`SORTS` (uppslag med `hasOwnProperty`); klientens fältnamn, operatorer och värden hamnar aldrig i SQL-texten (värden är parametrar, LIKE-tecken escapas). De exponeras som id `u<nr>` i samma `smart`-lista och `/api/music/:lib/smart/:sid` som de fasta, så apparna visar dem utan ändring. Musik har ingen åldersgräns – delade listor syns även för barnprofiler.
+
+11. **Chromecast** (`web/js/player/cast.js` ↔ Googles Cast-SDK ↔ `/playback?cast=1`): titeln som spelas på mottagaren identifieras av `MediaInfo.customData` (`bx: 1`, `kind`, `id`, `offset`/`ss` för ljudböcker och omkodade strömmar) – inte av adressen. RemotePlayerControllers händelser → samma framstegs-API som webbspelaren (`/api/items/:id/progress`, ljudböckernas och poddarnas). Nästa avsnitt köas med `queue=1` (egen token, ingen "spelas nu"). En ny `loadMedia` ersätter mottagarens kö – köa om efter den. Bara provat mot en låtsad SDK.
 
 ### Öppna frågor och kända luckor
 - **API-kontrakt mot apparna** finns nu (`test/api-contract.test.js`, 57 endpoints). Kontraktet är skrivet för hand ur appkoden – själva Swift/Kotlin-avkodningen körs inte i CI, så en ändrad struct utan ändrat kontrakt syns inte. Apparna läser ännu inte `api` och skickar inte `bw`, så de får ingen bandbreddsanpassning.

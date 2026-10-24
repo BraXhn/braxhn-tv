@@ -39,7 +39,8 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Spelaren** | Uppspelningshastighet 0,75–2×, kapitellista med förhandsbild per kapitel, *Hoppa över intro/sammanfattning*, tydlig fokusmarkering och pilar mellan knapparna med tangentbord eller fjärrkontroll. |
 | **Hoppa över intro** | Introt hittas automatiskt genom ljudfingeravtryck: avsnitten i en säsong jämförs och den gemensamma ljudsekvensen blir introt. Även **eftertexter** och **"tidigare i serien"** hittas och ger knapparna *Nästa avsnitt* och *Hoppa över sammanfattning*. Tiderna kan justeras manuellt. |
 | **Förhandsbilder vid spolning** | Miniatyrer visas ovanför tidslinjen när du drar i den (skapas vid skanningen). |
-| **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. |
+| **Casting** | Chromecast från Chrome, och AirPlay till Apple TV från Safari och iPhone/iPad-appen. Medan du castar styr du från en panel längst ner (spola, paus, ±10 s, volym, ljud- och undertextspår, stopp), framsteget och *sedd* sparas som vanligt, nästa avsnitt köas automatiskt och musik, ljudböcker och poddar kan castas från ljudspelaren. |
+| **Bio-läge** | Som på bio: 1–3 trailers före filmen – för filmer i biblioteket som du inte har sett, helst i liknande genre och efter vad du brukar titta på, och alltid inom profilens åldersgräns. Administratören kan lägga till en egen förfilm (en fil eller en mapp att slumpa från) som spelas sist. *Hoppa över* och *Hoppa över alla*, och en länk till trailerns film. Väljs per person under Mitt konto; gäller i webben när en film startas från början. Bara lokala trailers (inga YouTube-trailers). |
 | **Utanför hemmet** | Kvaliteten begränsas automatiskt för tittare utanför hemnätet. Inbyggd HTTPS eller omvänd proxy, och appar med token-inloggning. Se nedan. |
 | **Musik** | Album, artister, spellistor, favoriter och sökning. Omslag från `cover.jpg` eller inbäddad bild. Ljudspelare som fortsätter medan du bläddrar, med mediaknappar i telefon och bil. |
 | **Titta tillsammans** | Synkad uppspelning med chatt, även mellan olika hem. Dela en länk – play, paus och spolning följer med för alla. |
@@ -285,7 +286,7 @@ BraXhn TV har ett **Subsonic-API** (version 1.16.1 med OpenSubsonic-tillägg, so
 
 ## Casting
 
-- **Chromecast:** knappen *📺 Casta* visas i spelaren i Chrome. Googles regler kräver att sidan öppnas via **HTTPS**, alltså alternativ 2 eller 3 ovan. Chromecasten hämtar strömmen själv med en tidsbegränsad länk som gäller 12 timmar och bara för mediafiler.
+- **Chromecast:** knappen *📺 Casta* visas i spelaren och i ljudspelaren i Chrome. Googles regler kräver att sidan öppnas via **HTTPS**, alltså alternativ 2 eller 3 ovan. Chromecasten hämtar strömmen själv med en tidsbegränsad länk som gäller 24 timmar och bara för just den titeln (varje köat avsnitt får en egen). Medan du castar visas en panel längst ner med spolning, paus, ±10 s, volym, ljud- och undertextspår och stopp; framsteget sparas var 10:e sekund och vid paus och stopp, så *Fortsätt titta* och *sedd* stämmer. Nästa avsnitt köas på Chromecasten och startar av sig självt. Musik castas med resten av kön, ljudböcker från den sparade positionen (nästa del köas). Trailers i bio-läget spelas inte på Chromecast.
 - **AirPlay:** finns i Safari på Mac/iPhone och i iPhone/iPad-appen. Det fungerar hemma utan HTTPS.
 
 ## Namnge filer
@@ -418,6 +419,8 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Uppgradering av databasen | Databaser skapade av 0.5.0, 0.5.1, 0.6.1, 0.7.0, 0.8.2 och 0.9.3 (`test/fixtures/db/`) uppgraderas utan att något försvinner: konton, lösenord, framsteg, titlar och alla rader finns kvar, schemat blir det senaste, säkerhetskopian före uppgraderingen tas, en andra start ändrar ingenting, och servern startar och loggar in kontot (även appens gamla token). **Otestat:** databaser från före 0.5 (simuleras bara). |
 | Anpassningsbar kvalitet | Mastern listar rätt steg, och segmentgränser och starttider är identiska mellan stegen (ffprobe). |
 | Flera versioner, trailers | Gruppering, automatiskt val, versionsväljare och trailerknapp i webben; en kvarvarande version tar över när huvudfilen försvinner. |
+| Bio-läge | Mot en riktig server med riktiga trailerfiler i mappar enligt namngivningen (`test/cinema-cast.test.js`): bara osedda filmer, aldrig filmen själv, liknande genre först, barnprofilens åldersgräns, förfilmen sist, en egen token per trailer/förfilm som inte gäller något annat, inget vid fortsättning, avsnitt eller utan `cinema=1`. I Chromium vid 375 och 1280 px (`test/web-cinema-cast.test.js`): trailers och förfilm spelades före filmen, *Hoppa över*, *Hoppa över alla*, länken till titeln, sedan filmen; inget vid *Fortsätt titta* eller avsnitt. **Otestat:** Safari/iPhone och TV-webbläsare. Apparna visar inga trailers ännu. |
+| Chromecast | Med en låtsad Cast-SDK i Chromium (`test/web-cinema-cast.test.js`): laddning med token, kö av nästa avsnitt med egen token (och nästa igen när mottagaren byter), framstegsanrop vid paus, var 10:e sekund, vid byte av avsnitt (sedd) och vid stopp, panelens spolning/±10 s/paus/volym, undertextbyte via spår-API:t och ljudspårsbyte via ny laddning, musik med kö och *spelad* när mottagaren byter spår, ljudbok från sparad position med nästa del köad. Servern: köns token gäller bara sitt avsnitt och en köad titel räknas inte som *spelas nu*. **Otestat:** en riktig Chromecast (Default Media Receiver, Googles SDK) – bl.a. att mottagaren behåller `customData` och kön som väntat. |
 | Timeshift och reklam | Lång live-lista mot en simulerad direktsändning, disktak och städning; reklamavbrott hittades i en syntetisk fil med lockbeten. |
 | Lyssning | ReplayGain/R128-taggar, ebur128-mätning, LRC-tolkning, smarta listor och inställningar. Egna smarta spellistor: varje fält och operator, grupper, sortering och gränser, injektionsförsök (fältnamn, operatorer, sortering och värden med SQL nekas eller blir parametrar), delning mellan användare och barnprofil mot en riktig server; redigeraren i Chromium vid 375 och 1280 px med tangentbord. **Otestat:** listorna i iOS/tvOS- och Android-appen på riktiga enheter (samma fält som de fasta listorna, kontrollerat med kontraktstestet). |
 | Lyssning | ReplayGain/R128-taggar, ebur128-mätning, LRC-tolkning, smarta listor och inställningar. |
@@ -438,7 +441,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 - inbränning av andra bildundertexter än PGS (DVD/DVB)
 - GPU-omkodning och VAAPI-tonmappning
 - OpenSubtitles (API:t var inte nåbart härifrån)
-- Chromecast och AirPlay
+- Chromecast på riktigt (bara med en låtsad Cast-SDK) och AirPlay
 - certifikat från Let's Encrypt på riktigt (kräver en publik domän)
 - en riktig HDHomeRun, riktig IPTV, riktiga Sonarr/Radarr, Trakt, ListenBrainz, Last.fm och S3-lagring (simulerade här)
 - Google TV-appen på en riktig TV och ljudböcker i bilen

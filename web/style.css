@@ -824,4 +824,42 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
   .setup-head h1{font-size:20px}
   .setup-nav button.primary{flex:1 1 100%;justify-content:center;order:-1}
   .setup-hw th{width:auto;display:block;padding-bottom:0}.setup-hw td{display:block}
+
+/* Bio-läge: trailers och förfilm före filmen (player/cinema.js) */
+#player #previd{position:absolute;inset:0;z-index:4}
+#player.cinema .pbar,#player.cinema .ctl,#player.cinema .skip,#player.cinema .subtxt,#player.cinema .sub2,#player.cinema .pgs,#player.cinema .partybox{display:none}
+#player.cinema.idle{cursor:auto}
+#player .cinemabox{position:absolute;left:24px;right:24px;bottom:28px;z-index:6;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end;justify-content:space-between;pointer-events:none}
+#player .cinemabox>*{pointer-events:auto}
+#player .cbinfo{display:flex;flex-direction:column;gap:2px;background:rgba(0,0,0,.65);padding:10px 14px;border-radius:10px;max-width:min(560px,100%)}
+#player .cbinfo a{color:var(--accent)}
+#player .cbbtns{display:flex;gap:8px;flex-wrap:wrap}
+#player .cbleft{position:absolute;right:0;top:-26px;text-shadow:0 1px 2px #000}
+@media (max-width:760px){#player .cinemabox{left:12px;right:12px;bottom:16px}}
+
+/* Chromecast: kontrollpanel medan man castar (player/cast.js) */
+#castbar{position:fixed;left:0;right:0;bottom:0;z-index:41;background:rgba(30,31,34,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:1fr 2fr 1fr;gap:16px;align-items:center;padding:10px 20px}
+body.hascast main{padding-bottom:110px}
+#castbar .mleft{display:flex;gap:12px;align-items:center;min-width:0}
+#castbar .castico{font-size:28px}
+#castbar .mtxt{display:flex;flex-direction:column;min-width:0}
+#castbar .mtxt b,#castbar .mtxt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#castbar .mmid{display:flex;flex-direction:column;align-items:center;gap:6px}
+#castbar .mctl{justify-content:center}
+#castbar #cxplay{width:44px;height:44px;border-radius:50%;justify-content:center;padding:0}
+#castbar .mseek{display:flex;align-items:center;gap:10px;width:100%}
+#castbar .track{flex:1;height:5px;background:rgba(255,255,255,.2);border-radius:3px;position:relative;cursor:pointer}
+#castbar .track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
+#castbar .mright{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+#castbar .mright select{width:auto;max-width:160px;padding:6px 8px;font-size:13px}
+#castbar #cxvol{width:100px;padding:0}
+@media (min-width:761px){#top:not([hidden]) ~ #castbar{left:var(--rail-w)}}
+@media (max-width:760px){
+  #castbar{grid-template-columns:1fr;gap:6px;padding:8px 12px}
+  #castbar .mright{justify-content:flex-start}
+  #castbar .mright select{flex:1;max-width:none;min-width:0}
+  #castbar #cxvol{display:none}
+  body:has(#tabbar:not([hidden])) #castbar{bottom:calc(58px + env(safe-area-inset-bottom))}
+  body.hascast main{padding-bottom:200px}
 }

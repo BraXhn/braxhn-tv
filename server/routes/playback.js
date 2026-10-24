@@ -1,8 +1,9 @@
 // Uppspelning: offline-nedladdning, uppspelningsbeslut, /api/stream/* (direkt, HLS, undertexter, PGS),
 // OpenSubtitles och intro/eftertexter.
+import fs from 'node:fs';
 import path from 'node:path';
 import { getSetting, get, run } from '../db.js';
-import { clientIp, send, readJson, fail, isLocalReq, MIME } from '../util.js';
+import { clientIp, send, readJson, fail, isLocalReq, MIME, streamFile } from '../util.js';
 import { createSession } from '../auth.js';
 import { scan } from '../scanner.js';
 import * as st from '../stream.js';
@@ -13,7 +14,9 @@ import * as offline from '../offline.js';
 import * as trakt from '../trakt.js';
 import * as ver from '../versions.js';
 import { route, user, media, admin } from '../http/router.js';
-import { mediaItem, screenBlock, chaptersOf } from '../http/context.js';
+import { mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia } from '../http/context.js';
+import * as cinema from '../cinema.js';
+import { TRAILER_SCOPE } from '../trailers.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
@@ -96,16 +99,25 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Token i URL behövs för appar, Chromecast och AirPlay (de skickar inte webbläsarens cookie)
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;
-  if (c.q.get('info') !== '1' && (c.q.get('cast') === '1' || c.user.via !== 'cookie')) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
+  const needTok = c.q.get('cast') === '1' || c.user.via !== 'cookie';
+  if (c.q.get('info') !== '1' && needTok) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const hp = d.mode === 'direct' ? null : st.hlsParams(d, o, token);
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${hp}`;
-  // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning
-  const info = c.q.get('info') === '1';
-  // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först)
-  if (hp && !info && !d.abr) st.prewarm(it, hp, c.user.id, Math.max(0, +c.q.get('start') || 0));
-  if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', (+c.q.get('start') || 0) / it.duration * 100).catch(() => {});
+  // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning.
+  // queue=1: Chromecast köar nästa avsnitt (länkar och token nu, uppspelningen börjar senare) – ingen förstart eller "spelas nu".
+  const queued = c.q.get('queue') === '1';
+  const info = c.q.get('info') === '1' || queued;
+  const startAt = Math.max(0, +c.q.get('start') || 0);
+  // Bio-läge (cinema=1, bara filmer från början): trailers och förfilm före filmen
+  const preroll = c.q.get('info') !== '1' && !queued && c.q.get('cinema') === '1' && main.kind === 'movie' && startAt < 1
+    ? await prerollFor(c, main, needTok) : [];
+  if (c.res.writableEnded || c.req.destroyed) return;
+  // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först, och inte när trailers
+  // spelas först – då hämtar spelaren filmen på nytt efteråt)
+  if (hp && !info && !d.abr && !preroll.length) st.prewarm(it, hp, c.user.id, startAt);
+  if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', startAt / it.duration * 100).catch(() => {});
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
   if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
@@ -122,9 +134,46 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
     audioSelected: d.audio ?? null,
+    ...(preroll.length ? { preroll } : {}),
     ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
+});
+// Bio-läge: trailers för osedda filmer inom profilens åldersgräns och (sist) administratörens förfilm.
+// Varje post får en egen adress; token (appar/Chromecast) gäller bara den trailern eller förfilmen.
+async function prerollFor(c, movie, needTok) {
+  const prefs = cinema.getPrefs(c.user.id);
+  if (!cinema.enabled(prefs)) return [];
+  const tok = (scope) => needTok ? 't=' + createSession(c.user.id, 'media', { item: scope, ip: clientIp(c.req) }) : '';
+  const list = cinema.pickTrailers(c.user.id, movie, prefs.trailers, { age: ageFilter(c.user.id), taste: genreProfile(c.user.id) }).map(t => {
+    const q = tok(TRAILER_SCOPE + t.tid);
+    return { kind: 'trailer', itemId: t.itemId, trailerId: t.tid, title: t.title, url: `/api/trailers/${t.tid}/stream${q ? '?' + q : ''}`,
+      mime: MIME[path.extname(t.path).toLowerCase()] || 'video/mp4', path: t.path };
+  });
+  const pre = prefs.preroll ? cinema.pickPreroll(insideMedia) : null;
+  if (pre) {
+    const q = tok(cinema.PREROLL_SCOPE + pre.n);
+    list.push({ kind: 'preroll', itemId: null, title: 'Förfilm', url: `/api/cinema/preroll/${pre.n}/stream${q ? '?' + q : ''}`,
+      mime: MIME[path.extname(pre.path).toLowerCase()] || 'video/mp4', path: pre.path });
+  }
+  const durs = await Promise.all(list.map(x => cinema.durationOf(x.path)));
+  return list.map(({ path: _, ...x }, i) => ({ ...x, duration: durs[i] }));
+}
+const prerollStream = { auth: true, media: true, scope: (p) => cinema.PREROLL_SCOPE + (+p.n) };
+const servePreroll = (c) => {
+  const f = cinema.prerollFiles(insideMedia)[+c.p.n];
+  if (!/^\d{1,4}$/.test(c.p.n) || !f) return fail(c.res, 404, 'Finns inte');
+  if (screenBlock(c)) return;
+  fs.stat(f, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Filen finns inte längre')
+    : streamFile(c.req, c.res, f, s.size, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' }));
+};
+route('GET', '/api/cinema/preroll/:n/stream', prerollStream, servePreroll);
+route('HEAD', '/api/cinema/preroll/:n/stream', prerollStream, servePreroll);
+route('GET', '/api/me/cinema', user, (c) => send(c.res, 200, { ...cinema.getPrefs(c.user.id), max: cinema.MAX_TRAILERS, prerollAvailable: cinema.prerollFiles(insideMedia).length > 0 }));
+route('PUT', '/api/me/cinema', user, async (c) => {
+  const b = await readJson(c.req);
+  cinema.setPrefs(c.user.id, b);
+  send(c.res, 200, { ...cinema.getPrefs(c.user.id), max: cinema.MAX_TRAILERS, prerollAvailable: cinema.prerollFiles(insideMedia).length > 0 });
 });
 route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
 route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });

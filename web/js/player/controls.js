@@ -3,6 +3,7 @@ import { $, fmtTime, store } from '../core.js';
 import { setMini } from './overlay.js';
 import { P, closePlayer } from './video.js';
 import { setIconButton } from '../ui/buttons.js';
+import { preKey } from './cinema.js';
 
 /** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
 export function bindControls(cur, v) {
@@ -56,6 +57,7 @@ export function keys(e) {
   // I litet fönster tar spelaren inte över tangentbordet (man bläddrar och söker)
   if (!P || P.mini || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
   const v = $('#vid', P.el); if (!v) return;
+  if (P.pre && preKey(e, P)) return; // trailers före filmen spelas
   // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
   if (e.key.startsWith('Arrow') && moveFocus(e)) return;

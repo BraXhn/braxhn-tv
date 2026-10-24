@@ -196,6 +196,8 @@ addCol('tracks', 'loudness', 'TEXT');
 addCol('users', 'screen_time', 'TEXT');
 addCol('users', 'notify_personal', 'TEXT');
 addCol('users', 'offline_sync', 'TEXT');
+// Bio-läge: trailers/förfilm före filmer (JSON per användare, server/cinema.js)
+addCol('users', 'cinema', 'TEXT');
 // Platshållarfärg per bild ('#rrggbb', '' = kunde inte läsas, NULL = inte uträknad) – server/imgcolor.js
 addCol('items', 'poster_color', 'TEXT');
 addCol('items', 'backdrop_color', 'TEXT');
