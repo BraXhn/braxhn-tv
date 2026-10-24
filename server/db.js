@@ -207,6 +207,11 @@ CREATE TABLE IF NOT EXISTS scrobble_queue(id INTEGER PRIMARY KEY, user_id INTEGE
   track_id INTEGER, artist TEXT NOT NULL, title TEXT NOT NULL, album TEXT, album_artist TEXT, duration INTEGER, track_no INTEGER,
   listened_at INTEGER NOT NULL, due INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0, error TEXT,
   UNIQUE(user_id, service, listened_at, title));`);
+// Smarta spellistor med egna regler (server/smartlists.js): def = reglerna som JSON (vitlistade fält/operatorer),
+// shared = synlig för alla användare på servern, updated i ms (nyckel i den korta resultatcachen)
+db.exec(`CREATE TABLE IF NOT EXISTS smart_playlists(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, def TEXT NOT NULL, shared INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS smartpl_user ON smart_playlists(user_id);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);

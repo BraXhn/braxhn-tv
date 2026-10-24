@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { db, get, all, run, now } from './db.js';
 import { probe, TRACK_SQL, shapeTrack } from './music.js';
+import * as custom from './smartlists.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   normalize INTEGER NOT NULL DEFAULT 1, skip_back INTEGER NOT NULL DEFAULT 15, skip_fwd INTEGER NOT NULL DEFAULT 30,
@@ -142,8 +143,12 @@ export const SMART = [
   { id: 'never', name: 'Aldrig spelat' }
 ];
 const DAY = 86400;
+// Egna listor (server/smartlists.js) har id "u<nummer>" i samma API som de fasta – apparna visar dem utan ändring
+const CUSTOM_ID = /^u([1-9]\d{0,9})$/;
 /** Spåren i en smart lista för användaren (null om listan inte finns). */
 export function smartTracks(libId, uid, id, { limit = 200, at = now() } = {}) {
+  const cm = CUSTOM_ID.exec(String(id));
+  if (cm) return custom.tracksFor(+cm[1], uid)?.tracks ?? null;
   let rows;
   switch (id) {
     case 'top30':
@@ -181,14 +186,22 @@ export function smartLists(libId, uid) {
   if (smartCache.size > 500) smartCache.delete(smartCache.keys().next().value);
   return v;
 }
+/** Tömmer översikten (efter att en egen lista skapats, ändrats, delats eller tagits bort). */
+export function clearSmartCache() { smartCache.clear(); custom.clearCache(); }
+const summary = (tracks) => ({ count: tracks.length, duration: tracks.reduce((a, t) => a + (t.duration || 0), 0),
+  covers: [...new Set(tracks.filter(t => t.cover).map(t => t.albumId))].slice(0, 4) });
 function countSmartLists(libId, uid) {
-  return SMART.map(s => {
-    const tracks = smartTracks(libId, uid, s.id);
-    const covers = [...new Set(tracks.filter(t => t.cover).map(t => t.albumId))].slice(0, 4);
-    return { id: s.id, name: s.name, count: tracks.length, duration: tracks.reduce((a, t) => a + (t.duration || 0), 0), covers };
-  }).filter(s => s.count > 0);
+  const fixed = SMART.map(s => ({ id: s.id, name: s.name, ...summary(smartTracks(libId, uid, s.id)) }));
+  // Egna och delade listor efter de fasta (samma fält; custom/mine/owner/shared är tillägg)
+  const own = custom.listFor(uid).map(l => ({ id: 'u' + l.id, name: l.name, ...summary(custom.tracksFor(l.id, uid)?.tracks || []),
+    custom: true, mine: l.mine, shared: l.shared, owner: l.mine ? null : l.owner }));
+  return [...fixed, ...own].filter(s => s.count > 0);
 }
-export const smartName = (id) => SMART.find(s => s.id === id)?.name || null;
+export function smartName(id, uid) {
+  const cm = CUSTOM_ID.exec(String(id));
+  if (cm) return custom.getFor(+cm[1], uid)?.name || null;
+  return SMART.find(s => s.id === id)?.name || null;
+}
 
 // ---------------- inställningar per användare ----------------
 export const SKIP_BACK = [5, 10, 15, 30, 45, 60], SKIP_FORWARD = [10, 15, 30, 45, 60, 90];

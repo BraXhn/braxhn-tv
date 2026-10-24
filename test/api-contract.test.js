@@ -228,6 +228,8 @@ before(async () => {
   ok(await call('ios', 'POST', `/api/music/tracks/${S.track}/favorite`, { body: { on: true } }), 'favorit');
   ok(await call('ios', 'POST', `/api/music/tracks/${S.track}/played`), 'spelad');
   S.playlist = ok(await call('android', 'POST', '/api/music/playlists', { body: { name: 'Bilen', trackIds: tracks.map(t => t.id) } }), 'spellista').id;
+  // Egen smart spellista: syns i hemmets "smart" (id "u…") och kontrolleras mot samma kontrakt som de fasta
+  ok(await call('ios', 'POST', '/api/music/smartlists', { body: { name: 'Allt', rules: [], sort: 'title', order: 'asc' } }), 'smart spellista');
   S.book = (await call('ios', 'GET', `/api/audiobooks/${S.bookLib}`)).data.books[0].id;
   S.bookFile = (await call('ios', 'GET', `/api/audiobooks/book/${S.book}`)).data.files[0].id;
   ok(await call('ios', 'POST', `/api/audiobooks/book/${S.book}/progress`, { body: { position: 40 } }), 'bokframsteg');
