@@ -93,6 +93,18 @@ bara som att titlar saknas och att vissa anrop nekas:
   andra titlar. `POST /api/stream/:id/stop` frigör platsen direkt.
 - **Inbjudan:** `GET /api/invite/:token` (giltig: `{ valid, expires, homeOnly }`, annars 404) och
   `POST /api/invite/:token` med `{ name, password, app: true }` ger `{ token, user }` som `/api/login`.
+## Musikmetadata: artist, album och låttexter
+
+Bara tillägg – apparna kan läsa dem när de vill (alla kan saknas eller vara `null`):
+
+- `GET /api/music/artists/:arid`: `image` och `backdrop` (Bool – hämta `GET /api/music/artists/:arid/image` resp.
+  `/backdrop`, `?w=` och bildtoken som för omslag), `info` (`null` eller `{ bio, bioLang, bioUrl, type, begin, end, ended,
+  beginArea, area, country, genres: [String], links: [{ label, url }], mbid, … }`), `related: [{ id, name, albums,
+  cover_album, image, relation, source }]` och `albums[].type` (`album`, `ep`, `single`, `live`, `compilation`,
+  `soundtrack`, `remix`, `other`) med `albums[].typeGuessed` (Bool).
+- `GET /api/music/albums/:aid`: `type`, `typeGuessed` och `info` (`null` eller `{ description, descLang, descUrl, released, mbid, type }`).
+- `GET /api/music/:lib/artists`: `image` (Bool) per artist.
+- `GET /api/music/tracks/:tid/lyrics`: `source` kan nu vara `lrclib` (hämtad från nätet), och `instrumental: true` när låten saknar text.
 
 ## Kontraktstestet
 

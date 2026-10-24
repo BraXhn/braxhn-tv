@@ -3,7 +3,8 @@
 // Körs inget när modulen laddas utom definitioner (cirkulär import med views/music.js och audio.js).
 import { $, $$, act, api, esc, fmtDur, libs, routeGen, toast } from './core.js';
 import { playQueue, startRadio } from './audio.js';
-import { addToPlaylist, bindTracks, cover, trackRows } from './views/music.js';
+import { addToPlaylist, bindTracks, trackRows } from './views/music.js';
+import { artistCard } from './musicinfo.js';
 import { confirmDialog, openDialog } from './ui/dialog.js';
 import { openMenu } from './ui/menu.js';
 import { emptyState, errorState, loadingState } from './ui/states.js';
@@ -87,7 +88,7 @@ export async function similarArtists(box, arid) {
   let r;
   try { r = await api(`/music/artists/${+arid}/similar`, { bg: true }); } catch { return; }
   if (gen !== routeGen || !box.isConnected || !r.artists.length) return;
-  box.innerHTML = `<section class="section"><h2>Liknande artister <span class="muted small">efter hur de låter</span></h2><div class="shelf">${r.artists.map(x => `<a class="card mcard" href="#/artist/${+x.id}">${cover(x.cover_album || x.id, !!x.cover_album, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.albums} album</div></a>`).join('')}</div></section>`;
+  box.innerHTML = `<section class="section"><h2>Liknande artister <span class="muted small">efter hur de låter</span></h2><div class="shelf">${r.artists.map(x => artistCard(x)).join('')}</div></section>`;
 }
 
 /** Ljudanalysens förlopp och inställningar i administrationen. */

@@ -2,15 +2,16 @@
 import fs from 'node:fs';
 import { get, run, now, all, tx } from '../db.js';
 import { fail, send, clientIp, readJson } from '../util.js';
-import { createSession } from '../auth.js';
+import { createSession, audit } from '../auth.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
 import * as scrobble from '../scrobble.js';
 import * as smartl from '../smartlists.js';
 import * as sonic from '../sonic.js';
+import * as mmeta from '../musicmeta.js';
 import { sized } from '../imgsize.js';
-import { route, user, img, audio, admin } from '../http/router.js';
-import { screenBlock, libOk } from '../http/context.js';
+import { route, user, img, audio, admin, pub } from '../http/router.js';
+import { screenBlock, libOk, ctx } from '../http/context.js';
 
 // ---------- Musik ----------
 // Bibliotek, album, artister och spår kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
@@ -19,10 +20,78 @@ const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND 
 const trackOk = (uid, id) => { const t = get('SELECT library_id FROM tracks WHERE id=?', +id); return !!t && libOk(uid, t.library_id); };
 route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id), sonic: sonic.libraryStats(l.id) }); });
 route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
-route('GET', '/api/music/:lib/artists', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.artists(l.id)); });
+route('GET', '/api/music/:lib/artists', user, (c) => {
+  const l = musicLib(c); if (!l) return;
+  // image = artistbild från nätet/mappen finns (tillägg; cover_album gäller som förut)
+  const photos = new Set(all('SELECT m.artist_id FROM artist_meta m JOIN artists a ON a.id=m.artist_id WHERE a.library_id=? AND m.image=1', l.id).map(r => r.artist_id));
+  send(c.res, 200, music.artists(l.id).map(a => ({ ...a, image: photos.has(a.id) })));
+});
 route('GET', '/api/music/:lib/search', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.searchMusic(String(c.q.get('q') || '').slice(0, 100), c.user.id, l.id)); });
-route('GET', '/api/music/albums/:aid', user, (c) => { const a = music.album(+c.p.aid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
-route('GET', '/api/music/artists/:arid', user, (c) => { const a = music.artist(+c.p.arid, c.user.id); a ? send(c.res, 200, a) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/music/albums/:aid', user, (c) => {
+  const a = music.album(+c.p.aid, c.user.id);
+  if (!a) return fail(c.res, 404, 'Finns inte');
+  // Tillägg: typ (album/single/ep/compilation/live …, gissad utan MusicBrainz) och beskrivning från Wikipedia
+  const info = mmeta.albumInfoOf(a.id), k = mmeta.albumKind(a, info ? { kind: info.type } : null);
+  send(c.res, 200, { ...a, type: k.kind, typeGuessed: k.guessed, info });
+});
+route('GET', '/api/music/artists/:arid', user, (c) => {
+  const a = music.artist(+c.p.arid, c.user.id);
+  if (!a) return fail(c.res, 404, 'Finns inte');
+  // Tillägg: metadata från nätet (biografi, född/bildad, ursprung, genrer, länkar), artistbild, albumtyper och relaterade artister
+  const kinds = new Map(all('SELECT m.album_id, m.kind FROM album_meta m JOIN albums al ON al.id=m.album_id WHERE al.artist_id=?', a.id).map(r => [r.album_id, r.kind]));
+  const info = mmeta.artistInfo(a.id);
+  send(c.res, 200, { ...a, albums: a.albums.map(x => { const k = mmeta.albumKind(x, { kind: kinds.get(x.id) || null }); return { ...x, type: k.kind, typeGuessed: k.guessed }; }),
+    image: !!info?.image, backdrop: !!info?.backdrop, info, related: mmeta.relatedLocal(a.id) });
+});
+// Artistbild och bakgrund (från nätet eller artist.jpg i mappen)
+const artistImage = (kind) => async (c) => {
+  const f = mmeta.photoPath(+c.p.arid, kind);
+  if (!f) return fail(c.res, 404, 'Ingen bild');
+  fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
+};
+route('GET', '/api/music/artists/:arid/image', img, artistImage('photo'));
+route('GET', '/api/music/artists/:arid/backdrop', img, artistImage('bg'));
+// Signerad bildadress för musikappar (Subsonic getArtistInfo2/getAlbumInfo2): utan inloggning, men signaturen gäller bara
+// just den bilden (HMAC med en nyckel i inställningarna) – samma sätt som Navidrome lämnar ut bildadresser
+route('GET', '/api/music/pubimg/:kind/:id/:sig', pub, async (c) => {
+  const kind = c.p.kind, id = parseInt(c.p.id);
+  if (!['artist', 'album'].includes(kind) || !(id > 0) || !mmeta.checkImageSig(kind, id, c.p.sig)) return fail(c.res, 404, 'Ingen bild');
+  const f = kind === 'artist' ? (mmeta.photoPath(id) || music.coverPath(get('SELECT id FROM albums WHERE artist_id=? AND cover=1 ORDER BY year DESC LIMIT 1', id)?.id || 0)) : music.coverPath(id);
+  if (!f) return fail(c.res, 404, 'Ingen bild');
+  fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, '') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' }));
+});
+// "Fel artist?" (administratör): sök i MusicBrainz och välj rätt artist – matchningen låses
+const artistOr404 = (c) => { const a = get('SELECT id, name, library_id FROM artists WHERE id=?', +c.p.arid); if (!a) fail(c.res, 404, 'Finns inte'); return a; };
+route('GET', '/api/music/artists/:arid/match', admin, async (c) => {
+  const a = artistOr404(c); if (!a) return;
+  const m = mmeta.artistInfo(a.id);
+  try {
+    const res = await mmeta.search(String(c.q.get('q') ?? a.name).slice(0, 200));
+    send(c.res, 200, { current: m?.mbid ? { mbid: m.mbid, name: m.name } : null, locked: !!m?.locked, state: m?.state ?? 0,
+      results: res.slice(0, 15).map(x => ({ mbid: x.mbid, name: x.name, disambiguation: x.disambiguation, type: x.type, country: x.country, area: x.area, begin: x.begin, score: x.score })) });
+  } catch (e) { fail(c.res, 502, 'Sökningen misslyckades: ' + e.message); }
+});
+route('POST', '/api/music/artists/:arid/match', admin, async (c) => {
+  const a = artistOr404(c); if (!a) return;
+  const { mbid, unlock, refresh, none } = await readJson(c.req);
+  try {
+    if (unlock) { mmeta.unlock(a.id); mmeta.queue(a.library_id); return send(c.res, 200, { ok: true }); }
+    if (none) { mmeta.clearMatch(a.id); audit('artist_matched', { ...ctx(c), detail: `${a.name} → ingen` }); return send(c.res, 200, { ok: true }); }
+    if (refresh) {
+      const m = mmeta.artistInfo(a.id);
+      const ok = await mmeta.refreshArtist(a.id, { mbid: m?.mbid || null, locked: !!m?.locked });
+      return send(c.res, 200, { ok: true, matched: !!ok });
+    }
+    if (!(await mmeta.matchManual(a.id, String(mbid || '').toLowerCase()))) return fail(c.res, 404, 'Artisten hittades inte i MusicBrainz');
+    audit('artist_matched', { ...ctx(c), detail: `${a.name} → ${String(mbid).slice(0, 40)}` });
+    send(c.res, 200, { ok: true });
+  } catch (e) { fail(c.res, e.status || 502, e.status ? e.message : 'Hämtningen misslyckades: ' + e.message); }
+});
+// Inställningar och förlopp för metadata och låttexter från nätet (administrationen)
+route('GET', '/api/music/meta', admin, (c) => send(c.res, 200, mmeta.adminInfo()));
+route('PUT', '/api/music/meta', admin, async (c) => {
+  try { send(c.res, 200, mmeta.configure(await readJson(c.req))); } catch (e) { fail(c.res, e.status || 400, e.message); }
+});
 route('GET', '/api/music/cover/:aid', img, async (c) => {
   const al = get('SELECT library_id FROM albums WHERE id=?', +c.p.aid);
   if (!al || !libOk(c.user.id, al.library_id)) return fail(c.res, 404, 'Inget omslag');
@@ -127,7 +196,8 @@ route('DELETE', '/api/music/smartlists/:id', user, (c) => {
   listen.clearSmartCache();
   ok ? send(c.res, 200, { ok: true }) : fail(c.res, 404, 'Finns inte');
 });
-route('GET', '/api/music/tracks/:tid/lyrics', user, async (c) => { const t = trackRow(c); if (t) send(c.res, 200, await listen.lyricsFor(t)); });
+// Låttext: .lrc/taggar först, sedan LRCLIB (source: 'lrclib', cachas i databasen) om det är påslaget
+route('GET', '/api/music/tracks/:tid/lyrics', user, async (c) => { const t = trackRow(c); if (t) send(c.res, 200, await mmeta.lyrics(t)); });
 route('GET', '/api/me/listening', user, (c) => send(c.res, 200, listen.getPrefs(c.user.id)));
 route('PUT', '/api/me/listening', user, async (c) => {
   const b = await readJson(c.req);
@@ -147,7 +217,7 @@ route('GET', '/api/music/artists/:arid/similar', user, (c) => {
   const ar = get('SELECT library_id FROM artists WHERE id=?', +c.p.arid);
   if (!ar || !libOk(c.user.id, ar.library_id)) return fail(c.res, 404, 'Finns inte');
   const list = sonic.similarArtists(+c.p.arid, { limit: Math.max(1, Math.min(50, parseInt(c.q.get('limit')) || 12)) });
-  list ? send(c.res, 200, { artists: list }) : fail(c.res, 404, 'Finns inte');
+  list ? send(c.res, 200, { artists: list.map(a => ({ ...a, image: mmeta.hasPhoto(a.id) })) }) : fail(c.res, 404, 'Finns inte');
 });
 // Nästa låtar i en låtradio: { trackId | albumId | artistId, history: [spelade, senaste sist], exclude: [i kön], count }
 route('POST', '/api/music/radio', user, async (c) => {

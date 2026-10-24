@@ -18,13 +18,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { route, user, subsonic as sub, isTrusted, remoteDenied, has2fa } from '../http/router.js';
-import { get, all, run, now, tx } from '../db.js';
-import { send, fail, clientIp, readJson, streamFile } from '../util.js';
+import { get, all, run, now, tx, getSetting } from '../db.js';
+import { send, fail, clientIp, readJson, streamFile, isHttps, isPrivate } from '../util.js';
 import { audit, checkPw, ipBlocked, noteFail, verifyTotp } from '../auth.js';
 import { ctx, householdRoot, libOk, libFilter, canDownload } from '../http/context.js';
 import * as S from '../subsonic.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
+import * as mmeta from '../musicmeta.js';
+import * as sonic from '../sonic.js';
 import * as scrobble from '../scrobble.js';
 import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
@@ -177,9 +179,10 @@ function album(a) {
   };
 }
 const ARTIST_SQL = `SELECT ar.id, ar.name, ar.sort_name, ar.library_id, (SELECT COUNT(*) FROM albums a WHERE a.artist_id=ar.id) AS albums,
-  (SELECT a.id FROM albums a WHERE a.artist_id=ar.id AND a.cover=1 ORDER BY a.year DESC LIMIT 1) AS cover_album, s.created AS starred
+  (SELECT a.id FROM albums a WHERE a.artist_id=ar.id AND a.cover=1 ORDER BY a.year DESC LIMIT 1) AS cover_album, s.created AS starred,
+  (SELECT m.image FROM artist_meta m WHERE m.artist_id=ar.id) AS photo
   FROM me, artists ar LEFT JOIN artist_stars s ON s.artist_id=ar.id AND s.user_id=me.uid`;
-const artist = (a) => ({ id: 'ar-' + a.id, name: a.name, coverArt: a.cover_album ? 'ar-' + a.id : undefined, albumCount: a.albums || 0,
+const artist = (a) => ({ id: 'ar-' + a.id, name: a.name, coverArt: a.cover_album || a.photo ? 'ar-' + a.id : undefined, albumCount: a.albums || 0,
   starred: iso(a.starred), sortName: a.sort_name ?? undefined, mediaType: 'artist' });
 /** Artister som har album (albumartister), grupperade på första bokstaven */
 function artistIndex(uid, lib) {
@@ -266,13 +269,45 @@ api('getArtist', (c, P) => {
   if (!a || !libOk(c.user.id, a.library_id)) throw NOT_FOUND('Artisten');
   return { artist: { ...artist(a), album: albumRows(c.user.id, { where: 'al.artist_id=?', params: [a.id], order: 'year DESC, sort_title', limit: 2000 }).map(album) } };
 });
-api('getArtistInfo2', (c, P) => {
+// Biografi, bilder och liknande artister från musikmetadatan (server/musicmeta.js) och ljudanalysen (sonic.js).
+// Bildadresserna är absoluta och signerade (/api/music/pubimg/…): apparna hämtar dem utan app-lösenordet.
+function origin(req) {
+  const pub = getSetting('public_url', process.env.PUBLIC_URL || '');
+  if (/^https?:\/\/[^\s/]+$/i.test(pub)) return pub;
+  const host = (isPrivate(req.socket.remoteAddress) && req.headers['x-forwarded-host']) || req.headers.host || 'localhost';
+  return `${isHttps(req) ? 'https' : 'http'}://${String(host).replace(/[^\w.:\[\]-]/g, '')}`;
+}
+const imageUrls = (c, kind, id) => {
+  const u = `${origin(c.req)}/api/music/pubimg/${kind}/${id}/${mmeta.signImage(kind, id)}`;
+  return { smallImageUrl: S.elem(`${u}?w=160`), mediumImageUrl: S.elem(`${u}?w=320`), largeImageUrl: S.elem(`${u}?w=720`) };
+};
+function artistInfo(c, P) {
   const r = idOf(need(P, 'id'), 'ar');
   if (!r || !rowOk(c.user.id, 'artists', r.id)) throw NOT_FOUND('Artisten');
-  return { artistInfo2: {} };
-});
-api('getArtistInfo', (c, P) => { const r = idOf(need(P, 'id'), 'ar'); if (!r || !rowOk(c.user.id, 'artists', r.id)) throw NOT_FOUND('Artisten'); return { artistInfo: {} }; });
-api('getAlbumInfo2', (c, P) => { const r = idOf(need(P, 'id'), 'al'); if (!r || !rowOk(c.user.id, 'albums', r.id)) throw NOT_FOUND('Albumet'); return { albumInfo: {} }; });
+  const m = mmeta.artistInfo(r.id);
+  const count = int(P.get('count'), 20, 0, 50);
+  // Liknande: ljudanalysen först, sedan MusicBrainz-relationer och Last.fm (bara artister som finns i biblioteket)
+  const ids = [], seen = new Set([r.id]);
+  for (const x of [...(sonic.similarArtists(r.id, { limit: count }) || []), ...mmeta.relatedLocal(r.id, count)]) if (!seen.has(x.id) && rowOk(c.user.id, 'artists', x.id)) { seen.add(x.id); ids.push(x.id); }
+  const similar = ids.length ? all(`${ME}${ARTIST_SQL} WHERE ar.id IN (${ids.slice(0, count).map(() => '?').join(',')})`, c.user.id, ...ids.slice(0, count)) : [];
+  const byId = new Map(similar.map(a => [a.id, a]));
+  const hasImg = m?.image || get('SELECT 1 FROM albums WHERE artist_id=? AND cover=1', r.id);
+  // XML: textfälten som egna element i Subsonics ordning (biography, musicBrainzId, lastFmUrl, bilder, similarArtist)
+  return { biography: S.elem(m?.bio), musicBrainzId: S.elem(m?.mbid), lastFmUrl: S.elem(m?.lastfmUrl),
+    ...(hasImg ? imageUrls(c, 'artist', r.id) : {}), similarArtist: ids.slice(0, count).filter(id => byId.has(id)).map(id => artist(byId.get(id))) };
+}
+function albumInfo(c, P) {
+  const r = idOf(need(P, 'id'));
+  const id = r?.kind === 'al' ? r.id : r?.kind === 'tr' ? get('SELECT album_id FROM tracks WHERE id=?', r.id)?.album_id : null;
+  const a = id && get('SELECT id, cover FROM albums WHERE id=?', id);
+  if (!a || !rowOk(c.user.id, 'albums', a.id)) throw NOT_FOUND('Albumet');
+  const m = mmeta.albumInfoOf(a.id);
+  return { notes: S.elem(m?.description), musicBrainzId: S.elem(m?.mbid), ...(a.cover ? imageUrls(c, 'album', a.id) : {}) };
+}
+api('getArtistInfo2', (c, P) => ({ artistInfo2: artistInfo(c, P) }));
+api('getArtistInfo', (c, P) => ({ artistInfo: artistInfo(c, P) }));
+api('getAlbumInfo2', (c, P) => ({ albumInfo: albumInfo(c, P) }));
+api('getAlbumInfo', (c, P) => ({ albumInfo: albumInfo(c, P) }));
 api('getAlbum', (c, P) => {
   const r = idOf(need(P, 'id'), 'al');
   const a = r && albumRows(c.user.id, { where: 'al.id=?', params: [r.id], limit: 1 })[0];
@@ -525,7 +560,15 @@ api('getCoverArt', async (c, P) => {
   let alb = null;
   if (r?.kind === 'al') alb = r.id;
   else if (r?.kind === 'tr') alb = get('SELECT album_id FROM tracks WHERE id=?', r.id)?.album_id;
-  else if (r?.kind === 'ar') alb = get('SELECT id FROM albums WHERE artist_id=? AND cover=1 ORDER BY year DESC LIMIT 1', r.id)?.id;
+  else if (r?.kind === 'ar') {
+    // Artistbilden (från nätet eller artist.jpg) går före albumomslaget
+    const photo = mmeta.photoPath(r.id);
+    if (photo) {
+      const data = await fs.promises.readFile(await sized(photo, int(P.get('size'), 0, 0, 4000) ? String(int(P.get('size'), 0, 0, 4000)) : null)).catch(() => null);
+      if (data) return send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' });
+    }
+    alb = get('SELECT id FROM albums WHERE artist_id=? AND cover=1 ORDER BY year DESC LIMIT 1', r.id)?.id;
+  }
   else if (r?.kind === 'pl') alb = get(`SELECT al.id FROM playlists p JOIN playlist_items i ON i.playlist_id=p.id JOIN tracks t ON t.id=i.track_id JOIN albums al ON al.id=t.album_id AND al.cover=1
     WHERE p.id=? AND p.user_id=? ORDER BY i.pos LIMIT 1`, r.id, c.user.id)?.id;
   const f = alb && rowOk(c.user.id, 'albums', alb) ? music.coverPath(alb) : null;
@@ -542,14 +585,14 @@ api('getLyrics', async (c, P) => {
   const t = get(`SELECT t.* FROM tracks t LEFT JOIN artists ar ON ar.id=t.artist_id LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists aa ON aa.id=al.artist_id
     WHERE t.title=? COLLATE NOCASE AND (?='' OR ar.name=? COLLATE NOCASE OR aa.name=? COLLATE NOCASE)${lf.sql} LIMIT 1`, ti, a, a, a, ...lf.params);
   if (!t) return { lyrics: {} };
-  const l = await listen.lyricsFor(t);
+  const l = await mmeta.lyrics(t);
   if (!l.lines.length) return { lyrics: {} };
   const who = get('SELECT name FROM artists WHERE id=?', t.artist_id)?.name;
   return { lyrics: { artist: who || a || undefined, title: t.title, value: l.lines.map(x => x.text).join('\n') } };
 });
 api('getLyricsBySongId', async (c, P) => {
   const t = trackFile(P, c.user.id);
-  const l = await listen.lyricsFor(t);
+  const l = await mmeta.lyrics(t);
   if (!l.lines.length) return { lyricsList: { structuredLyrics: [] } };
   const who = get('SELECT name FROM artists WHERE id=?', t.artist_id)?.name;
   return { lyricsList: { structuredLyrics: [{ displayArtist: who || undefined, displayTitle: t.title, lang: 'und', synced: l.synced, offset: 0,

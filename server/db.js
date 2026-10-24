@@ -298,6 +298,22 @@ CREATE TABLE IF NOT EXISTS webhook_queue(id INTEGER PRIMARY KEY, hook_id INTEGER
   body TEXT NOT NULL, created INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0, error TEXT);
 CREATE TABLE IF NOT EXISTS webhook_log(id INTEGER PRIMARY KEY, hook_id INTEGER NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE, event TEXT NOT NULL,
   ts INTEGER NOT NULL, status INTEGER, ok INTEGER NOT NULL, error TEXT, attempt INTEGER NOT NULL, ms INTEGER);`);
+// Musikmetadata från nätet (server/musicmeta.js). artist_meta: state 0 = inte försökt, 1 = matchad mot MusicBrainz (mbid),
+// 2 = ingen säker träff (tried = senaste försöket); locked = vald för hand ("Fel artist?"); kind = Person/Group …,
+// life_begin/life_end = född/bildad och död/upplöst (ÅÅÅÅ[-MM[-DD]]); genres/links/related = JSON; bio från Wikipedia
+// (bio_lang sv/en, bio_url = artikeln); image/backdrop = 1 när bilden finns i /config/images (ar<id>-photo/-bg.jpg).
+// album_meta: releasegruppen i MusicBrainz (kind = album/single/ep/compilation/live …) och beskrivningen från Wikipedia.
+// track_lyrics: låttexter från LRCLIB (state 1 = hittad, 2 = ingen; fetched = när), bara när filen saknar egen text.
+db.exec(`CREATE TABLE IF NOT EXISTS artist_meta(artist_id INTEGER PRIMARY KEY REFERENCES artists(id) ON DELETE CASCADE,
+  state INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0, tried INTEGER, fetched INTEGER, mbid TEXT, mb_name TEXT, kind TEXT,
+  disambiguation TEXT, country TEXT, area TEXT, begin_area TEXT, life_begin TEXT, life_end TEXT, ended INTEGER NOT NULL DEFAULT 0,
+  genres TEXT, links TEXT, related TEXT, bio TEXT, bio_lang TEXT, bio_url TEXT, wikidata TEXT, lastfm_url TEXT,
+  image INTEGER NOT NULL DEFAULT 0, image_src TEXT, backdrop INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS album_meta(album_id INTEGER PRIMARY KEY REFERENCES albums(id) ON DELETE CASCADE,
+  mbid TEXT, kind TEXT, released TEXT, description TEXT, desc_lang TEXT, desc_url TEXT, tried INTEGER);
+CREATE TABLE IF NOT EXISTS track_lyrics(track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+  state INTEGER NOT NULL, fetched INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, instrumental INTEGER NOT NULL DEFAULT 0,
+  lyrics TEXT, source TEXT, ext_id TEXT);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
@@ -330,7 +346,8 @@ CREATE INDEX IF NOT EXISTS plays_show ON plays(show_id);
 CREATE INDEX IF NOT EXISTS webhooks_user ON webhooks(user_id);
 CREATE INDEX IF NOT EXISTS whq_due ON webhook_queue(next_try);
 CREATE INDEX IF NOT EXISTS whq_hook ON webhook_queue(hook_id, id);
-CREATE INDEX IF NOT EXISTS whlog_hook ON webhook_log(hook_id, id);`);
+CREATE INDEX IF NOT EXISTS whlog_hook ON webhook_log(hook_id, id);
+CREATE INDEX IF NOT EXISTS artist_meta_mbid ON artist_meta(mbid);`);
 
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');

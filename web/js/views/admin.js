@@ -8,6 +8,7 @@ import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { adminInvites, editPerms, permsSummary } from './admin-users.js';
 import { emptyState, errorState } from '../ui/states.js';
 import { sonicAdmin } from '../sonic.js';
+import { musicMetaAdmin } from '../musicinfo.js';
 
 /**
  * Ändra ett bibliotek: namn, mappar (lägg till/ta bort), NFO och hemvideor. En borttagen mapp tar bort titlarna i den ur
@@ -204,6 +205,7 @@ views.admin = async (sec) => {
       || '<tr><td colspan="5" class="muted">Inga händelser ännu.</td></tr>'}</table></div>
   </div>
   <div class="panel" id="adm-sonic" aria-live="polite"></div>
+  <div class="panel" id="adm-mmeta"></div>
   <div class="panel"><h2>Inställningar</h2><form id="settings">
     <label>TMDB API-nyckel (gratis på themoviedb.org – ger affischer, beskrivningar och betyg)</label>
     <input id="tk" type="password" placeholder="${S.tmdbKeySet ? (S.tmdbFromEnv ? 'Satt via miljövariabel' : '•••••••• (sparad – lämna tomt för att behålla)') : 'Ingen nyckel – endast filnamn och miniatyrer används'}">
@@ -237,7 +239,7 @@ views.admin = async (sec) => {
     <div class="row" style="margin-top:16px"><button class="primary">Spara</button><button type="button" class="ghost" id="remeta">Hämta om all metadata</button><button type="button" class="ghost" id="remark">Leta intro igen</button></div></form></div>`;
 
   // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig
-  if (L.some(l => l.type === 'music')) sonicAdmin($('#adm-sonic')); else $('#adm-sonic').remove();
+  if (L.some(l => l.type === 'music')) { sonicAdmin($('#adm-sonic')); musicMetaAdmin($('#adm-mmeta')); } else { $('#adm-sonic').remove(); $('#adm-mmeta').remove(); }
   // Mappväljare
   const browse = async (p) => {
     try {
