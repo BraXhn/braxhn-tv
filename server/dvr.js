@@ -55,6 +55,9 @@ export function scheduleProgram(programId, user, ruleId = null) {
   return id;
 }
 export function scheduleManual({ channelId, start, stop, title }, user) {
+  // Hela sekunder: Android-appen läser start/stop som Long – ett decimaltal (t.ex. Date.now()/1000) gör att
+  // hela inspelningslistan inte går att avkoda
+  start = Math.floor(start); stop = Math.floor(stop);
   const c = get('SELECT * FROM channels WHERE id=?', channelId);
   if (!c) throw new Error('Kanalen finns inte');
   if (!(stop > start) || stop - start > 12 * 3600) throw new Error('Ogiltig tid (max 12 timmar)');
