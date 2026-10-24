@@ -33,6 +33,8 @@ views.home = async () => {
   if ($('#fyclear')) $('#fyclear').onclick = act(async (e) => { e.preventDefault(); await api('/foryou/seen', { method: 'POST', body: {} }); route(); });
 };
 
+const FIRST = 60, CHUNK = 240;
+const libCard = (i) => i.kind === 'collection' ? colCard(i) : card(i);
 views.lib = async (id) => {
   const sort = store.get('sort.' + id, 'title'), filter = store.get('filter.' + id, ''), cols = store.get('cols.' + id, '1');
   const d = await api(`/libraries/${id}/items?sort=${sort}&filter=${filter}&collections=${cols}`);
@@ -41,8 +43,17 @@ views.lib = async (id) => {
     ${movies ? `<select id="cols" title="Visa filmer i samma samling som ett kort"><option value="1">Samlingar</option><option value="0">Alla filmer</option></select>` : ''}
     <select id="flt"><option value="">Alla</option><option value="unwatched">Osedda</option><option value="watched">Sedda</option></select>
     <select id="srt"><option value="title">Titel</option><option value="added">Senast tillagda</option><option value="year">År</option><option value="rating">Betyg</option></select></div>
-    ${d.items.length ? `<div class="grid">${d.items.map(i => i.kind === 'collection' ? colCard(i) : card(i)).join('')}</div>`
+    ${d.items.length ? `<div class="grid" id="libgrid">${d.items.slice(0, FIRST).map(libCard).join('')}</div>`
       : emptyState({ title: filter ? 'Inget som matchar filtret' : 'Inget här ännu', text: filter ? 'Välj Alla för att se hela biblioteket.' : 'Titlarna dyker upp här när biblioteket har skannats.' })}`;
+  // Stora bibliotek: de första korten direkt, resten i omgångar efter att sidan visats (tusentals kort på en gång
+  // låser webbläsaren en stund, särskilt på TV och telefon)
+  const more = (from) => {
+    const g = $('#libgrid');
+    if (!g || from >= d.items.length) return;
+    g.insertAdjacentHTML('beforeend', d.items.slice(from, from + CHUNK).map(libCard).join(''));
+    later(() => more(from + CHUNK), 30);
+  };
+  later(() => more(FIRST), 30);
   $('#srt').value = sort; $('#flt').value = filter;
   if ($('#cols')) { $('#cols').value = cols; $('#cols').onchange = (e) => { store.set('cols.' + id, e.target.value); route(); }; }
   $('#srt').onchange = (e) => { store.set('sort.' + id, e.target.value); route(); };

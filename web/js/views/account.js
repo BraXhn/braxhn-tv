@@ -22,7 +22,7 @@ const device = (ua) => {
 };
 function loadQr() {
   if (window.qrcode) return Promise.resolve(window.qrcode);
-  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = '/vendor/qrcode.min.js'; s.onload = () => ok(window.qrcode); s.onerror = no; document.head.append(s); });
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = new URL('../../vendor/qrcode.min.js', import.meta.url).href; s.onload = () => ok(window.qrcode); s.onerror = no; document.head.append(s); });
 }
 function showCodes(codes) {
   openDialog({
