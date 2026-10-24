@@ -6,7 +6,8 @@ import { route } from '../router.js';
 import { choiceDialog, confirmDialog, openDialog } from '../ui/dialog.js';
 import { emptyState } from '../ui/states.js';
 
-export const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
+import { chLogo } from '../ui/cards.js';
+export { chLogo };
 function loadLogos() {}
 views.live = async () => {
   const D = await api('/live/channels');
