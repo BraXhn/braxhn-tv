@@ -875,6 +875,7 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
   .setup-head h1{font-size:20px}
   .setup-nav button.primary{flex:1 1 100%;justify-content:center;order:-1}
   .setup-hw th{width:auto;display:block;padding-bottom:0}.setup-hw td{display:block}
+}
 
 /* Bio-läge: trailers och förfilm före filmen (player/cinema.js) */
 #player #previd{position:absolute;inset:0;z-index:4}
