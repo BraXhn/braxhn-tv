@@ -5,12 +5,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { CACHE, CONFIG } from './db.js';
 
 export const SIZES = [160, 240, 320, 480, 720, 1280];
 const DIR = path.join(CACHE, 'img');
-const LIMIT = 2, MAX_WAITING = 300;
+// Samtidiga skalningar: halva processorn, minst 2 och högst 4 (strömningen får aldrig svältas ut)
+const LIMIT = Math.min(4, Math.max(2, os.cpus().length >> 1)), MAX_WAITING = 300;
+// Så länge väntar en förfrågan på en ny variant innan originalet skickas i stället. Första besöket på en sida
+// med många nya affischer ska inte vänta på ffmpeg – varianten blir klar i bakgrunden och används nästa gång.
+const WAIT_MS = 300;
 /** Räknare (för tester och felsökning): antal skalningar som gjorts och som misslyckats */
 export const stats = { resized: 0, failed: 0 };
 
@@ -64,7 +69,7 @@ function keyOf(src) {
 /** Tar bort de skalade varianterna av en bild (när bilden tas bort) */
 export function dropVariants(src) { fs.rm(path.join(DIR, keyOf(src)), { recursive: true, force: true }, () => {}); }
 
-// Högst två ffmpeg åt gången; samma variant görs bara en gång även om många frågar samtidigt
+// Högst LIMIT ffmpeg åt gången; samma variant görs bara en gång även om många frågar samtidigt
 let active = 0;
 const waiting = [], inflight = new Map(), failedAt = new Map();
 const release = () => { const next = waiting.shift(); next ? next() : active--; };
@@ -91,14 +96,16 @@ function resize(src, out, w, stamp) {
   });
 }
 
+const waitFor = (p, src, ms) => ms === Infinity ? p : Promise.race([p, new Promise(r => setTimeout(r, ms, src).unref())]);
 /**
  * Sökvägen till bilden i bredden ?w= (från cachen, skalas vid första förfrågan), eller originalet när ingen
  * giltig bredd angavs, källan redan är lika smal eller skalningen misslyckas.
  * @param {string} src  källbilden
  * @param {string|null} wq  värdet på ?w=
+ * @param {number} [wait]  längsta väntan på en ny variant (ms) innan originalet används; Infinity = vänta tills den är klar
  * @returns {Promise<string>}
  */
-export async function sized(src, wq) {
+export async function sized(src, wq, wait = WAIT_MS) {
   const w = snapWidth(wq);
   if (!w || !src) return src;
   let st; try { st = await fs.promises.stat(src); } catch { return src; }
@@ -109,10 +116,10 @@ export async function sized(src, wq) {
   const out = path.join(DIR, keyOf(src), w + stamp);
   if (fs.existsSync(out)) return out;
   if ((failedAt.get(out) || 0) > Date.now() - 3600e3) return src;
-  if (inflight.has(out)) return inflight.get(out);
+  if (inflight.has(out)) return waitFor(inflight.get(out), src, wait);
   if (waiting.length >= MAX_WAITING) return src;
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch { return src; }
   const p = resize(src, out, w, stamp).finally(() => inflight.delete(out));
   inflight.set(out, p);
-  return p;
+  return waitFor(p, src, wait);
 }

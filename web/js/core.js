@@ -50,7 +50,15 @@ export async function api(path, opts = {}) {
   const o = { headers: {}, ...rest };
   if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
   let r;
-  try { r = await fetch('/api' + path, o); }
+  // Förhämtat vid start (start.js) – används en gång, bara för vanliga läsningar och om svaret är färskt
+  // Alla skrivningar (inloggning, profilbyte …) gör förhämtningarna ogiltiga: de kan gälla fel profil.
+  if (rest.method || o.body) globalThis.__early = null;
+  const pre = globalThis.__early?.[path];
+  if (pre) {
+    delete globalThis.__early[path];
+    if (Date.now() - pre.at < 15000) { r = await pre.res; if (!r?.ok) r = null; }
+  }
+  if (!r) try { r = await fetch('/api' + path, o); }
   catch (e) { if (e?.name === 'AbortError') throw e; throw Object.assign(new Error('Servern svarar inte – kontrollera att BraXhn TV körs'), { offline: true }); }
   const data = r.headers.get('content-type')?.includes('json') ? await r.json().catch(() => null) : await r.text();
   if (r.status === 401 && !path.startsWith('/login')) { me = null; rememberPage(); location.hash = '#/login'; throw new Error('Inte inloggad'); }

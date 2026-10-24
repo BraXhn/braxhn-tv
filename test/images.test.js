@@ -171,17 +171,23 @@ t('i processen: fasta bredder, bredd ur JPEG/PNG, en ffmpeg per variant och alla
   assert.equal(m.imageWidth(fs.readFileSync(png)), 300);
   assert.equal(m.imageWidth(Buffer.from('inte en bild')), null);
   // Fem samtidiga förfrågningar efter samma variant: en skalning
-  const outs = await Promise.all(Array.from({ length: 5 }, () => m.sized(src, '240')));
+  const outs = await Promise.all(Array.from({ length: 5 }, () => m.sized(src, '240', Infinity)));
   assert.equal(m.stats.resized, 1);
   assert.ok(outs.every(o => o === outs[0] && o !== src));
-  assert.equal(await m.sized(src, '240'), outs[0]);
+  assert.equal(await m.sized(src, '240', Infinity), outs[0]);
   assert.equal(m.stats.resized, 1);
   assert.equal(await m.sized(png, '480'), png); // ingen förstoring
   assert.equal(await m.sized(src, 'abc'), src);
   // Många olika varianter samtidigt: alla blir klara (kön släpper fram nästa)
-  const all = await Promise.all(['160', '240', '320', '480'].flatMap(w => [m.sized(src, w), m.sized(png, w)]));
+  const all = await Promise.all(['160', '240', '320', '480'].flatMap(w => [m.sized(src, w, Infinity), m.sized(png, w, Infinity)]));
   assert.equal(new Set(all).size, 7); // sex varianter + originalet för PNG:en i 320 och 480
   // nya: affischen i 160/320/480 och PNG:en i 160/240
   assert.equal(m.stats.resized, 6);
   assert.equal(m.stats.failed, 0);
+  // Utan väntan: originalet direkt, varianten blir klar i bakgrunden och används nästa gång
+  const big = path.join(process.env.CONFIG_DIR, 'images', 'c-backdrop.jpg');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=1000x560', '-frames:v', '1', big]);
+  assert.equal(await m.sized(big, '720', 0), big);
+  await new Promise(r => setTimeout(r, 1500));
+  assert.notEqual(await m.sized(big, '720', 0), big);
 });

@@ -20,7 +20,7 @@ let playSeq = 0; // ökas för varje play() och när alla spelare stängs – ä
 export function loadHls() {
   if (window.Hls) return Promise.resolve(window.Hls);
   const add = (src) => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window.Hls); s.onerror = no; document.head.append(s); });
-  return add('/vendor/hls.min.js');
+  return add(new URL('../../vendor/hls.min.js', import.meta.url).href); // samma bygge som modulen (cachas för alltid)
 }
 // Startknapp: inaktiveras medan spelaren startar (dubbelklick ger inte två spelare)
 export function startPlay(b, ...args) {

@@ -57,7 +57,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 4. **HLS-spellista ↔ segment** (`servePlaylist/segmentsOf` ↔ `startFfmpeg`): playlistens EXTINF måste exakt motsvara ffmpegs delning. Omkodning: rutnät 0,2,4,6,12… med tvingade nyckelbilder + segment-muxer. Remux TS: förindexerade nyckelbilder (delmängd ok). Remux fMP4 (HEVC): **komplett** nyckelbildslista krävs (en GOP per segment).
 5. **Session ↔ ffmpeg-process** (`sessions`-map i `stream.js`): nyckel = användare+titel+läge+kvalitet+ljud+pid. Strypning (SIGSTOP), trimning bakåt (`trimBehind`), städning efter 60 s/15 min. `highestFile` måste räkna från `trimmed`.
 6. **Skanner ↔ databas**: rader matchas på sökväg; `adoptRenamed` flyttar framsteg vid omdöpning; raderingsskydd (saknad mapp, tom mapp, >50 % borta).
-7. **Webbläsarens cache ↔ server**: `/app.js?v=`, `/style.css?v=` (versionen ur package.json), `no-cache`+ETag för appens filer, service worker `CACHE` + `MODULES`-lista (test kontrollerar).
+7. **Webbläsarens cache ↔ server**: appens filer under `/v/<BUILD>/` (hash av web/, `server/http/static.js`) cachas `immutable`; `index.html`/`sw.js` har fasta adresser och mallvärdena `{{b}}`/`{{preload}}`. Alla importer i webben måste vara **relativa** (annars lämnar de bygget); vendor-skript laddas via `new URL(..., import.meta.url)`. `web/start.js` förhämtar `/status`, `/libraries` (+ `/home`, `/collections`) och `api()` tar över svaren en gång – skrivningar gör dem ogiltiga (profilbyte). Service workern: `MODULES`-lista (test kontrollerar), cache först för versionerade filer.
 8. **CI ↔ Unraid**: push → `:edge`; Actions-knapp → `:latest`/`:beta` + release. Röktest av imagen före publicering.
 
 ### Invarianter (bryts de blir det fel – testa dem)
