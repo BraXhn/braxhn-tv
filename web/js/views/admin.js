@@ -6,6 +6,7 @@ import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { emptyState, errorState } from '../ui/states.js';
+import { sonicAdmin } from '../sonic.js';
 
 /**
  * Ändra ett bibliotek: namn, mappar (lägg till/ta bort), NFO och hemvideor. En borttagen mapp tar bort titlarna i den ur
@@ -197,6 +198,7 @@ views.admin = async (sec) => {
     ${AU.map(a => `<tr class="${/fail|denied|locked/.test(a.event) ? 'warnrow' : ''}"><td class="muted small">${fmtDate(a.ts)}</td><td>${esc(EVENTS[a.event] || a.event)}</td><td>${esc(a.user_name || '–')}</td><td class="muted small">${esc(a.ip || '')}</td><td class="muted small">${esc(a.detail || '')}</td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga händelser ännu.</td></tr>'}</table></div>
   </div>
+  <div class="panel" id="adm-sonic" aria-live="polite"></div>
   <div class="panel"><h2>Inställningar</h2><form id="settings">
     <label>TMDB API-nyckel (gratis på themoviedb.org – ger affischer, beskrivningar och betyg)</label>
     <input id="tk" type="password" placeholder="${S.tmdbKeySet ? (S.tmdbFromEnv ? 'Satt via miljövariabel' : '•••••••• (sparad – lämna tomt för att behålla)') : 'Ingen nyckel – endast filnamn och miniatyrer används'}">
@@ -229,6 +231,8 @@ views.admin = async (sec) => {
     <p class="muted" style="font-size:13px;margin:14px 0 0">Hårdvaruomkodning: <b>${esc(S.hwaccel)}</b> (sätts med miljövariabeln HWACCEL) · Pågående omkodningar: ${S.activeTranscodes} · Version ${esc(S.version)}</p>
     <div class="row" style="margin-top:16px"><button class="primary">Spara</button><button type="button" class="ghost" id="remeta">Hämta om all metadata</button><button type="button" class="ghost" id="remark">Leta intro igen</button></div></form></div>`;
 
+  // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig
+  if (L.some(l => l.type === 'music')) sonicAdmin($('#adm-sonic')); else $('#adm-sonic').remove();
   // Mappväljare
   const browse = async (p) => {
     try {

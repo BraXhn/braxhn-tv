@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { db, get, all, run, now } from './db.js';
 import { probe, TRACK_SQL, shapeTrack } from './music.js';
 import * as custom from './smartlists.js';
+import * as sonic from './sonic.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   normalize INTEGER NOT NULL DEFAULT 1, skip_back INTEGER NOT NULL DEFAULT 15, skip_fwd INTEGER NOT NULL DEFAULT 30,
@@ -149,6 +150,8 @@ const CUSTOM_ID = /^u([1-9]\d{0,9})$/;
 export function smartTracks(libId, uid, id, { limit = 200, at = now() } = {}) {
   const cm = CUSTOM_ID.exec(String(id));
   if (cm) return custom.tracksFor(+cm[1], uid)?.tracks ?? null;
+  // Stämningsstationer och låtradio från ljudanalysen (sonic.js) – samma format, så apparna visar dem utan ändring
+  if (sonic.isSonicId(id)) return sonic.stationTracks(id, libId, uid, { limit });
   let rows;
   switch (id) {
     case 'top30':
@@ -195,11 +198,16 @@ function countSmartLists(libId, uid) {
   // Egna och delade listor efter de fasta (samma fält; custom/mine/owner/shared är tillägg)
   const own = custom.listFor(uid).map(l => ({ id: 'u' + l.id, name: l.name, ...summary(custom.tracksFor(l.id, uid)?.tracks || []),
     custom: true, mine: l.mine, shared: l.shared, owner: l.mine ? null : l.owner }));
-  return [...fixed, ...own].filter(s => s.count > 0);
+  // Stationer från ljudanalysen sist (station/icon/text är tillägg; webben visar dem på en egen hylla)
+  let st = [];
+  try { st = sonic.stations(libId, uid).map(s => ({ id: s.id, name: s.name, ...summary(s.tracks), station: true, icon: s.icon, text: s.text })); }
+  catch (e) { console.warn('[ljudanalys] stationer:', e.message); }
+  return [...fixed, ...own, ...st].filter(s => s.count > 0);
 }
 export function smartName(id, uid) {
   const cm = CUSTOM_ID.exec(String(id));
   if (cm) return custom.getFor(+cm[1], uid)?.name || null;
+  if (sonic.isSonicId(id)) return sonic.stationName(id);
   return SMART.find(s => s.id === id)?.name || null;
 }
 

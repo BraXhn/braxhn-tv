@@ -9,6 +9,7 @@ import { ranked, parseQuery } from './search.js';
 import { send, fail, deletionBlocked, streamFile } from './util.js';
 import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
 import { parseReplayGain, scheduleLoudness } from './listening.js';
+import * as sonic from './sonic.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -120,6 +121,7 @@ export async function scanMusic(lib, status) {
     if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
   }
   scheduleLoudness(); // jämn ljudnivå mäts i bakgrunden, skanningen väntar inte
+  sonic.kick(); // ljudanalysen (tempo, energi, klang) likaså – nya och ändrade spår
   // Raderingsskyddet per mapp (libpaths.js): en mapp som saknas eller ser tömd ut tar inte bort något
   const missing = removable({ name: lib.name, list, rows: [...known.values()], seen, found: files,
     allowMass: getSetting('scan_allow_mass_delete', '0') === '1', warn: (m) => scanWarn(status, m) });

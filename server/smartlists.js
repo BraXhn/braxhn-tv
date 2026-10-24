@@ -23,7 +23,10 @@ export const FIELDS = {
   favorite: { label: 'Favorit', type: 'bool', expr: 'f.track_id' },
   library: { label: 'Bibliotek', type: 'library', expr: 't.library_id' },
   format: { label: 'Filformat', type: 'text', expr: 't.codec' },
-  bitrate: { label: 'Bithastighet (kbit/s)', type: 'number', expr: '(t.bitrate / 1000.0)' }
+  bitrate: { label: 'Bithastighet (kbit/s)', type: 'number', expr: '(t.bitrate / 1000.0)' },
+  // Från ljudanalysen (server/sonic.js) – NULL för spår som inte analyserats än
+  bpm: { label: 'Tempo (BPM)', type: 'number', expr: 'ts.bpm' },
+  energy: { label: 'Energi (0–100)', type: 'number', expr: 'ts.energy' }
 };
 export const OPS = {
   is: 'är', isNot: 'är inte', contains: 'innehåller', notContains: 'innehåller inte', startsWith: 'börjar med',
@@ -48,6 +51,8 @@ export const SORTS = {
   plays: { label: 'Antal spelningar', expr: 'COALESCE(pc.n, 0)' },
   lastplayed: { label: 'Senast spelad', expr: 'COALESCE(pc.last, 0)' },
   bitrate: { label: 'Bithastighet', expr: 't.bitrate' },
+  bpm: { label: 'Tempo', expr: 'ts.bpm' },
+  energy: { label: 'Energi', expr: 'ts.energy' },
   random: { label: 'Slumpad', expr: null }
 };
 
@@ -186,7 +191,8 @@ const SELECT_FROM = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.
   JOIN libraries lb ON lb.id=t.library_id AND lb.type='music'
   LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id LEFT JOIN artists aar ON aar.id=al.artist_id
   LEFT JOIN (SELECT track_id, COUNT(*) AS n, MAX(ts) AS last FROM track_plays WHERE user_id=? GROUP BY track_id) pc ON pc.track_id=t.id
-  LEFT JOIN favorites f ON f.track_id=t.id AND f.user_id=?`;
+  LEFT JOIN favorites f ON f.track_id=t.id AND f.user_id=?
+  LEFT JOIN track_sonic ts ON ts.track_id=t.id AND ts.ok=1`;
 
 /**
  * Bygger frågan för en (redan normaliserad) definition. Exporteras för tester.
