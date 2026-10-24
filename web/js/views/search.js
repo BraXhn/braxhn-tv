@@ -2,11 +2,10 @@
 // skriver, piltangenter från sökrutan till träffarna, senaste sökningar (bara i den här webbläsaren) och förslag
 // när rutan är tom. Sökrutan i menyraden (#q) kopplas här.
 import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views } from '../core.js';
-import { card, personArt, personCard, shelfHtml } from '../ui/cards.js';
+import { card, chLogo, personArt, personCard, shelfHtml } from '../ui/cards.js';
 import { bindRetry, emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTracks, cover, trackRows } from './music.js';
 import { bookCard, podCover } from './books.js';
-import { chLogo, programDialog } from './live.js';
 import { playLive } from '../player/live.js';
 
 const LIMIT = 12, RECENT = 'search.recent', DEBOUNCE = 200;
@@ -82,7 +81,7 @@ async function render(q) {
   const res = $('#sres');
   if (d.tracks.length) bindTracks(d.tracks, $('[data-tracks]', res));
   $$('[data-ch]', res).forEach(b => b.onclick = () => playLive(d.channels[+b.dataset.ch]));
-  $$('[data-pid]', res).forEach(b => b.onclick = () => programDialog(+b.dataset.pid));
+  $$('[data-pid]', res).forEach(b => b.onclick = async () => (await import('./live.js')).programDialog(+b.dataset.pid)); // live.js laddas vid behov (@lazy)
 }
 const showError = (e, q) => {
   if (e?.aborted) return;

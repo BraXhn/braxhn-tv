@@ -161,3 +161,6 @@ export function castShelf(it) {
   if (!it.cast?.length) return '';
   return `<section class="section"><h2>Rollista</h2><div class="shelf people">${it.cast.map(p => personCard(p, p.role === 'cast' ? p.character || '' : ROLE_NAME[p.role] || '')).join('')}</div></section>`;
 }
+
+/** Kanallogga (live-TV) med kanalnummer som reserv – används av live-vyerna och sökningen */
+export const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
