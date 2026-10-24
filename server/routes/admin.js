@@ -22,6 +22,7 @@ import * as mediaImport from '../mediaimport.js';
 import { route, admin, user, adminAnywhere, trustVpn, isTrusted } from '../http/router.js';
 import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile } from '../http/context.js';
 import * as jobs from '../jobs.js';
+import * as subsonic from '../subsonic.js';
 import * as logs from '../logs.js';
 import * as bookmeta from '../bookmeta.js';
 import os from 'node:os';
@@ -83,7 +84,7 @@ route('PUT', '/api/users/:id', admin, async (c) => {
   if (password) {
     const weak = weakPassword(password, target.name); if (weak) return fail(c.res, 400, weak);
     run('UPDATE users SET pass=?, pw_changed=? WHERE id=?', await hashPw(password), now(), target.id);
-    run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1)', target.id); changes.push('nytt lösenord');
+    run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1)', target.id); subsonic.revokeHousehold(target.id); changes.push('nytt lösenord');
   }
   if (isAdmin != null && target.id !== c.user.id) { run('UPDATE users SET is_admin=? WHERE id=?', isAdmin ? 1 : 0, target.id); changes.push(isAdmin ? 'admin' : 'ej admin'); }
   if (remoteAllowed != null) {
@@ -92,7 +93,7 @@ route('PUT', '/api/users/:id', admin, async (c) => {
     if (!remoteAllowed) run("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND kind IN ('media','img')", target.id);
   }
   if (reset2fa) { run('UPDATE users SET totp_enabled=0, totp_secret=NULL, totp_pending=NULL, recovery=NULL WHERE id=?', target.id); changes.push('2FA återställd'); }
-  if (logoutAll) { run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', target.id, c.user.tokenHash); changes.push('utloggad överallt'); }
+  if (logoutAll) { run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', target.id, c.user.tokenHash); subsonic.revokeHousehold(target.id); changes.push('utloggad överallt'); }
   audit('user_updated', { ...ctx(c), detail: `${target.name}: ${changes.join(', ')}` });
   send(c.res, 200, { ok: true });
 });
@@ -116,7 +117,7 @@ route('GET', '/api/settings', admin, (c) => {
     subAutoMax: +getSetting('sub_auto_max', '10'), subAutoStats: autoSubs,
     remoteQuality: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''),
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
-    adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
+    adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), subsonic: subsonic.enabled(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
     watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
@@ -153,6 +154,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   }
   if (b.require2faRemote != null) setSetting('require_2fa_remote', b.require2faRemote ? '1' : '0');
   if (b.quickConnect != null) setSetting('quick_connect', b.quickConnect ? '1' : '0');
+  if (b.subsonic != null) setSetting('subsonic', b.subsonic ? '1' : '0');
   if (typeof b.trustedNetworks === 'string') {
     const nets = b.trustedNetworks.split(',').map(s => s.trim()).filter(Boolean);
     if (nets.some(n => !/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$|^[0-9a-f:]+$/i.test(n))) return fail(c.res, 400, 'Ange nät som t.ex. 10.8.0.0/24, kommaseparerade');

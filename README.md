@@ -53,6 +53,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Sonarr/Radarr** | Webhook gör att nya avsnitt dyker upp direkt efter nedladdning. **Önskningar**: alla i hushållet kan önska filmer/serier, som skickas till Radarr/Sonarr när de godkänts. Visar om titeln redan finns på en av era tjänster. |
 | **Trakt** | Varje person kan koppla sitt Trakt-konto: sett-status synkas åt båda hållen och "tittar nu" visas. |
 | **Scrobbling av musik** | Varje person kan koppla **ListenBrainz** (med sin användartoken) och **Last.fm** under Mitt konto. Det du lyssnar på i webben, iPhone/Apple TV-appen och Android-appen visas som *spelas nu* och räknas när du lyssnat på halva låten eller 4 minuter (låtar under 30 s räknas inte). Lyssningar som inte gick att skicka (inget nät, tjänsten nere) sparas och skickas senare. Barnprofiler kan inte koppla. Se *Scrobbling* nedan. |
+| **Musikappar (Subsonic)** | Lyssna på musiken i färdiga musikappar: **Symfonium** (Android, Android Auto), **Amperfy** och **play:Sub** (iPhone med **CarPlay**), **Feishin** och **Supersonic** (dator) eller **Sonos via Music Assistant**. Servern talar Subsonic/OpenSubsonic-API:t under `/rest`. Var och en skapar ett eget *lösenord för musikappar* under Mitt konto – det ger bara tillgång till musiken. Favoriter, spellistor (även de smarta), låttexter och scrobbling är desamma som i webben. Se *Musikappar (Subsonic)* nedan. |
 | **Notiser** | Larm till mobilen via ntfy, Pushover, Gotify, Discord, Telegram eller webhook: attacker, spärrade konton, certifikat, säkerhetskopior, inspelningar, önskningar och nya versioner. |
 | **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
@@ -249,6 +250,28 @@ Antenn-TV (MPEG-2, flätad bild) kodas om till H.264 när du tittar live; IPTV i
 - Misslyckade lyssningar försöks igen med ökande väntetid (1 minut upp till 6 timmar). Last.fm tar emot lyssningar upp till 14 dagar bakåt, ListenBrainz skickas upp till 30 dagar; äldre slängs. Gäller kopplingen inte längre visas det under Mitt konto, och lyssningarna väntar tills du kopplar igen.
 - Token och sessionsnycklar sparas i databasen och visas aldrig i webben eller API:t.
 
+## Musikappar (Subsonic)
+
+BraXhn TV har ett **Subsonic-API** (version 1.16.1 med OpenSubsonic-tillägg, som Navidrome), så att färdiga musikappar fungerar: Symfonium, Amperfy, play:Sub (med CarPlay), Feishin, Supersonic, substreamer och Music Assistant (för Sonos m.fl.). Funktionen är på som standard och kan stängas av under Administration → Säkerhet.
+
+1. Gå till **Mitt konto → Musikappar** och tryck *Skapa lösenord för musikappar*. Ange ditt vanliga lösenord (för en profil: huvudkontots). Lösenordet visas **en gång** – skriv in det i appen direkt.
+2. Lägg till servern i appen som en **Subsonic**-server (i Symfonium: *Lägg till mediaserver → Subsonic*; i Amperfy: *Server URL* och inloggning; i Music Assistant: tillägget *Subsonic/Open Subsonic*):
+   - **Adress:** `https://<din server>` – hemma t.ex. `http://192.168.1.10:8420`. Appar som vill ha hela adressen till API:t anger `https://<din server>/rest`.
+   - **Användarnamn:** ditt namn i BraXhn TV (eller profilens namn).
+   - **Lösenord:** lösenordet för musikappar – **inte** ditt vanliga lösenord, det fungerar inte här.
+   - Välj gärna *legacy/klartext-inloggning av* (standard): appen skickar då bara en md5-kontroll med salt. Använd HTTPS utanför hemmet.
+3. Behöver du lösenordet igen skapar du ett nytt (det gamla slutar då fungera i alla appar) eller trycker *Återkalla*.
+
+**Säkerhet**
+- Lösenordet för musikappar gäller **bara** `/rest` och bara musiken: inga filmer, serier, ljudböcker, poddar, live-TV eller administration. Vanliga inloggningar (kakor, appens token, länkar för uppspelning) fungerar inte på `/rest`.
+- Det sparas krypterat (AES-256-GCM) med en nyckel i `/config/subsonic.key`, som inte ingår i databasens säkerhetskopior. Flyttar du servern utan den filen fungerar bara appar som skickar lösenordet i klartext – skapa då nya lösenord.
+- Upprepade fel lösenord spärrar IP-adressen för musikappar en stund (10 fel på 10 minuter), och användarnamnet spärras för försök utifrån (inte hemifrån, så att ingen kan låsa ute hushållets appar). Spärren påverkar inte webbinloggningen. Felen syns i revisionsloggen och i serverloggen (`[auth] subsonic_login_fail …` för CrowdSec/fail2ban).
+- **Utanför hemmet** gäller samma regler som för apparna: konton som bara får användas hemma nekas, och kräver administratören tvåstegsverifiering utanför hemmet måste kontot ha det. Eftersom musikappen inte kan fråga efter en kod skapas lösenordet bara **hemifrån** – eller utifrån med kod från autentiseringsappen.
+- Lösenordet återkallas när du byter lösenord, när administratören sätter nytt lösenord eller loggar ut dig överallt, och när kontot tas bort.
+- **Barnprofiler** får använda musikappar (musik har ingen åldersgräns i BraXhn TV) men scrobblar aldrig. Profiler med **skärmtid för ljud** nekas, eftersom musikappar inte rapporterar lyssnandet så att skärmtiden kan räknas.
+
+**Vad som stöds:** bläddra (artister, album, mappar, genrer), listor (slumpvis, nyast, mest och senast spelat, favoriter, A–Ö, år, genre), sök (även tom sökning för att synka hela biblioteket), spellistor (skapa, ändra, ta bort; de smarta listorna visas som skrivskyddade), favoriter på låtar, album och artister, strömning direkt eller omkodad till MP3 med `maxBitRate`/`format` (samma tak för omkodning som webben), nedladdning för offline, omslag i valfri storlek, låttexter (även synkade, OpenSubsonic) och scrobbling: när appen meddelar att en låt är lyssnad räknas den i *Spelat* och de smarta listorna och skickas till ListenBrainz/Last.fm om du kopplat dem. Id:n har prefix (`ar-`, `al-`, `tr-`, `pl-`, `sp-`). **Stöds inte:** poddar, internetradio, delning, jukebox, betyg och videor via Subsonic.
+
 ## Säkerhetskopior och återställning
 
 - Lokala kopior görs varje natt i `/config/backups`. Extern, krypterad kopia ställs in under *Statistik → Extern säkerhetskopia*. **Spara lösenfrasen på ett säkert ställe** – utan den går kopian inte att läsa.
@@ -345,6 +368,7 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |
 | `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | – | Din Trakt-app |
 | `LASTFM_API_KEY` / `LASTFM_SECRET` | – | Last.fm-appens API key och Shared secret för scrobbling (kan även sättas i webbgränssnittet, se *Scrobbling*) |
+| `SUBSONIC` | 1 | 0 = stäng av API:t för musikappar (`/rest`); kan även ändras i Administration → Säkerhet |
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `BACKUP_PASSPHRASE` | – | Extern säkerhetskopia |
 | `WATCH_REGION` | SE | Land för *var kan jag se den?* |
 | `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
@@ -388,6 +412,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Ljudböcker och poddar | Kapitel från m4b och flera mp3-filer, position över filgränser i webben, RSS-tolkning, nedladdning och spärr mot lokala adresser. Metadata för ljudböcker mot en simulerad Google Books/Open Library/Audnexus: svensk sökning först, reserv till Open Library, kapitel bara när längden stämmer, omslag, *Fel bok?* med låsning, redigering som överlever omskanning och att matchade böcker inte hämtas om. **Otestat:** de riktiga tjänsterna (inte nåbara härifrån) och hur bra träffarna blir för svenska ljudböcker. |
 | Sonarr/Radarr, Trakt, notiser | Mot simulerade tjänster: webhook och sökvägsmappning, önskan till Radarr, tvåvägssynk med Trakt, ntfy. |
 | Scrobbling (ListenBrainz, Last.fm) | Mot simulerade tjänster: validering av token, Last.fm-inloggning med signerade anrop (signaturen kontrolleras av låtsasservern), *spelas nu* via samma anrop som webben och apparna gör, regeln 50 %/4 min/30 s, överhoppade låtar, kö med backoff när tjänsten är nere, inga dubbletter, max ålder, utgången koppling, barnprofiler och att token aldrig syns i API-svar. **Otestat:** de riktiga tjänsterna (bl.a. hur Last.fm sorterar parametrar med `[i]` i en sats) och lyssning i apparna. |
+| Musikappar (Subsonic) | Mot en riktig server och ett litet bibliotek gjort med ffmpeg (`test/subsonic.test.js`): inloggning med md5+salt, klartext, `enc:` och apiKey, fel och motstridiga parametrar, återkallat och ersatt lösenord, att vanliga token inte fungerar på `/rest` och app-lösenordet inte på `/api`, hastighetsgränser per IP och användare, fjärrregler (konto bara hemma, krav på 2FA, skapa utifrån med kod), barnprofiler och skärmtid, samt alla endpoints i både XML (välformad, escaping) och JSON: bläddra, listor, sök med synk, spellistor, favoriter, scrobbling, strömning direkt/omkodad/raw med Range, nedladdning, omslag och låttexter. **Otestat:** de riktiga apparna (Symfonium, Amperfy, play:Sub, Feishin, Supersonic, Music Assistant) och CarPlay. |
 | Säkerhetskopior | Kryptering fram och tillbaka, fel lösenfras nekas, S3-signering mot AWS testvektor, återställning via omstart. |
 | Sökning | Å/ä/ö, accenter, bindestreck, stavfel, år, rankning (exakt före början före innehåller), `%` och `_` som vanliga tecken, barnprofil och söknycklar som hålls aktuella när titlar ändras (även från en annan databasanslutning). 10 000 titlar söks på under 50 ms. Webbvyn provad i Chromium (telefon- och datorbredd, piltangenter). **Otestat:** mycket stora musikbibliotek (hundratusentals låtar) och fjärrkontroll på TV. |
 | Uppgradering av databasen | Databaser skapade av 0.5.0, 0.5.1, 0.6.1, 0.7.0, 0.8.2 och 0.9.3 (`test/fixtures/db/`) uppgraderas utan att något försvinner: konton, lösenord, framsteg, titlar och alla rader finns kvar, schemat blir det senaste, säkerhetskopian före uppgraderingen tas, en andra start ändrar ingenting, och servern startar och loggar in kontot (även appens gamla token). **Otestat:** databaser från före 0.5 (simuleras bara). |

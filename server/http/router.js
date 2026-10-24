@@ -35,6 +35,10 @@ export const route = (method, pattern, opts, fn) => {
 //   audio – musikströmmar: mediatoken för just det spåret (scope = -spårets id)
 //   calendar – iCal-prenumeration: BARA den personliga kalendertoken (?t=, tabellen calendar_tokens). Kaka,
 //              Bearer och andra token gäller inte där, och kalendertoken gäller ingen annanstans (se auth.js).
+//   subsonic – musikappar (/rest/*, server/routes/subsonic.js): routern sätter ALDRIG c.user där – kaka, Bearer och
+//              ?t= ignoreras. Routen loggar själv in med appens lösenord för musikappar (server/subsonic.js) och
+//              kontrollerar fjärrreglerna med remoteDenied() nedan. /rest/* matchar bara subsonic-routes och
+//              subsonic-routes bara /rest/*, så musikappens lösenord når aldrig något annat API.
 // Routefilerna kan lägga till scope(p) (ljudböcker, poddar, live-TV, inspelningar, trailers): den räknar ut
 // vilket id en mediatoken måste vara utfärdad för, utifrån routens parametrar.
 export const pub = { auth: false }, user = { auth: true }, admin = { auth: true, admin: true };
@@ -42,6 +46,7 @@ export const media = { auth: true, media: true }; // strömmar: tillåter kortli
 export const img = { auth: true, img: true };     // bilder: tillåter bildtoken (?t=) för appar
 export const audio = { auth: true, media: true, music: true }; // musikströmmar: mediatoken för just det spåret
 export const calendar = { auth: true, calendar: true };          // iCal: bara kalendertoken (?t=)
+export const subsonic = { auth: false, subsonic: true };         // musikappar: egen inloggning i routen (app-lösenord)
 
 // ---------- betrodda nätverk ----------
 // Hemnät (RFC1918), VPN/CGNAT (100.64.0.0/10, t.ex. NetBird/Tailscale) och egna nät i inställningarna
@@ -55,6 +60,22 @@ export const trustVpn = () => getSetting('trust_vpn_range', process.env.TRUST_VP
 export const isTrusted = (req) => { const ip = clientIp(req); return isPrivate(ip) || (trustVpn() && inCidr(ip, '100.64.0.0/10')) || trustedNets().some(n => inCidr(ip, n)); };
 /** Får administratörer administrera utanför betrott nät? (avstängt som standard) */
 export const adminAnywhere = () => getSetting('admin_anywhere', process.env.ADMIN_ANYWHERE || '0') === '1';
+
+/** Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll); en passkey räknas också */
+export function has2fa(u) {
+  const owner = u.parent_id || u.id;
+  return !!(u.totp_enabled || (u.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', u.parent_id)?.totp_enabled) || pk.hasPasskey(owner));
+}
+/**
+ * Varför kontot nekas från förfrågans nät (null = släpps in). Konton utan fjärråtkomst släpps bara in från betrott nät;
+ * twoFactor: inloggningen är långlivad (kaka, appens Bearer, musikappens lösenord) och kräver då 2FA utifrån när det är påslaget.
+ */
+export function remoteDenied(u, req, twoFactor) {
+  if (isTrusted(req)) return null;
+  if (!u.remote_allowed) return 'Ditt konto får bara användas på hemnätverket';
+  if (twoFactor && require2faRemote() && !has2fa(u)) return 'Tvåstegsverifiering krävs utanför hemmet';
+  return null;
+}
 
 // CSRF: ändrande anrop med cookie-inloggning måste komma från samma origin
 function sameOrigin(req) {
@@ -84,8 +105,16 @@ export async function handle(req, res) {
   // Prometheus (egen token) och DLNA (bara betrodda nät, utan inloggning) ligger utanför /api/
   if (url.pathname === '/metrics') return metrics.serve(req, res);
   if (url.pathname.startsWith('/dlna/')) return dlna.handle(req, res, url, { trusted: isTrusted(req) });
+  // Musikappar (Subsonic/OpenSubsonic) under /rest/: inloggning via parametrar, aldrig kaka – därför CORS för webbklienter (Feishin)
+  const rest = url.pathname.startsWith('/rest/');
+  if (rest) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS', 'Access-Control-Max-Age': '86400' }); return res.end(); }
+  }
   // Allt annat utanför /api/ är webbappens statiska filer (se static.js)
-  if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
+  if (!rest && !url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
   // Chromecast-mottagare och andra enheter hämtar media från annan origin
   if (url.pathname.startsWith('/api/stream/')) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -95,13 +124,15 @@ export async function handle(req, res) {
   }
   for (const r of routes) {
     if (r.method !== req.method) continue;
+    if (rest !== !!r.subsonic) continue; // /rest/* når bara musikappens routes och tvärtom
     const m = r.re.exec(url.pathname);
     if (!m) continue;
     let p;
     try { p = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])); } catch { return fail(res, 400, 'Ogiltig adress'); }
     // Token i adressen (?t=) tas bara emot på routes som tillåter media- eller bildtoken
     // Kalenderroutes slår bara upp kalendertoken – ingen annan inloggning används där
-    const c = { req, res, q: url.searchParams, p, user: r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
+    // Musikappens routes får ingen inloggning härifrån (de loggar in själva med app-lösenordet)
+    const c = { req, res, q: url.searchParams, p, user: r.subsonic ? null : r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
     // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
     if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;
@@ -116,14 +147,10 @@ export async function handle(req, res) {
     }
     if (r.auth && !c.user) return fail(res, 401, 'Inte inloggad');
     if (c.user) {
-      // Konton utan fjärråtkomst släpps bara in från betrott nät
-      const trusted = isTrusted(req);
-      if (!trusted && !c.user.remote_allowed) return fail(res, 403, 'Ditt konto får bara användas på hemnätverket');
-      // Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll)
-      // (slås bara upp när det behövs – inte för varje segment och affisch)
-      const has2fa = () => { const owner = c.user.parent_id || c.user.id;
-        return c.user.totp_enabled || (c.user.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', c.user.parent_id)?.totp_enabled) || pk.hasPasskey(owner); };
-      if (!trusted && (c.user.kind === 'web' || c.user.kind === 'app') && require2faRemote() && !has2fa()) return fail(res, 403, 'Tvåstegsverifiering krävs utanför hemmet');
+      // Konton utan fjärråtkomst släpps bara in från betrott nät; web/app kräver 2FA utifrån när det är påslaget
+      // (2FA slås bara upp när det behövs – inte för varje segment och affisch)
+      const why = remoteDenied(c.user, req, c.user.kind === 'web' || c.user.kind === 'app');
+      if (why) return fail(res, 403, why);
     }
     // Administration: administratör, och betrott nät om inte "administration överallt" är påslaget
     if (r.admin) {

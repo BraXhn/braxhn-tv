@@ -182,6 +182,42 @@ export function played(u, trackId, at = now()) {
   return Promise.all(accts.filter(a => !a.error).map(a => nowPlaying(a, row)));
 }
 
+/**
+ * Musikappar (Subsonic: scrobble med submission=false): bara "spelas nu" hos tjänsterna. Kön rörs inte – appen meddelar
+ * själv när spåret räknas (listened nedan), så ett nytt spår betyder inte att ett annat hoppades över.
+ */
+export function nowPlayingOnly(u, trackId) {
+  if (!u || u.max_age != null) return Promise.resolve();
+  const accts = all('SELECT user_id, service, secret, error FROM scrobble_accounts WHERE user_id=? AND error IS NULL', u.id);
+  const t = accts.length ? trackMeta(trackId) : null;
+  const artist = known(t?.artist) || known(t?.album_artist);
+  if (!t || !artist) return Promise.resolve();
+  const row = { artist, title: String(t.title).slice(0, 500), album: t.album || null, album_artist: known(t.album_artist),
+    duration: t.duration > 0 ? Math.round(t.duration) : null, track_no: t.track_no || null };
+  return Promise.all(accts.map(a => nowPlaying(a, row)));
+}
+/**
+ * Musikappar (Subsonic: scrobble med submission=true): appen har redan avgjort att spåret räknas. Lyssningen läggs i kön
+ * som klar att skicka direkt (listened_at = när spåret spelades, enligt appen). Samma spår och starttid räknas en gång.
+ */
+export function listened(u, trackId, listenedAt = now(), at = now()) {
+  if (!u || u.max_age != null) return 0;
+  const accts = all('SELECT service FROM scrobble_accounts WHERE user_id=?', u.id);
+  if (!accts.length) return 0;
+  const t = trackMeta(trackId);
+  const artist = known(t?.artist) || known(t?.album_artist);
+  if (!t || !artist) return 0;
+  const dur = t.duration > 0 ? Math.round(t.duration) : null;
+  if (!scrobblable(dur)) return 0;
+  const when = Math.min(at, Math.max(at - MAX_AGE.listenbrainz, Math.floor(listenedAt) || at));
+  let n = 0;
+  tx(() => {
+    for (const a of accts) n += Number(run(`INSERT OR IGNORE INTO scrobble_queue(user_id,service,track_id,artist,title,album,album_artist,duration,track_no,listened_at,due)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`, u.id, a.service, t.id, artist, String(t.title).slice(0, 500), t.album || null, known(t.album_artist), dur, t.track_no || null, when, at).changes);
+  });
+  return n;
+}
+
 async function submit(acct, rows) {
   if (acct.service === 'listenbrainz') {
     await listenbrainz('/1/submit-listens', acct.secret, { listen_type: rows.length === 1 ? 'single' : 'import',
