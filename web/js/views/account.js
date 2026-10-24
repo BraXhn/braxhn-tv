@@ -8,6 +8,7 @@ import { confirmDialog, formDialog, openDialog, promptDialog } from '../ui/dialo
 import { loadingState } from '../ui/states.js';
 import { calendarFeedPanel } from './calendar.js';
 import { loadQr } from './quickconnect.js';
+import { renderCinemaPrefs } from '../player/cinema.js';
 import { applySubStyle, audioFx, bindSubStyleFields, setAudioFx, subStyleFields, webAudioFx } from '../player/comfort.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
@@ -58,6 +59,7 @@ views.account = async () => {
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="anight"> Nattläge – jämnare ljud, svaga ljud lyfts</label>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="adialog"> Tydligare dialog – rösterna förstärks</label></div>
     ${webAudioFx ? '' : '<p class="muted small">I Safari görs nattläge och tydligare dialog av servern: ljudet omkodas, bilden kopieras.</p>'}</div>
+  <div class="panel" id="cinemaprefs"></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
       <div class="row"><button class="ghost" id="newrc">Skapa nya reservkoder</button><button class="danger" id="off">Stäng av</button></div>`
@@ -101,6 +103,7 @@ views.account = async () => {
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
+  renderCinemaPrefs($('#cinemaprefs')).catch(e => { if (!e?.aborted && $('#cinemaprefs')) $('#cinemaprefs').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });

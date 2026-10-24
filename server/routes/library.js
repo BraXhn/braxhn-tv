@@ -386,7 +386,7 @@ route('GET', '/api/image/:id/:type', img, async (c) => {
 });
 
 // ---------- Skådespelare, trailers och årssammanfattning ----------
-const TRAILER_SCOPE = 6.5e9;
+const { TRAILER_SCOPE } = trailers;
 /** Rollista (avsnitt visar seriens), lokala trailers och YouTube-trailer (inte för barnprofiler – länken leder ut från appen) */
 function titleExtras(u, it) {
   const ep = it.kind === 'episode';

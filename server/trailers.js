@@ -9,6 +9,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS trailers(id INTEGER PRIMARY KEY, item_id INT
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE, path TEXT NOT NULL UNIQUE, size INTEGER, mtime INTEGER, added INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS trailers_item ON trailers(item_id);`);
 
+// Mediatoken för en trailer gäller bara den trailern (router.js: scope = TRAILER_SCOPE + trailerns id)
+export const TRAILER_SCOPE = 6.5e9;
 const TRAILER_DIR = /^trailers?$/i;
 // "Film (2020)-trailer", "Film (2020) - trailer", "Film.2020.trailer", "Film_trailer2" (avskiljare krävs)
 const SUFFIX = /^(.*?)[\s._]*[-._][\s._]*trailer(?:[\s._-]*\d{1,2})?$/i;
