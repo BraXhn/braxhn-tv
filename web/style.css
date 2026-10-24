@@ -242,6 +242,7 @@ body:has(#tabbar:not([hidden])) #toast,body.hasbar #toast{bottom:calc(96px + env
 .ok-badge{background:rgba(76,195,138,.18);color:var(--ok)}
 .warn-badge{background:rgba(255,200,87,.16);color:#ffc857}
 .switch{display:flex!important;gap:8px;align-items:center;color:var(--text)!important;font-size:14px!important}
+.switch[hidden]{display:none!important}
 .checks{display:flex;flex-direction:column;gap:10px}
 .check{display:flex;gap:12px;align-items:flex-start}
 .check .dot{flex:0 0 24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
@@ -948,3 +949,21 @@ body.hascast main{padding-bottom:110px}
 .hc-h{font-size:15px;margin:18px 0 8px}
 .hcorder li.off .cn{color:var(--dim);text-decoration:line-through}
 .hcorder .ccheck{cursor:pointer}
+
+/* Hemvideor: mappar och klipp som liggande kort, brödsmulor (views/home.js) */
+.grid.wide{grid-template-columns:repeat(auto-fill,minmax(min(100%,calc(var(--cw) * 1.6)),1fr))}
+.grid.wide>.card{contain-intrinsic-size:auto calc(var(--cw) * 1.6) auto calc(var(--cw) * 0.9 + 60px)}
+.grid.wide+.hvh,#hvfolders{margin-bottom:22px}
+.hvh{font-size:16px;margin:4px 0 12px}
+.crumbs{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:-6px 0 16px;color:var(--dim);font-size:14px}
+.crumbs a{color:var(--dim)}.crumbs a[aria-current]{color:var(--text);font-weight:600}
+.fcard .fph{background:linear-gradient(135deg,var(--bg3),var(--bg2))}
+.fcard .ficon{font-size:40px;opacity:.6}
+/* Lokal säsongsaffisch på seriesidan */
+.season-poster{width:60px;height:90px;object-fit:cover;border-radius:4px;flex:none}
+/* Bibliotekets mappar i administrationen */
+.libpaths{margin:0;padding:0;list-style:none}
+.libpaths li{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);word-break:break-all}
+.libwarn{color:#ffc857;margin:10px 0 0}
+.libpaths li code{flex:1;min-width:0}
+.libpaths li .muted,.libpaths li button{flex:none;white-space:nowrap}

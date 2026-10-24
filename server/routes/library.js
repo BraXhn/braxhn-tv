@@ -5,7 +5,9 @@ import path from 'node:path';
 import { all, run, get, now, tx, getSetting, IMAGES } from '../db.js';
 import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
 import { audit, createSession } from '../auth.js';
-import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb } from '../scanner.js';
+import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie } from '../scanner.js';
+import { rootsOf, setRoots, nested, MAX_ROOTS } from '../libpaths.js';
+import { imageFile, seasonPosters } from '../localmeta.js';
 import * as st from '../stream.js';
 import * as act from '../activity.js';
 import * as trick from '../trickplay.js';
@@ -23,18 +25,39 @@ import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
 import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, maxAgeOf, screenBlock } from '../http/context.js';
 
-// Bibliotek
+// Bibliotek. Fälten i svaret (l.*: id, name, type, path, anime, nfo, home_video, count) läses av apparna – bara tillägg.
+// paths = alla bibliotekets mappar (path är den första).
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
   WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
-  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)));
+  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)
+  .map(l => ({ ...l, paths: rootsOf(l) }))));
+/** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
+function checkPaths(list) {
+  const out = [];
+  if (!Array.isArray(list)) return { error: 'Ange bibliotekets mappar' };
+  for (const p of list.slice(0, MAX_ROOTS + 1)) {
+    const real = insideMedia(String(p || ''));
+    if (!real) return { error: `Mappen ${String(p || '').slice(0, 200)} måste finnas och ligga under ${MEDIA_ROOT}` };
+    try { if (!fs.statSync(real).isDirectory()) return { error: `${real} är ingen mapp` }; } catch { return { error: `Mappen ${real} går inte att läsa` }; }
+    if (!out.includes(real)) out.push(real);
+  }
+  if (!out.length) return { error: 'Biblioteket behöver minst en mapp' };
+  if (out.length > MAX_ROOTS) return { error: `Högst ${MAX_ROOTS} mappar per bibliotek` };
+  const n = nested(out);
+  if (n) return { error: `${n[0]} ligger i ${n[1]} – välj bara en av dem` };
+  return { paths: out };
+}
 route('POST', '/api/libraries', admin, async (c) => {
-  const { name, type, path: p, anime } = await readJson(c.req);
-  const real = insideMedia(String(p || ''));
+  const { name, type, path: p, paths, anime, nfo, homeVideo } = await readJson(c.req);
   if (!name?.trim() || !['movie', 'show', 'music', 'audiobook'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
-  if (!real) return fail(c.res, 400, `Sökvägen måste finnas och ligga under ${MEDIA_ROOT}`);
-  const id = Number(run('INSERT INTO libraries(name,type,path,anime) VALUES(?,?,?,?)', name.trim(), type, real, anime && type === 'show' ? 1 : 0).lastInsertRowid);
-  audit('library_added', { ...ctx(c), detail: `${name.trim()} (${real})` });
+  const chk = checkPaths(Array.isArray(paths) ? paths : [p]);
+  if (chk.error) return fail(c.res, 400, chk.error);
+  const real = chk.paths[0];
+  const id = Number(run('INSERT INTO libraries(name,type,path,anime,nfo,home_video) VALUES(?,?,?,?,?,?)', name.trim().slice(0, 60), type, real,
+    anime && type === 'show' ? 1 : 0, nfo === false ? 0 : 1, homeVideo && type === 'movie' ? 1 : 0).lastInsertRowid);
+  if (chk.paths.length > 1) setRoots(id, chk.paths);
+  audit('library_added', { ...ctx(c), detail: `${name.trim()} (${chk.paths.join(', ')})` });
   act.watchLibraries(scan);
   scan(id);
   send(c.res, 200, { id });
@@ -121,7 +144,34 @@ route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayou
 route('PUT', '/api/me/home-layout', user, async (c) => {
   try { send(c.res, 200, homes.setLayout(c.user.id, await readJson(c.req))); } catch (e) { fail(c.res, 400, e.message); }
 });
-const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title' };
+const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title',
+  date: 'i.taken DESC NULLS LAST, i.added DESC, i.sort_title' };
+/** ?folder= för hemvideor: relativ mapp utan inledande/avslutande snedstreck; '..' och styrtecken godtas inte */
+function folderParam(v) {
+  const f = String(v || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').slice(0, 1000);
+  return f.split('/').some(p => p === '..' || p === '.') || /[\u0000-\u001f]/.test(f) ? null : f.split('/').join(path.sep);
+}
+/** Undermapparna i en hemvideomapp: namn, antal klipp (hela undermappen), första/senaste datum och ett omslag */
+function subfolders(uid, libId, f, sort) {
+  const age = ageFilter(uid), pre = f ? f + path.sep : '';
+  const rows = all(`SELECT i.folder AS folder, COUNT(*) AS n, MIN(i.taken) AS first, MAX(i.taken) AS latest,
+    MAX(CASE WHEN i.thumb=1 THEN i.id END) AS cover
+    FROM items i LEFT JOIN items s ON s.id=i.parent_id WHERE i.library_id=? AND i.kind='movie' AND i.version_of IS NULL
+    AND i.folder IS NOT NULL AND length(i.folder) > ? AND substr(i.folder, 1, ?)=?${age.sql} GROUP BY i.folder`, libId, pre.length, pre.length, pre, ...age.params);
+  const by = new Map();
+  for (const r of rows) {
+    const name = r.folder.slice(pre.length).split(path.sep)[0];
+    if (!name) continue;
+    const g = by.get(name) || { name, path: (pre + name).split(path.sep).join('/'), count: 0, first: null, latest: null, cover: null };
+    g.count += r.n;
+    if (r.first != null && (g.first == null || r.first < g.first)) g.first = r.first;
+    if (r.latest != null && (g.latest == null || r.latest >= g.latest)) { g.latest = r.latest; if (r.cover) g.cover = r.cover; }
+    if (!g.cover && r.cover) g.cover = r.cover;
+    by.set(name, g);
+  }
+  const out = [...by.values()];
+  return sort === 'date' || sort === 'added' ? out.sort((a, b) => (b.latest || 0) - (a.latest || 0)) : out.sort((a, b) => a.name.localeCompare(b.name, 'sv', { numeric: true }));
+}
 route('GET', '/api/libraries/:id/items', user, (c) => {
   const lib = get('SELECT * FROM libraries WHERE id=?', c.p.id);
   if (!lib) return fail(c.res, 404, 'Biblioteket finns inte');
@@ -131,7 +181,15 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
   if (filter === 'watched') where.push(lib.type === 'show' ? 'ep_watched = ep_total' : 'p.watched=1');
   // Valfri sidindelning (?limit=&offset=); utan den skickas hela biblioteket (upp till 5000) som tidigare
   const limit = Math.min(10000, Math.max(1, parseInt(c.q.get('limit')) || 5000)), offset = Math.max(0, parseInt(c.q.get('offset')) || 0);
-  const out = { library: lib, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
+  // Hemvideor: ?folder= visar en mapp i taget (klippen direkt i mappen + undermapparna som "samlingar") – nya fält folder/folders
+  let folder = null;
+  if (lib.type === 'movie' && lib.home_video && c.q.has('folder')) {
+    folder = folderParam(c.q.get('folder'));
+    if (folder == null) return fail(c.res, 400, 'Ogiltig mapp');
+    where.push(`COALESCE(i.folder, '')=?`); params.push(folder);
+  }
+  const out = { library: { ...lib, paths: rootsOf(lib) }, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
+  if (folder != null) { out.folder = folder.split(path.sep).join('/'); out.folders = subfolders(c.user.id, lib.id, folder, c.q.get('sort')); }
   // ?collections=1: filmer i samma samling (minst två synliga i listan) visas som ett samlingskort på den första filmens plats
   if (lib.type === 'movie' && c.q.get('collections') === '1') out.items = collapseCollections(out.items);
   if (c.q.has('limit') || c.q.has('offset')) {
@@ -162,6 +220,9 @@ route('GET', '/api/items/:id', user, (c) => {
   if (it.kind === 'show') {
     Object.assign(out, follows.followInfo(uid, it.id));
     out.children = listItems(uid, 'i.parent_id=?', [it.id], 'i.season, i.episode', 5000);
+    // Säsonger med lokal affisch (nytt fält): /api/image/:id/season<N>
+    const sp = seasonPosters(it);
+    if (sp.length) out.seasonPosters = sp;
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
   } else {
     Object.assign(out, {
@@ -251,12 +312,52 @@ route('POST', '/api/items/:id/match', admin, async (c) => {
     send(c.res, 200, oneItem(c.user.id, it.id));
   } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
+// Ändra ett bibliotek: { name, anime, paths (alla mappar) eller addPath (en till), nfo, homeVideo }. En borttagen mapp tar bort
+// titlarna i den ur biblioteket (filerna på disken rörs inte).
 route('PUT', '/api/libraries/:id', admin, async (c) => {
   const b = await readJson(c.req);
   const l = get('SELECT * FROM libraries WHERE id=?', c.p.id); if (!l) return fail(c.res, 404, 'Finns inte');
-  if (typeof b.name === 'string' && b.name.trim()) run('UPDATE libraries SET name=? WHERE id=?', b.name.trim().slice(0, 60), l.id);
-  if (b.anime != null) { run('UPDATE libraries SET anime=? WHERE id=?', b.anime ? 1 : 0, l.id); run("UPDATE items SET meta_done=0 WHERE library_id=? AND kind='show' AND meta_done=1", l.id); scan(l.id); }
-  send(c.res, 200, { ok: true });
+  const old = rootsOf(l);
+  let next = null;
+  if (Array.isArray(b.paths) || typeof b.addPath === 'string') {
+    const chk = checkPaths(Array.isArray(b.paths) ? b.paths : [...old, b.addPath]);
+    if (chk.error) return fail(c.res, 400, chk.error);
+    next = chk.paths;
+  }
+  let rescan = false;
+  const changes = [];
+  if (typeof b.name === 'string' && b.name.trim() && b.name.trim() !== l.name) { run('UPDATE libraries SET name=? WHERE id=?', b.name.trim().slice(0, 60), l.id); changes.push(`namn ${b.name.trim().slice(0, 60)}`); }
+  if (b.anime != null && l.type === 'show' && !!b.anime !== !!l.anime) { run('UPDATE libraries SET anime=? WHERE id=?', b.anime ? 1 : 0, l.id); run("UPDATE items SET meta_done=0 WHERE library_id=? AND kind='show' AND meta_done=1", l.id); rescan = true; }
+  if (b.nfo != null && (l.type === 'movie' || l.type === 'show') && !!b.nfo !== (l.nfo !== 0)) {
+    run('UPDATE libraries SET nfo=? WHERE id=?', b.nfo ? 1 : 0, l.id);
+    // Av: NFO-värdena glöms och titlarna hämtas från TMDB igen (skanningen tar bort resten); på: läses vid skanningen
+    if (!b.nfo) run(`UPDATE items SET meta_done=CASE WHEN kind IN ('movie','show') AND meta_done IN (1,2) AND match_locked=0 THEN 0 ELSE meta_done END WHERE library_id=? AND nfo_sig IS NOT NULL`, l.id);
+    changes.push(b.nfo ? 'NFO på' : 'NFO av'); rescan = true;
+  }
+  if (b.homeVideo != null && l.type === 'movie' && !!b.homeVideo !== !!l.home_video) {
+    tx(() => {
+      run('UPDATE libraries SET home_video=? WHERE id=?', b.homeVideo ? 1 : 0, l.id);
+      // Alla filer läses om (titel/datum från filen, eller TMDB-matchning igen)
+      if (b.homeVideo) run(`UPDATE items SET mtime=0, tmdb_id=NULL, overview=NULL, rating=NULL, genres=NULL, collection_id=NULL, cert=NULL, age=NULL,
+        original_title=NULL, trailer_yt=NULL, match_locked=0, poster=CASE WHEN local_img LIKE '%"poster"%' THEN poster ELSE 0 END,
+        backdrop=CASE WHEN local_img LIKE '%"backdrop"%' THEN backdrop ELSE 0 END WHERE library_id=?`, l.id);
+      else for (const r of all('SELECT id, path FROM items WHERE library_id=? AND path IS NOT NULL', l.id)) {
+        const p = parseMovie(r.path);
+        run('UPDATE items SET mtime=0, meta_done=0, taken=NULL, folder=NULL, title=?, sort_title=?, year=? WHERE id=? AND match_locked=0', p.title, p.title.toLowerCase(), p.year, r.id);
+      }
+    });
+    changes.push(b.homeVideo ? 'hemvideor' : 'inte hemvideor'); rescan = true;
+  }
+  if (next && next.join('\n') !== old.join('\n')) {
+    setRoots(l.id, next);
+    for (const r of old.filter(r => !next.includes(r))) { const n = forgetFolder(l, r, next); changes.push(`mappen ${r} borttagen (${n} titlar)`); }
+    for (const r of next.filter(r => !old.includes(r))) changes.push(`mappen ${r} tillagd`);
+    act.watchLibraries(scan);
+    rescan = true;
+  }
+  if (changes.length) audit('library_changed', { ...ctx(c), detail: `${l.name}: ${changes.join(', ')}` });
+  if (rescan) scan(l.id);
+  send(c.res, 200, { ok: true, paths: rootsOf(get('SELECT * FROM libraries WHERE id=?', l.id)) });
 });
 route('PUT', '/api/items/:id', admin, async (c) => {
   const { title, year, overview, age } = await readJson(c.req);
@@ -385,10 +486,11 @@ route('GET', '/api/collection-image/:cid/:type', img, async (c) => {
     : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
 });
 route('GET', '/api/image/:id/:type', img, async (c) => {
-  if (!['poster', 'backdrop', 'thumb'].includes(c.p.type)) return fail(c.res, 404, '');
+  // season<N> = lokal säsongsaffisch (season01-poster.jpg bredvid serien, localmeta.js)
+  if (!['poster', 'backdrop', 'thumb'].includes(c.p.type) && !/^season\d{1,4}$/.test(c.p.type)) return fail(c.res, 404, '');
   // Begränsade profiler (barn) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen) från titlar över gränsen
   if (maxAgeOf(c.user.id) != null && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
-  const f = path.join(IMAGES, `${+c.p.id}-${c.p.type}.jpg`);
+  const f = imageFile(+c.p.id, c.p.type);
   const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
   const w = c.q.get('w');
   fs.readFile(await sized(f, w), async (e, data) => {

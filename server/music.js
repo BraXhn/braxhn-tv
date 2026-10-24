@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
 import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { ranked, parseQuery } from './search.js';
-import { send, fail, listFiles, deletionBlocked, underFailed, streamFile } from './util.js';
+import { send, fail, deletionBlocked, streamFile } from './util.js';
+import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
 import { parseReplayGain, scheduleLoudness } from './listening.js';
 
 const pexec = promisify(execFile);
@@ -31,7 +32,7 @@ export async function probe(file) {
 
 // Mappstruktur som reserv: Artist/Album/01 - Titel.flac
 function fromPath(lib, file) {
-  const rel = path.relative(lib.path, file).split(path.sep);
+  const rel = relOf(lib.roots || rootsOf(lib), file).split(path.sep);
   const base = path.basename(file, path.extname(file));
   const m = base.match(/^(?:(\d+)[-.]?)?(\d{1,3})?[\s._-]*(.*)$/);
   const tn = base.match(/^(\d{1,3})(?:[\s._-]+|$)/);
@@ -82,10 +83,12 @@ export async function makeCover(out, dir, file, hasPic) {
 const scanWarn = (status, msg) => { console.warn('[music]', msg); if (Array.isArray(status.warnings)) status.warnings.push(msg); };
 export async function scanMusic(lib, status) {
   status.phase = 'Söker musikfiler'; status.done = 0;
-  const { files, rootOk, failed } = await listFiles(lib.path, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
-  // Saknad/oläsbar mapp (t.ex. omonterad NAS): rör ingenting
-  if (!rootOk) return scanWarn(status, deletionBlocked({ name: lib.name, rootOk }));
-  for (const d of failed) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
+  const roots = lib.roots = rootsOf(lib);
+  const list = await listRoots(roots, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
+  const { files, failed } = list;
+  // Ingen mapp går att läsa (t.ex. omonterad NAS): rör ingenting
+  if (!list.rootOk) return scanWarn(status, deletionBlocked({ name: lib.name, rootOk: false }));
+  for (const d of failed) if (!roots.includes(d)) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length; status.phase = 'Läser taggar';
   const known = new Map(all('SELECT id, path, size, mtime FROM tracks WHERE library_id=?', lib.id).map(r => [r.path, r]));
   const seen = new Set();
@@ -117,10 +120,9 @@ export async function scanMusic(lib, status) {
     if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
   }
   scheduleLoudness(); // jämn ljudnivå mäts i bakgrunden, skanningen väntar inte
-  const missing = [...known.values()].filter(r => !seen.has(r.path) && !underFailed(r.path, failed));
-  const blocked = deletionBlocked({ name: lib.name, rootOk, files: files.length, known: known.size, missing: missing.length,
-    allowMass: getSetting('scan_allow_mass_delete', '0') === '1' });
-  if (blocked) return scanWarn(status, blocked);
+  // Raderingsskyddet per mapp (libpaths.js): en mapp som saknas eller ser tömd ut tar inte bort något
+  const missing = removable({ name: lib.name, list, rows: [...known.values()], seen, found: files,
+    allowMass: getSetting('scan_allow_mass_delete', '0') === '1', warn: (m) => scanWarn(status, m) });
   const gone = [];
   tx(() => {
     for (const r of missing) {

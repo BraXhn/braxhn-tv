@@ -4,8 +4,65 @@ import { $, $$, act, api, esc, fmtDate, keyClick, later, main, me, toast, views,
 import { boot, loadLibs, route } from '../router.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
-import { confirmDialog, promptDialog } from '../ui/dialog.js';
+import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { emptyState, errorState } from '../ui/states.js';
+
+/**
+ * Ändra ett bibliotek: namn, mappar (lägg till/ta bort), NFO och hemvideor. En borttagen mapp tar bort titlarna i den ur
+ * biblioteket när man sparar (filerna på disken rörs inte); en mapp som bara saknas tillfälligt rör skanningen aldrig.
+ */
+function editLibrary(l, mediaRoot) {
+  if (!l) return;
+  const orig = [...(l.paths || [l.path])];
+  let paths = [...orig];
+  const video = l.type === 'movie' || l.type === 'show';
+  const body = `<div class="field"><label for="le-name">Namn</label><input id="le-name" value="${esc(l.name)}" maxlength="60" required></div>
+    <h3 style="font-size:15px;margin:14px 0 4px">Mappar</h3>
+    <p class="muted small" style="margin:0 0 6px">Samma sorts innehåll kan ligga på flera diskar eller delningar. Går en mapp inte att läsa tas ingenting bort.</p>
+    <ul class="libpaths" id="le-paths"></ul>
+    <label for="le-add" style="margin-top:12px">Lägg till en mapp (under ${esc(mediaRoot)})</label>
+    <div class="row"><input id="le-add" value="${esc(mediaRoot)}" style="flex:1;min-width:0"><button type="button" class="ghost small" id="le-addb">Lägg till mappen</button></div>
+    <div class="fsb" id="le-fsb"></div>
+    ${video ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-nfo" ${l.nfo !== 0 ? 'checked' : ''}> Använd NFO-filer (movie.nfo, tvshow.nfo, &lt;avsnitt&gt;.nfo från Kodi, Jellyfin eller tinyMediaManager) – värdena går före TMDB</label>` : ''}
+    ${l.type === 'movie' ? `<label class="switch"><input type="checkbox" id="le-hv" ${l.home_video ? 'checked' : ''}> Hemvideor / andra videor – ingen TMDB, titel från filnamnet, datum från filen, mapparna blir navigering</label>` : ''}
+    <p class="small libwarn" id="le-warn" role="status" hidden></p>`;
+  const d = openDialog({ title: `Ändra ${l.name}`, body, form: true, size: 'wide', actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: async (h) => {
+    const b = { name: h.$('#le-name').value.trim(), paths };
+    if (h.$('#le-nfo')) b.nfo = h.$('#le-nfo').checked;
+    if (h.$('#le-hv')) b.homeVideo = h.$('#le-hv').checked;
+    await api('/libraries/' + l.id, { method: 'PUT', body: b });
+    toast('Biblioteket sparat – skannar');
+    await loadLibs();
+    route();
+  } }] });
+  const draw = () => {
+    d.$('#le-paths').innerHTML = paths.map((p, i) => `<li><code>${esc(p)}</code>${i === 0 ? ' <span class="muted small">(första)</span>' : ''}
+      <button type="button" class="ghost small" data-lrm="${i}" ${paths.length < 2 ? 'disabled title="Biblioteket behöver minst en mapp"' : ''} aria-label="Ta bort mappen ${esc(p)}">Ta bort</button></li>`).join('');
+    d.el.querySelectorAll('[data-lrm]').forEach(x => x.onclick = () => { paths.splice(+x.dataset.lrm, 1); draw(); });
+    const gone = orig.filter(p => !paths.includes(p));
+    const w = d.$('#le-warn');
+    w.hidden = !gone.length;
+    w.textContent = gone.length ? `Titlarna i ${gone.join(', ')} tas bort ur biblioteket när du sparar (tittarhistoriken för dem försvinner, filerna på disken rörs inte).` : '';
+  };
+  const browse = async (p) => {
+    try {
+      const r = await api('/fs?path=' + encodeURIComponent(p));
+      if (!d.el.isConnected) return;
+      d.$('#le-add').value = r.path;
+      d.$('#le-fsb').innerHTML = (r.parent ? `<div data-p="${esc(r.parent)}">⬆ ..</div>` : '') + r.dirs.map(x => `<div data-p="${esc(r.path + '/' + x)}">📁 ${esc(x)}</div>`).join('')
+        || '<div class="muted" role="status">Inga undermappar</div>';
+      d.el.querySelectorAll('#le-fsb [data-p]').forEach(el => keyClick(el).onclick = () => browse(el.dataset.p));
+    } catch (e) { if (!e.aborted && d.el.isConnected) d.$('#le-fsb').innerHTML = errorState(e, { compact: true }); }
+  };
+  d.$('#le-addb').onclick = () => {
+    const p = d.$('#le-add').value.trim().replace(/\/+$/, '');
+    if (!p) return;
+    if (paths.includes(p)) return toast('Mappen finns redan i biblioteket');
+    paths.push(p); draw();
+  };
+  draw();
+  browse(mediaRoot);
+}
 
 views.admin = async (sec) => {
   if (!me.is_admin) { location.hash = '#/'; return; }
@@ -20,14 +77,15 @@ views.admin = async (sec) => {
   </div>
   <div class="panel"><h2>Bibliotek</h2>
     <table><tr><th>Namn</th><th>Typ</th><th>Mapp</th><th>Titlar</th><th></th></tr>
-    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted">${esc(l.path)}</td><td>${l.count}</td>
-      <td class="r"><button class="ghost small" data-scan="${l.id}">Skanna</button> <button class="danger small" data-del="${l.id}">Ta bort</button></td></tr>`).join('')
+    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted small">${(l.paths || [l.path]).map(esc).join('<br>')}${l.home_video ? ' <span class="ok-badge">Hemvideor</span>' : ''}${(l.type === 'movie' || l.type === 'show') && l.nfo === 0 ? ' <span class="warn-badge">NFO av</span>' : ''}</td><td>${l.count}</td>
+      <td class="r"><button class="ghost small" data-ledit="${l.id}">Ändra…</button> <button class="ghost small" data-scan="${l.id}">Skanna</button> <button class="danger small" data-del="${l.id}">Ta bort</button></td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <h3 style="margin:22px 0 4px;font-size:15px">Lägg till bibliotek</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label>Namn</label><input id="ln" placeholder="Filmer" required></div>
       <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option></select></div></div>
       <label class="switch" id="lanimew" hidden><input type="checkbox" id="lanime"> Anime (absolut avsnittsnumrering som "Serie - 1071" mappas till säsonger)</label>
+      <label class="switch" id="lhvw"><input type="checkbox" id="lhv"> Hemvideor / andra videor (ingen TMDB – titel från filnamnet, sorteras på datum, mapparna blir navigering)</label>
       <label>Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
@@ -184,11 +242,13 @@ views.admin = async (sec) => {
   browse(S.mediaRoot);
   $('#addlib').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
+    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked, homeVideo: $('#lt').value === 'movie' && $('#lhv').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
     catch (er) { toastErr(er); }
   };
-  $('#lt').onchange = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; };
-  $('#lanimew').hidden = $('#lt').value !== 'show';
+  const typeOpts = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; $('#lhvw').hidden = $('#lt').value !== 'movie'; };
+  $('#lt').onchange = typeOpts;
+  typeOpts();
+  $$('[data-ledit]').forEach(b => b.onclick = () => editLibrary(L.find(l => l.id === +b.dataset.ledit), S.mediaRoot));
   $$('[data-anime]').forEach(b => b.onchange = act(async () => { await api('/libraries/' + b.dataset.anime, { method: 'PUT', body: { anime: b.checked } }); toast('Sparat – serierna matchas om'); }));
   $('#scanall').onclick = act(async () => { await api('/scan', { method: 'POST' }); toast('Skanning startad'); poll(); });
   $$('[data-scan]').forEach(b => b.onclick = act(async () => { await api(`/libraries/${b.dataset.scan}/scan`, { method: 'POST' }); toast('Skanning startad'); poll(); }));

@@ -78,8 +78,12 @@ function lines(it, land) {
   }
   // note: egen rad 2 från hyllan (t.ex. "Premiär för 30 år sedan" i Den här dagen)
   if (it.kind === 'show') return [it.title, it.note || (it.seasons > 1 ? `${it.seasons} säsonger` : it.seasons === 1 ? '1 säsong' : it.year ? String(it.year) : ''), ''];
+  // Hemvideor: inspelningsdagen i stället för året
+  if (it.taken) return [it.title, it.note || fmtTaken(it.taken), ''];
   return [it.title, it.note || (it.year ? String(it.year) : ''), ''];
 }
+/** Hemvideons datum ("24 juni 2023") */
+export const fmtTaken = (t) => new Date(t * 1000).toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' });
 /** Knapparna ovanpå bilden: ▶ i mitten, ✎ nere till vänster (administratörer) och ⋮ nere till höger */
 function overlay({ id, name, play, edit, menu, data = '' }) {
   let h = '';

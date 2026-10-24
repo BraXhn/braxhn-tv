@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { db, get, all, run, now, getSetting, setSetting } from './db.js';
 import { notify } from './notify.js';
+import { librariesWithRoots } from './libpaths.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS requests(id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, user_name TEXT,
   kind TEXT NOT NULL CHECK(kind IN('movie','show')), tmdb_id INTEGER NOT NULL, title TEXT NOT NULL, year INTEGER, poster TEXT, overview TEXT,
@@ -33,8 +34,8 @@ export function parseWebhook(body) {
   const folder = body?.series?.path || body?.movie?.folderPath || body?.movie?.path || null;
   const file = body?.episodeFile?.relativePath || body?.movieFile?.relativePath || null;
   const mapped = mapPath(folder && file ? path.posix.join(folder, file) : folder);
-  const libs = all("SELECT id, path FROM libraries WHERE type IN ('movie','show')");
-  const hit = mapped ? libs.filter(l => mapped === l.path || mapped.startsWith(l.path + '/')) : [];
+  const libs = librariesWithRoots("type IN ('movie','show')");
+  const hit = mapped ? libs.filter(l => l.roots.some(r => mapped === r || mapped.startsWith(r + '/'))) : [];
   const title = body?.series?.title || body?.movie?.title || null;
   // Okänd sökväg: skanna alla video-bibliotek (skanningen är inkrementell och snabb)
   return { event: ev, libIds: (hit.length ? hit : libs).map(l => l.id), title, path: mapped, tmdbId: body?.movie?.tmdbId || body?.series?.tmdbId || null };

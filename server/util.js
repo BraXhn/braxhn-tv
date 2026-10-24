@@ -140,7 +140,7 @@ export function inCidr(ip, cidr) {
  * Går igenom en mapp utan att blockera händelseloopen. accept(namn) väljer filer, skip(namn) hoppar över mappar.
  * Returnerar { files, rootOk, failed } där failed är mappar som inte gick att läsa (t.ex. avmonterad NAS-delning).
  */
-export async function listFiles(root, accept, skip = () => false) {
+export async function listFiles(root, accept, skip = () => false, dirs = null) {
   const files = [], failed = [];
   let rootOk = true, n = 0;
   async function visit(dir, isRoot) {
@@ -157,6 +157,7 @@ export async function listFiles(root, accept, skip = () => false) {
         else if (e.isFile() && accept(e.name)) files.push(p);
       }
     } catch { if (isRoot) rootOk = false; else failed.push(dir); return; }
+    dirs?.add(dir); // mappar som lästes helt (lokal metadata rör bara titlar i sådana mappar)
     for (const s of subdirs) await visit(s, false);
   }
   await visit(root, true);

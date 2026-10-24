@@ -1,12 +1,12 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, metadataverktyg, undertextsökning och följ-knapp
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { LP, RP } from '../player/live.js';
 import { stopVideo } from '../player/overlay.js';
 import { openRemotePicker, remoteButton } from '../player/remote.js';
 import { P, startPlay } from '../player/video.js';
 import { route } from '../router.js';
-import { art, card, castShelf, shelf } from '../ui/cards.js';
+import { art, card, castShelf, fmtTaken, shelf } from '../ui/cards.js';
 import { addToCollection } from '../ui/collections.js';
 import { openDialog } from '../ui/dialog.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
@@ -33,10 +33,11 @@ export async function fillWatch() {
 }
 
 function heroHtml(it, extra = '') {
-  const meta = [it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
+  // Hemvideor (taken): inspelningsdagen i stället för året
+  const meta = [it.taken ? esc(fmtTaken(it.taken)) : it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
     it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
     it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? 'Barntillåten' : it.age + '+'}</span>` : '',
-    (it.genres || []).slice(0, 3).map(esc).join(', ')]
+    (it.genres || []).slice(0, 3).map(esc).join(', '), it.studio ? esc(it.studio) : '']
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
   // Bakgrundens medelfärg (server/imgcolor.js) syns medan bilden laddas
   const bg = /^#[0-9a-f]{6}$/i.test(it.phBackdrop || '') ? `background-color:${it.phBackdrop};` : '';
@@ -60,7 +61,7 @@ views.item = async (id, season) => {
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
     <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
-    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
+    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.taken ? '' : '<button class="ghost" id="match">Fel titel?</button>'}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
     <select id="ver"><option value="">Automatiskt</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
@@ -122,7 +123,9 @@ function showView(it, season) {
   const renderEps = () => {
     const eps = it.children.filter(e => e.season === cur);
     const allSeen = eps.every(e => e.watched);
-    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px"><button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button></div>
+    // Lokal säsongsaffisch (season01-poster.jpg bredvid serien)
+    const sp = (it.seasonPosters || []).includes(cur) ? `<img class="season-poster" ${imgSrc(`/api/image/${+it.id}/season${+cur}`, 90)} alt="" width="90" height="135" data-fb="1">` : '';
+    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button></div>
       <div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
       <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? ' · Sedd' : e.position ? ` · ${fmtTime(e.position)} kvar: ${fmtTime(e.duration - e.position)}` : ''}</div>
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}

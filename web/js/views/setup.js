@@ -166,11 +166,11 @@ const STEP = {
       Hur filerna bör heta står i README under <i>Namnge filer</i>.</p>`;
     let libs = S.checks.libraries;
     const drawLibs = () => {
-      $('#stlibs').innerHTML = libs.length ? `<h3>Dina bibliotek</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${TYPES[l.type] || ''} · <code>${esc(l.path)}</code></span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? 'böcker' : 'titlar'}</span></li>`).join('')}</ul>` : '';
+      $('#stlibs').innerHTML = libs.length ? `<h3>Dina bibliotek</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? 'Hemvideor' : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? 'böcker' : 'titlar'}</span></li>`).join('')}</ul>` : '';
     };
     drawLibs();
-    const add = async (name, type, p) => {
-      await api('/libraries', { method: 'POST', body: { name, type, path: p } });
+    const add = async (name, type, p, homeVideo = false) => {
+      await api('/libraries', { method: 'POST', body: { name, type, path: p, homeVideo: homeVideo && type === 'movie' } });
       toast(`${name} tillagt – skannar`);
       await loadLibs(); await mark('libraries', 'done');
       await suggest(); poll();
@@ -184,15 +184,30 @@ const STEP = {
         return;
       }
       box.innerHTML = `<ul class="setup-sug">${r.suggestions.map((s, i) => `<li>
-        <div class="info"><b>📁 ${esc(s.name)}</b><div class="muted small">${esc(s.reason)}</div></div>
-        ${s.library ? `<span class="ok-badge">Tillagd som ${esc(s.library)}</span>` : `<label class="sr-only" for="sgt${i}">Typ för ${esc(s.name)}</label>
+        <div class="info"><b>📁 ${esc(s.name)}</b><div class="muted small">${esc(s.reason)}${s.homeVideo ? ' · läggs till som hemvideor (ingen TMDB, sorteras på datum)' : ''}</div></div>
+        ${s.library ? `<span class="ok-badge">Tillagd i ${esc(s.library)}</span>` : `<label class="sr-only" for="sgt${i}">Typ för ${esc(s.name)}</label>
         <select id="sgt${i}" data-sgt="${i}">${s.type ? '' : '<option value="">Välj typ…</option>'}${Object.entries(TYPES).map(([v, n]) => `<option value="${v}" ${s.type === v ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        <label class="sr-only" for="sgd${i}">Bibliotek för ${esc(s.name)}</label><select id="sgd${i}" data-sgd="${i}" hidden></select>
         <button type="button" class="${s.type ? 'primary' : 'ghost'} small" data-sga="${i}" ${s.type ? '' : 'disabled'}>Lägg till</button>`}</li>`).join('')}</ul>`;
-      $$('[data-sgt]').forEach(sel => sel.onchange = () => { const b = $(`[data-sga="${sel.dataset.sgt}"]`); b.disabled = !sel.value; });
+      // Samma sorts innehåll i en mapp till (t.ex. en andra disk med filmer): lägg till i ett befintligt bibliotek
+      const targets = (i) => {
+        const sel = $(`[data-sgd="${i}"]`); if (!sel) return;
+        const type = $(`[data-sgt="${i}"]`).value, same = libs.filter(l => l.type === type && !!l.home_video === !!r.suggestions[i].homeVideo);
+        sel.innerHTML = '<option value="">Som nytt bibliotek</option>' + same.map(l => `<option value="${+l.id}">I ${esc(l.name)}</option>`).join('');
+        sel.hidden = !same.length;
+      };
+      r.suggestions.forEach((_, i) => targets(i));
+      $$('[data-sgt]').forEach(sel => sel.onchange = () => { const b = $(`[data-sga="${sel.dataset.sgt}"]`); b.disabled = !sel.value; targets(sel.dataset.sgt); });
       $$('[data-sga]').forEach(b => b.onclick = act(async () => {
-        const s = r.suggestions[+b.dataset.sga], type = $(`[data-sgt="${b.dataset.sga}"]`).value;
+        const i = +b.dataset.sga, s = r.suggestions[i], type = $(`[data-sgt="${i}"]`).value, into = $(`[data-sgd="${i}"]`)?.value;
         b.disabled = true;
-        try { await add(s.type === type ? s.suggestedName : TYPES[type], type, s.path); } finally { b.disabled = false; }
+        try {
+          if (into) {
+            await api(`/libraries/${+into}`, { method: 'PUT', body: { addPath: s.path } });
+            toast(`Mappen lades till i ${libs.find(l => l.id === +into)?.name || 'biblioteket'} – skannar`);
+            await loadLibs(); await mark('libraries', 'done'); await suggest(); poll();
+          } else await add(s.type === type ? s.suggestedName : TYPES[type], type, s.path, s.homeVideo);
+        } finally { b.disabled = false; }
       }));
     };
     // Mappväljaren (samma som i Administration)
