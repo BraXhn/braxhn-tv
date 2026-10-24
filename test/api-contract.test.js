@@ -214,6 +214,7 @@ before(async () => {
   for (const app of Object.keys(APPS)) {
     const r = await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false, headers: { 'user-agent': UA[app] } });
     TOK[app] = ok(r, 'inloggning').token;
+    S.admin = r.data.user.id;
     TOK[app + 'Img'] = ok(await call(app, 'POST', '/api/media-token'), 'bildtoken').token;
   }
   // Det en användare gjort: tittat en bit, sett ett avsnitt, följer serien med offline-synk, musik, ljudbok, podd
@@ -243,6 +244,12 @@ before(async () => {
   S.rec = ok(await call('android', 'POST', '/api/dvr/manual', { body: { channelId: S.channel, start: T + 7200, stop: T + 7800, title: 'Bokad' } }), 'inspelning').id;
   // Bokning med decimalsekunder (Date.now()/1000) – får inte ge decimaltal i listan som Android läser som Long
   S.rec2 = ok(await call('android', 'POST', '/api/dvr/manual', { body: { channelId: S.channel, start: Date.now() / 1000 + 9000.25, stop: Date.now() / 1000 + 9600.75, title: 'Bokad igen' } }), 'inspelning').id;
+  S.rec3 = ok(await call('ios', 'POST', '/api/dvr/manual', { body: { channelId: S.channel, start: T + 10800, stop: T + 11400, title: 'Bokad i iOS' } }), 'inspelning').id;
+  // Programmet som iOS bokar från guiden: nästa program på kanalen som sänder nu (börjar om 30 minuter)
+  S.program = chans.find(c => c.now && c.next).next.id;
+  // Min lista och en egen samling på startsidan (iOS visar dem som hyllor)
+  ok(await call('ios', 'POST', `/api/items/${S.remux}/watchlist`, { body: { add: true } }), 'Min lista');
+  ok(await call('ios', 'POST', '/api/custom-collections', { body: { name: 'Favoriter', home: true, item: S.film } }), 'egen samling');
   // Offline-fil för den korta filmen (480p) – klar på några sekunder
   ok(await call('ios', 'POST', `/api/items/${S.film}/offline`, { body: { q: '480' } }), 'offline');
   for (let i = 0; i < 120; i++) { if ((await call('ios', 'GET', `/api/items/${S.film}/offline?q=480`)).data.status === 'ready') break; await sleep(500); }
@@ -252,7 +259,8 @@ after(async () => { await srv?.stop(); feed?.close(); fs.rmSync(ROOT, { recursiv
 // ---------------- vilka konkreta anrop varje endpoint provas med ----------------
 // p = sökvägsparametrar, url = färdig adress (från ett tidigare svar, som apparna gör), auth: false = ingen
 // Bearer-header (AVPlayer/bildladdning använder token i adressen), token = annan apptoken
-const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', get $har() { return `${S.ep3},99999999`; } };
+const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', get $har() { return `${S.ep3},99999999`; },
+  get $program() { return S.program; }, get $profil() { return S.admin; } };
 const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
 const playbackQ = (app, i = 0) => new URLSearchParams([C.endpoints['GET /api/items/:id/playback'][app].query].flat()[i]).toString();
 const json = async (app, p) => ok(await call(app, 'GET', p), p);
@@ -351,7 +359,14 @@ const CASES = {
   'POST /api/live/:cid/play': () => [{ p: { cid: S.channel } }],
   'GET /api/dvr': () => [{}],
   'POST /api/dvr/recordings/:rid/play': () => [{ p: { rid: S.rec } }],
-  'DELETE /api/dvr/recordings/:rid': () => [{ p: { rid: S.rec2 } }],
+  'DELETE /api/dvr/recordings/:rid': (app) => [{ p: { rid: app === 'ios' ? S.rec3 : S.rec2 } }],
+  'GET /api/live/guide': () => [{}],
+  'POST /api/dvr/program': () => [{}],
+  'GET /api/watchlist': () => [{}],
+  'POST /api/items/:id/watchlist': () => [{ p: { id: S.remux } }],
+  'GET /api/profiles': () => [{}],
+  // Profilbyte stänger inloggningen det görs med – en egen inloggning, som vid utloggning
+  'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
   // Utloggning med en egen inloggning, så att apparnas token gäller för resten av testet
   'POST /api/logout': async (app) => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }]

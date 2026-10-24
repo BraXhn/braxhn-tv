@@ -50,6 +50,12 @@ final class PlayerController: ObservableObject {
     @Published var chapters: [Chapter] = []
     @Published var selectedAudio: Int?
     @Published var selectedSubtitle: String = "none"
+    /// Bio-läge: titeln på trailern/förfilmen som spelas just nu (nil = filmen själv)
+    @Published private(set) var prerollTitle: String?
+    /// Nattläge/tydligare dialog kan väljas (strömmar från servern, inte nedladdade filer)
+    @Published private(set) var canComfort = false
+    @Published private(set) var night = false
+    @Published private(set) var dialog = false
 
     private let model: AppModel
     private var item: MediaItem?
@@ -78,9 +84,18 @@ final class PlayerController: ObservableObject {
     private var loadTask: Task<Void, Never>?
     /// Ökas för varje ny laddning – långsammare, ersatta laddningar ignoreras
     private var generation = 0
+    // Bio-läge: kön med trailers och filmen som väntar på att kön blir klar
+    private var prerollQueue: [URL] = []
+    private var prerollTitles: [String] = []
+    private var mainItem: AVPlayerItem?
+    private var mainStart: Double = 0
+    private var prerollObservers: [NSObjectProtocol] = []
+    private var prerollStatus: NSKeyValueObservation?
 
     init(model: AppModel) {
         self.model = model
+        night = model.nightMode
+        dialog = model.clearDialog
         player.allowsExternalPlayback = true // AirPlay till Apple TV
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -89,17 +104,17 @@ final class PlayerController: ObservableObject {
     }
 
     /// Startar (eller byter till) en titel. En pågående laddning avbryts.
-    func load(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) {
+    func load(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?, cinema: Bool = true) {
         guard !closed else { return }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
-            await self?.start(itemId: itemId, at: start, audio: audio, subtitle: subtitle)
+            await self?.start(itemId: itemId, at: start, audio: audio, subtitle: subtitle, cinema: cinema)
         }
     }
 
     private func isLive(_ gen: Int) -> Bool { !closed && gen == generation && !Task.isCancelled }
 
-    private func start(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?) async {
+    private func start(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?, cinema: Bool) async {
         guard !closed else { return }
         generation += 1
         let gen = generation
@@ -155,7 +170,10 @@ final class PlayerController: ObservableObject {
             // Vänta tills föregående session stoppats så att stoppet inte når servern efter den nya starten
             await stopping?.value
             guard isLive(gen) else { return }
-            let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub))
+            let cinemaQ = await cinemaQuery(it, start: start, cinema: cinema)
+            guard isLive(gen) else { return }
+            let extra = model.comfortQuery() + cinemaQ
+            let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub) + extra)
             guard isLive(gen) else {
                 // Ersatt eller stängd medan servern förberedde strömmen – stäng sessionen igen
                 Task { [model] in try? await model.post("/api/stream/\(itemId)/stop") }
@@ -184,21 +202,122 @@ final class PlayerController: ObservableObject {
             #if os(tvOS)
             playerItem.navigationMarkerGroups = chapterMarkers(p.chapters ?? [])
             #endif
-            player.replaceCurrentItem(with: playerItem)
-            reporting = true
             serverSession = true
-            if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
-            guard isLive(gen) else { return }
-            player.play()
-            installObservers()
-            if let s = sub { await loadCues(for: s, gen: gen) }
+            canComfort = true
+            // Bio-läge: trailers och förfilm först (filer som AVPlayer inte klarar hoppas över)
+            let queue = (p.preroll ?? []).filter { !($0.mime ?? "").contains("matroska") && !($0.mime ?? "").contains("webm") }
+            let urls = queue.compactMap { model.absolute($0.url) }
+            if !urls.isEmpty, urls.count == queue.count {
+                mainItem = playerItem
+                mainStart = start
+                prerollQueue = urls
+                prerollTitles = queue.map { $0.title ?? ($0.kind == "preroll" ? "Förfilm" : "Trailer") }
+                playNextPreroll()
+                return
+            }
+            await startMain(playerItem, at: start, gen: gen)
         } catch {
             if isLive(gen) { self.error = error.localizedDescription }
         }
     }
 
+    /// Startar själva filmen/avsnittet (direkt, eller när bio-lägets kö är slut)
+    private func startMain(_ playerItem: AVPlayerItem, at start: Double, gen: Int) async {
+        guard isLive(gen) else { return }
+        player.replaceCurrentItem(with: playerItem)
+        reporting = true
+        if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
+        guard isLive(gen) else { return }
+        player.play()
+        installObservers()
+        if let s = subtitle { await loadCues(for: s, gen: gen) }
+    }
+
+    /// cinema=1 bara för filmer från början och när bio-läget är påslaget på servern (GET /api/me/cinema)
+    private func cinemaQuery(_ it: MediaItem, start: Double, cinema: Bool) async -> [URLQueryItem] {
+        guard cinema, it.kind == "movie", start < 1 else { return [] }
+        let on = await model.cinemaEnabled()
+        return on ? [URLQueryItem(name: "cinema", value: "1")] : []
+    }
+
+    // MARK: - bio-läge (trailers före filmen)
+
+    private func playNextPreroll() {
+        clearPrerollObservers()
+        guard !closed else { return }
+        guard !prerollQueue.isEmpty else { finishPreroll(); return }
+        let url = prerollQueue.removeFirst()
+        let name = prerollTitles.isEmpty ? "Trailer" : prerollTitles.removeFirst()
+        let gen = generation
+        let pi = AVPlayerItem(url: url)
+        let oid = ObjectIdentifier(pi)
+        prerollTitle = name
+        skipTitle = "Hoppa över"
+        player.replaceCurrentItem(with: pi)
+        // Nästa post när den här är slut eller inte gick att spela
+        let next: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let s = self, s.generation == gen, let cur = s.player.currentItem, ObjectIdentifier(cur) == oid else { return }
+                s.playNextPreroll()
+            }
+        }
+        prerollObservers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: pi, queue: .main) { _ in next() })
+        prerollObservers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: pi, queue: .main) { _ in next() })
+        prerollStatus = pi.observe(\.status, options: [.new]) { item, _ in
+            if item.status == .failed { next() }
+        }
+        player.play()
+    }
+
+    /// Kön är slut (eller Hoppa över alla): filmen startar
+    private func finishPreroll() {
+        clearPrerollObservers()
+        prerollQueue = []
+        prerollTitles = []
+        prerollTitle = nil
+        skipTitle = nil
+        guard let main = mainItem else { return }
+        mainItem = nil
+        let gen = generation, at = mainStart
+        Task { [weak self] in await self?.startMain(main, at: at, gen: gen) }
+    }
+
+    func skipAllPreroll() {
+        guard prerollTitle != nil else { return }
+        prerollQueue = []
+        prerollTitles = []
+        playNextPreroll()
+    }
+
+    private func clearPrerollObservers() {
+        for o in prerollObservers { NotificationCenter.default.removeObserver(o) }
+        prerollObservers = []
+        prerollStatus?.invalidate()
+        prerollStatus = nil
+    }
+
+    // MARK: - nattläge och tydligare dialog (servern filtrerar ljudet – kräver en ny ström)
+
+    func toggleNight() {
+        model.nightMode.toggle()
+        night = model.nightMode
+        restart(audio: audio, subtitle: subtitle)
+    }
+
+    func toggleDialog() {
+        model.clearDialog.toggle()
+        dialog = model.clearDialog
+        restart(audio: audio, subtitle: subtitle)
+    }
+
     /// Nollställer allt som hör till föregående titel
     private func resetState() {
+        clearPrerollObservers()
+        prerollQueue = []
+        prerollTitles = []
+        prerollTitle = nil
+        mainItem = nil
+        canComfort = false
         item = nil
         pb = nil
         isLocal = false
@@ -279,9 +398,9 @@ final class PlayerController: ObservableObject {
     }
 
     private func restart(audio: Int?, subtitle: SubtitleTrack?) {
-        guard let id = currentId else { return }
-        let t = player.currentTime().seconds
-        load(itemId: id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle)
+        guard let id = currentId, !isLocal else { return }
+        let t = prerollTitle != nil ? mainStart : player.currentTime().seconds
+        load(itemId: id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle, cinema: false)
     }
 
     private func loadCues(for s: SubtitleTrack, gen: Int) async {
@@ -311,7 +430,7 @@ final class PlayerController: ObservableObject {
     private var duration: Double { pb?.duration ?? item?.duration ?? localDuration ?? 0 }
 
     private func tick(_ t: Double) {
-        guard t.isFinite, !closed else { return }
+        guard t.isFinite, !closed, prerollTitle == nil else { return }
         // Undertexter
         let st = t - subtitleOffset
         if let c = cues.last(where: { $0.start <= st }), st <= c.end { if subtitleText != c.text { subtitleText = c.text } }
@@ -331,6 +450,7 @@ final class PlayerController: ObservableObject {
 
     func skip() {
         guard let t = skipTitle else { return }
+        if prerollTitle != nil { playNextPreroll(); return }
         if t == "Hoppa över sammanfattning", let r = recap {
             player.seek(to: CMTime(seconds: r.end, preferredTimescale: 600))
         } else if t == "Hoppa över intro", let i = intro {
@@ -350,10 +470,12 @@ final class PlayerController: ObservableObject {
     /// Rapporterar slutposition och stänger serverns session – högst en gång per titel.
     @discardableResult
     private func stopReporting() -> Task<Void, Never>? {
-        guard reporting, let id = currentId else { return nil }
-        reporting = false
-        let t = player.currentTime().seconds
-        if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration) }
+        guard reporting || serverSession, let id = currentId else { return nil }
+        if reporting {
+            reporting = false
+            let t = player.currentTime().seconds
+            if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration) }
+        }
         guard serverSession else { return nil }
         serverSession = false
         return Task { [model] in _ = try? await model.post("/api/stream/\(id)/stop") }
@@ -368,6 +490,8 @@ final class PlayerController: ObservableObject {
         loadTask = nil
         onFinished = nil
         stopReporting()
+        clearPrerollObservers()
+        mainItem = nil
         player.pause()
         if let o = observer { player.removeTimeObserver(o); observer = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
@@ -395,7 +519,11 @@ struct PlayerVC: UIViewControllerRepresentable {
         #if os(tvOS)
         // På Apple TV visas knappen i spelarens egna kontroller (fokuserbar med fjärrkontrollen)
         if let t = skipTitle {
-            vc.contextualActions = [UIAction(title: t, image: UIImage(systemName: "forward.end.fill")) { _ in onSkip() }]
+            var actions = [UIAction(title: t, image: UIImage(systemName: "forward.end.fill")) { _ in onSkip() }]
+            if ctrl.prerollTitle != nil {
+                actions.append(UIAction(title: "Hoppa över alla", image: UIImage(systemName: "forward.fill")) { _ in ctrl.skipAllPreroll() })
+            }
+            vc.contextualActions = actions
         } else {
             vc.contextualActions = []
         }
@@ -411,6 +539,12 @@ struct PlayerVC: UIViewControllerRepresentable {
             menus.append(UIMenu(title: "Undertexter", image: UIImage(systemName: "captions.bubble"), options: .singleSelection, children: [none] + ctrl.subtitleTracks.map { s in
                 UIAction(title: s.label, state: s.id == ctrl.selectedSubtitle ? .on : .off) { _ in ctrl.selectSubtitle(s.id) }
             }))
+        }
+        if ctrl.canComfort {
+            menus.append(UIMenu(title: "Ljudläge", image: UIImage(systemName: "moon"), children: [
+                UIAction(title: "Nattläge", state: ctrl.night ? .on : .off) { _ in ctrl.toggleNight() },
+                UIAction(title: "Tydligare dialog", state: ctrl.dialog ? .on : .off) { _ in ctrl.toggleDialog() }
+            ]))
         }
         vc.transportBarCustomMenuItems = menus
         #endif
@@ -486,7 +620,7 @@ struct PlayerContent: View {
                     Text(ctrl.title).font(.subheadline.weight(.semibold)).lineLimit(1).shadow(radius: 2)
                     Spacer()
                     Text(ctrl.status).font(.caption2).foregroundStyle(.secondary)
-                    if ctrl.audioTracks.count > 1 || !ctrl.subtitleTracks.isEmpty || !ctrl.chapters.isEmpty {
+                    if ctrl.audioTracks.count > 1 || !ctrl.subtitleTracks.isEmpty || !ctrl.chapters.isEmpty || ctrl.canComfort {
                         Menu {
                             if ctrl.audioTracks.count > 1 {
                                 Picker("Ljud", selection: Binding(get: { ctrl.selectedAudio ?? -1 }, set: { ctrl.selectAudio($0) })) {
@@ -500,6 +634,10 @@ struct PlayerContent: View {
                                     ForEach(ctrl.subtitleTracks) { s in Text(s.label).tag(s.id) }
                                 }
                                 .pickerStyle(.menu)
+                            }
+                            if ctrl.canComfort {
+                                Button { ctrl.toggleNight() } label: { Label("Nattläge", systemImage: ctrl.night ? "checkmark" : "moon") }
+                                Button { ctrl.toggleDialog() } label: { Label("Tydligare dialog", systemImage: ctrl.dialog ? "checkmark" : "person.wave.2") }
                             }
                             if !ctrl.chapters.isEmpty {
                                 Menu("Kapitel") {
@@ -518,6 +656,15 @@ struct PlayerContent: View {
                 if let s = ctrl.skipTitle {
                     HStack {
                         Spacer()
+                        if let pt = ctrl.prerollTitle {
+                            Text(pt).font(.caption).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule()).padding(.bottom, 110)
+                            Button { ctrl.skipAllPreroll() } label: {
+                                Text("Hoppa över alla").font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .padding(.bottom, 110)
+                        }
                         Button { ctrl.skip() } label: {
                             Label(s, systemImage: "forward.end.fill").font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))

@@ -13,6 +13,12 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - tittarstatus som synkas med webben
 - AirPlay och bild-i-bild (iPhone/iPad)
 - HDR-filer spelas i HDR på enheter som klarar det, annars tonmappar servern
+- live-TV: kanaler med logga och *Nu/Sen*, TV-guide, boka inspelning från ett program, inspelningar (spela, ta bort, avboka)
+- byt profil (Inställningar → Byt profil) med PIN
+- Min lista: knapp på titelsidan, hylla på startsidan och egen sida
+- startsidans hyllor i din ordning från *Anpassa startsidan* i webben (egna samlingar, Kommer snart, Eftersom du såg …, Topprankat, Dagens genre, Fortsätt lyssna med mera – de hyllor servern har)
+- bio-läge: trailers före filmen med *Hoppa över* och *Hoppa över alla* (slås på under Mitt konto i webben)
+- nattläge och tydligare dialog (spelarens meny, på Apple TV *Ljudläge* i menyraden, eller Inställningar)
 
 ## Bygga och installera (kräver en Mac)
 
@@ -36,6 +42,16 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 |---|---|---|
 | Gratis Apple-ID | 0 kr | Appen fungerar i **7 dagar**, sedan installerar du om från Xcode. Max 3 egna appar per enhet. |
 | Apple Developer Program | 99 USD/år | Appen gäller i ett år. Du kan dela den via **TestFlight** med familj och vänner, upp till 100 interna testare. |
+
+## Top Shelf på Apple TV
+
+Top Shelf (raden högst upp när appen är markerad på hemskärmen) visar bara den fasta bilden i
+`App Icon & Top Shelf Image`, inte *Fortsätt titta*. Ett dynamiskt Top Shelf kräver ett eget tillägg
+(TV Top Shelf Extension) som själv hämtar listan från servern. Tillägget kör i en egen process och kommer inte åt
+appens inloggning utan en **App Group** eller delad nyckelring – och det kräver att du lägger till den förmågan
+under *Signing & Capabilities* för både appen och tillägget, med ett eget app-id för tillägget. Med ett gratis
+Apple-ID räcker inte alltid de app-id som får skapas per vecka, och misslyckas signeringen av tillägget går inte
+appen att installera alls. Därför är det inte byggt – hellre en app som alltid går att installera.
 
 ## Kontrollera att koden bygger
 

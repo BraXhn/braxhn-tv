@@ -87,6 +87,8 @@ struct MediaItem: Decodable, Identifiable, Hashable {
     let prevId: Int?
     let height: Int?
     let cast: [CastMember]?
+    /// I Min lista (bara i detaljvyn; saknas hos äldre servrar)
+    let inWatchlist: Bool?
 
     static func == (a: MediaItem, b: MediaItem) -> Bool { a.id == b.id && a.position == b.position && a.watched == b.watched }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -147,7 +149,42 @@ struct HomeResponse: Decodable {
     let rows: [HomeRow]
     /// Nya avsnitt av serier man följer (saknas hos äldre servrar)
     let forYou: [MediaItem]?
-    enum CodingKeys: String, CodingKey { case continueWatching = "continue", rows, forYou }
+    // Hyllor som nyare servrar skickar (Home.swift). Alla är valfria och avkodas med try? – ett fält med
+    // oväntad form ger bara en hylla mindre, aldrig en tom startsida.
+    let watchlist: [MediaItem]?
+    let recommended: [MediaItem]?
+    let customCollections: [CustomShelf]?
+    let upcoming: [UpcomingEntry]?
+    let because: [BecauseShelf]?
+    let topRated: [MediaItem]?
+    let hiddenGems: [MediaItem]?
+    let shortTonight: [MediaItem]?
+    let onThisDay: [MediaItem]?
+    let genreOfDay: GenreShelf?
+    let listening: [ListeningEntry]?
+    let homeLayout: HomeLayout?
+    enum CodingKeys: String, CodingKey {
+        case continueWatching = "continue", rows, forYou, watchlist, recommended, customCollections, upcoming, because
+        case topRated, hiddenGems, shortTonight, onThisDay, genreOfDay, listening, homeLayout
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        continueWatching = try c.decode([MediaItem].self, forKey: .continueWatching)
+        rows = try c.decode([HomeRow].self, forKey: .rows)
+        forYou = try c.decodeIfPresent([MediaItem].self, forKey: .forYou)
+        watchlist = (try? c.decodeIfPresent([MediaItem].self, forKey: .watchlist)) ?? nil
+        recommended = (try? c.decodeIfPresent([MediaItem].self, forKey: .recommended)) ?? nil
+        customCollections = (try? c.decodeIfPresent([CustomShelf].self, forKey: .customCollections)) ?? nil
+        upcoming = (try? c.decodeIfPresent([UpcomingEntry].self, forKey: .upcoming)) ?? nil
+        because = (try? c.decodeIfPresent([BecauseShelf].self, forKey: .because)) ?? nil
+        topRated = (try? c.decodeIfPresent([MediaItem].self, forKey: .topRated)) ?? nil
+        hiddenGems = (try? c.decodeIfPresent([MediaItem].self, forKey: .hiddenGems)) ?? nil
+        shortTonight = (try? c.decodeIfPresent([MediaItem].self, forKey: .shortTonight)) ?? nil
+        onThisDay = (try? c.decodeIfPresent([MediaItem].self, forKey: .onThisDay)) ?? nil
+        genreOfDay = (try? c.decodeIfPresent(GenreShelf.self, forKey: .genreOfDay)) ?? nil
+        listening = (try? c.decodeIfPresent([ListeningEntry].self, forKey: .listening)) ?? nil
+        homeLayout = (try? c.decodeIfPresent(HomeLayout.self, forKey: .homeLayout)) ?? nil
+    }
 }
 
 struct LibraryItems: Decodable {
@@ -177,6 +214,8 @@ struct Playback: Decodable {
     let chapters: [Chapter]?
     let audio: [AudioStream]?
     let audioSelected: String?
+    /// Bio-läge: trailers/förfilm före filmen (bara med cinema=1 och när bio-läget är på; Player.swift)
+    let preroll: [PrerollEntry]?
 }
 
 struct Chapter: Decodable, Hashable, Identifiable {
@@ -189,6 +228,9 @@ struct Chapter: Decodable, Hashable, Identifiable {
 struct APIError: LocalizedError {
     let message: String
     var need2fa: Bool = false
+    /// Profilbyte (POST /api/profiles/switch): profilen kräver PIN, eller huvudkontots lösenord från en barnprofil
+    var needPin: Bool = false
+    var needPassword: Bool = false
     var errorDescription: String? { message }
 }
 

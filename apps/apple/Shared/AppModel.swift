@@ -73,11 +73,11 @@ final class AppModel: ObservableObject {
         }
         let (data, resp) = try await session.data(for: r)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 401 && token != nil && path != "/api/login" && path != "/api/media-token" { logout(); throw APIError(message: "Du har loggats ut") }
+        if code == 401 && token != nil && path != "/api/login" && path != "/api/media-token" && path != "/api/profiles/switch" { logout(); throw APIError(message: "Du har loggats ut") }
         if !(200..<300).contains(code) {
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let msg = obj?["error"] as? String
-            throw APIError(message: msg ?? "Servern svarade \(code)", need2fa: (obj?["need2fa"] as? Bool) ?? false)
+            throw APIError(message: msg ?? "Servern svarade \(code)", need2fa: (obj?["need2fa"] as? Bool) ?? false, needPin: (obj?["needPin"] as? Bool) ?? false, needPassword: (obj?["needPassword"] as? Bool) ?? false)
         }
         return data
     }
@@ -242,5 +242,71 @@ extension AppModel {
             await refreshImageToken(force: true)
         }
         return r.status
+    }
+}
+
+// MARK: - Profiler, Min lista, bio-läge och tittarkomfort
+
+// (sist i filen av samma skäl som ovan)
+extension AppModel {
+    /// Byter profil i hushållet (POST /api/profiles/switch). Servern ger en ny apptoken för profilen och
+    /// stänger den gamla. Fel PIN ger APIError med needPin (401 – loggar inte ut, se request()).
+    func switchProfile(id: Int, pin: String? = nil, password: String? = nil) async throws {
+        var body: [String: Any] = ["id": id]
+        if let p = pin, !p.isEmpty { body["pin"] = p }
+        if let p = password, !p.isEmpty { body["password"] = p }
+        let data = try await request("/api/profiles/switch", method: "POST", body: body)
+        let r = try JSONDecoder().decode(ProfileSwitchResponse.self, from: data)
+        guard let t = r.token, let u = r.user else { throw APIError(message: "Servern gav ingen ny inloggning för profilen") }
+        Keychain.save("token", t)
+        token = t
+        user = u
+        await refreshImageToken(force: true)
+        // Alla flikar byggs om (MainTabs har .id(generation)) så att inget från förra profilen visas
+        ProfileEvents.shared.generation += 1
+    }
+
+    /// Lägger till eller tar bort en titel i Min lista (avsnitt räknas som hela serien på servern)
+    func setWatchlist(_ id: Int, _ on: Bool) async throws {
+        try await post("/api/items/\(id)/watchlist", ["add": on])
+    }
+
+    /// Bio-läget (trailers före filmen) är påslaget på servern. Äldre servrar saknar /api/me/cinema – då av.
+    func cinemaEnabled() async -> Bool {
+        guard let c: CinemaPrefs = try? await get("/api/me/cinema") else { return false }
+        return (c.trailers ?? 0) > 0 || (c.preroll == true && c.prerollAvailable != false)
+    }
+
+    /// Nattläge (jämnare ljudnivå) och tydligare dialog – sparas på enheten (vyerna använder @AppStorage med samma nycklar)
+    var nightMode: Bool {
+        get { UserDefaults.standard.bool(forKey: "nightMode") }
+        set { UserDefaults.standard.set(newValue, forKey: "nightMode") }
+    }
+    var clearDialog: Bool {
+        get { UserDefaults.standard.bool(forKey: "clearDialog") }
+        set { UserDefaults.standard.set(newValue, forKey: "clearDialog") }
+    }
+
+    /// Nattläge och tydligare dialog: servern filtrerar ljudet (AAC stereo) när de är på
+    func comfortQuery() -> [URLQueryItem] {
+        var q: [URLQueryItem] = []
+        if nightMode { q.append(.init(name: "night", value: "1")) }
+        if clearDialog { q.append(.init(name: "dialog", value: "1")) }
+        return q
+    }
+}
+
+/// Ökas vid profilbyte – flikarna byggs om från början
+@MainActor
+final class ProfileEvents: ObservableObject {
+    static let shared = ProfileEvents()
+    @Published var generation = 0
+}
+
+extension AppModel {
+    /// DELETE-anrop (t.ex. ta bort en inspelning)
+    @discardableResult
+    func delete(_ path: String) async throws -> Data {
+        try await request(path, method: "DELETE")
     }
 }
