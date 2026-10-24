@@ -75,12 +75,32 @@ export function testEncode(mode, seconds = 4) {
     res({ ok: true, mode, ms, fps: Math.round(seconds * 25 / (ms / 1000)) });
   }));
 }
+// Hela kedjan på grafikkortet (som Plex): avkodning, skalning och färgkonvertering utan att varje bild hämtas till
+// processorn och tillbaka. Utan det skalade processorn ner varje 4K-bild – det var den största skillnaden mot Plex.
+// Testas vid start med de filter ffmpeg i imagen faktiskt har; misslyckas en riktig körning används processorfiltren
+// (avkodning och kodning stannar på grafikkortet) resten av tiden.
+export const gpuPipe = { cuda: false, cudaTm: false, vaapi: false };
+const gpuProbe = (name, args) => new Promise(res => execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin',
+  ...args, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e) => { if (!e) gpuPipe[name] = true; res(); }));
+function probeGpuPipe() {
+  const src = ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=0.2:r=25'];
+  if (HW === 'nvenc') return Promise.all([
+    gpuProbe('cuda', ['-init_hw_device', 'cuda=cu', '-filter_hw_device', 'cu', ...src, '-vf', 'format=nv12,hwupload,scale_cuda=320:180:format=nv12', '-c:v', 'h264_nvenc']),
+    // HDR: skala på grafikkortet i 10 bitar, tonmappa den mindre bilden med processorn
+    gpuProbe('cudaTm', ['-init_hw_device', 'cuda=cu', '-filter_hw_device', 'cu', ...src, '-vf', 'format=p010le,hwupload,scale_cuda=320:180:format=p010le,hwdownload,format=p010le,format=yuv420p', '-c:v', 'h264_nvenc'])]);
+  if (HW === 'vaapi') return gpuProbe('vaapi', ['-vaapi_device', VAAPI_DEV_PROBE, ...src, '-vf', 'format=nv12,hwupload,scale_vaapi=w=320:h=180:format=nv12', '-c:v', 'h264_vaapi']);
+  return Promise.resolve();
+}
+const VAAPI_DEV_PROBE = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
 // Snabbtest vid start: koda några bildrutor med den valda hårdvaran
 if (HW !== 'none') {
   const enc = hwTestArgs(HW);
   if (!enc) disableHw(`okänt värde HWACCEL=${HW}`);
   else execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e, _o, stderr) => {
-    if (e) disableHw(stderr || e.message); else console.log(`[hårdvara] ${HW} fungerar`);
+    if (e) return disableHw(stderr || e.message);
+    if (process.env.GPU_FILTERS === '0') return console.log(`[hårdvara] ${HW} fungerar (filter på processorn: GPU_FILTERS=0)`);
+    probeGpuPipe().then(() => console.log(`[hårdvara] ${HW} fungerar – skalning på ${gpuPipe.cuda || gpuPipe.vaapi ? 'grafikkortet' : 'processorn'}`
+      + (HW === 'nvenc' ? `, HDR-tonmappning ${gpuPipe.cudaTm ? 'efter nedskalning på grafikkortet' : 'på processorn'}` : '')));
   });
 }
 // Segment-muxerns -segment_times jämförs med olika tider beroende på ffmpeg-version: 5.1 (Debian/Docker-imagen)
@@ -689,6 +709,24 @@ function videoArgs(it, d, fromStart) {
   const useVaapiTm = d.tonemap && HW === 'vaapi';
   if (d.tonemap && !useVaapiTm) sw.push(TM_CPU(it.hdr));
   const chain = (extra) => [...sw, ...extra].join(',') || 'null';
+  // Hela kedjan på grafikkortet: inte vid inbränning eller avflätning (görs med processorn), bara för format som
+  // grafikkortet avkodar (H.264/HEVC i 4:2:0, 8 eller 10 bitar). Bredden räknas ut här (jämn, samma bildformat).
+  const gpuOk = !d.burn && !sw.some(f => f.startsWith('yadif')) && ['h264', 'hevc'].includes(v?.codec)
+    && /^(yuvj?420p|yuv420p10le)$/.test(v?.pix || '') && v?.width > 0 && v?.height > 0;
+  const oh = h || v?.height, ow = Math.max(2, Math.round(v?.width * oh / v?.height / 2) * 2);
+  if (gpuOk && HW === 'nvenc' && (d.tonemap ? gpuPipe.cudaTm : gpuPipe.cuda)) {
+    const vf = d.tonemap ? `scale_cuda=${ow}:${oh}:format=p010le,hwdownload,format=p010le,${TM_CPU(it.hdr)}` : `scale_cuda=${ow}:${oh}:format=nv12`;
+    const enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'], ['-rc', 'vbr', '-cq', '25', '-b:v', Math.round((Q.br || 0) * 0.6) + 'k', ...cap])];
+    if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
+    return { pre: [], dec: ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'], gpu: 'cuda', filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
+  }
+  if (gpuOk && HW === 'vaapi' && gpuPipe.vaapi) {
+    const vf = (d.tonemap ? 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,' : '') + `scale_vaapi=w=${ow}:h=${oh}:format=nv12`;
+    const enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '22'])];
+    if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
+    return { pre: ['-vaapi_device', VAAPI_DEV], dec: ['-hwaccel', 'vaapi', '-hwaccel_device', VAAPI_DEV, '-hwaccel_output_format', 'vaapi'], gpu: 'vaapi',
+      filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
+  }
   let enc, post;
   if (HW === 'vaapi') {
     post = useVaapiTm ? ['format=p010', 'hwupload', 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709'] : ['format=nv12', 'hwupload'];
@@ -768,7 +806,7 @@ function startFfmpeg(s, it, n) {
   // Nyckelbildsmönstret för de korta startsegmenten gäller bara när omkodningen börjar från början
   if (d.mode === 'transcode' && n > 0 && n < HEAD.length) n = 0;
   const t = segs[n].start;
-  let args;
+  let args, gpuRun = null;
   if (d.mode === 'remux' && d.fmt === 'fmp4') {
     // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
     const next = segs[n + 1]?.start ?? it.duration;
@@ -797,8 +835,9 @@ function startFfmpeg(s, it, n) {
     // Omkodning: segment-muxern delar exakt på de tvingade nyckelbilderna (extra nyckelbilder från kodaren,
     // t.ex. vid scenbyten i hårdvarukodare, ger inga extra segment – listan förblir deterministisk)
     const va = videoArgs(it, d, n === 0);
+    gpuRun = va.gpu || null;
     const times = segTimes(segs, n, t);
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...hwDecode(), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
       ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
@@ -825,6 +864,13 @@ function startFfmpeg(s, it, n) {
       s.proc = null; s.done = code === 0;
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
+    // GPU-kedjan (skalning på grafikkortet) fungerade inte för den här filen/drivrutinen: nästa start använder
+    // processorfiltren men behåller hårdvarukodningen – stäng inte av hårdvaran för det
+    if (code && !sig && gpuRun) {
+      if (gpuRun === 'cuda') gpuPipe.cuda = gpuPipe.cudaTm = false; else gpuPipe.vaapi = false;
+      console.warn(`[hårdvara] skalning på grafikkortet (${gpuRun}) misslyckades – använder processorfilter. ${err.trim().split('\n').slice(-2).join(' ')}`);
+      return;
+    }
     // Hårdvaran fungerar inte: nästa start (spelaren väntar och servern försöker igen) använder processorn
     if (code && !sig && d.mode === 'transcode' && HW !== 'none' && HW_FAIL.test(err)) disableHw(err);
   });
@@ -834,7 +880,9 @@ function startFfmpeg(s, it, n) {
 
 // ffmpeg som ligger långt före uppspelningen pausas (SIGSTOP), annars kopieras en hel 4K-remux
 // till disk på några minuter. Den återupptas när spelaren närmar sig eller ber om något som saknas.
-const AHEAD = 40;
+// Omkodning ligger högst ~70 s före (som Plex standardbuffert på 60 s): processorn/grafikkortet arbetar inte i
+// onödan med minuter som kanske aldrig ses (spolning, avbrott) och lämnar utrymme åt andra strömmar.
+const AHEAD = 40, AHEAD_TRANSCODE = 12;
 function resume(s) { if (s.paused && s.proc) s.proc.kill('SIGCONT'); s.paused = false; }
 // Segment långt bakom uppspelningen tas bort – annars hamnar en hel film i omkodningsmappen
 // (ofta /tmp = RAM i Unraid). Spolar man tillbaka skapas de igen.
@@ -848,9 +896,9 @@ function trimBehind(s, n) {
 function throttle(s, n) {
   trimBehind(s, n);
   if (!s.proc) return;
-  const ahead = highestFile(s) - n;
-  if (!s.paused && ahead > AHEAD) { s.proc.kill('SIGSTOP'); s.paused = true; }
-  else if (s.paused && ahead < AHEAD / 2) resume(s);
+  const ahead = highestFile(s) - n, max = s.d.mode === 'transcode' ? AHEAD_TRANSCODE : AHEAD;
+  if (!s.paused && ahead > max) { s.proc.kill('SIGSTOP'); s.paused = true; }
+  else if (s.paused && ahead < max / 2) resume(s);
 }
 function stopProc(s) {
   s.paused = false;

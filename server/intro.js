@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { lowPriority } from './util.js';
 import { all, run, tx, CACHE, getSetting } from './db.js';
 
 const SR = 5512, FRAME = 2048, HOP = 256;
@@ -84,6 +85,7 @@ function readPcm(file, start, dur) {
   return new Promise((resolve, reject) => {
     const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-ss', String(Math.max(0, start)), '-t', String(dur),
       '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    lowPriority(p); // bakgrundsanalys: strömning och omkodning går före
     const chunks = []; let err = '', timedOut = false, settled = false;
     const done = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); fn(v); };
     const timer = setTimeout(() => { timedOut = true; p.kill('SIGKILL'); }, PCM_TIMEOUT);

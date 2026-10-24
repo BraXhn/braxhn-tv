@@ -105,6 +105,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - Egna samlingar (`server/customcollections.js`, `/api/custom-collections`): privata syns bara för skaparen, delade ändras bara av administratör på betrott nät; en samling utan titel inom profilens åldersgräns syns inte (namn, omslag, hylla) för den som inte får ändra den. Titlar lagras som huvudrad (avsnitt → serie, version → film) och flyttas med `mergeInto`.
 - Spela på…: `canControl` – samma profil alltid; vuxna profiler i hushållet ser varandras enheter utom PIN-skyddade (bara profilen och huvudkontot); barnprofiler bara egna; andra konton aldrig. `play` kräver `allowedFor` för både styrande och mottagarens profil (`test/remote.test.js`).
 - Omkodad video: H.264, yuv420p, inga B-bilder, BT.709-märkt; HDR-källa tonmappas alltid vid omkodning.
+- GPU-kedjan (`gpuPipe` i stream.js): bara när startprovet lyckats, aldrig vid inbränning/avflätning, bara H.264/HEVC 4:2:0. En misslyckad körning stänger av GPU-filtren – inte hårdvarukodningen.
 - Native HLS (Safari/iOS-appen) får aldrig AC-3/E-AC-3 i TS – inte heller surround som konverteras.
 - Omkodat ljud börjar aldrig före bilden (`transcodeAudio`); utan det överlappar första segmentet nästa.
 - Skannrar tar aldrig bort innehåll när biblioteket ser borttappat ut – prövat per mapp: en mapp som saknas eller ser tömd ut påverkar aldrig bibliotekets andra mappar (`test/localmeta.test.js`).

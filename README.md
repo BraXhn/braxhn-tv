@@ -388,6 +388,7 @@ Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av
 | `MEDIA_ROOT` | /media | Bibliotek måste ligga här |
 | `HWACCEL` | none | none, vaapi, qsv eller nvenc |
 | `HW_DECODE` | 1 | 0 = avkoda med processorn även när grafikkortet kodar |
+| `GPU_FILTERS` | 1 | 0 = skala och färgkonvertera med processorn även när grafikkortet kan (felsökning). Annars stannar bilderna på grafikkortet hela vägen (NVIDIA/Intel/AMD), som i Plex |
 | `TZ` | Europe/Stockholm | Tidszon för skärmtid, inspelningar och nattliga säkerhetskopior |
 | `LOG_TIME` | 1 | 0 = ingen tidsstämpel på loggraderna |
 | `TONEMAP` | hable | hable, mobius eller reinhard |

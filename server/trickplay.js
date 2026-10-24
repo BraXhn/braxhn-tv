@@ -5,8 +5,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { all, run, CACHE, getSetting } from './db.js';
 import { keyframesReady } from './stream.js';
+import { lowPriority } from './util.js';
 
-const pexec = promisify(execFile);
+const pexec0 = promisify(execFile);
+// Förhandsbilder görs i bakgrunden – lägsta prioritet (strömning går före)
+const pexec = (...a) => { const pr = pexec0(...a); lowPriority(pr.child); return pr; };
 export const INTERVAL = 10, COLS = 10, ROWS = 10, WIDTH = 240;
 const dirOf = (it) => path.join(CACHE, 'trickplay', `${it.id}-${it.mtime}`);
 

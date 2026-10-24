@@ -262,3 +262,30 @@ test('HEVC i fMP4: initsegmentet får Apples tagg även när ffmpeg skrev hev1',
   ff('-f', 'lavfi', '-i', 'sine=d=0.2', '-c:a', 'aac', aac);
   assert.deepEqual(st.hevcTag(fs.readFileSync(aac), 'dvh1'), fs.readFileSync(aac));
 });
+
+test('omkodning: hela kedjan på grafikkortet när testet vid start lyckats, annars processorfilter', () => {
+  // Egen process: HWACCEL läses när stream.js laddas. Testet vid start (ingen GPU här) hinner inte stänga av hårdvaran.
+  const code = `const st = await import(${JSON.stringify(new URL('../server/stream.js', import.meta.url).href)});
+    const it = { id: 1, hdr: null, streams: JSON.stringify([{ type: 'video', index: 0, codec: 'hevc', pix: 'yuv420p10le', width: 3840, height: 2160 }]) };
+    const d = { q: '1080', tonemap: false, mode: 'transcode' };
+    const out = {};
+    out.cpu = st._segs.videoArgs(it, d, true);
+    st.gpuPipe.cuda = st.gpuPipe.cudaTm = true;
+    out.gpu = st._segs.videoArgs(it, d, true);
+    out.gpuHdr = st._segs.videoArgs({ ...it, hdr: 'hdr10' }, { ...d, tonemap: true }, true);
+    out.burn = st._segs.videoArgs(it, { ...d, burn: 's3' }, true);
+    console.log(JSON.stringify(out)); process.exit(0);`;
+  const env = { ...process.env, HWACCEL: 'nvenc', CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-gpu-')), TRANSCODE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-gpu-tc-')) };
+  const r = JSON.parse(execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', code], { env }).toString().trim().split('\n').pop());
+  // Utan GPU-kedja: avkodning på kortet men skalning med processorn
+  assert.ok(!r.cpu.dec && r.cpu.filter[1].includes('scale=-2:1080') && !r.cpu.filter[1].includes('scale_cuda'));
+  // Med: bilderna stannar på kortet, skalas dit i 8 bitar och bredden räknas ut (16:9)
+  assert.deepEqual(r.gpu.dec, ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']);
+  assert.equal(r.gpu.filter[1], 'scale_cuda=1920:1080:format=nv12');
+  assert.ok(r.gpu.enc.includes('h264_nvenc'));
+  // HDR: skalas ner på kortet i 10 bitar, tonmappas sedan (på den mindre bilden) och märks BT.709
+  assert.match(r.gpuHdr.filter[1], /^scale_cuda=1920:1080:format=p010le,hwdownload,format=p010le,setparams=.*tonemap=/);
+  assert.ok(r.gpuHdr.enc.includes('bt709'));
+  // Inbränd bildundertext: processorfilter som förut
+  assert.ok(!r.burn.dec && r.burn.filter[0] === '-filter_complex');
+});
