@@ -492,6 +492,25 @@ async function saveCollection(c) {
 /** TVDB-id för en TMDB-serie (krävs av Sonarr) */
 export async function tvdbOf(tmdbId) { try { return (await tmdb(`/tv/${+tmdbId}/external_ids`)).tvdb_id || null; } catch { return null; } }
 export const hasTmdb = () => !!tmdbKey();
+/**
+ * Kontrollerar en TMDB-nyckel (v3-nyckel eller v4-token) utan att spara den – installationsguidens "Testa".
+ * Utan nyckel testas den sparade. Nyckeln skrivs aldrig ut i fel eller loggar.
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function tmdbCheck(key) {
+  key = String(key || '').trim() || tmdbKey();
+  if (!key) return { ok: false, error: 'Ingen nyckel angiven' };
+  if (key.length > 400 || /\s/.test(key)) return { ok: false, error: 'Nyckeln ser inte rätt ut – kopiera den igen från themoviedb.org' };
+  const q = new URLSearchParams();
+  const headers = { accept: 'application/json' };
+  if (key.startsWith('eyJ')) headers.authorization = 'Bearer ' + key; else q.set('api_key', key);
+  let r;
+  try { r = await fetch(`${TMDB_API}/configuration?${q}`, { headers, signal: AbortSignal.timeout(10000) }); }
+  catch { return { ok: false, error: 'Kunde inte nå TMDB – kontrollera att servern har internet' }; }
+  if (r.status === 401) return { ok: false, error: 'TMDB godkände inte nyckeln. Använd "API-nyckel" (v3) eller "API-läsåtkomsttoken" från themoviedb.org → Inställningar → API.' };
+  if (!r.ok) return { ok: false, error: `TMDB svarade med fel ${r.status} – försök igen om en stund` };
+  return { ok: true };
+}
 
 /** Sök i TMDB för manuell matchning */
 export async function tmdbSearch(kind, query, year) {

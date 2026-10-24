@@ -8,10 +8,13 @@ import { upcomingCard } from './calendar.js';
 
 views.home = async () => {
   const [d, cols, own] = await Promise.all([api('/home'), api('/collections').catch(() => []), api('/custom-collections').catch(() => [])]);
-  let html = '';
+  // Installationsguiden är inte klar (bara administratörer på hemnätet, fältet setupPending i /api/status)
+  let html = me.setupPending ? `<div class="setup-banner" role="region" aria-label="Installation"><div><b>Slutför installationen</b>
+    <p class="muted small">Några steg kvar: metadata, bibliotek, omkodning, åtkomst utanför hemmet och hushållet.</p></div>
+    <a class="btn primary" href="#/setup">Fortsätt guiden</a></div>` : '';
   if (!libs.length) {
-    html = emptyState({ icon: '🎬', title: 'Inga bibliotek ännu', text: me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.',
-      action: me.is_admin ? { label: 'Lägg till bibliotek', href: '#/admin' } : null });
+    html += emptyState({ icon: '🎬', title: 'Inga bibliotek ännu', text: me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.',
+      action: me.is_admin ? { label: 'Lägg till bibliotek', href: me.setupPending ? '#/setup/libraries' : '#/admin' } : null });
   }
   // Som Plex: en vågrät rad per hylla med stående affischer. Seriebibliotek visar nya avsnitt per säsong.
   if (d.forYou?.length) html += shelfHtml('Nytt för dig', d.forYou.map(i => card(i)).join(''), { row: 'foryou',

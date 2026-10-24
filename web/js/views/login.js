@@ -13,7 +13,7 @@ views.login = async () => {
   $('#top').hidden = true;
   main.innerHTML = `<form class="auth" id="f">
     <div class="brand"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"></div>
-    <p>${setup ? 'Välkommen! Skapa administratörskontot.' : 'Logga in'}</p>
+    <p>${setup ? 'Välkommen! Börja med att skapa administratörskontot – sedan hjälper en kort guide dig att komma igång.' : 'Logga in'}</p>
     <label for="n">Användarnamn</label><input id="n" autocomplete="username" required maxlength="64">
     <label for="p">Lösenord</label><input id="p" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required minlength="${setup ? 10 : 1}">
     ${setup ? '<p class="muted small" style="text-align:left;margin-top:6px">Minst 10 tecken med blandade tecken, eller minst 14 tecken.</p>' : ''}
@@ -43,7 +43,7 @@ views.login = async () => {
       if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
       await boot();
       if (d.weakPassword) { toast('Ditt lösenord är svagt – byt det under Mitt konto'); location.hash = '#/account'; }
-      else location.hash = setup ? '#/admin' : me.profiles > 1 ? '#/profiles' : pageAfterLogin();
+      else location.hash = setup ? '#/setup/welcome' : me.profiles > 1 ? '#/profiles' : pageAfterLogin();
     } catch (e) { $('#e').textContent = e.message; }
   };
 };

@@ -27,7 +27,7 @@ export async function loadLibs() {
 }
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
-  account: 'Mitt konto', admin: 'Administration', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person' };
+  account: 'Mitt konto', admin: 'Administration', setup: 'Installation', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
   const h = location.hash.slice(2) || '';
@@ -69,7 +69,7 @@ export async function boot() {
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
 const SKELETON = { home: 'shelves', lib: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
-  admin: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels' };
+  admin: 'panels', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels' };
 // Sällan använda vyer laddas först när de öppnas: vy -> modul i views/ (märkt @lazy, förladdas inte).
 // Relativ dynamisk import → samma bygge (/v/<bygge>/js/views/…). Modulen registrerar sina vyer i views när den laddats.
 const LAZY = new Map(Object.entries({ admin: 'admin', stats: 'stats', wrapped: 'wrapped', requests: 'requests', streaming: 'streaming', live: 'live', guide: 'live', dvr: 'live' }));

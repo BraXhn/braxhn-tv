@@ -21,6 +21,7 @@ import * as colors from './imgcolor.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
+import './routes/setup.js';
 import './routes/library.js';
 import './routes/collections.js';
 import './routes/search.js';
