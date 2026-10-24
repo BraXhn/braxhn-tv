@@ -89,7 +89,7 @@ button.ghost:hover,.btn:hover{border-color:var(--dim)}
 button.danger{color:var(--err)}
 button:disabled{opacity:.5;cursor:default}
 .small{padding:5px 10px!important;font-size:13px}
-input[type=text],input[type=password],input[type=number],input:not([type]),select,textarea{
+input[type=text],input[type=password],input[type=number],input[type=email],input[type=url],input[type=search]:not(#q),input:not([type]),select,textarea{
   padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);width:100%}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
 label{display:block;font-size:13px;color:var(--dim);margin:12px 0 5px}
@@ -650,3 +650,11 @@ button[aria-pressed=true].iconbtn{color:var(--accent)}
 /* Fasta element i nederkant följer den synliga ytan på iPhone (se fitBottom i router.js) */
 #tabbar,#mbar{transform:translateY(var(--vv-shift,0px))}
 html.kbd-open #tabbar{display:none!important}
+
+/* Kortkommandon */
+kbd{display:inline-block;min-width:1.6em;padding:1px 6px;border:1px solid var(--line,#444);border-bottom-width:2px;border-radius:5px;font:600 .85em/1.4 ui-monospace,monospace;text-align:center;background:rgba(255,255,255,.06)}
+.tbl.keys td:first-child{white-space:nowrap;padding-right:16px}
+#usermenu kbd{margin-left:6px;opacity:.7}
+/* Serverlogg i Administration */
+.logview{max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;font-family:ui-monospace,monospace}
+.logview .lw{color:#e8c46a}.logview .le{color:#ff8a7a}

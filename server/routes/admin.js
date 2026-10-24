@@ -19,9 +19,12 @@ import * as diskmon from '../diskmon.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import * as mediaImport from '../mediaimport.js';
-import { route, admin, adminAnywhere, trustVpn, isTrusted } from '../http/router.js';
+import { route, admin, user, adminAnywhere, trustVpn, isTrusted } from '../http/router.js';
 import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile } from '../http/context.js';
 import * as jobs from '../jobs.js';
+import * as logs from '../logs.js';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
 
 // Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
 let integCache = null, integAt = 0;
@@ -355,3 +358,37 @@ setTimeout(() => { try { dlna.apply(); } catch (e) { console.warn('[dlna]', e.me
 
 // Pågående jobb för aktivitetsindikatorn i menyraden (skanning, analys, omkodning, inspelning …)
 route('GET', '/api/jobs', admin, (c) => send(c.res, 200, { jobs: jobs.list() }));
+
+// ---------- Logg och diagnostik (som Jellyfins loggvy) ----------
+route('GET', '/api/logs', admin, (c) => send(c.res, 200, { lines: logs.lines({ level: c.q.get('level') || 'info', q: c.q.get('q') || '', after: +c.q.get('after') || 0, limit: +c.q.get('limit') || 500 }) }));
+// Diagnostikpaket att bifoga vid felsökning: versioner, maskin, hårdvarukodning, inställningar utan hemligheter och loggen
+route('GET', '/api/logs/diagnostics', admin, async (c) => {
+  const ff = await new Promise(r => execFile('ffmpeg', ['-hide_banner', '-version'], { timeout: 5000 }, (e, o) => r(e ? `saknas (${e.message})` : String(o).split('\n')[0])));
+  const ver = (k) => { try { return get('SELECT COUNT(*) AS n FROM ' + k).n; } catch { return '?'; } };
+  const info = {
+    BraXhnTV: VERSION, node: process.version, ffmpeg: ff, os: `${os.type()} ${os.release()} ${os.arch()}`, cpus: `${os.cpus().length} × ${os.cpus()[0]?.model || '?'}`,
+    minne: `${Math.round(os.totalmem() / 2 ** 30)} GB totalt, ${Math.round(os.freemem() / 2 ** 30)} GB ledigt`, upptid: `${Math.round(process.uptime() / 60)} min`,
+    hårdvarukodning: st.hwStatus, omkodningar: st.activeTranscodes().length, gränser: st.limits(),
+    bibliotek: all('SELECT id,name,type FROM libraries'), titlar: ver('items'), användare: ver('users'),
+    miljö: Object.fromEntries(['HWACCEL', 'HW_DECODE', 'VAAPI_DEVICE', 'TONEMAP', 'X264_PRESET', 'REMOTE_QUALITY', 'TRANSCODE_DIR', 'MEDIA_ROOT', 'TZ', 'PUID', 'PGID', 'NVIDIA_VISIBLE_DEVICES']
+      .filter(k => process.env[k] != null).map(k => [k, process.env[k]])),
+    disk: diskmon.snapshot(), jobb: jobs.list()
+  };
+  const body = `BraXhn TV – diagnostik ${new Date().toISOString()}\n\n${logs.mask(JSON.stringify(info, null, 2))}\n\n--- Logg (senaste ${logs.lines({ limit: 2000 }).length} raderna) ---\n`
+    + logs.lines({ limit: 2000 }).map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(5)} ${l.msg}`).join('\n') + '\n';
+  send(c.res, 200, Buffer.from(body), { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="braxhn-diagnostik-${new Date().toISOString().slice(0, 10)}.txt"` });
+});
+// Fel i webbappen hos användarna hamnar i serverloggen (Safari/iPhone, TV-webbläsare … som CI inte kör).
+// Högst 20 rapporter per användare och 10 minuter; korta, maskerade och utan HTML.
+const clientErr = new Map();
+route('POST', '/api/clientlog', user, async (c) => {
+  const k = c.user.id, n = clientErr.get(k);
+  const fresh = !n || n.at < Date.now() - 10 * 60e3;
+  if (!fresh && n.count >= 20) return send(c.res, 200, { ok: true });
+  clientErr.set(k, fresh ? { at: Date.now(), count: 1 } : { ...n, count: n.count + 1 });
+  if (clientErr.size > 1000) clientErr.clear();
+  const b = await readJson(c.req, 16 << 10).catch(() => ({}));
+  const clean = (v, max) => String(v ?? '').replace(/[\u0000-\u001f]+/g, ' ').slice(0, max);
+  console.warn(`[webb] ${clean(b.msg, 300)} | ${clean(b.where, 200)} | ${clean(b.ua, 160)} | användare ${k}${b.stack ? '\n  ' + clean(b.stack, 1500).replace(/ {2,}at /g, '\n  at ') : ''}`);
+  send(c.res, 200, { ok: true });
+});

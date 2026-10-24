@@ -3,6 +3,7 @@
 // Bara läsningar som alltid behövs, plus startsidans hyllor när man öppnar startsidan.
 (() => {
   const h = location.hash.replace(/^#\/?/, '');
+  if (h.startsWith('login')) return;
   const paths = ['/status', '/libraries', ...(h === '' ? ['/home', '/collections'] : [])];
   const at = Date.now();
   window.__early = Object.fromEntries(paths.map(p => [p, { at, res: fetch('/api' + p, { headers: {} }).catch(() => null) }]));

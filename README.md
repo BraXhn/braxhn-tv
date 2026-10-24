@@ -41,7 +41,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Statistik** | *Spelas nu* med möjlighet att stoppa en ström, tittartimmar, populäraste titlar och direkt/remux/omkodning-fördelning. |
 | **Säkerhetskopior** | Databasen kopieras automatiskt kl. 03.00 varje natt (14 sparas) och kan laddas ner från statistiksidan. |
 | **Ljudböcker** | En bok per mapp (`Författare/Bok/`) eller per `.m4b`. Kapitel, position som sparas, hastighet 0,75–2×, ±15/30 s, bokmärken. Även i bilen och i iPhone/Apple TV-appen. |
-| **Poddar** | Prenumerera med RSS-adress. De senaste avsnitten laddas ner automatiskt, position sparas per person. Även i bilen. |
+| **Poddar** | **Sök på poddens namn** (Apples poddkatalog, ingen nyckel) och prenumerera med ett klick – eller klistra in RSS-adressen. De senaste avsnitten laddas ner automatiskt, position sparas per person. Även i bilen. |
 | **Live-TV och inspelning** | **HDHomeRun** (antenn/kabel) eller **IPTV** (M3U). TV-guide från XMLTV eller HDHomeRuns egen guide. Titta live i webben och apparna, spela in enstaka program eller **hela serier** (bara nya avsnitt), MP4 efteråt som spelas överallt. |
 | **Streamingtjänster** | *Var kan jag se den?* – visar om en titel finns på t.ex. **Prime Video, TV4 Play**, Netflix, SVT Play eller Viaplay och öppnar den i tjänstens app. Bläddra i det som finns på era tjänster. (Innehållet spelas i tjänstens egen app – det är kopieringsskyddat och kan inte läggas in i biblioteket.) |
 | **Sonarr/Radarr** | Webhook gör att nya avsnitt dyker upp direkt efter nedladdning. **Önskningar**: alla i hushållet kan önska filmer/serier, som skickas till Radarr/Sonarr när de godkänts. Visar om titeln redan finns på en av era tjänster. |
@@ -63,6 +63,8 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Skärmtid** | Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer. |
 | **Följ serier** | *Nytt för dig* när nya avsnitt kommer, och personlig notis via ntfy eller webhook. Serier följs automatiskt när du lägger dem i Min lista eller ser klart ett avsnitt. |
 | **Automatisk offline-synk** | iPhone/iPad- och Android-appen håller de nästa osedda avsnitten nedladdade (valfritt bara på Wi-Fi) och tar bort sedda. |
+| **Serverlogg och diagnostik** | *Administration → Serverlogg* visar serverns händelser med filter, även fel som uppstått i webbappen hos användarna. Loggen sparas också i `/config/logs` (sju dagar). *Ladda ner diagnostik* ger versioner, maskin, hårdvarukodning och loggen i en fil att bifoga vid felsökning – nycklar och lösenord maskeras. |
+| **Kortkommandon** | Tryck **?** för en lista. `/` söker, i spelaren `j`/`l` eller pilarna ±10 s, `k`/mellanslag paus, ↑ ↓ volym, `0`–`9` hoppar i filmen, `f` helskärm, `m` ljud av. |
 | **Diskövervakning** | Ledigt utrymme för /config, omkodning, inspelningar, poddar och bibliotek. Notis när det börjar ta slut, och omkodningsmappen städas tidigare när den är nästan full. |
 | **Import från Plex/Jellyfin** | Sedda och påbörjade titlar förs över från Plex eller Jellyfin/Emby, matchade på TMDB/IMDb/TVDB-id, sökväg eller titel – med förhandsvisning. |
 | **Prometheus** | Mätvärden på `/metrics` (strömmar, omkodningar, skanning, disk, tuners) för Grafana, skyddade med token. |

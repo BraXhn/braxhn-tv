@@ -94,6 +94,32 @@ export async function readLimited(r, max) {
   return Buffer.concat(chunks);
 }
 
+// ---------- Sök efter poddar (Apples poddkatalog, ingen nyckel krävs) ----------
+// Som Audiobookshelf: sökningen ger RSS-adressen, så att man slipper leta upp den själv. Svaren cachas en stund.
+const searchCache = new Map();
+export async function search(term, country = 'se') {
+  term = String(term || '').normalize('NFC').trim().slice(0, 100);
+  if (term.length < 2) return [];
+  const k = country + '|' + term.toLowerCase();
+  const hit = searchCache.get(k);
+  if (hit && hit.at > Date.now() - 10 * 60e3) return hit.list;
+  const q = new URLSearchParams({ media: 'podcast', entity: 'podcast', term, country, limit: '25' });
+  let r;
+  try { ({ r } = await safeFetch('https://itunes.apple.com/search?' + q, { timeout: 10000, signal: AbortSignal.timeout(15000) })); }
+  catch (e) { console.warn('[poddar] sökningen:', e.message); throw new Error('Kunde inte nå Apples poddkatalog – kontrollera att servern har internetanslutning, eller klistra in RSS-adressen'); }
+  if (!r.ok) { r.body.resume?.(); throw new Error(`Sökningen svarar inte just nu (${r.status})`); }
+  let d; try { d = JSON.parse((await readLimited(r, 2 << 20)).toString('utf8')); } catch { throw new Error('Oväntat svar från sökningen'); }
+  const list = (d.results || []).filter(x => /^https?:\/\//i.test(x.feedUrl || '')).map(x => ({
+    title: String(x.collectionName || x.trackName || '').slice(0, 200), author: String(x.artistName || '').slice(0, 200),
+    feed: String(x.feedUrl).slice(0, 2000), genre: String(x.primaryGenreName || '').slice(0, 80), episodes: +x.trackCount || 0,
+    art: artOk(x.artworkUrl600 || x.artworkUrl100) ? String(x.artworkUrl600 || x.artworkUrl100) : null }));
+  if (searchCache.size > 200) searchCache.clear();
+  searchCache.set(k, { at: Date.now(), list });
+  return list;
+}
+// Omslagen i sökresultatet hämtas via servern (CSP tillåter inga bilder från andra webbplatser) – bara Apples bildservrar
+export const artOk = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && /(^|\.)mzstatic\.com$/.test(x.hostname); } catch { return false; } };
+
 // ---------- RSS-tolkning ----------
 // Tolkas med indexOf och begränsade mönster (inga regex som kan ta exponentiell/kvadratisk tid på skadliga flöden)
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };

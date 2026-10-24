@@ -110,3 +110,11 @@ test('poddar: spärrade adresser och skadliga flöden', () => {
   const evil = '<rss><channel><item>' + '<enclosure '.repeat(100000) + '</item>' + '<item><enclosure url="x"'.repeat(20000);
   const t0 = Date.now(); pods.parseFeed(evil); assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0} ms`);
 });
+
+test('poddsökning: bara Apples bildservrar får hämtas via servern, korta sökord ger inget anrop', async () => {
+  for (const ok of ['https://is1-ssl.mzstatic.com/image/thumb/a/600x600bb.jpg', 'https://mzstatic.com/x.png']) assert.ok(pods.artOk(ok), ok);
+  for (const bad of ['http://is1-ssl.mzstatic.com/x.jpg', 'https://mzstatic.com.evil.se/x.jpg', 'https://evilmzstatic.com/x.jpg', 'https://127.0.0.1/x.jpg', 'file:///etc/passwd', 'inte en adress', ''])
+    assert.ok(!pods.artOk(bad), bad);
+  assert.deepEqual(await pods.search('a'), []);
+  assert.deepEqual(await pods.search('   '), []);
+});

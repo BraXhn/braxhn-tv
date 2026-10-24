@@ -123,6 +123,22 @@ if (vv) {
 $('#userbtn').onclick = (e) => { e.stopPropagation(); userMenu($('#usermenu').hidden); if (!$('#usermenu').hidden) $('#usermenu a:not([hidden]), #usermenu button:not([hidden])')?.focus(); };
 document.addEventListener('click', () => userMenu(false));
 $('#usermenu').addEventListener('keydown', (e) => { if (e.key === 'Escape') { userMenu(false); $('#userbtn').focus(); } });
+// ---------- tangentbordsgenvägar ----------
+// ? visar alla genvägar, / går till sökrutan. Inte när man skriver i ett fält eller en dialog är öppen.
+const SHORTCUTS = [['Överallt', [['?', 'Visa den här listan'], ['/', 'Sök'], ['← → ↑ ↓', 'Flytta mellan korten i en hylla eller ett rutnät'], ['Enter', 'Öppna det markerade kortet']]],
+  ['Spelaren', [['Mellanslag eller k', 'Spela/pausa'], ['← eller j', '10 sekunder bakåt'], ['→ eller l', '10 sekunder framåt'], ['↑ ↓', 'Volym'],
+    ['m', 'Ljud av/på'], ['f', 'Helskärm'], ['0–9', 'Hoppa till 0 %, 10 % … 90 %'], ['s', 'Hoppa över intro/eftertexter (när knappen visas)'], ['Esc', 'Litet fönster']]]];
+export function showShortcuts() {
+  openDialog({ title: 'Kortkommandon', body: SHORTCUTS.map(([h, list]) => `<h3>${esc(h)}</h3><table class="tbl keys">${list.map(([k, t]) =>
+    `<tr><td>${k.split(' ').map(x => ['eller', '…'].includes(x) ? esc(x) : `<kbd>${esc(x)}</kbd>`).join(' ')}</td><td>${esc(t)}</td></tr>`).join('')}</table>`).join('') });
+}
+$('#keyshelp').onclick = () => showShortcuts();
+document.addEventListener('keydown', (e) => {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented || document.querySelector('dialog[open]')) return;
+  if (e.target.closest?.('input,textarea,select,[contenteditable]')) return;
+  if (e.key === '?') { e.preventDefault(); showShortcuts(); }
+  else if (e.key === '/' && me && !P) { e.preventDefault(); const q = $('#q'); if (q?.offsetParent) q.focus(); else location.hash = '#/search'; }
+});
 // ---------- installera som app ----------
 // Service workern kräver HTTPS (eller localhost); utan den går appen ändå att lägga på hemskärmen
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});

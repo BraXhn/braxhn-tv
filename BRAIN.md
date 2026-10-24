@@ -60,6 +60,8 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 7. **Webbläsarens cache ↔ server**: appens filer under `/v/<BUILD>/` (hash av web/, `server/http/static.js`) cachas `immutable`; `index.html`/`sw.js` har fasta adresser och mallvärdena `{{b}}`/`{{preload}}`. Alla importer i webben måste vara **relativa** (annars lämnar de bygget); vendor-skript laddas via `new URL(..., import.meta.url)`. `web/start.js` förhämtar `/status`, `/libraries` (+ `/home`, `/collections`) och `api()` tar över svaren en gång – skrivningar gör dem ogiltiga (profilbyte). Service workern: `MODULES`-lista (test kontrollerar), cache först för versionerade filer.
 8. **CI ↔ Unraid**: push → `:edge`; Actions-knapp → `:latest`/`:beta` + release. Röktest av imagen före publicering.
 
+9. **Loggen** (`server/logs.js`, importeras först i `index.js`): krokar på `console.*` → ringbuffert + `/config/logs/braxhn-<dag>.log`. Allt maskeras med `mask()` – skriv aldrig hemligheter till loggen i förväg i tron att de syns bara i Docker. Webbappens fel → `POST /api/clientlog` (begränsat per användare).
+
 ### Invarianter (bryts de blir det fel – testa dem)
 - All servertext i HTML går genom `esc()`.
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).
