@@ -17,7 +17,7 @@ export async function startServer({ root, media, port = 18000 + Math.floor(Math.
   const proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
     cwd: ROOT_DIR,
     env: { ...process.env, PORT: String(port), HTTPS_PORT: String(port + 1), CONFIG_DIR: path.join(root, 'config'), MEDIA_ROOT: media,
-      TRANSCODE_DIR: path.join(root, 'tc'), MAX_TRANSCODES: '32', MAX_TRANSCODES_USER: '32', ...env },
+      TRANSCODE_DIR: path.join(root, 'tc'), MAX_TRANSCODES: '32', MAX_TRANSCODES_USER: '32', BOOK_METADATA: '0', ...env },
     stdio: ['ignore', log, log]
   });
   let cookie = '';

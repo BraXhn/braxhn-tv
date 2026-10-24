@@ -6,10 +6,11 @@ import { fail, send, readJson, clientIp } from '../util.js';
 import { createSession, audit } from '../auth.js';
 import * as music from '../music.js';
 import * as books from '../audiobooks.js';
+import * as bookmeta from '../bookmeta.js';
 import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
-import { route, user, img } from '../http/router.js';
+import { route, user, img, admin } from '../http/router.js';
 import { screenBlock, ctx } from '../http/context.js';
 
 // ---------- Ljudböcker ----------
@@ -35,6 +36,41 @@ route('GET', '/api/audiobooks/cover/:bid', img, async (c) => {
   if (!f) return fail(c.res, 404, 'Inget omslag');
   const out = await sized(f, c.q.get('w')); // ?w= = nedskalad (imgsize.js)
   c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(out), c.res, () => {});
+});
+// "Fel bok?" och redigering (administratör): sök i Google Books/Open Library/Audnexus och välj rätt bok – matchningen låses
+const bookOr404 = (c) => { const b = get('SELECT id, library_id, title, author FROM books WHERE id=?', +c.p.bid); if (!b) fail(c.res, 404, 'Finns inte'); return b; };
+route('GET', '/api/audiobooks/book/:bid/match', admin, async (c) => {
+  const b = bookOr404(c); if (!b) return;
+  const m = get('SELECT source, source_id, locked FROM book_meta WHERE book_id=?', b.id);
+  const title = String(c.q.get('title') ?? b.title).slice(0, 200), author = String(c.q.get('author') ?? b.author ?? '').slice(0, 200);
+  try {
+    const res = await bookmeta.search(title, author);
+    send(c.res, 200, { current: m?.source ? { source: m.source, id: m.source_id } : null, locked: !!m?.locked,
+      results: res.map(x => ({ source: x.source, id: x.id, title: x.title, subtitle: x.subtitle, authors: x.authors.slice(0, 4), narrators: x.narrators.slice(0, 4),
+        year: x.year, publisher: x.publisher, series: x.series, seriesNo: x.seriesNo, description: (x.description || '').slice(0, 300),
+        cover: x.cover && bookmeta.coverUrlOk(x.cover) ? `/api/audiobooks/match/art?u=${encodeURIComponent(x.cover)}` : null })) });
+  } catch (e) { fail(c.res, 502, 'Sökningen misslyckades: ' + e.message); }
+});
+route('POST', '/api/audiobooks/book/:bid/match', admin, async (c) => {
+  const b = bookOr404(c); if (!b) return;
+  const { source, id, unlock } = await readJson(c.req);
+  if (unlock) { bookmeta.unlock(b.id); bookmeta.queue(b.library_id); return send(c.res, 200, { ok: true }); }
+  if (!['google', 'openlibrary', 'audnexus'].includes(source) || !id) return fail(c.res, 400, 'Välj en bok');
+  try {
+    if (!(await bookmeta.matchManual(b.id, source, String(id).slice(0, 60)))) return fail(c.res, 404, 'Boken hittades inte hos källan');
+    audit('book_matched', { ...ctx(c), detail: `${b.title} → ${source} ${String(id).slice(0, 60)}` });
+    send(c.res, 200, books.book(b.id, c.user.id));
+  } catch (e) { fail(c.res, 502, 'Hämtningen misslyckades: ' + e.message); }
+});
+route('PUT', '/api/audiobooks/book/:bid', admin, async (c) => {
+  const b = bookOr404(c); if (!b) return;
+  try { await bookmeta.edit(b.id, await readJson(c.req)); send(c.res, 200, books.book(b.id, c.user.id)); }
+  catch (e) { fail(c.res, e.status || 502, e.message); }
+});
+// Omslag i sökträffarna: bara från källornas bildvärdar (webbens CSP tillåter inga externa bilder)
+route('GET', '/api/audiobooks/match/art', admin, async (c) => {
+  try { const r = await bookmeta.fetchImage(c.q.get('u') || ''); send(c.res, 200, r.body, { 'Content-Type': r.type, 'Cache-Control': 'private, max-age=86400' }); }
+  catch { fail(c.res, 404, 'Ingen bild'); }
 });
 const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
 // Strömmar för ljudböcker/poddar: kortlivad token (24 h) som bara gäller den boken/det avsnittet – för appar och AirPlay

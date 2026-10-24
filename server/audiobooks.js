@@ -23,9 +23,9 @@ CREATE TABLE IF NOT EXISTS bookmarks(id INTEGER PRIMARY KEY, user_id INTEGER NOT
 CREATE TABLE IF NOT EXISTS book_probe_fail(path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER);`);
 searchKeys('books', ['title'], ['author', 'narrator', 'series']);
 
-const coverFile = (id) => path.join(IMAGES, `b${id}-cover.jpg`);
+export const coverFile = (id) => path.join(IMAGES, `b${id}-cover.jpg`);
 export const coverPath = (id) => { const f = coverFile(id); return fs.existsSync(f) ? f : null; };
-const sortName = (t) => String(t || '').toLowerCase().replace(/^(the|a|an|en|ett)\s+/, '');
+export const sortName = (t) => String(t || '').toLowerCase().replace(/^(the|a|an|en|ett)\s+/, '');
 const natural = (a, b) => a.localeCompare(b, 'sv', { numeric: true, sensitivity: 'base' });
 const DISC = /^(cd|disc|disk|del|part|skiva)[\s._-]*\d+$/i;
 
@@ -138,11 +138,40 @@ export async function scanBooks(lib, status) {
 }
 
 // ---------- API-hjälp ----------
-const shape = (b) => ({ id: b.id, title: b.title, author: b.author, narrator: b.narrator, year: b.year, duration: b.duration, cover: !!b.cover,
-  position: b.position || 0, finished: !!b.finished, updated: b.updated || null, library: b.library_id });
+// Fälten som visas: administratörens ändringar (book_meta.edits, '' = tömt) först, sedan filens taggar eller källan på nätet
+// (bookmeta.js). Titel och författare kommer alltid från filen om de inte ändrats för hand; beskrivningen från källan om
+// filens egen är kort (ofta "Ripped by …" eller en rad), utgivningsåret från källan före filens år (inspelningen).
+const E = (k) => `json_extract(m.edits,'$.${k}')`;
+const BOOK = `b.id, b.library_id, b.key, b.cover, b.duration, b.added, b.chapters AS file_chapters, m.chapters AS net_chapters,
+  m.state AS meta_state, m.locked AS meta_locked, m.source AS meta_source, m.source_id AS meta_source_id, m.src_title AS meta_title, m.edits AS meta_edits,
+  COALESCE(NULLIF(${E('title')}, ''), b.title) AS title, COALESCE(NULLIF(${E('sort')}, ''), b.sort_title) AS sort_title,
+  COALESCE(NULLIF(${E('author')}, ''), b.author) AS author,
+  NULLIF(COALESCE(${E('narrator')}, b.narrator, m.narrator), '') AS narrator,
+  NULLIF(COALESCE(${E('year')}, m.year, b.year), '') AS year,
+  NULLIF(COALESCE(${E('description')}, CASE WHEN length(b.description) >= 200 THEN b.description END, m.description, b.description), '') AS description,
+  NULLIF(COALESCE(${E('subtitle')}, m.subtitle), '') AS subtitle, NULLIF(COALESCE(${E('series')}, m.series), '') AS series,
+  NULLIF(COALESCE(${E('seriesNo')}, m.series_no), '') AS series_no, NULLIF(COALESCE(${E('publisher')}, m.publisher), '') AS publisher,
+  NULLIF(COALESCE(${E('isbn')}, m.isbn), '') AS isbn, NULLIF(COALESCE(${E('asin')}, m.asin), '') AS asin,
+  NULLIF(COALESCE(${E('genres')}, m.genres), '') AS genres, m.language AS language`;
+const FROM = 'books b LEFT JOIN book_meta m ON m.book_id=b.id';
+const json = (s, def) => { try { return s ? JSON.parse(s) : def; } catch { return def; } };
+const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+// Nya fält (series, seriesNo …) är tillägg – apparna läser bara de gamla
+const shape = (b) => ({ id: b.id, title: b.title, author: b.author, narrator: b.narrator, year: b.year == null ? null : parseInt(b.year) || null, duration: b.duration, cover: !!b.cover,
+  position: b.position || 0, finished: !!b.finished, updated: b.updated || null, library: b.library_id,
+  series: b.series || null, seriesNo: b.series_no == null ? null : String(b.series_no) });
+/** Kapitel: filens egna, men Audnexus kapitel om filen saknar kapitel och längden stämmer (±2 %) */
+export function chaptersFor(b) {
+  const own = json(b.file_chapters, []);
+  const net = json(b.net_chapters, null);
+  if (own.length <= 1 && Array.isArray(net) && net.length > 1 && lengthMatches(net[net.length - 1].end, b.duration)) return { chapters: net, source: 'audnexus' };
+  return { chapters: own, source: 'fil' };
+}
+export const lengthMatches = (a, b) => a > 0 && b > 0 && Math.abs(a - b) <= b * 0.02;
 export function listBooks(libId, uid, sort = 'title') {
-  const order = { title: 'b.sort_title', author: 'b.author COLLATE NOCASE, b.sort_title', added: 'b.added DESC', recent: 'p.updated DESC NULLS LAST, b.sort_title' }[sort] || 'b.sort_title';
-  return all(`SELECT b.*, p.position, p.finished, p.updated FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.library_id=? ORDER BY ${order}`, uid, libId).map(shape);
+  const order = { title: 'sort_title', author: 'author COLLATE NOCASE, sort_title', added: 'added DESC', recent: 'updated DESC NULLS LAST, sort_title', series: 'series IS NULL, series COLLATE NOCASE, CAST(series_no AS REAL), sort_title' }[sort] || 'sort_title';
+  // I en underfråga: sorteringen gäller de visade fälten (t.ex. ändrad titel), inte kolumnerna med samma namn
+  return all(`SELECT * FROM (SELECT ${BOOK}, p.position, p.finished, p.updated FROM ${FROM} LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.library_id=?) ORDER BY ${order}`, uid, libId).map(shape);
 }
 /** Böcker som matchar titeln, eller författaren/uppläsaren/serien (rankas lägre). Q = parseQuery(…) */
 export function searchBooks(Q, uid, limit = 20) {
@@ -150,18 +179,28 @@ export function searchBooks(Q, uid, limit = 20) {
     cols: 'b.*, p.position, p.finished, p.updated, b.title AS _t', key: 'b.skey', key2: 'b.skey2', year: 'b.year' }, Q, limit).map(shape);
 }
 export function continueBooks(uid, limit = 12) {
-  return all(`SELECT b.*, p.position, p.finished, p.updated FROM books b JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.finished=0 AND p.position > 30
+  return all(`SELECT ${BOOK}, p.position, p.finished, p.updated FROM ${FROM} JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.finished=0 AND p.position > 30
     ORDER BY p.updated DESC LIMIT ?`, uid, limit).map(shape);
 }
+/** En bok med de fält som visas (för bookmeta.js och routes) */
+export const bookRow = (id) => get(`SELECT ${BOOK} FROM ${FROM} WHERE b.id=?`, id);
 export function book(id, uid) {
-  const b = get(`SELECT b.*, p.position, p.finished, p.updated, p.speed FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.id=?`, uid, id);
+  const b = get(`SELECT ${BOOK}, p.position, p.finished, p.updated, p.speed FROM ${FROM} LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.id=?`, uid, id);
   if (!b) return null;
+  const ch = chaptersFor(b);
+  const card = (x) => ({ id: x.id, title: x.title, cover: !!x.cover, year: x.year == null ? null : parseInt(x.year) || null, seriesNo: x.series_no == null ? null : String(x.series_no) });
+  const others = (where, ...p) => all(`SELECT * FROM (SELECT ${BOOK} FROM ${FROM} WHERE b.library_id=? AND b.id!=?) WHERE ${where}`, b.library_id, id, ...p);
   return { ...shape(b), description: b.description, speed: b.speed || 1,
-    chapters: (() => { try { return JSON.parse(b.chapters || '[]'); } catch { return []; } })(),
+    chapters: ch.chapters, chapterSource: ch.source,
+    subtitle: b.subtitle || null, publisher: b.publisher || null, isbn: b.isbn || null, asin: b.asin || null, language: b.language || null,
+    genres: json(b.genres, []).filter(x => typeof x === 'string').slice(0, 10),
+    // Metadata från nätet: källa och om matchningen är låst ("Fel bok?")
+    meta: { state: b.meta_state || 0, locked: !!b.meta_locked, source: b.meta_source || null, sourceId: b.meta_source_id || null, matchedTitle: b.meta_title || null,
+      edited: Object.keys(json(b.meta_edits, {})).filter(k => k !== 'sort') },
     files: all('SELECT id, idx, title, duration, offset, codec FROM book_files WHERE book_id=? ORDER BY idx', id),
     bookmarks: all('SELECT id, position, note, created FROM bookmarks WHERE user_id=? AND book_id=? ORDER BY position', uid, id),
-    sameAuthor: all('SELECT id, title, cover, year FROM books WHERE author=? AND id!=? AND library_id=? ORDER BY year, sort_title LIMIT 20', b.author, id, b.library_id)
-      .map(x => ({ id: x.id, title: x.title, cover: !!x.cover, year: x.year })) };
+    sameAuthor: others('author=? AND (? IS NULL OR series IS NULL OR series != ? COLLATE NOCASE) ORDER BY year, sort_title LIMIT 20', b.author, b.series, b.series).map(card),
+    sameSeries: b.series ? others('series=? COLLATE NOCASE ORDER BY CAST(series_no AS REAL) NULLS LAST, year, sort_title LIMIT 50', b.series).map(card) : [] };
 }
 export function saveProgress(uid, id, position, speed) {
   const b = get('SELECT duration FROM books WHERE id=?', id); if (!b) return null;
