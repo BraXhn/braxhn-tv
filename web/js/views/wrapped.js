@@ -1,4 +1,5 @@
 // Vy: årssammanfattning
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, api, esc, main, me, views } from '../core.js';
 import { art } from '../ui/cards.js';
 import { emptyState } from '../ui/states.js';

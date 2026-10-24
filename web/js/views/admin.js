@@ -1,4 +1,5 @@
 // Vy: administration
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, keyClick, later, main, me, toast, views, toastErr } from '../core.js';
 import { boot, loadLibs, route } from '../router.js';
 import { EVENTS } from './account.js';

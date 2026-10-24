@@ -11,15 +11,18 @@ import * as screen from '../screentime.js';
 export const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
 
 // ---------- formning av objekt ----------
-// Avsnittsräkning behövs bara för serier (CASE gör att underfrågorna inte körs för filmer/avsnitt)
+// Avsnittsräkning behövs bara för serier (CASE gör att underfrågorna inte körs för filmer/avsnitt).
+// ep_watched: CROSS JOIN låser ordningen – seriens avsnitt först (items_parent_se), sedan ett uppslag per avsnitt i
+// progress. Utan eller med inaktuell statistik (sqlite_stat1, t.ex. tagen när biblioteket var tomt) valde SQLite annars att gå igenom alla
+// användarens progress-rader för varje serie: 400 serier × 10 000 rader = 1,2 s i stället för 12 ms.
 export const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
   CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id) END AS ep_total,
-  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e JOIN progress q ON q.item_id=e.id AND q.user_id=p_uid.uid AND q.watched=1 WHERE e.parent_id=i.id) END AS ep_watched,
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e CROSS JOIN progress q WHERE e.parent_id=i.id AND q.user_id=p_uid.uid AND q.item_id=e.id AND q.watched=1) END AS ep_watched,
   CASE WHEN i.kind='show' THEN (SELECT COUNT(DISTINCT e.season) FROM items e WHERE e.parent_id=i.id) END AS ep_seasons`;
 // Kolumner som shape() använder – inte tunga fält som streams/chapters (och overview i listvyer)
 const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop, i.thumb, i.duration, i.rating, i.added, i.hdr,
   i.genres, i.cert, i.age, i.collection_id, i.season, i.episode, i.parent_id, i.height,
-  i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay`;
+  i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay, i.poster_color, i.backdrop_color, i.thumb_color`;
 export const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
 export const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
 function shape(r) {
@@ -28,9 +31,12 @@ function shape(r) {
     poster: !!r.poster, backdrop: !!r.backdrop, thumb: !!r.thumb,
     duration: r.duration, rating: r.rating, overview: r.overview ?? undefined, added: r.added, hdr: r.hdr || null,
     genres: (() => { try { return JSON.parse(r.genres || '[]'); } catch { return []; } })(), cert: r.cert || null, age: r.age ?? null,
-    collection: r.collection_id || null
+    collection: r.collection_id || null,
+    // Platshållarfärg medan bilden laddas ('#rrggbb', server/imgcolor.js) – bara när den är känd
+    ph: r.poster_color || undefined, phBackdrop: r.backdrop_color || undefined, phThumb: r.thumb_color || undefined
   };
-  if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb });
+  if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb,
+    showPh: r.show_poster_color || undefined });
   if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched, seasons: r.ep_seasons ?? 0 });
   else Object.assign(o, { position: r.p_pos || 0, watched: !!r.p_watched, height: r.height,
     intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null,
@@ -60,7 +66,7 @@ export const MAIN_ONLY = ' AND i.version_of IS NULL';
 /** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
 export const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
   const age = ageFilter(uid);
-  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };
 /**
@@ -76,7 +82,7 @@ export function groupNewEpisodes(eps, limit = 24) {
     let g = groups.get(k);
     if (!g) {
       if (groups.size >= limit) continue;
-      g = { show: e.show, showTitle: e.showTitle || '', showPoster: !!e.showPoster, showThumb: !!e.showThumb, season: e.season, added: e.added, count: 0, unwatched: 0, latest: null, next: null };
+      g = { show: e.show, showTitle: e.showTitle || '', showPoster: !!e.showPoster, showThumb: !!e.showThumb, showPh: e.showPh, season: e.season, added: e.added, count: 0, unwatched: 0, latest: null, next: null };
       groups.set(k, g);
     }
     g.count++;

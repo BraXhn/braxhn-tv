@@ -1,4 +1,5 @@
 // Vyer: live-TV, programguide och inspelningar (DVR)
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, dayName, esc, fmtDur, hhmm, keyClick, later, main, me, toast, toastErr, views } from '../core.js';
 import { playLive, playRec } from '../player/live.js';
 import { route } from '../router.js';

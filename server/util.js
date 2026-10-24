@@ -6,9 +6,15 @@ import { pipeline } from 'node:stream';
 import net from 'node:net';
 // Text som lönar sig att komprimera (bibliotekslistor i JSON är ~15 ggr mindre med gzip)
 const COMPRESSIBLE = /^(application\/(json|javascript|manifest\+json|vnd\.apple\.mpegurl)|text\/|image\/svg)/;
+// Svar över ASYNC_MIN komprimeras utanför händelseloopen (zlib i trådpoolen): ett bibliotek med tusentals titlar
+// (100–500 kB JSON) låser annars servern några millisekunder per svar, och alla andra förfrågningar väntar.
+// Brotli (kvalitet 4: snabbt, ~20 % mindre än gzip) när klienten stöder det, annars gzip. Små svar som förut.
+const ASYNC_MIN = 64 << 10;
+const PENDING = Symbol('komprimeras');
+const BR_OPTS = { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4, [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT } };
 /** Skickar ett svar. headers.ETag === 'auto' räknar fram en ETag ur innehållet; If-None-Match ger då 304. */
 export function send(res, code, body, headers = {}) {
-  if (res.headersSent) return;
+  if (res.headersSent || res[PENDING]) return;
   if (typeof body === 'object' && !Buffer.isBuffer(body) && body !== null) {
     body = JSON.stringify(body);
     headers['Content-Type'] = 'application/json; charset=utf-8';
@@ -22,10 +28,28 @@ export function send(res, code, body, headers = {}) {
       return res.end();
     }
   }
-  if (body != null && body.length > 1024 && COMPRESSIBLE.test(headers['Content-Type'] || '') && /\bgzip\b/.test(req?.headers['accept-encoding'] || '')) {
-    body = zlib.gzipSync(body, { level: 5 });
-    headers['Content-Encoding'] = 'gzip';
-    headers['Vary'] = 'Accept-Encoding';
+  const ae = req?.headers['accept-encoding'] || '';
+  if (body != null && body.length > 1024 && COMPRESSIBLE.test(headers['Content-Type'] || '')) {
+    const br = body.length > ASYNC_MIN && /\bbr\b/.test(ae), gz = /\bgzip\b/.test(ae);
+    if (br || (gz && body.length > ASYNC_MIN)) {
+      // ETag och 304 ovan gäller det okomprimerade innehållet – samma som för små svar
+      res[PENDING] = true;
+      const done = (e, out) => {
+        res[PENDING] = false;
+        if (res.headersSent || res.destroyed) return;
+        if (!e) { body = out; headers['Content-Encoding'] = br ? 'br' : 'gzip'; headers['Vary'] = 'Accept-Encoding'; }
+        res.writeHead(code, { 'Cache-Control': 'no-store', ...headers });
+        res.end(body);
+      };
+      if (br) zlib.brotliCompress(body, { ...BR_OPTS, params: { ...BR_OPTS.params, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: Buffer.byteLength(body) } }, done);
+      else zlib.gzip(body, { level: 5 }, done);
+      return;
+    }
+    if (gz) {
+      body = zlib.gzipSync(body, { level: 5 });
+      headers['Content-Encoding'] = 'gzip';
+      headers['Vary'] = 'Accept-Encoding';
+    }
   }
   res.writeHead(code, { 'Cache-Control': 'no-store', ...headers });
   res.end(body ?? '');

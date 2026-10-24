@@ -6,7 +6,7 @@ import { measureBandwidth } from './player/caps.js';
 import { closeLive, closeRec } from './player/live.js';
 import { P, closeAllPlayers } from './player/video.js';
 import { refreshScreen, screenBadge } from './screentime.js';
-import { fillWatch } from './views/streaming.js';
+import { fillWatch } from './views/item.js';
 import { openDialog } from './ui/dialog.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
 import { startActivity, stopActivity } from './ui/activity.js';
@@ -70,6 +70,9 @@ export async function boot() {
 const SKELETON = { home: 'shelves', lib: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
   admin: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels' };
+// Sällan använda vyer laddas först när de öppnas: vy -> modul i views/ (märkt @lazy, förladdas inte).
+// Relativ dynamisk import → samma bygge (/v/<bygge>/js/views/…). Modulen registrerar sina vyer i views när den laddats.
+const LAZY = new Map(Object.entries({ admin: 'admin', stats: 'stats', wrapped: 'wrapped', requests: 'requests', streaming: 'streaming', live: 'live', guide: 'live', dvr: 'live' }));
 export async function route() {
   const gen = nextRoute();
   // Stoppa timers/slingor från föregående vy
@@ -83,8 +86,9 @@ export async function route() {
   if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
   else if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
   markNav();
-  const v = views[name || 'home'];
-  if (!v) { location.hash = '#/'; return; }
+  let v = views[name || 'home'];
+  const lazy = v ? null : LAZY.get(name);
+  if (!v && !lazy) { location.hash = '#/'; return; }
   // Inloggning och profilval döljer menyn – visa den igen när man navigerar därifrån (även med Bakåt)
   $('#top').hidden = !me || name === 'login' || name === 'profiles';
   $('#tabbar').hidden = $('#top').hidden;
@@ -93,7 +97,14 @@ export async function route() {
   main.innerHTML = loadingState({ kind: SKELETON[name || 'home'] || 'list' });
   main.setAttribute('aria-busy', 'true');
   if (me && name !== 'timeup') refreshScreen();
-  try { await v(arg, arg2); if (gen !== routeGen) return; main.removeAttribute('aria-busy'); window.scrollTo(0, 0); fillWatch(); }
+  try {
+    if (lazy) {
+      await import(`./views/${lazy}.js`);
+      if (gen !== routeGen) return;
+      v = views[name];
+      if (!v) { location.hash = '#/'; return; }
+    }
+    await v(arg, arg2); if (gen !== routeGen) return; main.removeAttribute('aria-busy'); window.scrollTo(0, 0); fillWatch(); }
   catch (e) {
     if (gen !== routeGen || e?.aborted) return;
     main.removeAttribute('aria-busy');

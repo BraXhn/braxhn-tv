@@ -1,5 +1,6 @@
 // BraXhn TV webbklient – ren JavaScript, inga ramverk. Startmodul: laddar alla moduler och startar appen.
-// Modulerna ligger i /js/ (se CLAUDE.md). Vyerna registrerar sig i views när de laddas, därför importeras alla här.
+// Modulerna ligger i /js/ (se CLAUDE.md). Vyerna registrerar sig i views när de laddas, därför importeras de här –
+// utom sällan använda vyer (administration, statistik, live-TV …), som router.js laddar första gången de öppnas (LAZY).
 // Nya moduler ska även läggas in i SHELL i sw.js så att appen kan starta utan kontakt med servern.
 import { me, rememberPage } from './js/core.js';
 import { boot, route } from './js/router.js';
@@ -19,15 +20,9 @@ import './js/views/collections.js';
 import './js/views/search.js';
 import './js/views/item.js';
 import './js/views/person.js';
-import './js/views/wrapped.js';
 import './js/views/account.js';
 import './js/views/books.js';
-import './js/views/live.js';
-import './js/views/streaming.js';
-import './js/views/requests.js';
 import './js/views/calendar.js';
-import './js/views/stats.js';
-import './js/views/admin.js';
 import './js/views/music.js';
 
 // Fel i appen rapporteras till serverloggen (Administration → Logg) – bara egna skript och högst fem per sidvisning

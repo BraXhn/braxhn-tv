@@ -1,4 +1,5 @@
 // Vy: statistik och aktivitet (administratör)
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { route } from '../router.js';
 import { diskTable } from './admin-ops.js';

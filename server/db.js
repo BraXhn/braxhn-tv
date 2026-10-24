@@ -196,6 +196,10 @@ addCol('tracks', 'loudness', 'TEXT');
 addCol('users', 'screen_time', 'TEXT');
 addCol('users', 'notify_personal', 'TEXT');
 addCol('users', 'offline_sync', 'TEXT');
+// Platshållarfärg per bild ('#rrggbb', '' = kunde inte läsas, NULL = inte uträknad) – server/imgcolor.js
+addCol('items', 'poster_color', 'TEXT');
+addCol('items', 'backdrop_color', 'TEXT');
+addCol('items', 'thumb_color', 'TEXT');
 // "Ta bort från Fortsätt titta" för en serie: döljer nästa avsnitt tills man tittar på serien igen (progress.updated > at)
 db.exec(`CREATE TABLE IF NOT EXISTS continue_hidden(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, at INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));`);

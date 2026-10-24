@@ -11,6 +11,7 @@ import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
 import { findBest, stripTrailingQuality, similarity, GOOD } from './match.js';
 import { dropVariants } from './imgsize.js';
+import * as colors from './imgcolor.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
@@ -460,6 +461,7 @@ async function image(tmdbPath, size, id, type) {
     const r = await fetch(`https://image.tmdb.org/t/p/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return 0;
     fs.writeFileSync(path.join(IMAGES, `${id}-${type}.jpg`), Buffer.from(await r.arrayBuffer()));
+    if (/^\d+$/.test(String(id))) colors.forget(+id, [type]); // samlingar ('c12') har ingen färg
     return 1;
   } catch { return 0; }
 }
@@ -700,7 +702,7 @@ export async function extractThumb(it) {
   try {
     await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file,pipe', '-ss', String(at), '-i', it.path,
       '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', out], { timeout: 60000 });
-    if (fs.existsSync(out)) run('UPDATE items SET thumb=1 WHERE id=?', it.id);
+    if (fs.existsSync(out)) { run('UPDATE items SET thumb=1 WHERE id=?', it.id); colors.forget(it.id, ['thumb']); }
   } catch (e) { console.warn('[thumb]', it.path, e.message); }
 }
 
@@ -712,7 +714,7 @@ async function thumbnails(lib, st = status) {
   for (const sh of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND poster=0 AND thumb=0`, lib.id)) {
     const ep = get(`SELECT id FROM items WHERE parent_id=? AND thumb=1 ORDER BY season, episode LIMIT 1`, sh.id);
     if (!ep) continue;
-    try { fs.copyFileSync(path.join(IMAGES, `${ep.id}-thumb.jpg`), path.join(IMAGES, `${sh.id}-thumb.jpg`)); run('UPDATE items SET thumb=1 WHERE id=?', sh.id); } catch {}
+    try { fs.copyFileSync(path.join(IMAGES, `${ep.id}-thumb.jpg`), path.join(IMAGES, `${sh.id}-thumb.jpg`)); run('UPDATE items SET thumb=1 WHERE id=?', sh.id); colors.forget(sh.id, ['thumb']); } catch {}
   }
 }
 
