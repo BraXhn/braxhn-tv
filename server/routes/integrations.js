@@ -48,7 +48,7 @@ route('POST', '/api/webhook/arr', pub, async (c) => {
   if (arr.SCAN_EVENTS.test(w.event)) { for (const id of w.libIds) scan(id); console.log(`[arr] ${w.event}: ${w.title || ''} → skannar`); }
   send(c.res, 200, { ok: true, event: w.event, scanned: arr.SCAN_EVENTS.test(w.event) ? w.libIds.length : 0 });
 });
-const canRequest = (u) => getSetting('requests_enabled', '1') === '1' && u.max_age == null && (arr.configured('movie') || arr.configured('show') || getSetting('requests_without_arr', '1') === '1');
+const canRequest = arr.canRequest;
 const reqShape = (r) => ({ id: r.id, kind: r.kind, tmdbId: r.tmdb_id, title: r.title, year: r.year, poster: r.poster, overview: r.overview, status: r.status, note: r.note,
   user: r.user_name, userId: r.user_id, created: r.created });
 route('GET', '/api/requests/search', user, async (c) => {

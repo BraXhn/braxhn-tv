@@ -23,6 +23,7 @@ import './js/views/books.js';
 import './js/views/live.js';
 import './js/views/streaming.js';
 import './js/views/requests.js';
+import './js/views/calendar.js';
 import './js/views/stats.js';
 import './js/views/admin.js';
 import './js/views/music.js';

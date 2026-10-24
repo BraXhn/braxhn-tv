@@ -10,6 +10,7 @@ import { addToCollection } from '../ui/collections.js';
 import { openDialog } from '../ui/dialog.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
+import { missingBox } from './calendar.js';
 
 function heroHtml(it, extra = '') {
   const meta = [it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
@@ -92,7 +93,7 @@ function showView(it, season) {
     <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
     <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
-  main.innerHTML = heroHtml(it, actions) + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
+  main.innerHTML = heroHtml(it, actions + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
     items: seasons.map(s => ({ key: s, label: s === 0 ? 'Specialavsnitt' : 'Säsong ' + s })) }) + '<div id="eps" role="tabpanel"></div>';
   const renderEps = () => {
     const eps = it.children.filter(e => e.season === cur);
@@ -108,6 +109,7 @@ function showView(it, season) {
     $('#seasonSeen').onclick = act(async () => { await api(`/items/${it.id}/watched?season=${cur}`, { method: 'POST', body: { watched: !allSeen } }); route(); });
   };
   renderEps();
+  missingBox($('#missing'), it.id).catch(() => {});
   bindWatchlist(it);
   bindCollections(it);
   bindTrailers(it);

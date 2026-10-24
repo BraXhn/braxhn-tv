@@ -14,6 +14,7 @@ import * as music from './music.js';
 import * as arr from './arr.js';
 import * as books from './audiobooks.js';
 import * as follows from './follows.js';
+import * as calendar from './calendar.js';
 import { allowedFor, clearRecommendations } from './http/context.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
@@ -26,6 +27,7 @@ import './routes/social.js';
 import './routes/books.js';
 import './routes/integrations.js';
 import './routes/livetv.js';
+import './routes/calendar.js';
 export { handle } from './http/router.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
@@ -37,6 +39,9 @@ hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 hooks.afterScan = () => { clearRecommendations(); return arr.markAvailable(); };
 hooks.audiobooks = (lib, status) => books.scanBooks(lib, status);
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
+
+// Kalendern: avsnitt och sändningsdatum från TMDB, utspritt (pågående och följda serier en gång per dygn)
+calendar.start();
 
 // Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)
 setTimeout(() => act.watchLibraries(scan), 5000);
