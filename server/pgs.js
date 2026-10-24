@@ -184,6 +184,17 @@ export function job(it, sub) {
   let fd;
   try { fd = fs.openSync(bin, 'w'); } catch { j.done = true; j.error = 'Kunde inte skriva undertextcachen'; return j; }
   jobs.set(key, j);
+  // Övergivet jobb (spelaren stängd mitt i läsningen): läsaren stoppar ffmpeg efter två minuter utan frågor,
+  // men då körs aldrig finish – utan den här städningen låg filhandtag, .part-fil och bilder kvar för alltid
+  j.abort = () => {
+    if (j.done) return;
+    j.done = true; j.error = 'Avbruten';
+    j.reader?.close();
+    try { fs.closeSync(fd); } catch {}
+    fs.rmSync(bin, { force: true });
+    j.cues = []; j.images = [];
+    if (jobs.get(key) === j) jobs.delete(key);
+  };
   const finish = (ok, err) => {
     if (j.done) return;
     j.done = true; j.error = err || null;
@@ -238,6 +249,15 @@ export function job(it, sub) {
   });
   return j;
 }
+
+// Jobb som inte är klara och inte frågats på 30 min städas bort (nästa fråga börjar om från cachen eller på nytt)
+const STALE_MS = 30 * 60e3;
+export function sweep(now = Date.now()) {
+  for (const j of [...jobs.values()]) if (!j.done && now - j.last > STALE_MS) j.abort();
+}
+setInterval(sweep, 60e3).unref();
+// För tester
+export const _jobs = jobs;
 
 /** Tidslistan (allt som tolkats hittills). Spelaren frågar igen så länge done är false. */
 export async function serveIndex(res, it, sub, t = 0) {

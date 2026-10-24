@@ -209,8 +209,13 @@ export function playlist(id, uid) {
 // ---------------- strömning av ljud ----------------
 const MIME = { mp3: 'audio/mpeg', aac: 'audio/aac', flac: 'audio/flac', vorbis: 'audio/ogg', opus: 'audio/ogg', alac: 'audio/mp4', pcm_s16le: 'audio/wav' };
 const EXT_MIME = { '.m4b': 'audio/mp4', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav' };
+// Omkodningar som pågår: { uid, file, p }. Tak per användare och totalt (varje förfrågan är en egen ffmpeg).
+// Spolning ger en ny förfrågan för samma spår – den äldre stoppas då i stället för att räknas mot taket.
+const audioJobs = new Set();
+export const AUDIO_LIMITS = { user: 3, total: 8 };
+export const audioTranscodes = () => audioJobs.size;
 /** Direkt om klienten klarar formatet (med Range för spolning), annars omkodning till AAC (eller MP3) i realtid. */
-export function streamTrack(req, res, t, query) {
+export function streamTrack(req, res, t, query, uid = 0) {
   const caps = new Set(String(query.get('a') || 'mp3,aac,flac,opus,vorbis').split(','));
   const ext = path.extname(t.path).toLowerCase();
   const direct = caps.has(t.codec) && EXT_MIME[ext] && !(t.codec === 'alac');
@@ -223,10 +228,17 @@ export function streamTrack(req, res, t, query) {
   const kbps = Math.min(320, maxKbps || 256);
   const useMp3 = !caps.has('aac');
   if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' }); return res.end(); }
+  for (const x of audioJobs) if (x.uid === uid && x.file === t.path) { audioJobs.delete(x); x.p.kill('SIGKILL'); }
+  if ([...audioJobs].filter(x => x.uid === uid).length >= AUDIO_LIMITS.user || audioJobs.size >= AUDIO_LIMITS.total)
+    return fail(res, 503, 'För många ljudströmmar omkodas samtidigt just nu – försök igen strax');
   const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', ...(ss ? ['-ss', String(ss)] : []), '-i', t.path,
     '-map', '0:a:0', '-vn', ...(useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
     { stdio: ['ignore', 'pipe', 'ignore'] });
+  const job = { uid, file: t.path, p };
+  audioJobs.add(job);
+  p.on('close', () => audioJobs.delete(job));
   p.on('error', (e) => {
+    audioJobs.delete(job);
     console.warn('[music] kunde inte starta ffmpeg:', e.message);
     if (!res.headersSent) fail(res, 500, 'Omkodningen kunde inte startas'); else res.destroy();
   });

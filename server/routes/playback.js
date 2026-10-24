@@ -21,13 +21,16 @@ route('GET', '/api/items/:id/offline', user, (c) => {
   const it = mediaItem(c); if (!it) return;
   const q = c.q.get('q') || '720';
   const st = offline.status(it, q);
+  if (st.status === 'missing') return fail(c.res, 404, st.error);
   if (st.status === 'ready') st.url = `/api/stream/${it.id}/offline-file?q=${encodeURIComponent(q)}&t=${createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) })}`;
   send(c.res, 200, st);
 });
 route('POST', '/api/items/:id/offline', user, async (c) => {
   const it = mediaItem(c); if (!it) return;
   const { q } = await readJson(c.req);
-  send(c.res, 200, offline.start(it, q || '720'));
+  const st = offline.start(it, q || '720');
+  if (st.status === 'missing') return fail(c.res, 404, st.error);
+  send(c.res, 200, st);
 });
 route('DELETE', '/api/items/:id/offline', user, (c) => { const it = mediaItem(c); if (!it) return; offline.cancel(it, c.q.get('q') || '720'); send(c.res, 200, { ok: true }); });
 route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
@@ -106,11 +109,12 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
   if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons });
-  const subs = st.subtitlesOf(it).filter(s => !s.bitmap).map(s => ({
+  const allSubs = st.subtitlesOf(it);
+  const subs = allSubs.filter(s => !s.bitmap).map(s => ({
     id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
   }));
   // Bildundertexter (PGS) som webbspelaren ritar själv – appar använder inbränning via sub=
-  const imageSubs = st.subtitlesOf(it).filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
+  const imageSubs = allSubs.filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
   send(c.res, 200, {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
     duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,
@@ -149,7 +153,10 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // Klienten anger filmen; omkodningen kan gälla vilken version som helst av den
   const row = get('SELECT * FROM items WHERE id=?', +c.p.id);
   const ids = row ? ver.versionsOf(ver.mainOf(row)).map(v => v.id) : [+c.p.id];
-  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id);
+  // pid (webbspelaren): bara den uppspelningen – en Chromecast eller annan enhet på samma konto fortsätter.
+  // Utan pid (apparna) stoppas alla användarens sessioner av titeln som förut.
+  const pid = /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
+  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid);
   send(c.res, 200, { ok: true });
 });
 
@@ -164,7 +171,7 @@ route('POST', '/api/items/:id/subdownload', user, async (c) => {
   const it = mediaItem(c); if (!it) return;
   const { fileId, lang } = await readJson(c.req);
   if (!fileId) return fail(c.res, 400, 'fileId saknas');
-  try { send(c.res, 200, await os.download(it, fileId, lang)); }
+  try { const r = await os.download(it, fileId, lang); st.forgetSubtitles(it); send(c.res, 200, r); }
   catch (e) { fail(c.res, e.status || 502, e.message); }
 });
 route('DELETE', '/api/items/:id/subs/:sid', admin, (c) => {
@@ -172,6 +179,7 @@ route('DELETE', '/api/items/:id/subs/:sid', admin, (c) => {
   const s = st.subtitlesOf(it).find(x => x.id === c.p.sid);
   if (!s || s.source !== 'downloaded') return fail(c.res, 400, 'Endast nedladdade undertexter kan tas bort');
   os.removeDownloaded(it, s.file);
+  st.forgetSubtitles(it);
   send(c.res, 200, { ok: true });
 });
 // Intro/eftertexter: justera manuellt eller analysera om

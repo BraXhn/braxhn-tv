@@ -330,19 +330,22 @@ async function goNext(nextId) {
   if (party) api(`/party/${party}/state`, { method: 'POST', body: { itemId: nextId, playing: true, position: 0 }, bg: true }).catch(() => {});
 }
 
-export function closePlayer(refresh = true) {
+/** cast: uppspelningen fortsätter på Chromecast – stoppa bara webbspelarens egen session (pid) */
+export function closePlayer(refresh = true, { cast = false } = {}) {
   if (!P) return;
   if (P.es) { P.es.close(); P.es = null; }
   sendProgress(true);
   clearInterval(P.nextTimer);
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   const el = P.el, v = $('#vid', el), id = P.it.id;
+  // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
+  let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
   pgsStop(P); textStop(P);
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);
-  fetch(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
+  if (pid || !cast) fetch(`/api/stream/${id}/stop${pid ? '?pid=' + encodeURIComponent(pid) : ''}`, { method: 'POST' }).catch(() => {});
   document.removeEventListener('keydown', keys);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.remove('hasmini'); el.classList.remove('mini');

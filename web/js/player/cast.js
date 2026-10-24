@@ -43,6 +43,6 @@ export async function castItem(it, position) {
   req.currentTime = position || 0;
   const subIdx = P?.sub ? p.subtitles.findIndex(s => s.id === P.sub) : -1;
   if (subIdx >= 0) req.activeTrackIds = [subIdx + 1];
-  try { await sess.loadMedia(req); toast('Spelas på ' + sess.getCastDevice().friendlyName); if (P) closePlayer(false); }
+  try { await sess.loadMedia(req); toast('Spelas på ' + sess.getCastDevice().friendlyName); if (P) closePlayer(false, { cast: true }); }
   catch (e) { toast('Kunde inte casta: ' + (e?.code || e)); }
 }

@@ -21,6 +21,12 @@
 - Rättat: efter spolning i remuxade och omkodade filmer blev segmenten fel i Docker-imagen (Debians ffmpeg 5.1): ett segment per nyckelbild i stället för var 6:e sekund, så spellistan inte stämde och uppspelningen kunde hacka eller hoppa. ffmpeg 5.1 och 6.x tolkar delningstiderna olika; servern testar nu vid start vilket som gäller
 - Rättat: Dolby Vision profil 5 till Apple-appen fick taggen hev1 i stället för dvh1 med ffmpeg 5.1 (Docker-imagen), och Apple spelar inte hev1. Servern sätter nu taggen i initsegmentet själv
 - iOS-appen anger att den spelar med Apples egen HLS-spelare (`nhls=1`), så att Dolby Digital inte skickas i TS-segment till iPhone/iPad (samma fel som i Safari). tvOS-appen skickar fortfarande Dolby Digital orört
+- Rättat: när man stängde webbspelaren efter att ha börjat casta till Chromecast stoppades Chromecastens ström också (och andra enheter på samma konto som tittade på samma film). Webbspelaren stoppar nu bara sin egen uppspelning
+- Rättat: undertexter som började läsas men aldrig blev klara (spelaren stängd mitt i) låg kvar i minnet och på disken tills servern startades om. De städas nu bort efter 30 minuter
+- Rättat: undertextlistan läste mappen på disken många gånger för varje uppspelning – när en arraydisk vaknar kunde det frysa servern en stund. Listan sparas nu i 30 s (en ny extern undertextfil syns därför inom en halv minut)
+- Rättat: köerna för nyckelbildsindexering och undertextläsning kunde släppa fram en körning för mycket, så att fler än tänkt läste disken samtidigt
+- Musik och ljudböcker: högst 3 samtidiga omkodningar per användare och 8 totalt (tidigare obegränsat). Spolning i ett omkodat spår ersätter den gamla körningen. När taket nås får spelaren "För många ljudströmmar omkodas samtidigt just nu"
+- Rättat: offline-status för en film vars fil flyttats eller tagits bort gav serverfel – nu "Filen finns inte längre". Städningen av offline-cachen kan inte längre krascha servern
 
 ## 0.9.3
 - Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre
