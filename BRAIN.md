@@ -67,6 +67,7 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 - All servertext i HTML går genom `esc()`.
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).
 - Barnprofilers åldersgräns (`allowedFor`) kontrolleras på varje route som rör en titel – även bilder och kortåtgärder.
+- Egna samlingar (`server/customcollections.js`, `/api/custom-collections`): privata syns bara för skaparen, delade ändras bara av administratör på betrott nät; en samling utan titel inom profilens åldersgräns syns inte (namn, omslag, hylla) för den som inte får ändra den. Titlar lagras som huvudrad (avsnitt → serie, version → film) och flyttas med `mergeInto`.
 - Omkodad video: H.264, yuv420p, inga B-bilder, BT.709-märkt; HDR-källa tonmappas alltid vid omkodning.
 - Native HLS (Safari/iOS-appen) får aldrig AC-3/E-AC-3 i TS – inte heller surround som konverteras.
 - Omkodat ljud börjar aldrig före bilden (`transcodeAudio`); utan det överlappar första segmentet nästa.

@@ -19,6 +19,7 @@ import { allowedFor, clearRecommendations } from './http/context.js';
 import './routes/auth.js';
 import './routes/admin.js';
 import './routes/library.js';
+import './routes/collections.js';
 import './routes/music.js';
 import './routes/playback.js';
 import './routes/social.js';

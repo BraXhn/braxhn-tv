@@ -25,6 +25,9 @@ export function mergeInto(fromId, toId) {
   run('DELETE FROM progress WHERE item_id=?', fromId);
   run('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) SELECT user_id, ?, added FROM watchlist WHERE item_id=?', toId, fromId);
   run('DELETE FROM watchlist WHERE item_id=?', fromId);
+  // Egna samlingar följer med filmen (samma plats i samlingen)
+  run('INSERT OR IGNORE INTO custom_collection_items(collection_id,item_id,pos,added) SELECT collection_id, ?, pos, added FROM custom_collection_items WHERE item_id=?', toId, fromId);
+  run('DELETE FROM custom_collection_items WHERE item_id=?', fromId);
   // Uppspelningshistoriken (activity.js) räknas på filmen
   try { run('UPDATE plays SET item_id=? WHERE item_id=?', toId, fromId); } catch {}
   // Rollista och trailers följer med filmen (people.js/trailers.js)

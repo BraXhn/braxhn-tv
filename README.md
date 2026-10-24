@@ -24,6 +24,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | Användare | Flera konton med egen tittarhistorik, *Fortsätt titta*, *Nästa avsnitt* och sedd/osedd. |
 | **Profiler** | *Vem tittar?* – profiler i hushållet med egen historik och Min lista, valfri **PIN** och **åldersgräns** för barn (svensk åldersgräns från TMDB, med USA/Tyskland som reserv). |
 | **Upptäck** | **Min lista**, **samlingar** (t.ex. alla Bond-filmer), **rekommendationer** utifrån det du sett och *Liknande titlar*. |
+| **Egna samlingar** | Samla filmer och serier själv (som Collections i Plex/Jellyfin): namn, beskrivning och sortering (egen ordning, titel, år eller senast tillagda). Lägg till med ⋮ → *Lägg till i samling…* eller *+ Samling* på titelsidan, ordna med dra och släpp eller ↑/↓ (fungerar med tangentbord och fjärrkontroll). **Delade** samlingar (alla profiler) skapas av administratören hemma; alla kan göra **privata**. Barnprofiler ser bara titlar inom sin åldersgräns. Valfritt: *Visa på startsidan* som egen hylla. Omslaget är första titelns affisch. |
 | **Webbgränssnitt i Plex-stil** | Mörk, kompakt layout: sidomeny med ikoner (Hem och ett val per bibliotek, ☰ fäller ut namnen), menyrad med sidor, sök och **reglage för kortstorlek**, startsidan som vågräta hyllor med ‹ › (även piltangenter/fjärrkontroll). Korten har ▶ som spelar direkt, ✎ för administratörer och märke för osedda avsnitt; *Nyligen tillagda* i seriebibliotek visar ett kort per säsong. På telefon finns flikmenyn längst ner kvar. |
 | **Snabbåtgärder på korten** | **⋮** på varje affisch (även högerklick, långtryck och Menu-tangenten på fjärrkontrollen): spela/fortsätt, markera som sedd, Min lista, **ta bort från Fortsätt titta**, följ serien, titta tillsammans och ladda ner – utan att öppna titelsidan. Administratörer får även metadataverktygen. Det mesta går att ångra direkt. |
 | **Direktuppspelning** | Filer som enheten klarar skickas orörda (med spolning). |
@@ -363,6 +364,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | HEVC-remux (fMP4) | Tidsstämplar och init-segment stämde, även efter spolning. |
 | Musik | Skanning av taggar och omslag, strömning direkt och omkodad. |
 | Profiler och åldersgränser | Barnprofiler såg bara tillåtna titlar. |
+| Egna samlingar | Mot en riktig server (`test/custom-collections.test.js`): skapa/ändra/ta bort, privat mot delad, administratör utanför hemnätet nekas, barnprofilens åldersgräns (även omslag och startsidans hylla), sortering, manuell ordning och borttagna titlar/användare. Webben i Chromium vid 375 och 1280 px: hylla på startsidan, samlingssidan, ordning med tangentbordet, kortmenyn och titelsidan. **Otestat:** dra och släpp på pekskärm (mobil Safari stöder inte HTML-dra-och-släpp – använd ↑/↓ där). Apparna visar inte egna samlingar ännu. |
 | Titta tillsammans | Två webbläsare höll synk vid play, paus och spolning. |
 | Offline, förhandsbilder, säkerhetskopior, filbevakning | Fungerade. |
 | Passkeys | Registrering och inloggning med en mjukvaru-autentiserare, inklusive avvisning av fel domän, fel nyckel och kopierad nyckel. |

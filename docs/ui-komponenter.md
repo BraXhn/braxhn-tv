@@ -174,7 +174,8 @@ Ange vilken rad korten ligger i med `data-row` (`continue`, `watchlist`, `foryou
 gör det. Kortmenyn visar då t.ex. "Ta bort från Fortsätt titta" och tar bort kortet ur Min lista-raden.
 
 Menyns val (`cardActions`) beror på sorten och rollen: spela/fortsätt/från början, sedd/osedd (film, avsnitt,
-serie, säsong), Min lista, ta bort från Fortsätt titta, följ serien, titta tillsammans, ladda ner, visa
+serie, säsong), Min lista, lägg till i samling (`ui/collections.js`: `addToCollection(it)`, `collectionForm(col, item)`,
+`deleteCollection(col)`), ta bort från samlingen (kort i en egen samling man får ändra: `data-ucol` + `data-edit` på rutnätet), ta bort från Fortsätt titta, följ serien, titta tillsammans, ladda ner, visa
 information/gå till serien och för administratörer metadataverktygen. Läget som korten inte känner till hämtas
 från `GET /api/items/:id/state`. Kortet uppdateras direkt och ångringsbara val får "Ångra" i toasten.
 

@@ -6,6 +6,7 @@ import { stopVideo } from '../player/overlay.js';
 import { P, startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { art, card, castShelf, shelf } from '../ui/cards.js';
+import { addToCollection } from '../ui/collections.js';
 import { openDialog } from '../ui/dialog.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
@@ -33,7 +34,7 @@ views.item = async (id, season) => {
     ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
       : `<button class="primary" data-play="0">▶ Spela</button>`}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
     <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button><button class="ghost" id="match">Fel titel?</button><button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
@@ -64,6 +65,7 @@ views.item = async (id, season) => {
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   bindWatchlist(it);
+  bindCollections(it);
   bindTrailers(it);
   main.insertAdjacentHTML('beforeend', castShelf(it));
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
@@ -86,7 +88,7 @@ function showView(it, season) {
   const nx = it.next;
   const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
     <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${trailerBtns(it)}
+    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button><button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>${trailerBtns(it)}
     <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
     <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
@@ -107,6 +109,7 @@ function showView(it, season) {
   };
   renderEps();
   bindWatchlist(it);
+  bindCollections(it);
   bindTrailers(it);
   main.insertAdjacentHTML('beforeend', castShelf(it));
   bindFollow(it);
@@ -117,6 +120,17 @@ function showView(it, season) {
   if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
 }
 
+// Egna samlingar: "+ Samling" och raden "Ingår i …" under knapparna (bara samlingar profilen ser)
+function bindCollections(it) {
+  const b = $('#addcol'); if (!b) return;
+  const fill = () => api(`/custom-collections?item=${+it.id}`, { bg: true }).then(cols => {
+    const inCols = cols.filter(c => c.has);
+    $('#incol')?.remove();
+    if (inCols.length && b.isConnected) b.closest('.row').insertAdjacentHTML('afterend', `<p class="muted small" id="incol">Ingår i ${inCols.map(c => `<a href="#/ucollection/${+c.id}">${esc(c.name)}</a>`).join(', ')}</p>`);
+  }).catch(() => {});
+  b.onclick = async () => { await addToCollection(it); fill(); };
+  fill();
+}
 function bindWatchlist(it) {
   const b = $('#wl'); if (!b) return;
   b.onclick = act(async () => {
