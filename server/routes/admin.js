@@ -26,6 +26,9 @@ import * as jobs from '../jobs.js';
 import * as subsonic from '../subsonic.js';
 import * as logs from '../logs.js';
 import * as bookmeta from '../bookmeta.js';
+import * as invites from '../invites.js';
+import * as listen from '../listening.js';
+import { normLibs, normQuality, normStreams } from '../perms.js';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 
@@ -66,22 +69,58 @@ route('POST', '/api/acme/obtain', admin, (c) => {
 });
 
 // Admin: användare och inställningar
-route('GET', '/api/users', admin, (c) => send(c.res, 200, all(`SELECT id,name,is_admin,created,totp_enabled,remote_allowed,pw_changed,
-  (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id=users.id AND s.kind IN ('web','app')) AS last_seen FROM users ORDER BY name`)));
+// Rättigheter per användare (perms.js): libraries (null = alla), canDownload, remoteQuality (tak utanför hemmet), maxStreams.
+// Profiler (parent) visas också: de ärver kontots bibliotek om de inte har en egen lista.
+const parseLibs = (s) => { if (s == null) return null; try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch { return []; } };
+route('GET', '/api/users', admin, (c) => send(c.res, 200, all(`SELECT id,name,is_admin,created,totp_enabled,remote_allowed,pw_changed,parent_id,max_age,
+  libraries,can_download,remote_quality,max_streams,
+  (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id=users.id AND s.kind IN ('web','app')) AS last_seen FROM users ORDER BY name`)
+  .map(({ libraries, can_download, remote_quality, max_streams, ...u }) => ({ ...u, libraries: parseLibs(libraries), canDownload: !!can_download,
+    remoteQuality: remote_quality || null, maxStreams: max_streams || null }))));
+/** Rättigheterna i kroppen (bara de fält som skickas). Kastar Error med status 400 vid ogiltiga värden. */
+function permsBody(b) {
+  const out = {};
+  if (b.libraries !== undefined) out.libraries = normLibs(b.libraries);
+  if (b.canDownload !== undefined) out.canDownload = !!b.canDownload;
+  if (b.remoteQuality !== undefined) out.remoteQuality = normQuality(b.remoteQuality);
+  if (b.maxStreams !== undefined) out.maxStreams = normStreams(b.maxStreams);
+  return out;
+}
+function savePerms(uid, p) {
+  if ('libraries' in p) run('UPDATE users SET libraries=? WHERE id=?', p.libraries == null ? null : JSON.stringify(p.libraries), uid);
+  if ('canDownload' in p) run('UPDATE users SET can_download=? WHERE id=?', p.canDownload ? 1 : 0, uid);
+  if ('remoteQuality' in p) run('UPDATE users SET remote_quality=? WHERE id=?', p.remoteQuality, uid);
+  if ('maxStreams' in p) run('UPDATE users SET max_streams=? WHERE id=?', p.maxStreams, uid);
+  // Korta cacher per användare (smarta listor) räknas om direkt – titlar och strömmar kontrolleras alltid på nytt
+  listen.clearSmartCache();
+}
+const permsText = (p) => [p.libraries !== undefined && (p.libraries == null ? 'alla bibliotek' : `bibliotek ${p.libraries.join(',') || 'inga'}`),
+  p.canDownload !== undefined && (p.canDownload ? 'nedladdning på' : 'nedladdning av'),
+  p.remoteQuality !== undefined && `tak utanför hemmet ${p.remoteQuality ? p.remoteQuality + 'p' : 'som servern'}`,
+  p.maxStreams !== undefined && `samtidiga strömmar ${p.maxStreams || 'obegränsat'}`].filter(Boolean);
 route('POST', '/api/users', admin, async (c) => {
-  const { name, password, isAdmin, remoteAllowed } = await readJson(c.req);
+  const b = await readJson(c.req);
+  const { name, password, isAdmin, remoteAllowed } = b;
   if (!name?.trim() || name.trim().length > 64) return fail(c.res, 400, 'Namn krävs');
   const weak = weakPassword(password, name); if (weak) return fail(c.res, 400, weak);
-  try { run('INSERT INTO users(name,pass,is_admin,created,remote_allowed,pw_changed) VALUES(?,?,?,?,?,?)', name.trim(), await hashPw(password), isAdmin ? 1 : 0, now(), remoteAllowed === false ? 0 : 1, now()); }
+  let perms; try { perms = permsBody(b); } catch (e) { return fail(c.res, 400, e.message); }
+  let uid;
+  try { uid = Number(run('INSERT INTO users(name,pass,is_admin,created,remote_allowed,pw_changed) VALUES(?,?,?,?,?,?)', name.trim(), await hashPw(password), isAdmin ? 1 : 0, now(), remoteAllowed === false ? 0 : 1, now()).lastInsertRowid); }
   catch { return fail(c.res, 409, 'Namnet är upptaget'); }
+  savePerms(uid, perms);
   audit('user_created', { ...ctx(c), detail: `${name.trim()}${isAdmin ? ' (admin)' : ''}` });
-  send(c.res, 200, { ok: true });
+  send(c.res, 200, { ok: true, id: uid });
 });
 route('PUT', '/api/users/:id', admin, async (c) => {
-  const { password, isAdmin, remoteAllowed, reset2fa, logoutAll } = await readJson(c.req);
-  const target = get('SELECT id,name FROM users WHERE id=?', +c.p.id);
+  const b = await readJson(c.req);
+  const { password, isAdmin, remoteAllowed, reset2fa, logoutAll } = b;
+  const target = get('SELECT id,name,parent_id FROM users WHERE id=?', +c.p.id);
   if (!target) return fail(c.res, 404, 'Finns inte');
+  let perms; try { perms = permsBody(b); } catch (e) { return fail(c.res, 400, e.message); }
+  // Samtidiga strömmar och kvalitetstak gäller hushållet och sätts på kontot (profilerna ärver)
+  if (target.parent_id != null && (perms.maxStreams !== undefined || perms.remoteQuality !== undefined)) return fail(c.res, 400, 'Ändra kvalitetstak och samtidiga strömmar på kontot – profilerna ärver dem');
   const changes = [];
+  if (Object.keys(perms).length) { savePerms(target.id, perms); changes.push(...permsText(perms)); }
   if (password) {
     const weak = weakPassword(password, target.name); if (weak) return fail(c.res, 400, weak);
     run('UPDATE users SET pass=?, pw_changed=? WHERE id=?', await hashPw(password), now(), target.id);
@@ -96,6 +135,22 @@ route('PUT', '/api/users/:id', admin, async (c) => {
   if (reset2fa) { run('UPDATE users SET totp_enabled=0, totp_secret=NULL, totp_pending=NULL, recovery=NULL WHERE id=?', target.id); changes.push('2FA återställd'); }
   if (logoutAll) { run('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE id=?1 OR parent_id=?1) AND token != ?2', target.id, c.user.tokenHash); subsonic.revokeHousehold(target.id); changes.push('utloggad överallt'); }
   audit('user_updated', { ...ctx(c), detail: `${target.name}: ${changes.join(', ')}` });
+  send(c.res, 200, { ok: true });
+});
+// ---------- Inbjudningslänkar (server/invites.js) ----------
+// Token visas bara i svaret när inbjudan skapas; webben bygger länken <adress>/#/invite/<token>
+route('GET', '/api/invites', admin, (c) => send(c.res, 200, { invites: invites.list(), maxDays: invites.MAX_DAYS }));
+route('POST', '/api/invites', admin, async (c) => {
+  const b = await readJson(c.req);
+  try {
+    const r = invites.create(c.user.id, b);
+    audit('invite_created', { ...ctx(c), detail: `${r.invite.note || 'inbjudan'} – giltig till ${new Date(r.invite.expires * 1000).toISOString().slice(0, 10)}` });
+    send(c.res, 200, { ...r.invite, token: r.token, path: `/#/invite/${r.token}` });
+  } catch (e) { fail(c.res, e.status || 400, e.message); }
+});
+route('DELETE', '/api/invites/:iid', admin, (c) => {
+  if (!invites.remove(+c.p.iid)) return fail(c.res, 404, 'Finns inte');
+  audit('invite_removed', ctx(c));
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/users/:id', admin, (c) => {
@@ -325,7 +380,7 @@ const opsInfo = () => {
   return {
     disk: diskmon.snapshot(), diskMinPct: th.pct, diskMinGb: th.gb,
     metrics: { enabled: metrics.enabled(), fromEnv: metrics.fromEnv() },
-    dlna: { enabled: dlna.enabled(), name: dlna.friendlyName(), maxAge: getSetting('dlna_max_age', ''), effectiveMaxAge: dlna.maxAge(),
+    dlna: { enabled: dlna.enabled(), name: dlna.friendlyName(), maxAge: getSetting('dlna_max_age', ''), effectiveMaxAge: dlna.maxAge(), libraries: dlna.libraries(),
       running: dlna.state.running, error: dlna.state.error, addresses: dlna.state.addresses },
     users: all('SELECT id, name, parent_id FROM users ORDER BY COALESCE(parent_id, id), id')
   };
@@ -334,7 +389,11 @@ route('GET', '/api/ops', admin, (c) => send(c.res, 200, opsInfo()));
 route('PUT', '/api/ops', admin, async (c) => {
   const b = await readJson(c.req);
   let token = null;
-  if ((b.dlnaEnabled != null || b.dlnaMaxAge != null) && !isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
+  if ((b.dlnaEnabled != null || b.dlnaMaxAge != null || b.dlnaLibraries !== undefined) && !isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
+  // Bibliotek som DLNA visar: null = alla, annars en lista med id (rättigheter per användare, fast för hela hemnätet)
+  if (b.dlnaLibraries !== undefined) {
+    try { const l = normLibs(b.dlnaLibraries); setSetting('dlna_libraries', l == null ? '' : JSON.stringify(l)); } catch (e) { return fail(c.res, 400, e.message); }
+  }
   if (b.dlnaMaxAge != null) {
     const v = String(b.dlnaMaxAge).trim();
     if (v !== '' && !/^\d{1,2}$/.test(v)) return fail(c.res, 400, 'Åldersgränsen ska vara ett tal, t.ex. 15 (tomt = som huvudkontot)');

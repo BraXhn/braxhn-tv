@@ -148,6 +148,14 @@ export function stopPlay(key) {
   end(s);
   return s;
 }
+/** Pågående videoströmmar för hushållet (kontot root och dess profiler), utom titeln exceptItem (perms.js max_streams) */
+export function householdStreams(root, exceptItem = null) {
+  const ids = new Set(all('SELECT id FROM users WHERE id=?1 OR parent_id=?1', root).map(r => r.id));
+  let n = 0;
+  // En uppspelning som klienten stoppat (clientStop, väntar på att avslutas) räknas inte – nästa titel kan starta direkt
+  for (const s of active.values()) if (ids.has(s.userId) && s.itemId !== exceptItem && !s.stopTimer && now() - s.last <= 90) n++;
+  return n;
+}
 // Stopp-markeringar behövs bara i två minuter – rensa gamla så att kartan inte växer
 setInterval(() => { for (const [k, t] of stopped) if (now() - t > 86400) stopped.delete(k); }, 3600e3).unref();
 const view = ({ meta, stopTimer, lastProgress, playId, scrobbled, played, ...s }, m) => ({ ...s,

@@ -10,6 +10,7 @@ import { send, fail, deletionBlocked, streamFile } from './util.js';
 import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
 import { parseReplayGain, scheduleLoudness } from './listening.js';
 import * as sonic from './sonic.js';
+import { libOk, libFilter } from './perms.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -168,7 +169,7 @@ export function albums(libId, sort = 'title', limit = 5000) {
 }
 export function album(id, uid) {
   const a = get(`${ALBUM_SQL} WHERE al.id=?`, id);
-  if (!a) return null;
+  if (!a || !libOk(uid, a.library_id)) return null;
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   return { ...shapeAlbum(a), trackList: all(`${TRACK_SQL} WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title`, id).map(t => shapeTrack(t, favs)) };
 }
@@ -179,7 +180,7 @@ export function artists(libId) {
 }
 export function artist(id, uid) {
   const a = get('SELECT * FROM artists WHERE id=?', id);
-  if (!a) return null;
+  if (!a || !libOk(uid, a.library_id)) return null;
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   const popular = all(`${TRACK_SQL} WHERE t.artist_id=? OR al.artist_id=? ORDER BY (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id) DESC, t.title LIMIT 10`, id, id).map(t => shapeTrack(t, favs));
   return { id: a.id, name: a.name, albums: all(`${ALBUM_SQL} WHERE al.artist_id=? ORDER BY al.year DESC`, id).map(shapeAlbum), popular };
@@ -192,7 +193,8 @@ export function artist(id, uid) {
 export function searchMusic(q, uid, libId = null, limits = { artists: 20, albums: 30, tracks: 50 }) {
   const Q = typeof q === 'string' ? parseQuery(q) : q;
   if (Q.empty) return { artists: [], albums: [], tracks: [] };
-  const lib = (a) => libId == null ? { where: '1', params: [] } : { where: `${a}.library_id=?`, params: [libId] };
+  // Ett bibliotek, eller alla som användaren får se (rättigheter per användare)
+  const lib = (a) => { const f = libFilter(uid, `${a}.library_id`); return libId == null ? { where: '1' + f.sql, params: f.params } : { where: `${a}.library_id=?${f.sql}`, params: [libId, ...f.params] }; };
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   const la = lib('ar'), lb = lib('al'), lt = lib('t');
   return {
@@ -218,14 +220,17 @@ export function musicHome(libId, uid) {
   };
 }
 export function playlists(uid) {
-  return all(`SELECT p.id, p.name, p.created, COUNT(i.track_id) AS tracks, SUM(t.duration) AS duration FROM playlists p
-    LEFT JOIN playlist_items i ON i.playlist_id=p.id LEFT JOIN tracks t ON t.id=i.track_id WHERE p.user_id=? GROUP BY p.id ORDER BY p.name`, uid);
+  // Spår i bibliotek som användaren inte får se räknas inte (och visas inte i listan)
+  const f = libFilter(uid, 't.library_id');
+  return all(`SELECT p.id, p.name, p.created, COUNT(t.id) AS tracks, SUM(t.duration) AS duration FROM playlists p
+    LEFT JOIN playlist_items i ON i.playlist_id=p.id LEFT JOIN tracks t ON t.id=i.track_id${f.sql} WHERE p.user_id=? GROUP BY p.id ORDER BY p.name`, ...f.params, uid);
 }
 export function playlist(id, uid) {
   const p = get('SELECT * FROM playlists WHERE id=? AND user_id=?', id, uid);
   if (!p) return null;
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
-  return { id: p.id, name: p.name, trackList: all(`${TRACK_SQL} JOIN playlist_items i ON i.track_id=t.id WHERE i.playlist_id=? ORDER BY i.pos`, id).map(t => shapeTrack(t, favs)) };
+  const f = libFilter(uid, 't.library_id');
+  return { id: p.id, name: p.name, trackList: all(`${TRACK_SQL} JOIN playlist_items i ON i.track_id=t.id WHERE i.playlist_id=?${f.sql} ORDER BY i.pos`, id, ...f.params).map(t => shapeTrack(t, favs)) };
 }
 
 // ---------------- strömning av ljud ----------------

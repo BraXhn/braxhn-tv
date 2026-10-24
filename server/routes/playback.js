@@ -14,14 +14,18 @@ import * as offline from '../offline.js';
 import * as trakt from '../trakt.js';
 import * as ver from '../versions.js';
 import { route, user, media, admin } from '../http/router.js';
-import { mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia } from '../http/context.js';
+import { mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia, canDownload, permsOf, remoteMax } from '../http/context.js';
+import { minQuality } from '../perms.js';
 import * as cinema from '../cinema.js';
 import * as pp from '../playprefs.js';
 import { TRAILER_SCOPE } from '../trailers.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
+// Offline (appar) räknas som nedladdning: kräver rättigheten (perms.js)
+const noDownload = (c) => { if (canDownload(c.user.id)) return false; fail(c.res, 403, 'Ditt konto får inte ladda ner'); return true; };
 route('GET', '/api/items/:id/offline', user, (c) => {
+  if (noDownload(c)) return;
   const it = mediaItem(c); if (!it) return;
   const q = c.q.get('q') || '720';
   const st = offline.status(it, q);
@@ -30,6 +34,7 @@ route('GET', '/api/items/:id/offline', user, (c) => {
   send(c.res, 200, st);
 });
 route('POST', '/api/items/:id/offline', user, async (c) => {
+  if (noDownload(c)) return;
   const it = mediaItem(c); if (!it) return;
   const { q } = await readJson(c.req);
   const st = offline.start(it, q || '720');
@@ -64,6 +69,11 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const main = ver.mainOf(row);
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   if (c.q.get('info') !== '1' && screenBlock(c)) return;
+  // Högsta antal samtidiga strömmar för hushållet (perms.js) – samma titel igen (spolning, annan enhet) räknas inte
+  const pm = permsOf(c.user.id);
+  if (pm.maxStreams && c.q.get('info') !== '1' && c.q.get('queue') !== '1' && act.householdStreams(pm.root, main.id) >= pm.maxStreams)
+    return fail(c.res, 403, pm.maxStreams === 1 ? 'Ditt konto får bara spela en sak i taget – stoppa den andra uppspelningen först'
+      : `Ditt konto får spela högst ${pm.maxStreams} saker samtidigt – stoppa någon av de andra först`);
   const t0 = Date.now();
   // Användarens uppspelningsval (Mitt konto): gäller när klienten inte själv valt kvalitet eller ljudspår
   const prefs = pp.getPrefs(c.user.id);
@@ -75,7 +85,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     // Bara versioner som faktiskt skulle kunna skickas utan omkodning (rätt kvalitet, ingen inbränning/tonmappning)
     // – annars omkodas filmen ändå och väntan på nyckelbilderna vore bortkastad
     const pre = st.parseCaps(c.q); pre.assumeKf = true;
-    if (!c.q.get('q') || c.q.get('q') === 'auto') { const aq = pp.autoQuality(prefs, !isLocalReq(c.req), adminCap); pre.q = aq.cap || aq.q || pre.q; }
+    if (!c.q.get('q') || c.q.get('q') === 'auto') { const aq = pp.autoQuality(prefs, !isLocalReq(c.req), isLocalReq(c.req) ? adminCap : remoteMax(c.user.id)); pre.q = aq.cap || aq.q || pre.q; }
     const todo = ver.versionsOf(main).filter(v => ['h264', 'hevc'].includes(v.vcodec) && !st.keyframesReady(v) && st.decide(v, pre).mode !== 'transcode').slice(0, 2);
     if (todo.length) await Promise.race([Promise.all(todo.map(v => st.computeKeyframes(v, { priority: true }))), new Promise(r => setTimeout(r, 10000))]);
     if (c.res.writableEnded || c.req.destroyed) return;
@@ -88,7 +98,10 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const auto = !c.q.get('q') || c.q.get('q') === 'auto';
   const bw = Math.max(0, Math.min(1e6, parseInt(c.q.get('bw')) || 0));
   // Hemma gäller användarens standardkvalitet (Auto = original), utanför hemmet användarens val inom taket
-  if (auto) { const aq = pp.autoQuality(prefs, remote, adminCap); o.q = remote ? remoteQuality(aq.cap, bw, c.q.get('save') === '1') : aq.q || o.q; }
+  // (taket = det lägsta av serverns, kontots och profilens – rättigheter per användare)
+  if (auto) { const aq = pp.autoQuality(prefs, remote, remote ? remoteMax(c.user.id) : adminCap); o.q = remote ? remoteQuality(aq.cap, bw, c.q.get('save') === '1') : aq.q || o.q; }
+  // Användarens kvalitetstak utanför hemmet gäller även när klienten valt kvalitet själv (strömmarna kontrollerar det också)
+  else if (remote && pm.remoteQuality) o.q = minQuality(o.q, pm.remoteQuality);
   o.maxBitrate = st.QUALITIES[o.q]?.br || null;
   // Flera versioner: klientens val (version=<id>) eller den som passar klienten bäst
   const versions = ver.versionsOf(main);

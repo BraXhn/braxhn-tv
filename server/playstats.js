@@ -4,6 +4,7 @@
 // Historiken sparas history_days dagar (standard 365, 0 = för alltid) och gallras en gång per dygn.
 import { get, all, run, now, getSetting } from './db.js';
 import { searchKey } from './searchkey.js';
+import { libsOf } from './perms.js';
 
 export const DEFAULT_DAYS = 365;
 export const keepDays = () => { const n = parseInt(getSetting('history_days', process.env.HISTORY_DAYS || String(DEFAULT_DAYS))); return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAYS; };
@@ -33,6 +34,9 @@ export function filters(q, viewer, { everyone = false, at = now() } = {}) {
   const admin = everyone && !!viewer?.is_admin && viewer.max_age == null;
   const uid = admin ? parseInt(g('user')) || null : viewer.id;
   if (uid) { w.push('p.user_id=?'); p.push(uid); }
+  // Min historik: bara bibliotek som användaren får se (rättigheter per användare, perms.js) – administratörens vy ser allt
+  const libs = admin ? null : libsOf(viewer.id);
+  if (libs) { w.push('COALESCE(i.library_id, p.library_id) IN (SELECT value FROM json_each(?))'); p.push(JSON.stringify(libs)); }
   const lib = parseInt(g('library')); if (lib) { w.push('COALESCE(i.library_id, p.library_id)=?'); p.push(lib); }
   const kind = g('kind'); if (['movie', 'episode'].includes(kind)) { w.push(`${KIND}=?`); p.push(kind); }
   const mode = g('mode'); if (['direct', 'remux', 'transcode'].includes(mode)) { w.push('p.mode=?'); p.push(mode); }

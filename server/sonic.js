@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { get, all, run, getSetting, setSetting } from './db.js';
 import { TRACK_SQL, shapeTrack } from './music.js';
+import { libFilter } from './perms.js';
 import * as jobs from './jobs.js';
 import { analyze, toVector, energyPct, SR, VERSION, DIMS, DIM } from './sonic-dsp.js';
 
@@ -317,10 +318,12 @@ const mix = (a, b, wb) => { const m = new Float32Array(D); for (let k = 0; k < D
 function shapeIds(ids, uid) {
   if (!ids.length) return [];
   const rows = new Map();
+  // Bara spår i bibliotek som användaren får se (rättigheter per användare) – gäller alla stationer, radio och resor
+  const lf = libFilter(uid, 't.library_id');
   for (let o = 0; o < ids.length; o += 500) {
     const part = ids.slice(o, o + 500);
     for (const r of all(`${TRACK_SQL.replace('SELECT ', 'SELECT s.bpm AS s_bpm, s.energy AS s_energy, s.key AS s_key, ')} LEFT JOIN track_sonic s ON s.track_id=t.id AND s.ok=1
-      WHERE t.id IN (${part.map(() => '?').join(',')})`, ...part)) rows.set(r.id, r);
+      WHERE t.id IN (${part.map(() => '?').join(',')})${lf.sql}`, ...part, ...lf.params)) rows.set(r.id, r);
   }
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   // Fälten är desamma som i resten av musik-API:t; bpm/energy/key är tillägg (null om spåret inte analyserats)

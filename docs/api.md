@@ -77,6 +77,23 @@ en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna bör
 inte som en uppspelning: ingen förstart av omkodningen, ingen rad under Aktivitet och ingen Trakt-start. Webben köar
 nästa avsnitt så på Chromecasten; apparna kan använda det på samma sätt.
 
+## Rättigheter per användare
+
+Administratören kan begränsa ett konto eller en profil (`server/perms.js`). Inga fält har ändrats – apparna märker det
+bara som att titlar saknas och att vissa anrop nekas:
+
+- **Bibliotek:** `/api/libraries` och alla listor visar bara tillåtna bibliotek. En titel, låt, bok, bild eller ström i ett
+  otillåtet bibliotek ger **403** eller **404**, precis som en titel över barnprofilens åldersgräns.
+- **Nedladdning:** utan rätten ger `/api/stream/:id/download`, `/api/stream/:id/offline-file` och `/api/items/:id/offline`
+  **403** (`Ditt konto får inte ladda ner`), och `/api/offline/sync` svarar `items: []` och lägger allt i `have` i `remove`.
+  `/api/status` har `user.canDownload` (nytt fält, `Bool`).
+- **Kvalitetstak utanför hemmet:** `/playback` sänker `quality` även när klienten valt kvalitet själv, och en ström över
+  taket (`direct`, remux eller `q=` över taket) ger **403** utanför hemmet.
+- **Samtidiga strömmar:** `/playback` (inte `info=1` eller `queue=1`) ger **403** när hushållet redan spelar så många
+  andra titlar. `POST /api/stream/:id/stop` frigör platsen direkt.
+- **Inbjudan:** `GET /api/invite/:token` (giltig: `{ valid, expires, homeOnly }`, annars 404) och
+  `POST /api/invite/:token` med `{ name, password, app: true }` ger `{ token, user }` som `/api/login`.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

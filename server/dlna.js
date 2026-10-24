@@ -34,9 +34,20 @@ export function maxAge() {
   return get('SELECT max_age FROM users WHERE parent_id IS NULL ORDER BY id LIMIT 1')?.max_age ?? null;
 }
 const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
+/**
+ * Bibliotek som DLNA visar (inställningen dlna_libraries, JSON-lista med id). Tom/saknas = alla. DLNA har ingen inloggning,
+ * så det motsvarar rättigheterna per användare (perms.js) för hela hemnätet. Trasig lista = inga bibliotek.
+ */
+export function libraries() {
+  const v = getSetting('dlna_libraries', '');
+  if (!v) return null;
+  try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(Number).filter(n => Number.isInteger(n) && n > 0) : []; } catch { return []; }
+}
+const libOk = (id) => { const l = libraries(); return l == null || l.includes(Number(id)); };
 function ageSql() {
-  const max = maxAge();
-  return max == null ? { sql: '', params: [] } : { sql: ' AND COALESCE(i.age, s.age, ?) <= ?', params: [allowUnrated() ? max : 999, max] };
+  const max = maxAge(), l = libraries();
+  const lib = l == null ? { sql: '', params: [] } : { sql: ' AND i.library_id IN (SELECT value FROM json_each(?))', params: [JSON.stringify(l)] };
+  return max == null ? lib : { sql: ' AND COALESCE(i.age, s.age, ?) <= ?' + lib.sql, params: [allowUnrated() ? max : 999, max, ...lib.params] };
 }
 
 // ---------- XML ----------
@@ -61,7 +72,10 @@ const ext = (p) => (path.extname(String(p || '')).toLowerCase().replace(/[^a-z0-
 // ---------- innehåll ----------
 const ITEM_SQL = `SELECT i.id, i.kind, i.title, i.year, i.path, i.size, i.duration, i.width, i.height, i.season, i.episode, i.parent_id, i.library_id,
   i.poster, i.thumb, i.overview, s.title AS show_title, s.poster AS show_poster FROM items i LEFT JOIN items s ON s.id=i.parent_id`;
-const videoLibs = () => all("SELECT id, name, type FROM libraries WHERE type IN ('movie','show','music') ORDER BY name");
+const videoLibs = () => all("SELECT id, name, type FROM libraries WHERE type IN ('movie','show','music') ORDER BY name").filter(l => libOk(l.id));
+const libRow = (id) => { const l = get("SELECT id, name, type FROM libraries WHERE id=? AND type IN ('movie','show','music')", id); return l && libOk(l.id) ? l : null; };
+const albumOk = (id) => { const a = get('SELECT library_id FROM albums WHERE id=?', id); return !!a && libOk(a.library_id); };
+const trackOk = (id) => { const t = get('SELECT library_id FROM tracks WHERE id=?', id); return !!t && libOk(t.library_id); };
 
 function itemAllowed(id, kinds) {
   const a = ageSql();
@@ -122,7 +136,7 @@ export function children(id, base, start = 0, count = 0) {
     return { nodes: libs.slice(off, off + lim).map(l => container(`L${l.id}`, '0', l.name, libCount(l))), total: libs.length };
   }
   if ((m = /^L(\d+)$/.exec(id))) {
-    const l = get("SELECT id, name, type FROM libraries WHERE id=? AND type IN ('movie','show','music')", +m[1]);
+    const l = libRow(+m[1]);
     if (!l) return null;
     if (l.type === 'music') {
       const rows = all(`${albumSql} WHERE al.library_id=? ORDER BY COALESCE(ar.sort_name, ar.name, ''), al.year, al.title LIMIT ? OFFSET ?`, l.id, lim, off);
@@ -146,7 +160,7 @@ export function children(id, base, start = 0, count = 0) {
     return { nodes: eps.slice(off, off + lim).map(e => videoItem(e, id, base)), total: eps.length };
   }
   if ((m = /^A(\d+)$/.exec(id))) {
-    if (!get('SELECT 1 FROM albums WHERE id=?', +m[1])) return null;
+    if (!albumOk(+m[1])) return null;
     const tr = all(`${TRACK_SQL} WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title`, +m[1]);
     return { nodes: tr.slice(off, off + lim).map(t => trackItem(t, base)), total: tr.length };
   }
@@ -159,7 +173,7 @@ export function metadata(id, base) {
   let m;
   if (id === '0') return `<container id="0" parentID="-1" restricted="1" searchable="0" childCount="${videoLibs().length}"><dc:title>${xml(friendlyName())}</dc:title><upnp:class>object.container.storageFolder</upnp:class></container>`;
   if ((m = /^L(\d+)$/.exec(id))) {
-    const l = get("SELECT id, name, type FROM libraries WHERE id=? AND type IN ('movie','show','music')", +m[1]);
+    const l = libRow(+m[1]);
     return l ? container(id, '0', l.name, libCount(l)) : null;
   }
   if ((m = /^S(\d+)$/.exec(id))) { const sh = itemAllowed(+m[1], ['show']); return sh ? showNode(sh, base) : null; }
@@ -173,8 +187,8 @@ export function metadata(id, base) {
     if (!it) return null;
     return videoItem(it, it.kind === 'movie' ? `L${it.library_id}` : `E${it.parent_id}_${it.season ?? 0}`, base);
   }
-  if ((m = /^A(\d+)$/.exec(id))) { const al = get(`${albumSql} WHERE al.id=?`, +m[1]); return al ? albumNode(al, base) : null; }
-  if ((m = /^T(\d+)$/.exec(id))) { const t = get(`${TRACK_SQL} WHERE t.id=?`, +m[1]); return t ? trackItem(t, base) : null; }
+  if ((m = /^A(\d+)$/.exec(id))) { const al = albumOk(+m[1]) && get(`${albumSql} WHERE al.id=?`, +m[1]); return al ? albumNode(al, base) : null; }
+  if ((m = /^T(\d+)$/.exec(id))) { const t = trackOk(+m[1]) && get(`${TRACK_SQL} WHERE t.id=?`, +m[1]); return t ? trackItem(t, base) : null; }
   return null;
 }
 
@@ -300,8 +314,8 @@ export async function handle(req, res, url, { trusted }) {
     return streamFile(req, res, it.path, s.size, dlnaHeaders(mimeOf(it.path, VIDEO_MIME, 'video/mpeg')));
   }
   if ((x = /^\/dlna\/track\/(\d+)(\.[a-z0-9]{1,5})?$/.exec(p))) {
-    const t = get('SELECT path FROM tracks WHERE id=?', +x[1]);
-    if (!t?.path) return fail(res, 404, 'Finns inte');
+    const t = get('SELECT path, library_id FROM tracks WHERE id=?', +x[1]);
+    if (!t?.path || !libOk(t.library_id)) return fail(res, 404, 'Finns inte');
     let s; try { s = fs.statSync(t.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
     return streamFile(req, res, t.path, s.size, dlnaHeaders(mimeOf(t.path, AUDIO_MIME, 'audio/mpeg')));
   }
@@ -309,7 +323,7 @@ export async function handle(req, res, url, { trusted }) {
   if ((x = /^\/dlna\/art\/(\d+)\.jpg$/.exec(p))) {
     const it = itemAllowed(+x[1], ['movie', 'show', 'episode']);
     if (it) img = [`${it.id}-poster.jpg`, `${it.id}-thumb.jpg`].map(f => path.join(IMAGES, f)).find(f => fs.existsSync(f));
-  } else if ((x = /^\/dlna\/cover\/(\d+)\.jpg$/.exec(p))) img = path.join(IMAGES, `a${+x[1]}-cover.jpg`);
+  } else if ((x = /^\/dlna\/cover\/(\d+)\.jpg$/.exec(p)) && albumOk(+x[1])) img = path.join(IMAGES, `a${+x[1]}-cover.jpg`);
   if (img) {
     let s; try { s = fs.statSync(img); } catch { return fail(res, 404, 'Ingen bild'); }
     return streamFile(req, res, img, s.size, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=86400' }, { ranges: false });

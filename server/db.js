@@ -208,6 +208,16 @@ addCol('items', 'thumb_color', 'TEXT');
 // Premiärdatum från TMDB ('YYYY-MM-DD', hyllan "Den här dagen") och startsidans egen ordning per användare (JSON, server/homeshelves.js)
 addCol('items', 'released', 'TEXT');
 addCol('users', 'home_layout', 'TEXT');
+// Rättigheter per användare (server/perms.js): libraries = JSON-lista med biblioteks-id (NULL = alla; profiler ärver kontots),
+// can_download = originalfil/offline/musikappars nedladdning, remote_quality = kvalitetstak utanför hemmet (NULL = serverns),
+// max_streams = högsta antal samtidiga videoströmmar för hushållet (NULL = obegränsat)
+addCol('users', 'libraries', 'TEXT');
+addCol('users', 'can_download', 'INTEGER NOT NULL DEFAULT 1');
+addCol('users', 'remote_quality', 'TEXT');
+addCol('users', 'max_streams', 'INTEGER');
+// Inbjudningslänkar (server/invites.js): token lagras bara som SHA-256, perms = förvalda rättigheter (JSON), engångs
+db.exec(`CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created INTEGER NOT NULL, expires INTEGER NOT NULL, perms TEXT NOT NULL, note TEXT, used_at INTEGER, used_by INTEGER REFERENCES users(id) ON DELETE SET NULL, used_name TEXT);`);
 // "Ta bort från Fortsätt titta" för en serie: döljer nästa avsnitt tills man tittar på serien igen (progress.updated > at)
 db.exec(`CREATE TABLE IF NOT EXISTS continue_hidden(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, at INTEGER NOT NULL, PRIMARY KEY(user_id,item_id));`);

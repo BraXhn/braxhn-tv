@@ -530,6 +530,21 @@ function readParams(q) {
     night: q.get('night') === '1', dialog: q.get('dialog') === '1'
   };
 }
+/**
+ * Över kvalitetstaket cap ('720' …, kvalitetstak per användare utanför hemmet)? direct = filen skickas som den är;
+ * annars avgör adressens HLS-parametrar: remux skickar källans bild, omkodning höjden för q (orig = källans).
+ */
+export function exceedsQuality(it, query, cap, direct = false) {
+  const C = QUALITIES[cap];
+  if (!C?.h) return false;
+  const v = videoOf(it), srcKbps = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
+  const srcOver = !!((v?.height && v.height > C.h) || (C.br && srcKbps > C.br * 1.3));
+  if (direct) return srcOver;
+  const d = readParams(query);
+  if (d.mode === 'remux') return srcOver;
+  const Q = QUALITIES[d.q];
+  return Q.h ? Q.h > C.h : !!(v?.height ? v.height > C.h : true);
+}
 const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
 const withT = (p, q) => { const t = q.get('t'); if (t) p.set('t', t); return p; };
 

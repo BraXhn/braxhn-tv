@@ -8,6 +8,7 @@ import { db, get, all, run, now } from './db.js';
 import { probe, TRACK_SQL, shapeTrack } from './music.js';
 import * as custom from './smartlists.js';
 import * as sonic from './sonic.js';
+import { libOk } from './perms.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   normalize INTEGER NOT NULL DEFAULT 1, skip_back INTEGER NOT NULL DEFAULT 15, skip_fwd INTEGER NOT NULL DEFAULT 30,
@@ -150,6 +151,7 @@ const CUSTOM_ID = /^u([1-9]\d{0,9})$/;
 export function smartTracks(libId, uid, id, { limit = 200, at = now() } = {}) {
   const cm = CUSTOM_ID.exec(String(id));
   if (cm) return custom.tracksFor(+cm[1], uid)?.tracks ?? null;
+  if (!libOk(uid, libId)) return null; // bibliotek användaren inte får se (rättigheter per användare)
   // Stämningsstationer och låtradio från ljudanalysen (sonic.js) – samma format, så apparna visar dem utan ändring
   if (sonic.isSonicId(id)) return sonic.stationTracks(id, libId, uid, { limit });
   let rows;

@@ -11,10 +11,12 @@ import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, admin } from '../http/router.js';
-import { screenBlock, ctx } from '../http/context.js';
+import { screenBlock, ctx, libOk } from '../http/context.js';
 
 // ---------- Ljudböcker ----------
-const bookLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='audiobook'", +c.p.lib); if (!l) fail(c.res, 404, 'Inget ljudboksbibliotek'); return l; };
+// Bibliotek, böcker och filer kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
+const bookLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='audiobook'", +c.p.lib); if (!l || !libOk(c.user.id, l.id)) { fail(c.res, 404, 'Inget ljudboksbibliotek'); return null; } return l; };
+const bookOk = (c, id) => { const b = get('SELECT library_id FROM books WHERE id=?', +id); return !!b && libOk(c.user.id, b.library_id); };
 route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: l, continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
 route('GET', '/api/audiobooks/book/:bid', user, (c) => { const b = books.book(+c.p.bid, c.user.id); b ? send(c.res, 200, b) : fail(c.res, 404, 'Finns inte'); });
 route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
@@ -25,13 +27,14 @@ route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
 });
 route('POST', '/api/audiobooks/book/:bid/bookmarks', user, async (c) => {
   const { position, note } = await readJson(c.req);
-  if (!get('SELECT 1 FROM books WHERE id=?', +c.p.bid)) return fail(c.res, 404, 'Finns inte');
+  if (!bookOk(c, c.p.bid)) return fail(c.res, 404, 'Finns inte');
   if (get('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id=? AND book_id=?', c.user.id, +c.p.bid).n >= 200) return fail(c.res, 400, 'För många bokmärken');
   run('INSERT INTO bookmarks(user_id,book_id,position,note,created) VALUES(?,?,?,?,?)', c.user.id, +c.p.bid, Math.max(0, +position || 0), String(note || '').slice(0, 200) || null, now());
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/audiobooks/bookmarks/:mid', user, (c) => { run('DELETE FROM bookmarks WHERE id=? AND user_id=?', +c.p.mid, c.user.id); send(c.res, 200, { ok: true }); });
 route('GET', '/api/audiobooks/cover/:bid', img, async (c) => {
+  if (!bookOk(c, c.p.bid)) return fail(c.res, 404, 'Inget omslag');
   const f = books.coverPath(+c.p.bid);
   if (!f) return fail(c.res, 404, 'Inget omslag');
   const out = await sized(f, c.q.get('w')); // ?w= = nedskalad (imgsize.js)
@@ -72,7 +75,7 @@ route('GET', '/api/audiobooks/match/art', admin, async (c) => {
   try { const r = await bookmeta.fetchImage(c.q.get('u') || ''); send(c.res, 200, r.body, { 'Content-Type': r.type, 'Cache-Control': 'private, max-age=86400' }); }
   catch { fail(c.res, 404, 'Ingen bild'); }
 });
-const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f) fail(c.res, 404, 'Finns inte'); return f; };
+const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f || !libOk(c.user.id, f.library_id)) { fail(c.res, 404, 'Finns inte'); return null; } return f; };
 // Strömmar för ljudböcker/poddar: kortlivad token (24 h) som bara gäller den boken/det avsnittet – för appar och AirPlay
 const BOOK_SCOPE = 2e9, POD_SCOPE = 3e9;
 const bookStream = { auth: true, media: true, scope: (p) => BOOK_SCOPE + (books.fileRow(+p.fid)?.book_id || 0) };

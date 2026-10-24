@@ -8,6 +8,7 @@ import { ranked } from './search.js';
 import { probe, AUDIO, makeCover } from './music.js';
 import { underFailed } from './util.js';
 import { rootsOf, listRoots, relOf, under } from './libpaths.js';
+import { libOk, libFilter } from './perms.js';
 
 const pexec = promisify(execFile);
 db.exec(`CREATE TABLE IF NOT EXISTS books(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
@@ -190,18 +191,20 @@ export function listBooks(libId, uid, sort = 'title') {
 }
 /** Böcker som matchar titeln, eller författaren/uppläsaren/serien (rankas lägre). Q = parseQuery(…) */
 export function searchBooks(Q, uid, limit = 20) {
-  return ranked({ from: 'FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=?', colParams: [uid],
+  const f = libFilter(uid, 'b.library_id'); // bara bibliotek användaren får se
+  return ranked({ from: 'FROM books b LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=?', colParams: [uid], where: '1' + f.sql, params: f.params,
     cols: 'b.*, p.position, p.finished, p.updated, b.title AS _t', key: 'b.skey', key2: 'b.skey2', year: 'b.year' }, Q, limit).map(shape);
 }
 export function continueBooks(uid, limit = 12) {
-  return all(`SELECT ${BOOK}, p.position, p.finished, p.updated FROM ${FROM} JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.finished=0 AND p.position > 30
-    ORDER BY p.updated DESC LIMIT ?`, uid, limit).map(shape);
+  const f = libFilter(uid, 'b.library_id');
+  return all(`SELECT ${BOOK}, p.position, p.finished, p.updated FROM ${FROM} JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.finished=0 AND p.position > 30${f.sql}
+    ORDER BY p.updated DESC LIMIT ?`, uid, ...f.params, limit).map(shape);
 }
 /** En bok med de fält som visas (för bookmeta.js och routes) */
 export const bookRow = (id) => get(`SELECT ${BOOK} FROM ${FROM} WHERE b.id=?`, id);
 export function book(id, uid) {
   const b = get(`SELECT ${BOOK}, p.position, p.finished, p.updated, p.speed FROM ${FROM} LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.id=?`, uid, id);
-  if (!b) return null;
+  if (!b || !libOk(uid, b.library_id)) return null;
   const ch = chaptersFor(b);
   const card = (x) => ({ id: x.id, title: x.title, cover: !!x.cover, year: x.year == null ? null : parseInt(x.year) || null, seriesNo: x.series_no == null ? null : String(x.series_no) });
   const others = (where, ...p) => all(`SELECT * FROM (SELECT ${BOOK} FROM ${FROM} WHERE b.library_id=? AND b.id!=?) WHERE ${where}`, b.library_id, id, ...p);
@@ -218,7 +221,7 @@ export function book(id, uid) {
     sameSeries: b.series ? others('series=? COLLATE NOCASE ORDER BY CAST(series_no AS REAL) NULLS LAST, year, sort_title LIMIT 50', b.series).map(card) : [] };
 }
 export function saveProgress(uid, id, position, speed) {
-  const b = get('SELECT duration FROM books WHERE id=?', id); if (!b) return null;
+  const b = get('SELECT duration, library_id FROM books WHERE id=?', id); if (!b || !libOk(uid, b.library_id)) return null;
   const pos = Math.max(0, Math.min(+position || 0, b.duration || 1e9));
   const finished = b.duration && b.duration - pos < Math.min(30, b.duration * 0.02) ? 1 : 0;
   run(`INSERT INTO book_progress(user_id,book_id,position,finished,speed,updated) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,book_id) DO UPDATE SET

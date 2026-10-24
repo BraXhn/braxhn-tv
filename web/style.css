@@ -1016,3 +1016,9 @@ fieldset.plain{border:0;padding:0;margin:12px 0}fieldset.plain legend{font-size:
 #player .skipcd{position:absolute;right:28px;width:max-content;max-width:calc(100% - 56px);bottom:calc(var(--ctlh) + 76px);display:flex;align-items:center;gap:12px;padding:8px 8px 8px 16px;
   border-radius:10px;background:rgba(27,28,31,.9);color:#fff;font-weight:600;font-size:15px}
 #player.mini .skipcd,#player.cinema .skipcd{display:none}
+/* Rättigheter per användare och inbjudningar (views/admin-users.js, admin-ops.js) */
+.libpick{border:1px solid var(--line);border-radius:8px;padding:8px 12px 10px;margin:12px 0;min-width:0}
+.libpick legend{font-size:13px;color:var(--dim);padding:0 4px}
+.libpick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 12px;margin:4px 0 0 4px}
+.libpick-list[hidden]{display:none}
+.invite{max-width:420px}

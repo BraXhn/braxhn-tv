@@ -60,7 +60,7 @@ views.item = async (id, season) => {
     ${remoteButton('playon')}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
-    <a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>
+    ${me.canDownload === false ? '' : `<a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>`}
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.taken ? '' : '<button class="ghost" id="match">Fel titel?</button>'}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
