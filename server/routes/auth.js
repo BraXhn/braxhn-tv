@@ -16,7 +16,11 @@ route('GET', '/api/health', pub, (c) => {
   try { get('SELECT 1'); } catch (e) { return send(c.res, 503, { ok: false, error: 'Databasen svarar inte' }); }
   send(c.res, 200, { ok: true });
 });
+// API-version för apparna (docs/api.md): höjs bara om något som installerade appar läser måste ändras.
+// Inom samma version får fält bara läggas till – test/api-contract.test.js kontrollerar det apparna avkodar.
+const API_VERSION = 1;
 route('GET', '/api/status', pub, (c) => send(c.res, 200, {
+  api: API_VERSION,
   // Avslöja inte för utomstående att servern är nyinstallerad
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',
   // Utanför hemmet: webbspelaren mäter då uppkopplingen och anpassar kvaliteten
