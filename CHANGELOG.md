@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- **Snabbare sidladdning:** startsidan visas direkt från förra besöket och uppdateras tyst när servern svarat (sparad per profil i webbläsaren, tas bort vid utloggning). Varje fil i webbappen har nu en egen innehållshash i adressen, så en uppdatering hämtar bara de filer som faktiskt ändrats i stället för alla. Googles Cast-bibliotek och aktivitetsindikatorn laddas först efter att sidan visats. I mätning med 100 ms fördröjning: återbesök 480 → 320 ms till första kort (utan service workerns cache, som gör det snabbare än så)
 - Rättat: efter byte av kvalitet, ljudspår, nattläge/tydligare dialog (Safari) eller inbränd undertext blev filmen stående tills man pausade och startade igen. Den spelar nu vidare av sig själv – och en pausad film förblir pausad
 - **Omkodningen drar mycket mindre processor, särskilt 4K och HDR med grafikkort:** med NVIDIA och Intel/AMD (VAAPI) stannar bilderna nu på grafikkortet hela vägen – avkodning, nedskalning och färgkonvertering – i stället för att varje bild hämtades till processorn för skalning (som en 4K-bild). HDR med NVIDIA skalas ner på grafikkortet innan tonmappningen, så processorn tonmappar en fjärdedel så många bildpunkter. Testas vid start; fungerar det inte används processorfiltren automatiskt (`GPU_FILTERS=0` stänger av)
 - Omkodningen ligger nu högst ~70 s före tittaren (förut upp till 4 minuter), som Plex – processorn arbetar inte i onödan med minuter som kanske aldrig ses

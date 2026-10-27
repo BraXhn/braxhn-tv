@@ -42,7 +42,9 @@ addEventListener('unhandledrejection', (e) => {
   report(r.message || r, r.stack);
 });
 
-initCast();
+// Googles Cast-bibliotek (från gstatic.com) först när sidan visats – behövs bara för att casta
+const idle = (fn, ms) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: ms }) : setTimeout(fn, ms));
+idle(() => initCast(), 2500);
 initCardMenus();
 initShelves();
 initCardSize();

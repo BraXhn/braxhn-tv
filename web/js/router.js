@@ -63,7 +63,8 @@ export async function boot() {
   screenBadge(me.screenTime);
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
   if (st.remote) setTimeout(() => measureBandwidth(), 3000);
-  if (me.adminHere) startActivity(); else stopActivity();
+  // Aktivitetsindikatorn (pågående jobb) strax efter att sidan visats – den är inte nödvändig för första bilden
+  if (me.adminHere) setTimeout(() => { if (me?.adminHere) startActivity(); }, 1500); else stopActivity();
   startRemote(); // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();
@@ -118,6 +119,8 @@ export async function route() {
 }
 window.addEventListener('hashchange', route);
 
+// Sparade startsidor (views/home.js) tas bort vid utloggning – nästa person på datorn ska inte se dem
+function clearHomeCache() { try { for (const k of Object.keys(localStorage)) if (k.startsWith('bxhome')) localStorage.removeItem(k); } catch {} }
 // Användarmenyn: aria-expanded följer menyn, Escape stänger och lämnar fokus på knappen
 const userMenu = (open) => { $('#usermenu').hidden = !open; $('#userbtn').setAttribute('aria-expanded', String(open)); };
 // iPhone (Safari och hemskärmsappen): efter att tangentbordet stängts eller verktygsfältet krympt kan den synliga
@@ -174,7 +177,7 @@ $('#install').onclick = async () => {
 // Flikmenyn: Sök fokuserar sökfältet i stället för att byta sida
 $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
 
-$('#logout').onclick = async () => { stopAudio(); stopActivity(); stopRemote(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
+$('#logout').onclick = async () => { stopAudio(); stopActivity(); stopRemote(); clearHomeCache(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
 // Sökfältet (resultat medan man skriver, piltangenter, senaste sökningar) sköts av views/search.js
 
 // ---------- sidomenyn ----------
