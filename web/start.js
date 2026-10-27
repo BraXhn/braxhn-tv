@@ -4,7 +4,7 @@
 (() => {
   const h = location.hash.replace(/^#\/?/, '');
   if (h.startsWith('login')) return;
-  const paths = ['/status', '/libraries', ...(h === '' ? ['/home', '/collections'] : [])];
+  const paths = ['/status', '/libraries', ...(h === '' ? ['/home', '/collections', '/custom-collections'] : [])];
   const at = Date.now();
   window.__early = Object.fromEntries(paths.map(p => [p, { at, res: fetch('/api' + p, { headers: {} }).catch(() => null) }]));
 })();

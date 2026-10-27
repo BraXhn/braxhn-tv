@@ -31,10 +31,20 @@ const PREFIX = `/v/${BUILD}`;
 // En modul med raden "// @lazy" i början laddas med import() när den behövs och förladdas inte.
 export const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
 export const PRELOAD_FILES = walk(path.join(WEB, 'js')).filter(f => f.endsWith('.js') && !isLazy(fs.readFileSync(f, 'utf8'))).sort().map(rel);
-const PRELOAD = PRELOAD_FILES.map(f => `<link rel="modulepreload" href="${PREFIX}/${f}">`).join('\n');
+// Innehållshash per fil: /m/<fil>?h=<hash> cachas för alltid, och en uppdatering byter bara adress på filerna som
+// faktiskt ändrats – resten finns kvar i webbläsarens och service workerns cache (förut hämtades allt efter varje
+// uppdatering). Modulernas relativa importer (./core.js → /m/js/core.js) pekas om till sin hash med en import map.
+// Webbläsare utan import maps (Safari före 16.4) får samma filer utan hash: no-cache + ETag, som förut.
+const FILEHASH = new Map(walk(WEB).map(f => [rel(f), crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex').slice(0, 10)]));
+export const hashedUrl = (r) => FILEHASH.has(r) ? `/m/${r}?h=${FILEHASH.get(r)}` : `/${r}`;
+const IMPORTMAP = JSON.stringify({ imports: Object.fromEntries([...FILEHASH.keys()].filter(r => /^js\/.*\.js$/.test(r)).sort().map(r => [`/m/${r}`, hashedUrl(r)])) });
+const IMPORTMAP_CSP = `'sha256-${crypto.createHash('sha256').update(IMPORTMAP).digest('base64')}'`;
+const PRELOAD = PRELOAD_FILES.map(f => `<link rel="modulepreload" href="${hashedUrl(f)}">`).join('\n');
+// Service workerns skal: filerna med hash (sw.js läser listan)
+const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|start\.js|style\.css|vendor\/hls\.min\.js)$/.test(r))));
 
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK)
-const CSP = ["default-src 'self'", "script-src 'self' https://www.gstatic.com",
+const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} https://www.gstatic.com`,
   "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https://image.tmdb.org", "media-src 'self' blob:", "connect-src 'self'",
   "font-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "frame-src https://www.gstatic.com"].join('; ');
 
@@ -47,7 +57,9 @@ function load(f, st) {
   const name = rel(f);
   // Mallvärden: rätt bygge i index.html och service workern
   if (name === 'index.html' || name === 'sw.js' || name === 'offline.html') {
-    raw = Buffer.from(String(raw).replaceAll('{{b}}', BUILD).replaceAll('{{preload}}', PRELOAD));
+    raw = Buffer.from(String(raw).replace(/\/v\/\{\{b\}\}\/([\w./-]+)/g, (_, r) => FILEHASH.has(r) ? hashedUrl(r) : `${PREFIX}/${r}`)
+      .replaceAll('{{b}}', BUILD).replaceAll('{{preload}}', PRELOAD).replaceAll('{{importmap}}', `<script type="importmap">${IMPORTMAP}</script>`)
+      .replaceAll('{{hashes}}', SW_HASHES));
   }
   const e = { raw, type: MIME[path.extname(f)] || 'application/octet-stream', mtime: st.mtimeMs, size: st.size,
     etag: `"${crypto.createHash('sha1').update(raw).digest('base64url').slice(0, 22)}"` };
@@ -60,13 +72,16 @@ function load(f, st) {
   return e;
 }
 
-export function serveStatic(req, res, pathname) {
+export function serveStatic(req, res, pathname, search = '') {
   if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, '');
   // /v/<bygge>/… = samma fil utan prefix. Rätt bygge cachas för alltid; ett gammalt bygge (en flik som stått
   // öppen över en uppdatering) får dagens fil utan cache, så att den inte fastnar i webbläsaren.
   let immutable = false;
   const v = /^\/v\/([0-9a-f]{1,32})(\/.*)$/.exec(pathname);
   if (v) { immutable = v[1] === BUILD; pathname = v[2]; }
+  // /m/<fil>?h=<hash>: för alltid när hashen stämmer med filen, annars (gammal sida, ingen import map) utan cache
+  const m = /^\/m(\/.+)$/.exec(pathname);
+  if (m) { pathname = m[1]; const h = /[?&]h=([0-9a-f]{1,16})/.exec(search)?.[1]; immutable = !!h && h === FILEHASH.get(pathname.slice(1)); }
   let f;
   try { f = path.normalize(path.join(WEB, decodeURIComponent(pathname))); } catch { return fail(res, 400, ''); }
   if (f !== WEB && !f.startsWith(WEB + path.sep)) return fail(res, 403, '');

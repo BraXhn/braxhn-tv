@@ -22,8 +22,23 @@ const listenCard = (x, i) => x.type === 'podcast'
     <div class="t">${esc(x.title || '')}</div><div class="s">${esc(x.podcastTitle || '')}${x.duration ? ` · ${esc(fmtDur(Math.max(0, x.duration - x.position)))} kvar` : ''}</div></a>`
   : bookCard(x);
 
+// Startsidan visas direkt från förra besöket (sparad per profil i webbläsaren) och byts tyst när servern svarat –
+// ingen väntan på servern vid återbesök. Nyckeln är profilens id, så en annan profil aldrig ser någon annans hyllor.
+const homeKey = () => 'bxhome1:' + (me?.id || 0);
+function cachedHome() { try { return JSON.parse(localStorage.getItem(homeKey()) || 'null'); } catch { return null; } }
+function saveHome(o) { try { localStorage.setItem(homeKey(), JSON.stringify(o)); } catch { try { localStorage.removeItem(homeKey()); } catch {} } }
 views.home = async () => {
-  const [d, cols, own] = await Promise.all([api('/home'), api('/collections').catch(() => []), api('/custom-collections').catch(() => [])]);
+  const fresh = Promise.all([api('/home'), api('/collections').catch(e => { if (e?.aborted) throw e; return []; }), api('/custom-collections').catch(e => { if (e?.aborted) throw e; return []; })]);
+  const old = cachedHome();
+  if (old?.d) await renderHome(old.d, old.cols || [], old.own || [], true);
+  const [d, cols, own] = await fresh;
+  const next = { d, cols, own };
+  if (old && JSON.stringify(old) === JSON.stringify(next)) return; // oförändrat – sidan står kvar som den är
+  saveHome(next);
+  await renderHome(d, cols, own, false);
+};
+async function renderHome(d, cols, own, fromCache) {
+  const keep = !fromCache && main.querySelector('.shelf') ? window.scrollY : null; // uppdatering: behåll skrollläget
   const L = d.homeLayout || { order: DEFAULT_ORDER, hidden: [], hero: 'auto' };
   const off = new Set(L.hidden || []);
   // Installationsguiden är inte klar (bara administratörer på hemnätet, fältet setupPending i /api/status)
@@ -65,13 +80,15 @@ views.home = async () => {
     collections: () => cols.length || own.length ? shelfHtml('Samlingar', [...own, ...cols].map(colCard).join(''), { more: '<a href="#/collections">Visa alla</a>' }) : ''
   };
   for (const id of L.order || DEFAULT_ORDER) if (!off.has(id) && part[id]) html += part[id]();
-  if (libs.length && !d.rows.some(r => r.items.length)) {
+  if (libs.length && !d.rows.some(r => r.items.length) && !fromCache) {
     const s = await api('/scan');
     html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? 'Skannar bibliotek…' : 'Inget innehåll hittades', text: s.running ? `${s.phase} ${s.done}/${s.total}` : 'Kontrollera sökvägarna under Administration.' });
     if (s.running) later(route, 3000);
   }
   if (libs.length) html += `<div class="homefoot"><button type="button" class="ghost" id="homecustom">Anpassa startsidan</button></div>`;
   main.innerHTML = html;
+  if (keep != null) window.scrollTo(0, keep);
+  if (fromCache) main.removeAttribute('aria-busy');
   if (hero) bindFeatured(main.querySelector('.feat'), d.featured);
   if ($('#fyclear')) $('#fyclear').onclick = act(async (e) => { e.preventDefault(); await api('/foryou/seen', { method: 'POST', body: {} }); route(); });
   if ($('#homecustom')) $('#homecustom').onclick = () => openHomeCustomizer({ onChange: route });
@@ -81,7 +98,7 @@ views.home = async () => {
     playSpoken({ kind: 'podcast', id: x.id, title: x.title, sub: x.podcastTitle, link: `#/podcast/${x.podcast}`, cover: `/api/podcasts/${x.podcast}/image`,
       duration: x.duration || 0, position: x.position || 0, files: [{ id: x.id, offset: 0, duration: x.duration, url: `/api/podcasts/episodes/${x.id}/stream` }] });
   });
-};
+}
 
 const FIRST = 60, CHUNK = 240;
 const libCard = (i) => i.kind === 'collection' ? colCard(i) : card(i);

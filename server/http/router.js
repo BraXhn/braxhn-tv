@@ -114,7 +114,7 @@ export async function handle(req, res) {
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS', 'Access-Control-Max-Age': '86400' }); return res.end(); }
   }
   // Allt annat utanför /api/ är webbappens statiska filer (se static.js)
-  if (!rest && !url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
+  if (!rest && !url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname, url.search);
   // Chromecast-mottagare och andra enheter hämtar media från annan origin
   if (url.pathname.startsWith('/api/stream/')) {
     res.setHeader('Access-Control-Allow-Origin', '*');
