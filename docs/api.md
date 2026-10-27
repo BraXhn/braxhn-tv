@@ -71,6 +71,10 @@ en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna bör
 (`{ enabled: bool, countdown: heltal sekunder }`). `/api/items/:id` har också `defaultAudio`/`defaultSub`, där
 `defaultSub` kan vara en PGS-bildundertext (webbspelaren ritar dem själv).
 
+Android-appen (från 0.6.0) skickar `cinema=1` bara när `GET /api/me/cinema` visar att bio-läget är på (`trailers > 0`,
+eller `preroll` och `prerollAvailable`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
+om en trailer inte går att spela. Den skickar också `night=1`/`dialog=1` när nattläge eller tydligare dialog är påslaget.
+
 ## Kö på Chromecast: `queue=1`
 
 `/api/items/:id/playback?cast=1&queue=1` ger samma svar som vanligt (med en egen mediatoken för titeln) men räknas

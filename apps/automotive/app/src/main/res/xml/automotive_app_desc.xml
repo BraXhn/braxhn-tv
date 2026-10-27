@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto (telefonen i bilen): appen visas som mediaapp. Läses inte av Android Automotive. -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

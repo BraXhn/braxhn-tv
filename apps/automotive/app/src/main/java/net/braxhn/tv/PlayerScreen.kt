@@ -10,6 +10,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
@@ -53,8 +55,17 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var skip by remember(req) { mutableStateOf<String?>(null) }
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
-    var menu by remember { mutableStateOf<String?>(null) } // "tracks" | "chapters"
+    var menu by remember { mutableStateOf<String?>(null) } // "tracks" | "chapters" | "speed"
     val tv = remember { isTv(context) }
+    // Bio-läge: trailers/förfilm ligger först i spelarens kö, filmen på plats mainIndex
+    var mainIndex by remember(req) { mutableIntStateOf(0) }
+    var prerolls by remember(req) { mutableStateOf<List<PrerollEntry>>(emptyList()) }
+    var prerollLabel by remember(req) { mutableStateOf<String?>(null) }
+    var offline by remember(req) { mutableStateOf(false) }
+    var speed by remember { mutableFloatStateOf(1f) }
+    val activity = remember { context.findActivity() }
+    val pipOk = remember { Pip.supported(context) }
+    val inPip by Pip.active.collectAsState()
     val skipFocus = remember { FocusRequester() }
 
     val player = remember {
@@ -69,7 +80,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         val it = item ?: return
         val pos = player.currentPosition / 1000.0
         val dur = pb?.duration ?: it.duration ?: 0.0
-        if (pos > 1) Api.appScope.launch { Api.reportProgress(it.id, pos, dur) }
+        // Under trailers/förfilm finns inget framsteg att spara
+        if (pos > 1 && player.currentMediaItemIndex >= mainIndex) Api.appScope.launch { Api.reportProgress(it.id, pos, dur) }
         if (final) Api.appScope.launch { runCatching { Api.post("/api/stream/${it.id}/stop") } }
     }
 
@@ -77,7 +89,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     LaunchedEffect(req) {
         // Nedladdad fil: spela lokalt (fungerar utan nät)
         Downloads.localFile(req.id)?.let { f ->
-            status = "Offline"
+            status = "Offline"; offline = true
             // Starta den lokala filen först – nätanropen nedan kan ta lång tid eller misslyckas utan täckning
             player.setMediaItem(M3Item.fromUri(Uri.fromFile(f)), (req.start * 1000).toLong())
             player.prepare(); player.playWhenReady = true
@@ -91,7 +103,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             item = it
             val sub = req.sub ?: it.subtitles?.firstOrNull { s -> s.forced == true && s.bitmap != true }
                 ?: it.subtitles?.firstOrNull { s -> Api.subtitleLang.isNotEmpty() && s.lang == Api.subtitleLang && s.bitmap != true }
-            val p: Playback = Api.get("/api/items/${req.id}/playback", Api.capabilities(req.audio, sub))
+            // Bio-läge bara för filmer från början, och bara om det är påslaget (/api/me/cinema; saknas hos äldre servrar)
+            val cinema = !req.skipPreroll && req.start < 1 && it.kind == "movie" &&
+                runCatching { Api.get<CinemaPrefs>("/api/me/cinema").on }.getOrDefault(false)
+            val p: Playback = Api.get("/api/items/${req.id}/playback", Api.capabilities(req.audio, sub) + Api.comfortQuery() +
+                ("cinema" to (if (cinema) "1" else null)))
             pb = p
             currentSub = sub
             status = listOfNotNull(when (p.mode) { "direct" -> "Direkt"; "remux" -> "Remux"; else -> "Omkodning" },
@@ -110,7 +126,15 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 .setSubtitleConfigurations(subs)
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(if (it.isEpisode) "${it.showTitle} – ${it.sxe} ${it.title}" else it.title).build())
                 .build()
-            player.setMediaItem(mi, (req.start * 1000).toLong())
+            // Trailers och förfilm först (egna adresser med token), sedan filmen
+            val pre = p.preroll.map { e ->
+                M3Item.Builder().setUri(Api.absolute(e.url))
+                    .setMediaMetadata(MediaMetadata.Builder().setTitle(e.title ?: "Trailer").build()).build()
+            }
+            prerolls = p.preroll
+            mainIndex = pre.size
+            if (pre.isEmpty()) player.setMediaItem(mi, (req.start * 1000).toLong())
+            else player.setMediaItems(pre + mi, 0, 0L)
             player.prepare()
             player.playWhenReady = true
         } catch (e: Exception) { error = e.message ?: e.toString() }
@@ -123,7 +147,13 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             delay(500)
             val t = player.currentPosition / 1000.0
             val p = pb
+            val idx = player.currentMediaItemIndex
+            prerollLabel = if (idx < mainIndex) prerolls.getOrNull(idx)?.let { e -> if (e.kind == "preroll") "Förfilm" else "Trailer: ${e.title ?: ""}" } else null
+            // Bild-i-bild får videons format
+            val vs = player.videoSize
+            if (pipOk) Pip.aspect = Pip.ratio((vs.width * vs.pixelWidthHeightRatio).toInt(), vs.height)
             skip = when {
+                idx < mainIndex -> "Hoppa över"
                 p?.recap != null && t >= p.recap.start && t < p.recap.end - 1 -> "Hoppa över sammanfattning"
                 p?.intro != null && t >= p.intro.start && t < p.intro.end - 1 -> "Hoppa över intro"
                 p?.credits != null && item?.nextId != null && t >= p.credits && t < p.credits + 60 -> "Nästa avsnitt"
@@ -143,7 +173,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     if (next != null) onPlay(Screen.Play(next, 0.0, null, null)) else onClose()
                 }
             }
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.errorCodeName + ": " + (e.message ?: "") }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
+                // En trailer som inte går att spela: gå direkt till filmen
+                if (player.currentMediaItemIndex < mainIndex) { player.seekTo(mainIndex, 0L); player.prepare(); return }
+                error = e.errorCodeName + ": " + (e.message ?: "")
+            }
         }
         player.addListener(l)
         onDispose { player.removeListener(l) }
@@ -156,12 +190,22 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val obs = LifecycleEventObserver { _, ev ->
-            if (ev == Lifecycle.Event.ON_PAUSE) { player.pause(); latestReport(false) }
+            // Bild-i-bild pausar också aktiviteten – då ska videon fortsätta (bilar har ingen bild-i-bild)
+            if (ev == Lifecycle.Event.ON_PAUSE && activity?.isInPictureInPictureMode != true) { player.pause(); latestReport(false) }
+            // Bild-i-bild-fönstret stängt (eller appen i bakgrunden): pausa
+            if (ev == Lifecycle.Event.ON_STOP) { player.pause(); latestReport(false) }
         }
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
-    DisposableEffect(Unit) { onDispose { latestReport(true); player.release() } }
+    DisposableEffect(Unit) { onDispose { Pip.aspect = null; latestReport(true); player.release() } }
+
+    /** Startar om samma titel där man är (t.ex. nytt ljud från servern), utan bio-läge */
+    fun restart(audio: Int? = req.audio, sub: SubtitleTrack? = currentSub) {
+        val at = if (player.currentMediaItemIndex >= mainIndex) player.currentPosition / 1000.0 else req.start
+        report(final = true); player.stop()
+        onPlay(Screen.Play(req.id, at, audio, sub, nonce = req.nonce + 1, skipPreroll = true))
+    }
 
     /** Byt undertext utan att starta om strömmen (bildundertexter bränns in av servern och kräver omstart) */
     fun selectSubtitle(s: SubtitleTrack?) {
@@ -169,7 +213,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         Api.subtitleLang = s?.lang ?: ""
         if (s?.bitmap == true || currentSub?.bitmap == true) {
             // Stoppa den gamla strömmen direkt, annars startar dess nästa segment en ny omkodning på servern
-            val at = player.currentPosition / 1000.0; report(final = true); player.stop(); onPlay(Screen.Play(it.id, at, req.audio, s)); return
+            restart(sub = s); return
         }
         currentSub = s
         val b = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -184,16 +228,28 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player; setShowSubtitleButton(true); keepScreenOn = true } },
-            modifier = Modifier.fillMaxSize())
+            update = { v -> v.useController = !inPip }, modifier = Modifier.fillMaxSize())
+        // Bild-i-bild: bara videon, inga knappar
+        if (!inPip) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { report(final = true); onClose() }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
                 Icon(Icons.Filled.Close, "Stäng", tint = Color.White, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.width(12.dp))
             Text(item?.let { if (it.isEpisode) "${it.showTitle} · ${it.sxe} · ${it.title}" else it.title } ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(status, color = Color.LightGray, fontSize = 12.sp)
+            Text(prerollLabel ?: status, color = Color.LightGray, fontSize = 12.sp)
             val p = pb
-            if (p != null && (p.audio.size > 1 || p.subtitles.isNotEmpty() || (item?.subtitles?.isNotEmpty() == true))) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = { menu = "speed" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
+                Icon(Icons.Filled.Speed, "Uppspelningshastighet", tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            if (pipOk) {
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = { Pip.enter(activity) }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
+                    Icon(Icons.Filled.PictureInPictureAlt, "Bild-i-bild", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+            if (p != null && (p.audio.size > 1 || p.subtitles.isNotEmpty() || (item?.subtitles?.isNotEmpty() == true) || !offline)) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { menu = "tracks" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
                     Icon(Icons.Filled.Subtitles, "Ljud och undertexter", tint = Color.White, modifier = Modifier.size(28.dp))
@@ -209,10 +265,16 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         if (menu != null) {
             val p = pb
             AlertDialog(onDismissRequest = { menu = null }, confirmButton = { TextButton(onClick = { menu = null }) { Text("Stäng") } },
-                title = { Text(if (menu == "chapters") "Kapitel" else "Ljud och undertexter") },
+                title = { Text(when (menu) { "chapters" -> "Kapitel"; "speed" -> "Hastighet"; else -> "Ljud och undertexter" }) },
                 text = {
                     LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                        if (menu == "chapters" && p != null) {
+                        if (menu == "speed") {
+                            items(SPEEDS) { (v, label) ->
+                                OptionRow(label, v == speed) {
+                                    speed = v; player.setPlaybackSpeed(v); menu = null
+                                }
+                            }
+                        } else if (menu == "chapters" && p != null) {
                             val now = player.currentPosition / 1000.0
                             val cur = p.chapters.lastOrNull { c -> c.start <= now }
                             items(p.chapters) { c ->
@@ -225,13 +287,19 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                                 items(p.audio) { a ->
                                     OptionRow(a.label, a.index == sel) {
                                         menu = null
-                                        if (a.index != sel) { val at = player.currentPosition / 1000.0; report(final = true); player.stop(); onPlay(Screen.Play(req.id, at, a.index, currentSub)) }
+                                        if (a.index != sel) restart(audio = a.index)
                                     }
                                 }
                             }
                             this.item { Text("Undertexter", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
                             this.item { OptionRow("Inga", currentSub == null) { selectSubtitle(null); menu = null } }
                             items(item?.subtitles ?: emptyList()) { s -> OptionRow(s.label, s.id == currentSub?.id) { selectSubtitle(s); menu = null } }
+                            // Nattläge/tydligare dialog: servern filtrerar ljudet, så strömmen startas om där man är
+                            if (!offline) {
+                                this.item { Text("Ljudkomfort", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
+                                this.item { CheckRow("Nattläge (jämnare ljudnivå)", Api.nightMode) { Api.nightMode = !Api.nightMode; menu = null; restart() } }
+                                this.item { CheckRow("Tydligare dialog", Api.dialogBoost) { Api.dialogBoost = !Api.dialogBoost; menu = null; restart() } }
+                            }
                         }
                     }
                 })
@@ -239,7 +307,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         skip?.let { label ->
             Button(onClick = {
                 val p = pb
-                if (label == "Hoppa över sammanfattning" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
+                if (label == "Hoppa över") player.seekTo(mainIndex, 0L)
+                else if (label == "Hoppa över sammanfattning" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
                 else if (label == "Hoppa över intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
                 else item?.nextId?.let { next -> report(final = true); player.stop(); onPlay(Screen.Play(next, 0.0, null, null)) }
             }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
@@ -258,6 +327,18 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 Button(onClick = onClose) { Text("Stäng") }
             }
         }
+        } // !inPip
+    }
+}
+
+private val SPEEDS = listOf(0.75f to "0,75×", 1f to "Normal", 1.25f to "1,25×", 1.5f to "1,5×", 1.75f to "1,75×", 2f to "2×")
+
+@Composable
+private fun CheckRow(label: String, checked: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = { onClick() })
+        Spacer(Modifier.width(8.dp))
+        Text(label, fontSize = 17.sp)
     }
 }
 

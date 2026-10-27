@@ -208,7 +208,31 @@ before(async () => {
   const ins = db.prepare('INSERT INTO item_people(item_id,person_id,role,character,ord) VALUES(?,?,?,?,?)');
   for (const id of [S.remux, S.show]) { ins.run(id, 501, 'cast', 'Huvudrollen', 0); ins.run(id, 502, id === S.show ? 'creator' : 'director', null, 0); }
   db.prepare('UPDATE items SET intro_start=1, intro_end=3, recap_start=0, recap_end=1, credits_start=6, rating=7.5 WHERE id IN (?,?)').run(S.ep2, S.remux);
+  // Startsidans tematiska hyllor (Android läser dem): titlar utan filer i ett eget bibliotek vars mapp saknas (skanningen
+  // tar inte bort något då), ett sett frö (Eftersom du såg …), tio komedier (Dagens genre), en premiär i dag för 30 år sedan
+  // (Den här dagen) och ett kommande avsnitt av serien (Kommer snart)
+  const now = Math.floor(Date.now() / 1000), d = new Date();
+  const md = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const tema = Number(db.prepare('INSERT INTO libraries(name,type,path) VALUES(?,?,?)').run('Tema', 'movie', path.join(MEDIA, 'saknas')).lastInsertRowid);
+  const insItem = db.prepare(`INSERT INTO items(library_id,kind,title,sort_title,year,duration,rating,genres,overview,backdrop,added,released)
+    VALUES(?,'movie',?,?,?,?,?,?,?,0,?,?)`);
+  const movie = (title, rating, released = '2001-02-03') => Number(insItem.run(tema, title, title.toLowerCase(), +released.slice(0, 4), 85 * 60, rating,
+    JSON.stringify(['Komedi']), `Om ${title}`, now - 400 * 86400, released).lastInsertRowid);
+  const seed = movie('Fröfilm', 6);
+  for (let i = 0; i < 10; i++) movie(`Komedi ${i}`, 7.5 + i / 10);
+  movie('Jubilaren', 7.6, `${d.getFullYear() - 30}-${md}`);
+  const uid = db.prepare("SELECT id FROM users WHERE name='admin'").get().id;
+  db.prepare('INSERT INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(?,?,0,5100,1,?)').run(uid, seed, now - 60);
+  const tomorrow = new Date(Date.now() + 86400e3);
+  const ymd = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+  db.prepare('UPDATE items SET tmdb_id=COALESCE(tmdb_id, 990001) WHERE id=?').run(S.show);
+  db.prepare("INSERT INTO calendar_shows(show_id,tmdb_id,status,fetched) SELECT id, tmdb_id, 'Returning Series', ? FROM items WHERE id=?").run(now, S.show);
+  db.prepare("INSERT INTO calendar_episodes(show_id,season,episode,name,air_date) VALUES(?,1,4,'Fjärde',?)").run(S.show, ymd);
   db.close();
+  // Bio-läge med administratörens förfilm (Playback.preroll) och en egen samling på startsidan
+  const pre = dir('Förfilmer');
+  ff('-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(pre, 'intro.mp4'));
+  ok(await srv.req('/api/settings', { method: 'PUT', body: { cinemaPreroll: pre } }), 'förfilm');
 
   // Appinloggningar (Bearer) och bildtoken, som apparna
   for (const app of Object.keys(APPS)) {
@@ -217,6 +241,7 @@ before(async () => {
     S.admin = r.data.user.id;
     TOK[app + 'Img'] = ok(await call(app, 'POST', '/api/media-token'), 'bildtoken').token;
   }
+  ok(await call('android', 'PUT', '/api/me/cinema', { body: { preroll: true } }), 'bio-läge');
   // Det en användare gjort: tittat en bit, sett ett avsnitt, följer serien med offline-synk, musik, ljudbok, podd
   ok(await call('ios', 'POST', `/api/items/${S.remux}/progress`, { body: { position: 8, duration: 20 } }), 'framsteg');
   ok(await call('ios', 'POST', `/api/items/${S.ep1}/watched`, { body: { watched: true } }), 'sett');
@@ -260,7 +285,7 @@ after(async () => { await srv?.stop(); feed?.close(); fs.rmSync(ROOT, { recursiv
 // p = sökvägsparametrar, url = färdig adress (från ett tidigare svar, som apparna gör), auth: false = ingen
 // Bearer-header (AVPlayer/bildladdning använder token i adressen), token = annan apptoken
 const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', get $har() { return `${S.ep3},99999999`; },
-  get $program() { return S.program; }, get $profil() { return S.admin; } };
+  get $program() { return S.program; }, get $profil() { return S.admin; }, get $artist() { return S.artist; } };
 const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
 const playbackQ = (app, i = 0) => new URLSearchParams([C.endpoints['GET /api/items/:id/playback'][app].query].flat()[i]).toString();
 const json = async (app, p) => ok(await call(app, 'GET', p), p);
@@ -327,6 +352,7 @@ const CASES = {
   'GET /api/music/:lib/artists': () => [{ p: { lib: S.musicLib } }],
   'GET /api/music/:lib/search': () => [{ p: { lib: S.musicLib } }],
   'GET /api/music/:lib/smart/:sid': async (app) => (await json(app, `/api/music/${S.musicLib}/home`)).smart.map(s => ({ p: { lib: S.musicLib, sid: s.id } })),
+  'POST /api/music/radio': () => [{}],
   'GET /api/music/albums/:aid': () => [{ p: { aid: S.album } }],
   'GET /api/music/artists/:arid': () => [{ p: { arid: S.artist } }],
   'GET /api/music/playlists': () => [{}],
@@ -363,11 +389,12 @@ const CASES = {
   'GET /api/live/guide': () => [{}],
   'POST /api/dvr/program': () => [{}],
   'GET /api/watchlist': () => [{}],
-  'POST /api/items/:id/watchlist': () => [{ p: { id: S.remux } }],
+  'POST /api/items/:id/watchlist': () => [{ p: { id: S.remux } }, { p: { id: S.ep1 } }],
   'GET /api/profiles': () => [{}],
   // Profilbyte stänger inloggningen det görs med – en egen inloggning, som vid utloggning
   'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
+  'GET /api/me/cinema': () => [{}],
   // Utloggning med en egen inloggning, så att apparnas token gäller för resten av testet
   'POST /api/logout': async (app) => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }]
 };

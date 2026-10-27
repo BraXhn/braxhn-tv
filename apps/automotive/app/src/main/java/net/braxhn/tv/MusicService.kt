@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -57,14 +58,16 @@ import java.util.concurrent.ConcurrentHashMap
 @Serializable data class PDetail(val id: Int, val title: String? = null, val image: Boolean = false, val episodes: List<PEp> = emptyList())
 @Serializable data class MHome(val recentAlbums: List<MAlbum> = emptyList(), val recentlyPlayed: List<MAlbum> = emptyList(), val favorites: List<MTrack> = emptyList(),
                                val smart: List<MSmart> = emptyList())
-@Serializable data class MSmart(val id: String, val name: String, val count: Int = 0)
+@Serializable data class MSmart(val id: String, val name: String, val count: Int = 0, val station: Boolean = false)
 @Serializable data class MSmartDetail(val id: String, val name: String? = null, val trackList: List<MTrack> = emptyList())
 
 /**
  * Musik i bilen. Android Automotive visar den här tjänsten i bilens egen mediaspelare – till skillnad
  * från video får musik användas under körning. Fungerar även med Android Auto/Bluetooth-kontroller.
  *
- * Bläddringsträd: root → Spelat nyligen / Nytt / Smarta listor / Album / Artister / Spellistor / Favoriter
+ * Bläddringsträd: root → Spelat nyligen / Nytt / Smarta listor / Album / Artister / Spellistor / Favoriter / Ljudböcker / Poddar.
+ * Android Auto (telefonen i bilen) visar bara ett fåtal flikar överst – där blir roten Musik / Ljudböcker / Poddar
+ * och musikens mappar ligger under Musik. Bilens egen mediaspelare (Android Automotive) får trädet som förut.
  * Spår får id "t:<spår>:<sammanhang>" så att hela albumet/listan köas när man väljer en låt.
  */
 @OptIn(UnstableApi::class)
@@ -94,6 +97,8 @@ class MusicService : MediaLibraryService() {
     /** Bläddringsträdet cachas en kort stund – bilens mediaspelare frågar ofta efter samma sida */
     private class Cached(val at: Long, val items: List<MediaItem>)
     private val childCache = ConcurrentHashMap<String, Cached>()
+    /** Spelare som bara visar några flikar i roten (Android Auto, bilens mediaspelare med gräns i rotens tips) */
+    private val compactRoot = ConcurrentHashMap.newKeySet<String>()
 
     override fun onCreate() {
         super.onCreate()
@@ -337,18 +342,13 @@ class MusicService : MediaLibraryService() {
             parent.startsWith("pod:") -> { val d = Api.get<PDetail>("/api/podcasts/${parent.removePrefix("pod:")}"); return d.episodes.take(100).map { epItem(it.copy(podcastTitle = d.title)) } }
         }
         val l = lib()
-        if (parent == ROOT) return listOfNotNull(
-            l?.let { folder("recent", "Spelat nyligen", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
-            l?.let { folder("new", "Nytt", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
-            l?.let { folder("smart", "Smarta listor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS) },
-            l?.let { folder("albums", "Album", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS) },
-            l?.let { folder("artists", "Artister", type = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS) },
-            l?.let { folder("playlists", "Spellistor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS) },
-            l?.let { folder("favorites", "Favoriter", type = MediaMetadata.MEDIA_TYPE_PLAYLIST) },
-            bookLibId?.let { folder("books", "Ljudböcker", type = MediaMetadata.MEDIA_TYPE_FOLDER_AUDIO_BOOKS) },
-            folder("pods", "Poddar", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
-        )
+        val books = bookLibId?.let { folder("books", "Ljudböcker", type = MediaMetadata.MEDIA_TYPE_FOLDER_AUDIO_BOOKS) }
+        val pods = folder("pods", "Poddar", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
+        if (parent == ROOT) return (if (l != null) musicFolders(l) else emptyList()) + listOfNotNull(books, pods)
+        // Android Auto och bilar som anger en gräns: högst fyra flikar i roten
+        if (parent == AUTO_ROOT) return listOfNotNull(l?.let { folder(MUSIC, "Musik", type = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED) }, books, pods)
         if (l == null) return emptyList()
+        if (parent == MUSIC) return musicFolders(l)
         return when {
             parent == "recent" -> Api.get<MHome>("/api/music/$l/home").recentlyPlayed.map(::album)
             parent == "new" -> Api.get<MHome>("/api/music/$l/home").recentAlbums.map(::album)
@@ -356,16 +356,33 @@ class MusicService : MediaLibraryService() {
             parent == "artists" -> Api.get<List<MArtist>>("/api/music/$l/artists").map { folder("ar:${it.id}", it.name, "${it.albums ?: 0} album", null, MediaMetadata.MEDIA_TYPE_ARTIST) }
             parent == "playlists" -> Api.get<List<MPlaylist>>("/api/music/playlists").map { folder("pl:${it.id}", it.name, "${it.tracks ?: 0} låtar", null, MediaMetadata.MEDIA_TYPE_PLAYLIST) }
             parent == "favorites" -> tracksOf("fav").map { track(it, "fav") }
-            parent == "smart" -> Api.get<MHome>("/api/music/$l/home").smart.map { folder("sm:${it.id}", it.name, "${it.count} låtar", null, MediaMetadata.MEDIA_TYPE_PLAYLIST) }
+            parent == "smart" -> Api.get<MHome>("/api/music/$l/home").smart.filter { !it.station }.map { folder("sm:${it.id}", it.name, "${it.count} låtar", null, MediaMetadata.MEDIA_TYPE_PLAYLIST) }
+            // Musikstationer och låtradio från ljudanalysen (smarta listor med station = true)
+            parent == "stations" -> Api.get<MHome>("/api/music/$l/home").smart.filter { it.station }.map { folder("sm:${it.id}", it.name, "${it.count} låtar", null, MediaMetadata.MEDIA_TYPE_RADIO_STATION) }
             parent.startsWith("sm:") -> { val id = parent.removePrefix("sm:"); tracksOf("sm-$id").map { track(it, "sm-$id") } }
             parent.startsWith("al:") -> { val id = parent.removePrefix("al:"); tracksOf("al-$id").map { track(it, "al-$id") } }
             parent.startsWith("pl:") -> { val id = parent.removePrefix("pl:"); tracksOf("pl-$id").map { track(it, "pl-$id") } }
             parent.startsWith("ar:") -> {
                 val d = Api.get<MArtistDetail>("/api/music/artists/${parent.removePrefix("ar:")}")
-                d.albums.map(::album)
+                // Först: låtradio från artisten (ny kö med liknande låtar varje gång)
+                listOf(playable("rad:${d.id}", "Radio: ${d.name}", "Låtar som liknar ${d.name}", null, MediaMetadata.MEDIA_TYPE_RADIO_STATION)) + d.albums.map(::album)
             }
             else -> emptyList()
         }
+    }
+
+    private suspend fun musicFolders(l: Int): List<MediaItem> {
+        val stations = runCatching { Api.get<MHome>("/api/music/$l/home").smart.any { it.station } }.getOrDefault(false)
+        return listOfNotNull(
+        folder("recent", "Spelat nyligen", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
+        folder("new", "Nytt", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
+        if (stations) folder("stations", "Stationer", type = MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS) else null,
+        folder("smart", "Smarta listor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
+        folder("albums", "Album", type = MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
+        folder("artists", "Artister", type = MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
+        folder("playlists", "Spellistor", type = MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
+        folder("favorites", "Favoriter", type = MediaMetadata.MEDIA_TYPE_PLAYLIST)
+        )
     }
 
     private inner class Callback : MediaLibrarySession.Callback {
@@ -384,14 +401,19 @@ class MusicService : MediaLibraryService() {
             return super.onCustomCommand(session, controller, customCommand, args)
         }
 
-        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(LibraryResult.ofItem(folder(ROOT, "BraXhn TV"), params))
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> {
+            // Bilens mediaspelare och Android Auto anger hur många flikar roten får ha (vanligen 4)
+            val limit = params?.extras?.getInt(MediaConstants.EXTRAS_KEY_ROOT_CHILDREN_LIMIT, 0) ?: 0
+            if (browser.packageName == AUTO_PACKAGE || limit in 1..8) compactRoot.add(browser.packageName)
+            return Futures.immediateFuture(LibraryResult.ofItem(folder(ROOT, "BraXhn TV"), params))
+        }
 
         override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?):
                 ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             if (Api.token.value == null) return@future LibraryResult.ofError(LibraryResult.RESULT_ERROR_SESSION_AUTHENTICATION_EXPIRED)
             try {
-                val all = cachedChildren(parentId)
+                // Android Auto får en egen, grundare rot (samma mappar under)
+                val all = cachedChildren(if (parentId == ROOT && browser.packageName in compactRoot) AUTO_ROOT else parentId)
                 // Räkna i Long – page * pageSize kan slå runt för stora värden (t.ex. pageSize = Int.MAX_VALUE)
                 val size = all.size.toLong()
                 val ps = pageSize.toLong().coerceAtLeast(0L)
@@ -430,6 +452,14 @@ class MusicService : MediaLibraryService() {
             val one = mediaItems.singleOrNull()?.mediaId
             val parts = one?.split(":")
             if (parts != null && parts[0] == "b") runCatching { bookQueue(parts[1]) }.getOrNull()?.let { return it }
+            // Röststyrning ("spela … på BraXhn TV"): ett tomt id med sökfrågan i requestMetadata
+            val voice = mediaItems.singleOrNull()?.takeIf { it.mediaId.isEmpty() }?.requestMetadata?.searchQuery
+            if (voice != null) runCatching { playFromSearch(voice) }.getOrNull()?.let { return it }
+            // Låtradio från en artist: ny kö med liknande låtar
+            if (parts != null && parts[0] == "rad") runCatching {
+                val list = Api.json.decodeFromString<MRadio>(Api.post("/api/music/radio", buildJsonObject { put("artistId", parts[1].toInt()); put("count", 50) })).trackList
+                if (list.isEmpty()) null else MediaSession.MediaItemsWithStartPosition(list.map { track(it, "ar-${parts[1]}") }, 0, 0L)
+            }.getOrNull()?.let { return it }
             if (parts != null && parts[0] == "pe") runCatching {
                 val e = Api.get<PEp>("/api/podcasts/episodes/${parts[1]}")
                 MediaSession.MediaItemsWithStartPosition(listOf(epMedia(e)), 0, if (e.played) 0 else (e.position * 1000).toLong())
@@ -450,6 +480,7 @@ class MusicService : MediaLibraryService() {
     /** Ett enskilt objekt: från cachen om det nyss visats, annars från servern; spelbara id:n blir aldrig mappar. */
     private suspend fun itemFor(mediaId: String): MediaItem {
         if (mediaId == ROOT) return folder(ROOT, "BraXhn TV")
+        if (mediaId == MUSIC) return folder(MUSIC, "Musik")
         childCache.values.firstNotNullOfOrNull { c -> c.items.firstOrNull { it.mediaId == mediaId } }?.let { return it }
         val p = mediaId.split(":")
         val real = runCatching {
@@ -470,6 +501,7 @@ class MusicService : MediaLibraryService() {
             "b" -> playable(mediaId, "Ljudbok", null, null, MediaMetadata.MEDIA_TYPE_AUDIO_BOOK)
             "bf" -> playable(mediaId, "Ljudbok", null, null, MediaMetadata.MEDIA_TYPE_AUDIO_BOOK_CHAPTER)
             "pe" -> playable(mediaId, "Avsnitt", null, null, MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+            "rad" -> playable(mediaId, "Radio", null, null, MediaMetadata.MEDIA_TYPE_RADIO_STATION)
             else -> folder(mediaId, mediaId)
         }
     }
@@ -479,14 +511,67 @@ class MusicService : MediaLibraryService() {
         if (parts.size >= 2 && parts[0] == "t" && mi.localConfiguration == null) mi.buildUpon().setUri(trackUri(parts[1].toInt())).build() else mi
     }
 
+    /** Sökning i bilen: musik, ljudböcker (titel/författare) och poddar (namn) */
     private suspend fun searchItems(q: String): List<MediaItem> {
-        val l = lib() ?: return emptyList()
-        val r = Api.get<MSearch>("/api/music/$l/search", mapOf("q" to q))
-        return r.albums.map(::album) + r.tracks.map { track(it, "al-${it.albumId}") }
+        loadLibs()
+        val l = libId
+        val music = if (l != null) runCatching {
+            val r = Api.get<MSearch>("/api/music/$l/search", mapOf("q" to q))
+            r.albums.map(::album) + r.tracks.map { track(it, "al-${it.albumId}") }
+        }.getOrDefault(emptyList()) else emptyList()
+        val needle = q.trim().lowercase()
+        val books = bookLibId?.let { bl -> runCatching {
+            Api.get<BList>("/api/audiobooks/$bl", mapOf("sort" to "recent")).books
+                .filter { b -> b.title.lowercase().contains(needle) || (b.author?.lowercase()?.contains(needle) == true) }.take(20).map(::bookItem)
+        }.getOrDefault(emptyList()) } ?: emptyList()
+        val pods = runCatching {
+            Api.get<PList>("/api/podcasts").podcasts.filter { p -> p.title?.lowercase()?.contains(needle) == true }.take(10)
+                .map { folder("pod:${it.id}", it.title ?: "Podd", it.author, if (it.image) img("/api/podcasts/${it.id}/image") else null, MediaMetadata.MEDIA_TYPE_PODCAST) }
+        }.getOrDefault(emptyList())
+        return music + books + pods
+    }
+
+    /** Röstsökning: spela den bästa träffen – låtar (med albumet), ett album, en ljudbok eller poddens senaste avsnitt */
+    private suspend fun playFromSearch(q: String): MediaSession.MediaItemsWithStartPosition? {
+        if (q.isBlank()) return null
+        loadLibs()
+        val l = libId
+        if (l != null) {
+            val r = runCatching { Api.get<MSearch>("/api/music/$l/search", mapOf("q" to q)) }.getOrNull()
+            val t = r?.tracks?.firstOrNull()
+            val a = r?.albums?.firstOrNull()
+            if (a != null && (t == null || a.title.equals(q.trim(), ignoreCase = true))) {
+                val list = tracksOf("al-${a.id}")
+                if (list.isNotEmpty()) return MediaSession.MediaItemsWithStartPosition(list.map { track(it, "al-${a.id}") }, 0, 0L)
+            }
+            if (t != null) {
+                val ctx = "al-${t.albumId}"
+                val list = runCatching { tracksOf(ctx) }.getOrDefault(emptyList())
+                val idx = list.indexOfFirst { it.id == t.id }
+                return if (idx >= 0) MediaSession.MediaItemsWithStartPosition(list.map { track(it, ctx) }, idx, 0L)
+                       else MediaSession.MediaItemsWithStartPosition(listOf(track(t, ctx)), 0, 0L)
+            }
+        }
+        val needle = q.trim().lowercase()
+        bookLibId?.let { bl ->
+            val b = runCatching { Api.get<BList>("/api/audiobooks/$bl", mapOf("sort" to "recent")).books }.getOrDefault(emptyList())
+                .firstOrNull { it.title.lowercase().contains(needle) || (it.author?.lowercase()?.contains(needle) == true) }
+            if (b != null) bookQueue(b.id.toString())?.let { return it }
+        }
+        val pod = runCatching { Api.get<PList>("/api/podcasts").podcasts }.getOrDefault(emptyList()).firstOrNull { it.title?.lowercase()?.contains(needle) == true }
+        if (pod != null) {
+            val e = runCatching { Api.get<PDetail>("/api/podcasts/${pod.id}").episodes.firstOrNull() }.getOrNull()
+            if (e != null) return MediaSession.MediaItemsWithStartPosition(listOf(epMedia(e.copy(podcastTitle = pod.title))), 0, if (e.played) 0 else (e.position * 1000).toLong())
+        }
+        return null
     }
 
     companion object {
         const val ROOT = "root"
+        private const val AUTO_ROOT = "autoroot"
+        private const val MUSIC = "music"
+        /** Android Auto på telefonen (projicerad till bilens skärm) */
+        private const val AUTO_PACKAGE = "com.google.android.projection.gearhead"
         private const val CMD_SLEEP = "net.braxhn.tv.SLEEP"
         private const val SLEEP_FADE = 10.0
         private const val CACHE_TTL = 60_000L
@@ -494,4 +579,6 @@ class MusicService : MediaLibraryService() {
     }
 }
 
+/** POST /api/music/radio – nästa låtar i en låtradio */
+@Serializable data class MRadio(val name: String? = null, val trackList: List<MTrack> = emptyList())
 @Serializable data class MSearch(val albums: List<MAlbum> = emptyList(), val tracks: List<MTrack> = emptyList())

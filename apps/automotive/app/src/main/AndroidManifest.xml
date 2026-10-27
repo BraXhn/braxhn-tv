@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Google TV / Android TV: raden Fortsätt titta (Watch Next) -->
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
 
     <!-- Android Automotive OS (t.ex. Polestar 4). required=false gör att appen även kan installeras på telefon/surfplatta. -->
     <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
@@ -32,12 +34,16 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.BraXhnTV">
 
+        <!-- Android Auto (telefonen i bilen): musik, ljudböcker och poddar via MusicService -->
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+
         <!-- OBS: ingen "distractionOptimized"-metadata. Systemet blockerar då appen automatiskt under körning
              och vi pausar uppspelningen i onPause (krav för videoappar i bilar). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:screenOrientation="unspecified"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
             android:launchMode="singleTask">
