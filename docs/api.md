@@ -53,11 +53,13 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 ```json
 { "audioLangs": ["sv", "en", "orig"], "subMode": "foreign", "subLangs": ["sv"], "sdh": "avoid",
   "skipIntro": true, "skipRecap": false, "skipCredits": false, "autoNext": true, "nextCountdown": 8,
-  "qualityHome": "auto", "qualityRemote": "720", "autoSync": true, "saved": true, "remoteCap": "1080" }
+  "qualityHome": "auto", "qualityRemote": "720", "autoSync": true, "audioDesc": false, "saved": true, "remoteCap": "1080" }
 ```
 
 - Språk är ISO 639-1 (`sv`, `en`); trebokstavskoder (`swe`) tas emot och skrivs om. `orig` i `audioLangs` = filens
-  standardspår (originalspråket i de flesta filer). Kommentarsspår och ljudbeskrivning väljs aldrig automatiskt.
+  standardspår (originalspråket i de flesta filer). Kommentarsspår väljs aldrig automatiskt; ljudbeskrivning
+  (syntolkning: disposition `visual_impaired`, "Syntolkning", "AD") bara med `audioDesc: true` – då på samma språk
+  som annars skulle spelas, annars på första språket i `audioLangs` som har en.
 - `subMode`: `off` (inga), `forced` (bara tvingade), `foreign` (hela undertexter när ljudet inte är på något av mina
   språk – `subLangs` och `audioLangs` – annars tvingade), `always`. `sdh`: `avoid` eller `prefer`.
 - `qualityHome`/`qualityRemote`: `auto`, `orig`, `1080`, `720`, `480`, `360`. Gäller när klienten inte skickar `q`;

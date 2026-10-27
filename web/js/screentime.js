@@ -64,7 +64,7 @@ export async function screenDialog(p) {
     <details style="margin-top:12px"><summary>Andra tider vissa veckodagar</summary><p class="muted small">Tomma fält = samma som ovan.</p>
       <table><tr><th></th><th>Minuter</th><th>Från</th><th>Till</th></tr>${DAYS.map(([i, n]) => { const o = r.days?.[i] || {};
         return `<tr><td>${n}</td><td><input data-dd="${i}" aria-label="${n}: minuter" type="number" min="0" max="1440" value="${v(o.daily)}" style="width:90px"></td><td><input data-df="${i}" aria-label="${n}: från" type="time" value="${v(o.from)}"></td><td><input data-du="${i}" aria-label="${n}: till" type="time" value="${v(o.until)}"></td></tr>`; }).join('')}</table></details>
-    <h3 style="font-size:15px;margin:16px 0 6px">Extra tid idag</h3>
+    <h3 style="font-size:.9375rem;margin:16px 0 6px">Extra tid idag</h3>
     <div class="row"><button class="ghost small" data-ex="15">+15 min</button><button class="ghost small" data-ex="30">+30 min</button><button class="ghost small" data-ex="60">+1 timme</button>
       <button class="ghost small" data-ex="-15">−15 min</button><button class="ghost small" data-exr="1">Nollställ dagens tid</button></div>
     <p class="muted small">Tiden räknas när film, serier, live-TV eller inspelningar spelas (inte när de är pausade) på alla enheter, och två samtidiga strömmar räknas inte dubbelt. När tiden är slut stoppas uppspelningen. Klockslagen följer serverns tid. Extra tid förlänger även dagens sluttid. Nedladdat i appen som ses utan nät räknas inte.</p>`,

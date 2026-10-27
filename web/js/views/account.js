@@ -40,13 +40,35 @@ function showCodes(codes) {
   });
 }
 
+// Visningsval per enhet (web/start.js lägger på dem vid start): textstorlek i procent av webbläsarens egen,
+// minska rörelse och hög kontrast (klasser på <html>, se style.css)
+const A11Y_KEY = 'braxhn-tv.a11y';
+function a11yPrefs() { try { return JSON.parse(localStorage.getItem(A11Y_KEY) || 'null') || {}; } catch { return {}; } }
+function applyA11y(a) {
+  const r = document.documentElement, t = Math.max(100, Math.min(200, +a.text || 100));
+  r.style.fontSize = t === 100 ? '' : t + '%';
+  r.classList.toggle('reduce-motion', a.motion === 'reduce');
+  r.classList.toggle('more-contrast', a.contrast === 'more');
+  r.classList.toggle('bigtext', t >= 130); // menyraden: sidflikarna får inte plats (finns i Mer/användarmenyn)
+}
+function bindA11yPrefs() {
+  const a = a11yPrefs();
+  $('#a11ytext').value = String(+a.text || 100); $('#a11ymotion').value = a.motion || ''; $('#a11ycontrast').value = a.contrast || '';
+  const save = () => {
+    const n = { text: +$('#a11ytext').value, motion: $('#a11ymotion').value, contrast: $('#a11ycontrast').value };
+    try { localStorage.setItem(A11Y_KEY, JSON.stringify(n)); } catch {}
+    applyA11y(n);
+  };
+  for (const id of ['#a11ytext', '#a11ymotion', '#a11ycontrast']) $(id).onchange = save;
+}
+
 views.account = async () => {
   const [tfa, sess, pks, TR] = await Promise.all([api('/me/2fa'), api('/me/sessions'), api('/me/passkeys'), api('/me/trakt')]);
   main.innerHTML = `
   <div class="panel"><h2>Mitt konto – ${esc(me.name)}</h2>
-    <h3 style="font-size:15px;margin:0 0 4px">Byt lösenord</h3>
-    <form id="pw"><label>Nuvarande lösenord</label><input type="password" id="c" autocomplete="current-password" required>
-    <label>Nytt lösenord</label><input type="password" id="n1" autocomplete="new-password" minlength="10" required>
+    <h3 style="font-size:.9375rem;margin:0 0 4px">Byt lösenord</h3>
+    <form id="pw"><label for="c">Nuvarande lösenord</label><input type="password" id="c" autocomplete="current-password" required>
+    <label for="n1">Nytt lösenord</label><input type="password" id="n1" autocomplete="new-password" minlength="10" required>
     <p class="muted small" style="margin:6px 0 0">Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut och lösenord för musikappar återkallas.</p>
     <div class="row" style="margin-top:12px"><button class="primary">Byt lösenord</button></div></form>
   </div>
@@ -62,6 +84,13 @@ views.account = async () => {
   <div class="panel"><h2>Min historik</h2>
     <p class="muted small">Allt du har tittat på, med datum – sökbart${me.kid ? '' : ', och du kan ta bort enskilda rader'}.</p>
     <div class="row"><a class="btn" href="#/history">Visa min historik</a>${me.kid ? '' : '<a class="btn" href="#/webhooks">Webhooks</a>'}</div></div>
+  <div class="panel" id="a11yprefs"><h2>Tillgänglighet</h2>
+    <p class="muted small">Gäller den här enheten. Webbläsarens och systemets egna val (zoom, minska rörelse, hög kontrast) gäller också.</p>
+    <div class="row ppgrid">
+      <div><label for="a11ytext">Textstorlek</label><select id="a11ytext">${[100, 115, 130, 150, 175, 200].map(n => `<option value="${n}">${n} %${n === 100 ? ' (standard)' : ''}</option>`).join('')}</select></div>
+      <div><label for="a11ymotion">Rörelse</label><select id="a11ymotion"><option value="">Som i systemet</option><option value="reduce">Minska rörelse</option></select></div>
+      <div><label for="a11ycontrast">Kontrast</label><select id="a11ycontrast"><option value="">Som i systemet</option><option value="more">Hög kontrast</option></select></div></div>
+    <p class="muted small">Tryck <kbd>?</kbd> för alla kortkommandon. Syntolkning väljer du under Uppspelning nedan.</p></div>
   <div class="panel"><h2>Undertexter och ljud i spelaren</h2>
     <p class="muted small">Gäller filmer och serier i webbläsaren på den här enheten och sparas för ditt konto. Du kan också ändra det under ⚙ medan du tittar.</p>
     <div class="subprev" id="subprev"><div class="subtxt"><div><span>Så här ser undertexten ut.</span></div></div></div>
@@ -89,9 +118,9 @@ views.account = async () => {
     <p class="muted small">Profiler delar inloggning men har egen tittarhistorik och Min lista. Barnprofiler ser bara titlar upp till sin åldersgräns. Med PIN kan barnen inte byta till vuxnas profiler.</p>
     <div id="proflist">${loadingState({ kind: 'inline' })}</div>
     <form id="addprof" class="row" style="margin-top:12px;align-items:flex-end">
-      <div style="flex:1;min-width:140px"><label>Namn</label><input id="pn" required maxlength="40"></div>
-      <div><label>Åldersgräns</label><select id="pa"><option value="">Vuxen (ingen)</option><option value="0">Barntillåten</option><option value="7">7 år</option><option value="11">11 år</option><option value="13">13 år</option><option value="15">15 år</option></select></div>
-      <div><label>PIN (valfri)</label><input id="pp" inputmode="numeric" maxlength="8" style="width:110px"></div>
+      <div style="flex:1;min-width:140px"><label for="pn">Namn</label><input id="pn" required maxlength="40"></div>
+      <div><label for="pa">Åldersgräns</label><select id="pa"><option value="">Vuxen (ingen)</option><option value="0">Barntillåten</option><option value="7">7 år</option><option value="11">11 år</option><option value="13">13 år</option><option value="15">15 år</option></select></div>
+      <div><label for="pp">PIN (valfri)</label><input id="pp" inputmode="numeric" maxlength="8" style="width:110px"></div>
       <button class="primary">Lägg till profil</button></form></div>` : ''}
   ${TR.enabled ? `<div class="panel"><h2>Trakt ${TR.connected ? '<span class="ok-badge">Kopplat</span>' : ''}</h2>
     ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Dina betyg (stjärnor) skickas till Trakt. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
@@ -124,7 +153,7 @@ views.account = async () => {
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });
-      $('#trbox').innerHTML = `<p>Gå till <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> och ange koden:</p><p style="font-size:32px;letter-spacing:6px;font-weight:800">${esc(r.userCode)}</p><p class="muted small" id="trst">Väntar…</p>`;
+      $('#trbox').innerHTML = `<p>Gå till <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> och ange koden:</p><p style="font-size:2rem;letter-spacing:6px;font-weight:800">${esc(r.userCode)}</p><p class="muted small" id="trst">Väntar…</p>`;
       const tick = async () => {
         const p = await api('/me/trakt/poll', { method: 'POST' }).catch(e => { if (e.aborted) throw e; return { status: 'pending' }; });
         if (p.status === 'connected') { toast('Trakt kopplat – synkar'); route(); }
@@ -174,7 +203,7 @@ views.account = async () => {
       <li>Skanna QR-koden med din autentiseringsapp<div id="qr" style="background:#fff;display:inline-block;padding:10px;border-radius:8px;margin:8px 0"></div></li>
       <li>Eller ange nyckeln manuellt: <code style="user-select:all;word-break:break-all">${esc(r.secret.replace(/(.{4})/g, '$1 ').trim())}</code></li>
       <li>Skriv in den sexsiffriga koden som visas i appen:</li></ol>
-      <div class="row"><input id="tc" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="max-width:160px;font-size:20px;letter-spacing:4px">
+      <div class="row"><input id="tc" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="max-width:160px;font-size:1.25rem;letter-spacing:4px">
       <input id="tpw" type="password" autocomplete="current-password" placeholder="Ditt lösenord" style="max-width:220px"><button class="primary" id="tcok">Bekräfta</button></div>`;
     loadQr().then(q => { const el = $('#qr'); if (!el) return; const qr = q(0, 'M'); qr.addData(r.uri); qr.make(); el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0 }); })
       .catch(() => { const el = $('#qr'); if (el) el.outerHTML = '<span class="muted">(QR-koden kunde inte laddas – använd nyckeln nedan)</span>'; });
@@ -197,6 +226,7 @@ views.account = async () => {
     try { const r = await api('/me/2fa/recovery', { method: 'POST', body: { password } }); showCodes(r.recoveryCodes); } catch (e) { toastErr(e); }
   };
   $('#homecust').onclick = () => openHomeCustomizer();
+  bindA11yPrefs();
   const prev = $('#subprev');
   applySubStyle(prev); bindSubStyleFields(main, () => applySubStyle(prev));
   const fx = audioFx(); $('#anight').checked = fx.night; $('#adialog').checked = fx.dialog;
@@ -214,13 +244,13 @@ async function renderScrobble(el, data) {
   el.hidden = false;
   el.innerHTML = `<h2>Scrobbling</h2>
     <p class="muted small">Skicka det du lyssnar på i musiken till ListenBrainz eller Last.fm – från webben och apparna. En låt räknas när du lyssnat på halva den (eller 4 minuter); låtar under 30 sekunder räknas inte. Kopplingen gäller bara den här profilen.</p>
-    <h3 style="font-size:15px;margin:12px 0 4px">ListenBrainz${badge(LB)}</h3>
+    <h3 style="font-size:.9375rem;margin:12px 0 4px">ListenBrainz${badge(LB)}</h3>
     ${LB.connected ? `<p class="muted small">Kopplat som <b>${esc(LB.username || '')}</b>${LB.lastSent ? ', senast skickat ' + fmtDate(LB.lastSent) : ''}.${status(LB)}</p>
       <div class="row"><button class="danger" id="lboff">Koppla från</button></div>`
     : `<p class="muted small">Kopiera din användartoken från <a href="https://listenbrainz.org/settings/" target="_blank" rel="noopener">listenbrainz.org/settings</a>.</p>
       <form id="lbform" class="row" style="align-items:flex-end"><div style="flex:1;min-width:200px"><label for="lbtok">Användartoken</label><input id="lbtok" type="password" autocomplete="off" required maxlength="200"></div>
       <button class="primary">Koppla ListenBrainz</button></form>`}
-    <h3 style="font-size:15px;margin:18px 0 4px">Last.fm${badge(LF)}</h3>
+    <h3 style="font-size:.9375rem;margin:18px 0 4px">Last.fm${badge(LF)}</h3>
     ${!LF.available ? '<p class="muted small">Kräver API-nyckel (se README) – administratören anger den under Administration → Sonarr, Radarr och Trakt.</p>'
     : LF.connected ? `<p class="muted small">Kopplat som <b>${esc(LF.username || '')}</b>${LF.lastSent ? ', senast skickat ' + fmtDate(LF.lastSent) : ''}.${status(LF)}</p>
       <div class="row"><button class="danger" id="lfoff">Koppla från</button></div>`
@@ -280,7 +310,7 @@ async function renderSubsonic(el, data) {
       body: `<p class="muted small">Lägg till en Subsonic-server i musikappen (i Symfonium: Lägg till mediaserver → Subsonic) med uppgifterna nedan. Lösenordet visas bara nu – spara det i appen eller i en lösenordshanterare.</p>
         <label>Serveradress</label><input readonly value="${esc(server)}" class="subcopy" style="font-family:ui-monospace,monospace">
         <label>Användarnamn</label><input readonly value="${esc(r.username)}" class="subcopy" style="font-family:ui-monospace,monospace">
-        <label>Lösenord</label><input readonly value="${esc(r.password)}" class="subcopy" id="subpw" style="font-family:ui-monospace,monospace">
+        <label for="subpw">Lösenord</label><input readonly value="${esc(r.password)}" class="subcopy" id="subpw" style="font-family:ui-monospace,monospace">
         <p class="muted small" style="margin-top:8px">Vissa appar vill ha adressen med <code>/rest</code> på slutet. Utanför hemmet fungerar appen bara om ditt konto får användas utifrån${r.has2fa ? '' : ' (och om administratören kräver tvåstegsverifiering utifrån måste du aktivera den)'}.</p>`,
       actions: [{ label: 'Kopiera lösenordet', onClick: () => { navigator.clipboard?.writeText(r.password).then(() => toast('Kopierat'), () => toastErr(new Error('Kunde inte kopiera – markera lösenordet och kopiera det själv'))); return false; } },
         { label: 'Klar', kind: 'primary' }],
@@ -308,16 +338,16 @@ async function accountExtras() {
       <td class="r"><button class="ghost small" data-unf="${f.id}">Sluta följa</button></td></tr>`).join('')}</table>` : '<p class="muted">Du följer inga serier ännu.</p>'}</div>
   ${N.allowed ? `<div class="panel"><h2>Notiser om nya avsnitt</h2>
     <p class="muted small">Få en notis i mobilen när nya avsnitt av serier du följer kommer – flera avsnitt samlas i en notis. Använd t.ex. appen <b>ntfy</b> (adress som https://ntfy.sh/ett-hemligt-ämne) eller en egen webhook som tar emot JSON. Adressen måste gå att nå via internet; adresser i hemnätet tillåts inte.</p>
-    <div class="row" style="align-items:flex-end"><div><label>Typ</label><select id="nk"><option value="none">Av</option><option value="ntfy">ntfy</option><option value="webhook">Webhook (JSON)</option></select></div>
-      <div style="flex:1;min-width:220px"><label>Adress</label><input id="nu" value="${esc(N.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne" maxlength="500"></div>
-      <div><label>Token (valfri)</label><input id="nt" type="password" autocomplete="off" placeholder="${N.hasToken ? '(sparad)' : ''}"></div></div>
+    <div class="row" style="align-items:flex-end"><div><label for="nk">Typ</label><select id="nk"><option value="none">Av</option><option value="ntfy">ntfy</option><option value="webhook">Webhook (JSON)</option></select></div>
+      <div style="flex:1;min-width:220px"><label for="nu">Adress</label><input id="nu" value="${esc(N.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne" maxlength="500"></div>
+      <div><label for="nt">Token (valfri)</label><input id="nt" type="password" autocomplete="off" placeholder="${N.hasToken ? '(sparad)' : ''}"></div></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="nsave">Spara</button><button class="ghost" id="ntest" ${N.kind === 'none' ? 'disabled' : ''}>Skicka testnotis</button></div></div>` : ''}
   <div class="panel"><h2>Automatisk nedladdning i appen</h2>
     <p class="muted small">iPhone/iPad- och Android-appen håller de närmaste osedda avsnitten nedladdade, så att de finns när du saknar nät. Appen synkar när den öppnas och tar bort avsnitt som den själv laddat ner när du har sett dem. Per serie kan du ändra antalet på seriens sida.</p>
     <div class="row" style="align-items:flex-end">
-      <div><label>Avsnitt per serie</label><select id="sc"><option value="0">Av</option>${[1, 2, 3, 5, 10].map(n => `<option value="${n}">${n}</option>`).join('')}</select></div>
-      <div><label>Vilka serier</label><select id="ss"><option value="follows">Serier jag följer</option><option value="continue">Fortsätt titta (senaste 30 dagarna)</option></select></div>
-      <div><label>Kvalitet</label><select id="sq"><option value="480">480p (minst)</option><option value="720">720p</option><option value="1080">1080p</option><option value="orig">Original</option></select></div>
+      <div><label for="sc">Avsnitt per serie</label><select id="sc"><option value="0">Av</option>${[1, 2, 3, 5, 10].map(n => `<option value="${n}">${n}</option>`).join('')}</select></div>
+      <div><label for="ss">Vilka serier</label><select id="ss"><option value="follows">Serier jag följer</option><option value="continue">Fortsätt titta (senaste 30 dagarna)</option></select></div>
+      <div><label for="sq">Kvalitet</label><select id="sq"><option value="480">480p (minst)</option><option value="720">720p</option><option value="1080">1080p</option><option value="orig">Original</option></select></div>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="sw"> Bara på Wi-Fi</label></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="ssave">Spara</button></div></div>`);
   $$('[data-unf]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.unf}/follow`, { method: 'POST', body: { follow: false } }); route(); }));

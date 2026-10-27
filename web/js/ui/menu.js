@@ -30,6 +30,8 @@ export const menuOpen = () => !!cur;
 
 /** Gemensamt skal för meny och popover: placering, ark på telefon, stäng-logik */
 function popup(anchor, { point, label, title, cls, role, onClose }) {
+  // Fokus tillbaka dit det var (t.ex. kortets länk när menyn öppnades med Shift+F10), annars till knappen
+  const from = document.activeElement;
   closeMenu(false);
   const sheet = matchMedia(SHEET).matches;
   const back = document.createElement('div'); back.className = 'pop-back' + (sheet ? ' on' : '');
@@ -68,7 +70,10 @@ function popup(anchor, { point, label, title, cls, role, onClose }) {
     el.remove(); back.remove();
     if (anchor?.setAttribute && anchor.hasAttribute('aria-expanded')) anchor.setAttribute('aria-expanded', 'false');
     if (cur?.el === el) cur = null;
-    if (restoreFocus && anchor?.isConnected && anchor.focus) anchor.focus({ preventScroll: true });
+    if (restoreFocus) {
+      const to = from?.isConnected && from !== document.body && from.focus && !from.closest('.pop') ? from : anchor;
+      if (to?.isConnected && to.focus) to.focus({ preventScroll: true });
+    }
     onClose?.();
   }
   // Lyssnarna läggs till efter klicket/trycket som öppnade menyn

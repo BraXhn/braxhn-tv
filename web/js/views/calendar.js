@@ -120,8 +120,8 @@ export async function calendarFeedPanel(el) {
     openDialog({
       title: 'Din kalenderlänk',
       body: `<p class="muted small">Kopiera länken och lägg till den som prenumererad kalender (iPhone: Inställningar → Kalender → Konton → Lägg till konto → Annat → Lägg till prenumererad kalender). Länken visas bara nu.</p>
-        <label>Alla serier i biblioteket</label><input readonly value="${esc(url)}" id="calurl" style="font-family:ui-monospace,monospace">
-        <label>Bara serier jag följer</label><input readonly value="${esc(urlMine)}" id="calurl2" style="font-family:ui-monospace,monospace">
+        <label for="calurl">Alla serier i biblioteket</label><input readonly value="${esc(url)}" id="calurl" style="font-family:ui-monospace,monospace">
+        <label for="calurl2">Bara serier jag följer</label><input readonly value="${esc(urlMine)}" id="calurl2" style="font-family:ui-monospace,monospace">
         <p style="margin-top:12px"><a class="btn" href="${esc(webcal)}">Öppna i kalenderappen</a></p>`,
       actions: [{ label: 'Kopiera', onClick: () => { navigator.clipboard?.writeText(url).then(() => toast('Kopierat'), () => toastErr(new Error('Kunde inte kopiera – markera länken och kopiera den själv'))); return false; } },
         { label: 'Klar', kind: 'primary' }],

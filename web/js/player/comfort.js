@@ -5,18 +5,31 @@ import { me, store } from '../core.js';
 const ukey = (k) => `${k}.${me?.id ?? ''}`;
 
 // ---------------- undertextens utseende ----------------
-export const SUB_SIZES = { s: ['Liten', 0.75], m: ['Mellan', 1], l: ['Stor', 1.3], xl: ['Mycket stor', 1.65] };
-export const SUB_COLORS = { white: 'Vit', yellow: 'Gul' };
-export const SUB_BGS = { outline: 'Kantlinje och skugga', box: 'Halvgenomskinlig ruta', none: 'Ingen' };
-export const SUB_POS = { 0: 'Längst ner', 6: 'Lite högre', 12: 'Högre' };
+// Allt som FCC (47 CFR 79.103) och WCAG räknar upp för undertexter: storlek, typsnitt, textfärg, bakgrund (färg
+// och täckning), kantlinje och placering. Äldre sparade val (bg = outline/box/none) översätts i subStyle().
+export const SUB_SIZES = { s: ['Liten', 0.75], m: ['Mellan', 1], l: ['Stor', 1.3], xl: ['Mycket stor', 1.65], xxl: ['Störst', 2] };
+export const SUB_COLORS = { white: ['Vit', '#ffffff'], yellow: ['Gul', '#ffe14d'], cyan: ['Cyan', '#5ff4ff'], green: ['Grön', '#6dff7a'],
+  magenta: ['Magenta', '#ff7dff'], red: ['Röd', '#ff6b6b'], blue: ['Blå', '#8fb4ff'], black: ['Svart', '#000000'] };
+export const SUB_FONTS = { sans: ['Standard (utan seriffer)', 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'], serif: ['Med seriffer', 'Georgia,"Times New Roman",serif'],
+  mono: ['Jämnbred', 'ui-monospace,Menlo,Consolas,monospace'], casual: ['Handskriven', '"Comic Sans MS","Comic Neue",cursive'],
+  caps: ['Kapitäler', 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'] };
+export const SUB_BGS = { none: 'Ingen', semi: 'Halvgenomskinlig ruta', solid: 'Täckande ruta' };
+export const SUB_BGCOLORS = { black: ['Svart', '0,0,0'], gray: ['Grå', '60,60,60'], white: ['Vit', '255,255,255'], blue: ['Blå', '10,30,110'] };
+export const SUB_EDGES = { outline: 'Kantlinje', shadow: 'Skugga', raised: 'Upphöjd', depressed: 'Nedsänkt', none: 'Ingen' };
+export const SUB_POS = { 0: 'Längst ner', 6: 'Lite högre', 12: 'Högre', 24: 'Mitt på' };
+const SHADOW = { outline: '0 0 .08em #000,0 0 .08em #000,.04em .04em .1em #000,-.04em -.04em .1em #000,.04em -.04em .1em #000,-.04em .04em .1em #000',
+  shadow: '.06em .06em .12em rgba(0,0,0,.95)', raised: '-.04em -.04em 0 #fff8,.05em .05em 0 #000', depressed: '.04em .04em 0 #fff8,-.05em -.05em 0 #000', none: 'none' };
 // Standard för TV-avstånd: mellanstorlek (ca 5 % av bildhöjden), vit text med kantlinje
-const SUB_DEF = { size: 'm', color: 'white', bg: 'outline', pos: '0' };
+const SUB_DEF = { size: 'm', color: 'white', font: 'sans', bg: 'none', bgcolor: 'black', edge: 'outline', pos: '0' };
+const OLD_BG = { outline: { bg: 'none', edge: 'outline' }, box: { bg: 'semi', edge: 'none' } };
 
 export function subStyle() {
-  const s = { ...SUB_DEF, ...(store.get(ukey('substyle'), null) || {}) };
-  if (!SUB_SIZES[s.size]) s.size = SUB_DEF.size;
-  if (!SUB_COLORS[s.color]) s.color = SUB_DEF.color;
-  if (!SUB_BGS[s.bg]) s.bg = SUB_DEF.bg;
+  const saved = store.get(ukey('substyle'), null) || {};
+  const s = { ...SUB_DEF, ...saved };
+  if (OLD_BG[saved.bg]) Object.assign(s, OLD_BG[saved.bg]);
+  else if (saved.bg === 'none' && !saved.edge) s.edge = 'shadow';
+  for (const [k, list] of [['size', SUB_SIZES], ['color', SUB_COLORS], ['font', SUB_FONTS], ['bg', SUB_BGS], ['bgcolor', SUB_BGCOLORS], ['edge', SUB_EDGES]])
+    if (!list[s[k]]) s[k] = SUB_DEF[k];
   s.pos = String(s.pos);
   if (!SUB_POS[s.pos]) s.pos = SUB_DEF.pos;
   return s;
@@ -30,7 +43,11 @@ export function applySubStyle(el) {
   const s = subStyle();
   el.style.setProperty('--subscale', String(SUB_SIZES[s.size][1]));
   el.style.setProperty('--subpos', s.pos + '%');
-  el.dataset.subcolor = s.color; el.dataset.subbg = s.bg; el.dataset.subsize = s.size;
+  el.style.setProperty('--subcolor', SUB_COLORS[s.color][1]);
+  el.style.setProperty('--subfont', SUB_FONTS[s.font][1]);
+  el.style.setProperty('--subbg', s.bg === 'none' ? 'transparent' : `rgba(${SUB_BGCOLORS[s.bgcolor][1]},${s.bg === 'solid' ? 1 : 0.62})`);
+  el.style.setProperty('--subshadow', SHADOW[s.edge]);
+  el.dataset.subcolor = s.color; el.dataset.subbg = s.bg; el.dataset.subsize = s.size; el.dataset.subedge = s.edge; el.dataset.subfont = s.font;
   measureCtl(el);
 }
 // Kontrollradens höjd: undertexten lyfts över den när kontrollerna syns
@@ -44,8 +61,9 @@ export function subStyleFields(prefix = 'pst') {
   const s = subStyle();
   const sel = (id, label, opts, val) => `<label>${label}<select id="${prefix}-${id}" data-substyle="${id}">${Object.entries(opts).map(([k, v]) =>
     `<option value="${k}" ${String(val) === k ? 'selected' : ''}>${Array.isArray(v) ? v[0] : v}</option>`).join('')}</select></label>`;
-  return sel('size', 'Textstorlek', SUB_SIZES, s.size) + sel('color', 'Färg', SUB_COLORS, s.color) +
-    sel('bg', 'Bakgrund', SUB_BGS, s.bg) + sel('pos', 'Placering', SUB_POS, s.pos);
+  return sel('size', 'Textstorlek', SUB_SIZES, s.size) + sel('font', 'Typsnitt', SUB_FONTS, s.font) + sel('color', 'Textfärg', SUB_COLORS, s.color) +
+    sel('edge', 'Kantlinje', SUB_EDGES, s.edge) + sel('bg', 'Bakgrund', SUB_BGS, s.bg) + sel('bgcolor', 'Bakgrundsfärg', SUB_BGCOLORS, s.bgcolor) +
+    sel('pos', 'Placering', SUB_POS, s.pos);
 }
 export function bindSubStyleFields(root, onChange) {
   root.querySelectorAll('[data-substyle]').forEach(x => x.addEventListener('change', () => { setSubStyle({ [x.dataset.substyle]: x.value }); onChange?.(); }));

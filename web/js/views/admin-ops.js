@@ -43,8 +43,8 @@ export async function adminOps() {
   <div class="panel"><h2>Diskutrymme</h2>
     <p class="muted small">Ledigt utrymme kontrolleras var 5:e minut. Notis skickas när något går under gränsen (och högst en påminnelse per dygn) – kryssa i <i>Lågt diskutrymme</i> under Notiser. När omkodningsmappen nästan är full rensas inaktiva uppspelningar tidigare.</p>
     <div id="opdisk">${diskTable(O.disk)}</div>
-    <form id="opdiskf"><div class="row" style="margin-top:10px"><div><label>Varna under (% ledigt)</label><input id="opdp" type="number" min="0" max="50" step="0.5" value="${esc(O.diskMinPct)}" style="width:110px"></div>
-      <div><label>eller under (GB ledigt)</label><input id="opdg" type="number" min="0" step="1" value="${esc(O.diskMinGb)}" style="width:110px"></div>
+    <form id="opdiskf"><div class="row" style="margin-top:10px"><div><label for="opdp">Varna under (% ledigt)</label><input id="opdp" type="number" min="0" max="50" step="0.5" value="${esc(O.diskMinPct)}" style="width:110px"></div>
+      <div><label for="opdg">eller under (GB ledigt)</label><input id="opdg" type="number" min="0" step="1" value="${esc(O.diskMinGb)}" style="width:110px"></div>
       <button class="ghost">Spara</button><button type="button" class="ghost" id="opdchk">Kontrollera nu</button></div>
       <p class="muted small">0 stänger av gränsen. Kritiskt = under en fjärdedel av gränsen.</p></form>
   </div>
@@ -57,13 +57,13 @@ export async function adminOps() {
   </div>
   <div class="panel"><h2>Importera tittarhistorik från Plex eller Jellyfin</h2>
     <p class="muted small">Hämtar vad som är sett och hur långt du kommit i påbörjade filmer och avsnitt och för in det på valda användare här. Titlar matchas i första hand på TMDB/IMDb/TVDB-id, sedan på filsökväg och sist på titel och år (serier: säsong och avsnitt). Inget ändras förrän du klickar på <i>Importera</i>.</p>
-    <form id="impf"><div class="row"><div><label>Källa</label><select id="imps"><option value="plex">Plex</option><option value="jellyfin">Jellyfin / Emby</option></select></div>
-      <div style="flex:2;min-width:220px"><label>Adress</label><input id="impu" placeholder="http://192.168.1.10:32400"></div></div>
-      <div class="row" id="impplex"><div style="flex:1;min-width:220px"><label>X-Plex-Token <span class="muted small">(historiken för kontot som äger token)</span></label><input id="impt" type="password" autocomplete="off"></div></div>
-      <div class="row" id="impjf" hidden><div style="flex:1;min-width:180px"><label>API-nyckel <span class="muted small">(Instrumentpanel → API-nycklar)</span></label><input id="impk" type="password" autocomplete="off"></div>
-        <div style="flex:1;min-width:160px"><label>Användare i Jellyfin</label><select id="impjfu"><option value="">Hämta först…</option></select></div>
+    <form id="impf"><div class="row"><div><label for="imps">Källa</label><select id="imps"><option value="plex">Plex</option><option value="jellyfin">Jellyfin / Emby</option></select></div>
+      <div style="flex:2;min-width:220px"><label for="impu">Adress</label><input id="impu" placeholder="http://192.168.1.10:32400"></div></div>
+      <div class="row" id="impplex"><div style="flex:1;min-width:220px"><label for="impt">X-Plex-Token <span class="muted small">(historiken för kontot som äger token)</span></label><input id="impt" type="password" autocomplete="off"></div></div>
+      <div class="row" id="impjf" hidden><div style="flex:1;min-width:180px"><label for="impk">API-nyckel <span class="muted small">(Instrumentpanel → API-nycklar)</span></label><input id="impk" type="password" autocomplete="off"></div>
+        <div style="flex:1;min-width:160px"><label for="impjfu">Användare i Jellyfin</label><select id="impjfu"><option value="">Hämta först…</option></select></div>
         <button type="button" class="ghost small" id="impjfl">Hämta användare</button></div>
-      <label>Sökvägsmappning om filerna ligger på olika ställen (en per rad), t.ex. <code>/data/movies=/media/Filmer</code></label><textarea id="impm" rows="2" style="width:100%"></textarea>
+      <label for="impm">Sökvägsmappning om filerna ligger på olika ställen (en per rad), t.ex. <code>/data/movies=/media/Filmer</code></label><textarea id="impm" rows="2" style="width:100%"></textarea>
       <div class="row" style="margin-top:12px"><button class="primary">Förhandsvisa</button></div></form>
     <div id="impres"></div>
   </div>
@@ -71,8 +71,8 @@ export async function adminOps() {
     <p class="muted small">Smart-TV, spelkonsoler och mediaspelare (VLC, Kodi) hittar biblioteket under <i>Medieservrar</i> och spelar filerna direkt, utan omkodning – formatet måste alltså stödjas av TV:n. <b>Ingen inloggning:</b> alla enheter på hemnätet kan se och spela det som visas här, därför finns en åldersgräns. Nås aldrig via omvänd proxy eller utifrån. I Docker krävs nätverkstypen <b>host</b> (eller macvlan/br0 med egen IP) för att TV:n ska hitta servern.</p>
     ${O.dlna.error ? `<p class="err small">${esc(O.dlna.error)}</p>` : ''}${O.dlna.running && O.dlna.addresses.length ? `<p class="muted small">Annonseras på ${esc(O.dlna.addresses.join(', '))}.</p>` : ''}
     <form id="dlnaf"><label class="switch"><input type="checkbox" id="dlen" ${O.dlna.enabled ? 'checked' : ''}> Dela biblioteket med DLNA</label>
-      <div class="row"><div style="flex:1;min-width:180px"><label>Namn på TV:n</label><input id="dlname" value="${esc(O.dlna.name)}" maxlength="60"></div>
-      <div><label>Högsta åldersgräns <span class="muted small">(tomt = som huvudkontot${O.dlna.effectiveMaxAge == null ? ': allt' : ''})</span></label><input id="dlage" value="${esc(O.dlna.maxAge)}" placeholder="t.ex. 11" style="width:140px"></div></div>
+      <div class="row"><div style="flex:1;min-width:180px"><label for="dlname">Namn på TV:n</label><input id="dlname" value="${esc(O.dlna.name)}" maxlength="60"></div>
+      <div><label for="dlage">Högsta åldersgräns <span class="muted small">(tomt = som huvudkontot${O.dlna.effectiveMaxAge == null ? ': allt' : ''})</span></label><input id="dlage" value="${esc(O.dlna.maxAge)}" placeholder="t.ex. 11" style="width:140px"></div></div>
       ${L.length ? `<fieldset class="libpick"><legend>Bibliotek som visas</legend>${dlLibOpts}</fieldset>` : ''}
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button></div></form>
   </div>

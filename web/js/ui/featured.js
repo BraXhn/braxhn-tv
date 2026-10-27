@@ -7,7 +7,7 @@ import { startPlay } from '../lazy.js';
 
 const INTERVAL = 9000;
 const HEX = /^#[0-9a-f]{6}$/i;
-const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('reduce-motion');
 
 function meta(it) {
   const p = [];

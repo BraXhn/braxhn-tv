@@ -3,7 +3,7 @@
 // kortstorlek i menyraden (sparas i webbläsaren).
 import { $, esc, main, store } from '../core.js';
 
-const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('reduce-motion');
 const SIZE = { min: 90, max: 220, def: 125 };
 
 /** Rubriken för en hylla (texten i h2 utan länkarna efter) – för knapparnas namn */
