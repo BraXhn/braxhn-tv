@@ -1,6 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
+- Rättat: efter byte av kvalitet, ljudspår, nattläge/tydligare dialog (Safari) eller inbränd undertext blev filmen stående tills man pausade och startade igen. Den spelar nu vidare av sig själv – och en pausad film förblir pausad
 - **Omkodningen drar mycket mindre processor, särskilt 4K och HDR med grafikkort:** med NVIDIA och Intel/AMD (VAAPI) stannar bilderna nu på grafikkortet hela vägen – avkodning, nedskalning och färgkonvertering – i stället för att varje bild hämtades till processorn för skalning (som en 4K-bild). HDR med NVIDIA skalas ner på grafikkortet innan tonmappningen, så processorn tonmappar en fjärdedel så många bildpunkter. Testas vid start; fungerar det inte används processorfiltren automatiskt (`GPU_FILTERS=0` stänger av)
 - Omkodningen ligger nu högst ~70 s före tittaren (förut upp till 4 minuter), som Plex – processorn arbetar inte i onödan med minuter som kanske aldrig ses
 - Bakgrundsjobb (förhandsbilder, intro-detektering, platshållarfärger) körs med lägsta processor- och diskprioritet

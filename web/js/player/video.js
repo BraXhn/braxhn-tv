@@ -218,7 +218,7 @@ export async function play(id, start = 0, opts = {}) {
   v.addEventListener('pause', () => P === cur && sendProgress());
   v.addEventListener('ended', () => P === cur && onEnded());
   v.addEventListener('error', () => {
-    if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(); }
+    if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(true); }
     else if (P === cur && v.error) toast(`Kunde inte spela upp (${['', 'avbrutet', 'nätverksfel', 'avkodningsfel', 'formatet stöds inte'][v.error.code] || 'fel'}) – prova en lägre kvalitet under ⚙`);
   });
   // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
@@ -276,7 +276,8 @@ function startSkipCountdown(cur, plan, v) {
   }, 1000);
 }
 
-async function load(start) {
+// play: false = byt ström men låt filmen stå pausad (den var pausad när inställningen ändrades)
+async function load(start, { play = true } = {}) {
   const cur = P; if (!cur) return;
   const { it, el } = cur, v = $('#vid', el);
   if (!v || !v.isConnected) return;
@@ -325,6 +326,7 @@ async function load(start) {
   const pm = $('#pmode', el);
   pm.textContent = `${label}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
   pm.title = pb.reasons.join(', ');
+  v.autoplay = play; // pausad vid bytet: den nya strömmen ska inte starta av sig själv
   if (pb.mode === 'direct' || v.canPlayType('application/vnd.apple.mpegurl')) {
     v.src = pb.url;
   } else {
@@ -359,6 +361,9 @@ async function load(start) {
       if (d.type === 'mediaError' && ++mediaTries <= 2) return hls.recoverMediaError();
       toast(d.type === 'networkError' ? 'Ingen kontakt med servern – uppspelningen stoppades' : 'Uppspelningsfel: ' + d.details);
     });
+    // Starta när spellistan är inläst – ett play() direkt efter attachMedia avbryts ofta av den nya laddningen
+    // ("interrupted by a new load request") och filmen blev stående tills man pausade och startade igen
+    hls.on(Hls.Events.MANIFEST_PARSED, () => tryPlay());
     hls.loadSource(pb.url); hls.attachMedia(v);
   }
   const lmd = cur.lmd = () => {
@@ -368,10 +373,14 @@ async function load(start) {
     setSubs();
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
-  v.play().catch(() => {});
+  // Efter byte av kvalitet, ljud, nattläge m.m.: fortsätt spela av sig själv. play() försöks direkt, när
+  // spellistan är inläst och när det finns data att spela – det som först lyckas räcker.
+  function tryPlay() { if (play && live() && v.paused) v.play().catch(() => {}); }
+  v.addEventListener('canplay', tryPlay, { once: true });
+  tryPlay();
   applyAudioFx(v);
 }
-function reload() { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0); }
+function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
 
 function sendProgress(final = false) {
   if (!P) return;
