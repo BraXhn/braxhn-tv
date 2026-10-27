@@ -193,7 +193,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   if (typeof b.osUser === 'string') setSetting('os_user', b.osUser.trim());
   if (typeof b.osPass === 'string' && b.osPass) setSetting('os_pass', b.osPass);
   if (typeof b.subLangs === 'string') setSetting('sub_langs', b.subLangs.replace(/[^a-z,-]/gi, ''));
-  if (b.remoteQuality && st.QUALITIES[b.remoteQuality]) setSetting('remote_quality', b.remoteQuality);
+  if (b.remoteQuality && st.isQuality(b.remoteQuality)) setSetting('remote_quality', b.remoteQuality);
   if (typeof b.publicUrl === 'string') {
     const u = b.publicUrl.trim().replace(/\/+$/, '');
     if (u && !/^https?:\/\/[^\s/]+$/i.test(u)) return fail(c.res, 400, 'Publik adress ska vara t.ex. https://tv.dindomän.se');

@@ -102,3 +102,15 @@ export function heifWithExif(t, { width = 4032, height = 3024, irot = null, padd
   const mdat = box('mdat', Buffer.alloc(padding), exifItem);
   return Buffer.concat([ftyp, metaFor(pre + 8 + padding), mdat]);
 }
+
+/**
+ * Fientlig HEIC: iloc med offset_size/length_size 0 (inga byte per utsträckning) och 10 000 poster med 65 535
+ * utsträckningar var – 60 kB som utan gräns gav 655 miljoner varv i läsaren (servern stod still i 40 s).
+ */
+export function heifIlocBomb(items = 10000) {
+  const ftyp = box('ftyp', Buffer.from('heic', 'latin1'), u32(0), Buffer.from('mif1heic', 'latin1'));
+  const iinf = box('iinf', full(0), u16(1), box('infe', full(2), u16(1), u16(0), Buffer.from('Exif\0', 'latin1')));
+  const entries = Buffer.concat(Array.from({ length: items }, () => Buffer.concat([u16(2), u16(0), u16(65535)])));
+  const iloc = box('iloc', full(0), Buffer.from([0x00, 0x00]), u16(items), entries);
+  return Buffer.concat([ftyp, box('meta', full(0), iinf, iloc)]);
+}

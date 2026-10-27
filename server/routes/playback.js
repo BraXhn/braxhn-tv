@@ -52,7 +52,7 @@ route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaIt
 // aldrig över inställd maxkvalitet utanför hemmet. save: "Spara data" i telefonen → högst 480p.
 const STEPS = ['1080', '720', '480', '360'];
 export function remoteQuality(max, bw, save) {
-  let cap = st.QUALITIES[max] ? max : '1080';
+  let cap = st.isQuality(max) ? max : '1080';
   if (save && (cap === 'orig' || +cap > 480)) cap = '480';
   if (!bw) return cap;
   const budget = bw * 0.75;

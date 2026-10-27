@@ -89,6 +89,12 @@
 - Rättat: filbevakningen missade ljudböcker (.m4b) och flera ljudformat (.oga, .aif/.aiff, .ape, .wv, .mka) samt nya mappar med punkt i namnet (t.ex. "Film.2020"). Bevakningen startas nu efter svaret och ett bibliotek i taget, så att det inte segar när man lägger till eller ändrar bibliotek
 - Snabbare startsida, musikhem och TV-guide: rekommendationernas kandidater och översikten över smarta spellistor sparas en kort stund, och nya index för TV-guiden och nyligen tillagda låtar
 
+### Säkerhet
+- En fientlig HEIC-fil (60 kB, tomma utsträckningar i `iloc`) i fotobiblioteket kunde låsa hela servern i 40 sekunder vid skanningen – EXIF-läsaren har nu ett tak och tar linjär tid
+- Extramaterial med `?mp4=1`: taket på två samtidiga omgörningar kunde kringgås med samtidiga förfrågningar (platsen togs först efter ffprobe) – nu tas platsen direkt, och `HEAD` startar ingen ffmpeg
+- Fotobibliotekets videoklipp: varje bildförfrågan startade en egen ffmpeg för stillbilden, utan tak. Nu högst två samtidigt, samma stillbild en gång och ett klipp som inte går att läsa försöks igen först efter en timme
+- Kvalitet ur adressen (`?q=`), kvalitetstaket utanför hemmet och webhookformatet slås bara upp bland egna nycklar – `q=constructor` eller `__proto__` räknades förut som en giltig kvalitet
+
 ## 0.9.3
 - Rättat: HDR-filmer som omkodades till SDR kom aldrig igång ("Startar omkodning…"). Efter avkodning på grafikkortet saknar bilderna ofta färginformation och tonmappningen stannade med "no path between colorspaces". Källans färgegenskaper sätts nu uttryckligen. Felet räknades dessutom som ett hårdvarufel, så NVENC stängdes av till nästa omstart – det gör det inte längre
 

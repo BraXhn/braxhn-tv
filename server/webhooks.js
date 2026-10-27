@@ -65,7 +65,7 @@ function clean(b, owner, prev) {
   const allowed = owner == null ? Object.keys(EVENTS) : USER_EVENTS;
   const events = b.events === undefined ? parseEvents(prev?.events) : (Array.isArray(b.events) ? b.events : []).filter(e => allowed.includes(e));
   if (!events.length) throw new HookError('Välj minst en händelse');
-  const format = b.format === undefined ? prev?.format || 'json' : FORMATS[b.format] ? b.format : 'json';
+  const format = b.format === undefined ? prev?.format || 'json' : typeof b.format === 'string' && Object.hasOwn(FORMATS, b.format) ? b.format : 'json';
   // Lokala adresser bara för serverns webhooks (administratören på betrott nät) – aldrig för en profils egna
   const allowLocal = owner == null ? (b.allowLocal === undefined ? !!prev?.allow_local : !!b.allowLocal) : false;
   const enabled = b.enabled === undefined ? (prev ? !!prev.enabled : true) : !!b.enabled;
