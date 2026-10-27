@@ -32,7 +32,7 @@ const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', 
   history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
-  const h = location.hash.slice(2) || '';
+  const h = (location.hash.slice(2) || '').split('?')[0]; // ?… = vyns parametrar (t.ex. bibliotekets filter)
   const [name, arg] = h.split('/');
   for (const a of $$('#libnav a')) {
     const hr = a.getAttribute('href');
@@ -83,7 +83,8 @@ export async function route() {
   // Stoppa timers/slingor från föregående vy
   for (const f of [...leaveFns]) { try { f(); } catch {} }
   leaveFns.clear();
-  const h = location.hash.slice(2) || '';
+  // Allt efter ? hör till vyn (bibliotekets filter, #/lib/1?genre=…) och läses av den
+  const h = (location.hash.slice(2) || '').split('?')[0];
   const [name, arg, arg2] = h.split('/');
   // Inbjudningslänken (#/invite/<token>) öppnas utan inloggning – där skapar mottagaren sitt konto
   if (!me && name !== 'login' && name !== 'invite') { rememberPage(); location.hash = '#/login'; return; }

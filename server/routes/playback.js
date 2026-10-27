@@ -19,6 +19,7 @@ import { minQuality } from '../perms.js';
 import * as cinema from '../cinema.js';
 import * as pp from '../playprefs.js';
 import { TRAILER_SCOPE } from '../trailers.js';
+import * as libfilter from '../libfilter.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
@@ -263,7 +264,7 @@ route('POST', '/api/items/:id/subdownload', user, async (c) => {
   const it = mediaItem(c); if (!it) return;
   const { fileId, lang } = await readJson(c.req);
   if (!fileId) return fail(c.res, 400, 'fileId saknas');
-  try { const r = await os.download(it, fileId, lang); st.forgetSubtitles(it); send(c.res, 200, r); }
+  try { const r = await os.download(it, fileId, lang); st.forgetSubtitles(it); libfilter.forget(it.id); send(c.res, 200, r); }
   catch (e) { fail(c.res, e.status || 502, e.message); }
 });
 route('DELETE', '/api/items/:id/subs/:sid', admin, (c) => {
@@ -272,6 +273,7 @@ route('DELETE', '/api/items/:id/subs/:sid', admin, (c) => {
   if (!s || s.source !== 'downloaded') return fail(c.res, 400, 'Endast nedladdade undertexter kan tas bort');
   os.removeDownloaded(it, s.file);
   st.forgetSubtitles(it);
+  libfilter.forget(it.id); // undertextspråken i bibliotekets filter
   send(c.res, 200, { ok: true });
 });
 // Intro/eftertexter: justera manuellt eller analysera om

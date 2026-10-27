@@ -10,22 +10,27 @@ let seq = 0;
  * Formulär för en ny eller ändrad samling. Delad (alla profiler) går bara att välja för administratörer på hemnätet.
  * @param {object} [col]   Befintlig samling (ändra) – annars skapas en ny
  * @param {number} [item]  Titel som läggs in direkt i en ny samling
+ * @param {{ library: number, query: string }} [smart]  Ny smart samling: bibliotekets filter (innehållet räknas fram vid visning)
  * @returns {Promise<number|null>} Samlingens id, eller null om man avbröt
  */
-export async function collectionForm(col = null, item = null) {
+export async function collectionForm(col = null, item = null, smart = null) {
   const id = 'cf' + (++seq), canShare = !!me?.adminHere;
   const v = col || { name: '', overview: '', sort: 'manual', shared: false, home: false };
+  const isSmart = !!(smart || col?.smart);
   const body = `<div class="field"><label for="${id}n">Namn</label><input id="${id}n" name="name" required maxlength="100" value="${esc(v.name)}" autocomplete="off"></div>
     <div class="field"><label for="${id}o">Beskrivning (valfritt)</label><textarea id="${id}o" name="overview" rows="3" maxlength="2000">${esc(v.overview || '')}</textarea></div>
-    <div class="field"><label for="${id}s">Sortering</label><select id="${id}s" name="sort">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${v.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    ${isSmart ? `<p class="hint small muted">Smart samling: innehållet och ordningen följer filtret och uppdateras av sig själv när biblioteket ändras.</p>`
+      : `<div class="field"><label for="${id}s">Sortering</label><select id="${id}s" name="sort">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${v.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`}
     <label class="ccheck"><input type="checkbox" id="${id}h"${v.home ? ' checked' : ''}> Visa på startsidan</label>
     ${canShare ? `<label class="ccheck"><input type="checkbox" id="${id}d"${v.shared ? ' checked' : ''} aria-describedby="${id}dh"> Delad med alla profiler</label>
       <p class="hint small muted" id="${id}dh">Annars syns samlingen bara för dig. Barnprofiler ser bara titlar inom sin åldersgräns.</p>`
       : `<p class="hint small muted">Samlingen syns bara för dig.</p>`}`;
   const d = openDialog({
-    title: col ? 'Ändra samling' : 'Ny samling', form: true, body,
+    title: col ? 'Ändra samling' : smart ? 'Ny smart samling' : 'Ny samling', form: true, body,
     actions: [{ label: 'Avbryt', value: null }, { label: col ? 'Spara' : 'Skapa', kind: 'primary', submit: true, onClick: async (h) => {
-      const b = { name: h.$(`#${id}n`).value.trim(), overview: h.$(`#${id}o`).value, sort: h.$(`#${id}s`).value, home: h.$(`#${id}h`).checked };
+      const b = { name: h.$(`#${id}n`).value.trim(), overview: h.$(`#${id}o`).value, home: h.$(`#${id}h`).checked };
+      if (!isSmart) b.sort = h.$(`#${id}s`).value;
+      if (smart) b.smart = smart;
       if (canShare) b.shared = h.$(`#${id}d`).checked;
       if (!b.name) { h.$(`#${id}n`).focus(); return false; }
       if (col) { await api(`/custom-collections/${col.id}`, { method: 'PUT', body: b }); return col.id; }

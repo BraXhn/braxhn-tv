@@ -1,6 +1,6 @@
 // Vyer: alla samlingar (egna + TMDB) och en egen samling med ändring, borttagning och manuell ordning
 // (dra och släpp eller ↑/↓-knapparna, som fungerar med tangentbord, fjärrkontroll och skärmläsare).
-import { $, $$, act, api, esc, heroUrl, main, toastErr, views } from '../core.js';
+import { $, $$, act, api, esc, heroUrl, main, sxe, toast, toastErr, views } from '../core.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
@@ -20,21 +20,30 @@ views.collections = async () => {
 views.ucollection = async (id) => {
   const c = await api('/custom-collections/' + encodeURIComponent(id));
   const bd = c.items.find(i => i.backdrop), first = c.items.find(i => i.kind === 'movie' && !i.watched);
-  const meta = [`${c.count} ${c.count === 1 ? 'titel' : 'titlar'}`, c.shared ? 'Delad med alla profiler' : 'Privat', `Sortering: ${SORT_LABEL[c.sort] || c.sort}`]
+  // Smart samling: ett sparat biblioteksfilter – "Ändra filter" öppnar biblioteket med filtret (och sparar tillbaka hit)
+  const filterUrl = c.smart && c.library ? `#/lib/${+c.library}?${c.query ? c.query + '&' : ''}scol=${+c.id}` : null;
+  const meta = [`${c.count} ${c.count === 1 ? 'titel' : 'titlar'}`, c.shared ? 'Delad med alla profiler' : 'Privat', c.smart ? 'Smart samling' : `Sortering: ${SORT_LABEL[c.sort] || c.sort}`]
     .concat(c.home ? ['Visas på startsidan'] : []);
   main.innerHTML = `<div class="hero">${bd ? `<div class="bd" style="background-image:url(${heroUrl(`/api/image/${+bd.id}/backdrop`)})"></div>` : ''}
     <div class="in"><div><p><a class="muted" href="#/collections">← Samlingar</a></p><h1>${esc(c.name)}</h1>
     <div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>${c.overview ? `<p class="overview">${esc(c.overview)}</p>` : ''}
     <div class="row">${first ? `<button class="primary" id="playfirst">▶ Spela ${esc(first.title)}</button>` : ''}
-    ${c.editable ? `<button class="ghost" id="cedit">Ändra</button>${c.sort === 'manual' && c.items.length > 1 ? '<button class="ghost" id="corder" aria-pressed="false">Ändra ordning</button>' : ''}
+    ${c.items.length ? '<button class="ghost" id="cshuffle" title="Spela en slumpad titel ur samlingen">🔀 Blanda</button>' : ''}
+    ${filterUrl ? `<a class="btn ghost" href="${esc(filterUrl)}">${c.editable ? 'Ändra filter' : 'Visa i biblioteket'}</a>` : ''}
+    ${c.editable ? `<button class="ghost" id="cedit">Ändra</button>${!c.smart && c.sort === 'manual' && c.items.length > 1 ? '<button class="ghost" id="corder" aria-pressed="false">Ändra ordning</button>' : ''}
       <button class="ghost danger" id="cdel">Ta bort samlingen</button>` : ''}</div></div></div></div>
     <div id="cbody" style="margin-top:20px"></div><p class="sr-only" aria-live="polite" id="clive"></p>`;
   const grid = () => {
-    $('#cbody').innerHTML = c.items.length ? `<div class="grid" data-row="ucol" data-ucol="${+c.id}"${c.editable ? ' data-edit="1"' : ''}>${c.items.map(i => card(i)).join('')}</div>`
-      : emptyState({ icon: '🗂', title: 'Samlingen är tom', text: 'Lägg till filmer och serier med ⋮ → ”Lägg till i samling…” eller från titelsidan.' });
+    $('#cbody').innerHTML = c.items.length ? `<div class="grid" data-row="ucol" data-ucol="${+c.id}"${c.editable && !c.smart ? ' data-edit="1"' : ''}>${c.items.map(i => card(i)).join('')}</div>`
+      : emptyState({ icon: '🗂', title: 'Samlingen är tom', text: c.smart ? 'Inget i biblioteket matchar filtret just nu.' : 'Lägg till filmer och serier med ⋮ → ”Lägg till i samling…” eller från titelsidan.' });
   };
   grid();
   if (first) $('#playfirst').onclick = (e) => startPlay(e.currentTarget, first.id, first.position || 0);
+  if ($('#cshuffle')) $('#cshuffle').onclick = act(async (e) => {
+    const b = e.currentTarget, r = await api(`/custom-collections/${+c.id}/shuffle`);
+    toast(r.play.kind === 'episode' ? `Blandat: ${r.item.title} · ${sxe(r.play)}` : `Blandat: ${r.play.title}`);
+    startPlay(b, r.play.id, r.play.watched ? 0 : r.play.position || 0);
+  });
   if (!c.editable) return;
   $('#cedit').onclick = act(async () => { if (await collectionForm(c)) route(); });
   $('#cdel').onclick = act(async () => { if (await deleteCollection(c)) location.hash = '#/collections'; });

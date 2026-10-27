@@ -106,6 +106,26 @@ Bara tillägg – apparna kan läsa dem när de vill (alla kan saknas eller vara
 - `GET /api/music/:lib/artists`: `image` (Bool) per artist.
 - `GET /api/music/tracks/:tid/lyrics`: `source` kan nu vara `lrclib` (hämtad från nätet), och `instrumental: true` när låten saknar text.
 
+## Bibliotekets filter: `/api/libraries/:id/items`, `/facets`, `/shuffle`
+
+Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` = `title`/`added`/`year`/`rating`/`date`,
+`filter` = `unwatched`/`watched`, `limit`/`offset`, `collections=1`). Allt nedan är valfritt (server/libfilter.js):
+
+- Filter (AND mellan nycklar, listor är "någon av"): `genre=A,B` (+ `genreAll=1` = alla), `yearMin`/`yearMax`,
+  `ratingMin` (0–10), `durMin`/`durMax` (minuter; serier: avsnittens snittlängd), `res=sd,720,1080,4k`,
+  `hdr=hdr,hdr10,dovi,hlg,sdr`, `audio=stereo,surround,atmos`, `alang=sv,en` och `slang=…` (två eller tre bokstäver),
+  `filter=inprogress`, `addedDays`, `ageMax`, `coll=yes|no` (filmer), `status=ongoing|ended` och
+  `seasonsMin`/`seasonsMax` (serier). Fil-egenskaperna gäller filmens fil eller en version, för serier något avsnitt.
+- Sortering: `sort` = `title`, `year`, `rating`, `added`, `lastwatched`, `duration`, `random` (+ `seed` = heltal för
+  stabil ordning mellan sidor), `order=asc|desc`. Utan `order` är ordningen densamma som förut.
+- Okända nycklar och ogiltiga värden ignoreras. Nya fält: `query` (filtret normaliserat som adressdel) och `total`
+  (när filter eller sidindelning används; med `collections=1` räknas kort).
+- `GET /api/libraries/:id/facets`: värdena som finns i biblioteket för profilen (genrer med antal, år, åldersgränser,
+  upplösning, HDR, ljud, språk, samlingar/status/säsonger).
+- `GET /api/libraries/:id/shuffle?<filter>`: `{ item, play }` – en slumpad titel; för serier är `play` ett avsnitt.
+- Smarta samlingar: `POST/PUT /api/custom-collections` med `smart: { library, query }`; samlingen får fälten `smart`,
+  `library` och `query`. `GET /api/custom-collections/:cid/shuffle` som ovan.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

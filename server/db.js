@@ -371,6 +371,20 @@ addCol('items', 'imdb_id', 'TEXT');
 addCol('items', 'taken', 'INTEGER');
 addCol('items', 'folder', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS items_folder ON items(library_id, folder)');
+// Bibliotekens filter (server/libfilter.js): ljud-/undertextspråk (',sv,en,'), flest ljudkanaler och Atmos/DTS:X per fil,
+// räknade ur streams och undertextfilerna. f_v = beräkningens version, NULL = räknas om (utlösaren nedan när filen ändras).
+addCol('items', 'f_alang', 'TEXT');
+addCol('items', 'f_slang', 'TEXT');
+addCol('items', 'f_ach', 'INTEGER');
+addCol('items', 'f_atmos', 'INTEGER');
+addCol('items', 'f_v', 'INTEGER');
+db.exec(`CREATE INDEX IF NOT EXISTS items_facets_todo ON items(id) WHERE f_v IS NULL AND path IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS items_facets_upd AFTER UPDATE OF streams, path ON items WHEN NEW.f_v IS NOT NULL
+BEGIN UPDATE items SET f_v=NULL WHERE id=NEW.id; END;`);
+// Smarta samlingar (server/customcollections.js): kind 'smart' = innehållet räknas fram vid visning ur def
+// (JSON { library, query } – bibliotekets filter som adressdel, libfilter.js); 'manual' = titlarna i custom_collection_items
+addCol('custom_collections', 'kind', "TEXT NOT NULL DEFAULT 'manual'");
+addCol('custom_collections', 'def', 'TEXT');
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 5;
