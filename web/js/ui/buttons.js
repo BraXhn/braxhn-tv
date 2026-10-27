@@ -37,3 +37,5 @@ export function setIconButton(b, icon, label) {
   b.innerHTML = ICON[icon] || `<span aria-hidden="true">${esc(icon)}</span>`;
   b.setAttribute('aria-label', label); b.title = label;
 }
+/** Knappen "Spela på…" (titelsidan och spelaren) – menyn öppnas av openRemotePicker i player/remote.js */
+export const remoteButton = (id, cls = 'ghost') => `<button type="button" class="${cls} playon" id="${id}" aria-haspopup="menu" title="Spela på en annan enhet" aria-label="Spela på en annan enhet">${ICON.remote}<span>Spela på…</span></button>`;

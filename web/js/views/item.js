@@ -1,11 +1,10 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, metadataverktyg, undertextsökning och följ-knapp
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
 import { capsQuery } from '../player/caps.js';
-import { LP, RP } from '../player/live.js';
-import { stopVideo } from '../player/overlay.js';
-import { openRemotePicker, remoteButton } from '../player/remote.js';
-import { P, startPlay } from '../player/video.js';
+import { curPlayer, liveOpen, loadPlayer, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
+import { remoteButton } from '../ui/buttons.js';
 import { art, card, castShelf, fmtTaken, shelf } from '../ui/cards.js';
 import { addToCollection } from '../ui/collections.js';
 import { openDialog } from '../ui/dialog.js';
@@ -51,6 +50,7 @@ views.item = async (id, season) => {
   // Flera versioner (t.ex. 4K och 1080p): valet sparas per film i webbläsaren, annars väljer servern
   const chosen = store.get('version.' + id, '');
   const it = await api('/items/' + id + (chosen ? '?version=' + encodeURIComponent(chosen) : ''));
+  loadPlayer().catch(() => {}); // titelsidan finns för att spela: spelaren laddas medan sidan ritas
   if (it.kind === 'show') return showView(it, season);
   const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = it.position > 30;
@@ -185,7 +185,7 @@ function playTrailer(id, title) {
   let v;
   const d = openDialog({ title: `${title} – trailer`, size: 'wide', className: 'trailer',
     body: `<video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>`,
-    onClose: () => { v.onerror = null; stopVideo(v); } });
+    onClose: () => { v.onerror = null; v.pause(); v.removeAttribute('src'); v.load(); } });
   v = d.$('video');
   v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)', { error: true });
 }
@@ -236,7 +236,7 @@ async function subSearch(it) {
   let got = false;
   // Stängs dialogen: ladda bara om sidan om något faktiskt hämtades
   const h = openDialog({ title: 'Sök undertexter', body: `<p class="muted" id="ssm" aria-live="polite">Söker på OpenSubtitles…</p><div id="ssr" class="scrollbox"></div>`,
-    onClose: (v) => { if (got && v !== 'route' && !P && !LP && !RP) route(); } });
+    onClose: (v) => { if (got && v !== 'route' && !curPlayer() && !liveOpen()) route(); } });
   const d = h.el;
   try {
     const r = await api(`/items/${it.id}/subsearch`, { bg: true });

@@ -4,6 +4,9 @@ import { M, musicSession, videoSession } from '../audio.js';
 import { overlayClose, overlayOpen, stopVideo } from './overlay.js';
 import { closeAllPlayers, loadHls } from './video.js';
 import { screenPing, screenSt, timeUp } from '../screentime.js';
+import { provide } from '../lazy.js';
+import * as self from './live.js';
+provide('live', self); // fasaderna i lazy.js når modulen härifrån
 
 export let LP = null, RP = null; // live-spelare, inspelningsspelare
 document.addEventListener('keydown', (e) => {

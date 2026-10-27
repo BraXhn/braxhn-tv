@@ -1,30 +1,15 @@
-// BraXhn TV webbklient – ren JavaScript, inga ramverk. Startmodul: laddar alla moduler och startar appen.
-// Modulerna ligger i /js/ (se CLAUDE.md). Vyerna registrerar sig i views när de laddas, därför importeras de här –
-// utom sällan använda vyer (administration, statistik, live-TV …), som router.js laddar första gången de öppnas (LAZY).
-// Nya moduler ska även läggas in i SHELL i sw.js så att appen kan starta utan kontakt med servern.
+// BraXhn TV webbklient – ren JavaScript, inga ramverk. Startmodul: laddar startsidans moduler och startar appen.
+// Modulerna ligger i /js/ (se CLAUDE.md). Bara det startsidan behöver importeras här (servern förladdar hela
+// kedjan, server/http/static.js). Övriga vyer laddas av router.js första gången de öppnas (LAZY) och spelaren
+// genom fasaderna i js/lazy.js – i förväg när sidan är ritad och när pekaren eller fokus når ett kort.
+// Alla moduler ska även finnas i MODULES i sw.js så att appen kan starta utan kontakt med servern.
 import { me, rememberPage } from './js/core.js';
-import { boot, route } from './js/router.js';
-import { initCast } from './js/player/cast.js';
+import { boot, prefetchView, route } from './js/router.js';
+import { idle, loadPlayer, need, pageDrawn } from './js/lazy.js';
 import { initCardMenus } from './js/ui/cardmenu.js';
 import { initCardSize, initShelves } from './js/ui/shelves.js';
-import './js/player/overlay.js';
-import './js/player/live.js';
-import './js/player/video.js';
-import './js/player/party.js';
-import './js/audio.js';
 import './js/screentime.js';
-import './js/views/login.js';
-import './js/views/quickconnect.js';
 import './js/views/home.js';
-import './js/views/collections.js';
-import './js/views/search.js';
-import './js/views/item.js';
-import './js/views/person.js';
-import './js/views/account.js';
-import './js/views/books.js';
-import './js/views/calendar.js';
-import './js/views/setup.js';
-import './js/views/music.js';
 
 // Fel i appen rapporteras till serverloggen (Administration → Logg) – bara egna skript och högst fem per sidvisning
 let reported = 0;
@@ -42,17 +27,23 @@ addEventListener('unhandledrejection', (e) => {
   report(r.message || r, r.stack);
 });
 
-// Googles Cast-bibliotek (från gstatic.com) först när sidan visats – behövs bara för att casta
-const idle = (fn, ms) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: ms }) : setTimeout(fn, ms));
-idle(() => initCast(), 2500);
 initCardMenus();
 initShelves();
 initCardSize();
+
+// Djuplänk (#/item/…, #/music/… …): vyns moduler hämtas redan nu, parallellt med inloggningskontrollen
+prefetchView(location.hash.slice(2).split('/')[0] || 'home');
 
 (async () => {
   try { await boot(); } catch {}
   // Djuplänk utan inloggning (t.ex. QR-koden för inloggning med kod): öppnas efter inloggningen
   if (!me && location.hash.startsWith('#/invite/')) route(); // inbjudan: skapa konto utan att logga in först
   else if (!me) { rememberPage(); location.hash = '#/login'; if (location.hash === '#/login') route(); }
-  else { if (location.hash === '#/login') location.hash = '#/'; else route(); }
+  else { if (location.hash === '#/login') location.hash = '#/'; else await route(); }
+  // När sidan är ritad: spelaren (med Chromecast), titelsidan och sökningen i förväg – första klicket ska inte vänta
+  pageDrawn();
+  idle(() => {
+    loadPlayer().then(() => need('player/cast.js')).then(m => m.initCast()).catch(() => {});
+    if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); }
+  });
 })();

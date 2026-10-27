@@ -1,7 +1,8 @@
 // Vyer: alla samlingar (egna + TMDB) och en egen samling med ändring, borttagning och manuell ordning
 // (dra och släpp eller ↑/↓-knapparna, som fungerar med tangentbord, fjärrkontroll och skärmläsare).
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, heroUrl, main, sxe, toast, toastErr, views } from '../core.js';
-import { startPlay } from '../player/video.js';
+import { startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
 import { card, colCard, shelfHtml } from '../ui/cards.js';

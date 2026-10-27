@@ -1,4 +1,5 @@
 // Vy: installationsguiden (#/setup/<steg>) – leder en ny administratör genom språk, metadata, bibliotek,
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // hårdvaruomkodning, åtkomst utanför hemmet och hushållet. Läget (aktuellt steg, klarade/överhoppade steg och
 // om guiden är klar) sparas på servern: server/routes/setup.js. Kan köras igen från Administration.
 // Fungerar med fjärrkontroll/tangentbord: ↑/↓ flyttar mellan kontrollerna, ←/→ mellan stegen i stegindikatorn.

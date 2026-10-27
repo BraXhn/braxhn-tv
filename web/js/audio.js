@@ -9,6 +9,9 @@ import { P, closeAllPlayers } from './player/video.js';
 import { screenBadge } from './screentime.js';
 import { cover, trackRows } from './views/music.js';
 import { openDialog } from './ui/dialog.js';
+import { provide } from './lazy.js';
+import * as self from './audio.js';
+provide('audio', self); // fasaderna i lazy.js når modulen härifrån
 
 // ---------- musikspelare (följer med mellan sidor) ----------
 export const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false, seekSeq: 0 };

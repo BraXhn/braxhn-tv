@@ -1,4 +1,5 @@
 // Titta tillsammans (watch party)
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, api, esc, main, me, status, toast, views } from '../core.js';
 import { P, play } from './video.js';
 import { errorState } from '../ui/states.js';

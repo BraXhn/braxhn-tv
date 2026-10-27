@@ -1,7 +1,7 @@
 // Skärmtid för profiler
 import { $, $$, act, api, esc, later, main, me, toast, views } from './core.js';
 import { route } from './router.js';
-import { openDialog } from './ui/dialog.js';
+import { need } from './lazy.js';
 import { emptyState } from './ui/states.js';
 
 export let screenSt = null;
@@ -52,7 +52,7 @@ export function screenPing(v, key, alive, stop) {
 /** Huvudkontot ställer in skärmtid för en profil */
 export async function screenDialog(p) {
   if (!p) return;
-  const D0 = await api('/screentime/' + p.id, { bg: true });
+  const [D0, { openDialog }] = await Promise.all([api('/screentime/' + p.id, { bg: true }), need('ui/dialog.js')]); // dialogen laddas först här
   const r = D0.rules || {};
   const DAYS = [[1, 'Måndag'], [2, 'Tisdag'], [3, 'Onsdag'], [4, 'Torsdag'], [5, 'Fredag'], [6, 'Lördag'], [0, 'Söndag']];
   const v = (x) => x == null ? '' : esc(String(x));
