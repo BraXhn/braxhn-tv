@@ -7,11 +7,12 @@ import { need } from '../lazy.js';
 import { emptyState } from '../ui/states.js';
 
 import { chLogo } from '../ui/cards.js';
+import '../player/iptv.js'; // kanalbyte, favoriter och återanslutning i livespelaren
 export { chLogo };
 function loadLogos() {}
 views.live = async () => {
   const D = await api('/live/channels');
-  main.innerHTML = `<div class="toolbar"><h1>Live-TV</h1><a class="btn ghost" href="#/guide">📅 TV-guide</a><a class="btn ghost" href="#/dvr">⏺ Inspelningar</a></div>
+  main.innerHTML = `<div class="toolbar"><h1>Live-TV</h1><a class="btn ghost" href="#/epg">📅 TV-guide</a><a class="btn ghost" href="#/dvr">⏺ Inspelningar</a>${me.iptvVod ? '<a class="btn ghost" href="#/vod">🎬 Filmer &amp; serier</a>' : ''}</div>
     ${D.channels.length ? `<div class="chgrid">${D.channels.map((c, i) => `<button class="chcard" data-ch="${i}">${chLogo(c)}<div class="chinfo"><b>${esc(c.name)}</b>
       ${c.now ? `<div class="small">${esc(c.now.title)}</div><div class="prog"><i style="width:${Math.min(100, (Date.now() / 1000 - c.now.start) / (c.now.stop - c.now.start) * 100)}%"></i></div>` : '<div class="small muted">Ingen guide</div>'}
       ${c.next ? `<div class="small muted">${hhmm(c.next.start)} ${esc(c.next.title)}</div>` : ''}</div></button>`).join('')}</div>`

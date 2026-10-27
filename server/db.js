@@ -566,6 +566,46 @@ if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGM
 if (ver > LATEST) console.warn(`[db] Databasen kommer från en nyare version av BraXhn TV (schema ${ver} > ${LATEST}). Uppdatera imagen – eller återställ backups/före-uppgradering-*.db om du vill gå tillbaka.`);
 try { db.prepare("INSERT INTO settings(k,v) VALUES('app_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(globalThis.__braxhnAppVersion); } catch {}
 
+// IPTV (server/iptv/*): tillägg till live-TV:s tabeller tuners/channels/programs (skapas i livetv.js – därför egna
+// tabeller här i stället för nya kolumner där). Skapas efter versionsmigreringarna: främmande nycklar mot tabeller som
+// ännu inte finns (ny databas) är tillåtna i SQLite och kontrolleras först när rader skrivs.
+//   iptv_sources  – källans typ (m3u/xtream), Xtream-inloggning (lämnas aldrig ut), rubriker, fler guider, schema
+//   iptv_guides   – TV-guider (XMLTV) som gäller alla IPTV-källor, i prioritetsordning
+//   channel_ext   – per kanal: rubriker (User-Agent/Referer), catch-up, tidsförskjutning, ursprungliga och ändrade värden
+//                   (namn/nummer/grupp/logotyp skrivs tillbaka på channels efter varje uppdatering av listan), åldersgräns
+//   iptv_groups   – kanalgrupper och VOD-kategorier: dölj, åldersgräns (barnprofiler), ordning
+//   channel_favorites, iptv_reminders – per profil
+//   iptv_vod, iptv_episodes, iptv_vod_progress – filmer och serier från Xtream-källor
+db.exec(`CREATE TABLE IF NOT EXISTS iptv_sources(tuner_id INTEGER PRIMARY KEY REFERENCES tuners(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'm3u', xt_user TEXT, xt_pass TEXT, headers TEXT, epg_urls TEXT, m3u_epg TEXT,
+  refresh_hours INTEGER NOT NULL DEFAULT 24, allow_lan INTEGER NOT NULL DEFAULT 1, vod INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 0,
+  account TEXT, vod_refresh INTEGER, vod_error TEXT);
+CREATE TABLE IF NOT EXISTS iptv_guides(id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+  shift REAL NOT NULL DEFAULT 0, sort REAL, last_refresh INTEGER, error TEXT, channels INTEGER, programs INTEGER);
+CREATE TABLE IF NOT EXISTS channel_ext(channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+  headers TEXT, catchup TEXT, catchup_days INTEGER, catchup_source TEXT, shift REAL, xc_id INTEGER, radio INTEGER NOT NULL DEFAULT 0,
+  adult INTEGER NOT NULL DEFAULT 0, alt_key TEXT, orig_name TEXT, orig_number TEXT, orig_group TEXT, orig_logo TEXT,
+  name_o TEXT, number_o TEXT, group_o TEXT, logo_o TEXT, sort_o REAL, age INTEGER, ghidden INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS channel_ext_alt ON channel_ext(alt_key);
+CREATE TABLE IF NOT EXISTS iptv_groups(kind TEXT NOT NULL DEFAULT 'live', name TEXT NOT NULL COLLATE NOCASE, hidden INTEGER NOT NULL DEFAULT 0,
+  age INTEGER, auto INTEGER NOT NULL DEFAULT 0, sort REAL, PRIMARY KEY(kind, name));
+CREATE TABLE IF NOT EXISTS channel_favorites(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, added INTEGER NOT NULL, PRIMARY KEY(user_id, channel_id));
+CREATE TABLE IF NOT EXISTS iptv_reminders(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE, start INTEGER NOT NULL, stop INTEGER, title TEXT NOT NULL,
+  notified INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, channel_id, start));
+CREATE INDEX IF NOT EXISTS iptv_reminders_due ON iptv_reminders(notified, start);
+CREATE TABLE IF NOT EXISTS iptv_vod(id INTEGER PRIMARY KEY, tuner_id INTEGER NOT NULL REFERENCES tuners(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN('movie','series')), ext_id TEXT NOT NULL, name TEXT NOT NULL, category TEXT, cover TEXT, backdrop TEXT,
+  plot TEXT, year INTEGER, rating REAL, genre TEXT, cast_list TEXT, director TEXT, duration INTEGER, ext TEXT, added INTEGER, tmdb INTEGER,
+  info INTEGER NOT NULL DEFAULT 0, seen INTEGER, UNIQUE(tuner_id, kind, ext_id));
+CREATE INDEX IF NOT EXISTS iptv_vod_cat ON iptv_vod(kind, category);
+CREATE TABLE IF NOT EXISTS iptv_episodes(id INTEGER PRIMARY KEY, vod_id INTEGER NOT NULL REFERENCES iptv_vod(id) ON DELETE CASCADE,
+  ext_id TEXT NOT NULL, season INTEGER, episode INTEGER, title TEXT, plot TEXT, duration INTEGER, ext TEXT, image TEXT, UNIQUE(vod_id, ext_id));
+CREATE TABLE IF NOT EXISTS iptv_vod_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN('movie','episode')), ref_id INTEGER NOT NULL, position REAL NOT NULL DEFAULT 0, duration REAL,
+  watched INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, PRIMARY KEY(user_id, kind, ref_id));`);
+
 // ---- söknycklar (searchkey.js) ----
 // skey = normaliserad titel/namn med ord, skey2 = ev. andra sökbara fält (originaltitel, författare …), skeyc = båda i
 // kompakt form ("spiderman lefabuleux…", för förurvalet i SQL utan replace() per rad). En utlösare i ren SQL
@@ -674,3 +714,4 @@ searchKeys('items', ['title'], ['original_title']);
 searchKeys('artists', ['name']);
 searchKeys('albums', ['title']);
 searchKeys('tracks', ['title']);
+searchKeys('iptv_vod', ['name']);

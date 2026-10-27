@@ -11,8 +11,10 @@ import { VERSION } from '../updates.js';
 import * as screen from '../screentime.js';
 import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
 import * as invites from '../invites.js';
+import { kidsHaveChannels } from '../iptv/channels.js';
+import { vodAllowed } from '../iptv/vod.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
-import { allowUnrated, ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
+import { ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
 // Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
 route('GET', '/api/health', pub, (c) => {
@@ -40,7 +42,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     setupPending: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) && setupPending(),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,
     streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.status(c.user.id),
-    liveTv: (c.user.max_age == null || allowUnrated()) && !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') } : null
+    liveTv: c.user.max_age == null ? !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') : kidsHaveChannels(c.user),
+    iptvVod: !!get("SELECT 1 FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id WHERE t.enabled=1 LIMIT 1") && vodAllowed(c.user) } : null
 }));
 route('POST', '/api/setup', pub, async (c) => {
   // Förhindra att någon utifrån hinner skapa adminkontot på en nyinstallerad server

@@ -41,6 +41,7 @@ import './routes/social.js';
 import './routes/books.js';
 import './routes/integrations.js';
 import './routes/livetv.js';
+import './routes/iptv.js'; // IPTV: kanaler per profil, rutnätsguide, catch-up, VOD, källor (efter livetv.js)
 import './routes/calendar.js';
 import './routes/subsonic.js'; // /rest/* (musikappar) och /api/me/subsonic
 import './routes/remote.js';
