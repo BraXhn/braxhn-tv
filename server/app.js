@@ -27,9 +27,11 @@ import { metadataOf, itemMeta } from './activity.js';
 import * as libfilter from './libfilter.js';
 import * as sublines from './sublines.js';
 import * as prestart from './prestart.js';
+import * as health from './health.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
+import './routes/health.js'; // hälsokontroll av biblioteket (admin)
 import './routes/setup.js';
 import './routes/library.js';
 import './routes/metadata.js'; // Redigera: fält med lås och bilder
@@ -64,6 +66,8 @@ hooks.afterScan = () => {
   libfilter.clearFacets(); libfilter.afterScan();
   // Repliksökningen: nya och ändrade undertexter indexeras i bakgrunden, borttagna tas bort
   sublines.kick(5000);
+  // Hälsokontrollen: nya och ändrade filer kontrolleras i bakgrunden, hela biblioteket räknas om ur databasen
+  health.kick(30000);
   webhooks.emit('library.scan.done', { scan: { libraries: scanStatus.scanned || [], started: scanStatus.started, seconds: Math.max(0, (scanStatus.last || 0) - (scanStatus.started || 0)), warnings: scanStatus.warnings || [] } });
   return arr.markAvailable();
 };
@@ -108,6 +112,10 @@ sonic.kick(60000);
 // Repliksökningen fortsätter där den slutade och väntar medan video omkodas
 sublines.setBusyCheck(() => st.activeTranscodes().length > 0);
 sublines.kick(90000);
+// Hälsokontrollen: rättad språkmärkning läggs på spåren; jobbet väntar medan något spelas eller kodas om
+st.setLangFix(health.langFixFor);
+health.setBusyCheck(() => st.activeTranscodes().length > 0 || act.listActive().length > 0);
+health.kick(+(process.env.HEALTH_START_DELAY ?? 120000));
 
 // Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)
 setTimeout(() => act.watchLibraries(scan), 5000);

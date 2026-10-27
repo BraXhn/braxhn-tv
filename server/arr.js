@@ -98,11 +98,12 @@ export async function send(reqRow, tvdbOf) {
 export const sonarrCalendar = (start, end) => arr('show', `/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeSeries=true&unmonitored=true`);
 /**
  * Be Sonarr söka efter avsnitt som saknas. eps = [{ season, episode }]. Serien slås upp på TMDB-id (Sonarr v4)
- * eller TVDB-id. Avsnitt som inte bevakas börjar bevakas, annars hoppar Sonarr över dem.
+ * eller TVDB-id (eller sökvägen). Avsnitt som inte bevakas börjar bevakas, annars hoppar Sonarr över dem.
  */
-export async function searchEpisodes({ tmdbId, tvdbId }, eps) {
+export async function searchEpisodes({ tmdbId, tvdbId, path: file = null }, eps) {
   const all = await arr('show', '/series');
-  const s = (Array.isArray(all) ? all : []).find(x => (tmdbId && x.tmdbId === +tmdbId) || (tvdbId && x.tvdbId === +tvdbId));
+  // file (valfri): en fil i seriens mapp – serien hittas då även på sökvägen (arr_path_map) när TMDB-id saknas
+  const s = (Array.isArray(all) ? all : []).find(x => (tmdbId && x.tmdbId === +tmdbId) || (tvdbId && x.tvdbId === +tvdbId)) || (file ? (Array.isArray(all) ? all : []).find(x => under(x.path, file)) : null);
   if (!s) return { notInSonarr: true, searched: 0 };
   const want = new Set(eps.map(e => `${+e.season}:${+e.episode}`));
   const list = await arr('show', `/episode?seriesId=${+s.id}`);
@@ -113,6 +114,45 @@ export async function searchEpisodes({ tmdbId, tvdbId }, eps) {
   if (unmon.length) await arr('show', '/episode/monitor', { method: 'PUT', body: { episodeIds: unmon, monitored: true } });
   await arr('show', '/command', { method: 'POST', body: { name: 'EpisodeSearch', episodeIds: ids } });
   return { searched: ids.length, series: s.title };
+}
+
+// ---------- ny version av en fil (hälsokontrollen, server/health.js) ----------
+const under = (p, file) => { const m = mapPath(String(p || '').replace(/\/+$/, '')); return !!(m && file && (file === m || file.startsWith(m + '/'))); };
+/** Markera den senaste hämtningen som misslyckad (Radarr/Sonarr spärrar då den releasen). Returnerar 1 om något spärrades. */
+async function markFailed(kind, p, pick) {
+  const h = await arr(kind, p);
+  const rows = (Array.isArray(h) ? h : h?.records || []).filter(r => pick(r) && String(r.eventType).toLowerCase() === 'grabbed');
+  rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  if (!rows[0]) return 0;
+  await arr(kind, `/history/failed/${+rows[0].id}`, { method: 'POST' });
+  return 1;
+}
+/**
+ * Be Radarr/Sonarr söka efter en ny version av en film eller ett avsnitt. Filmen/serien slås upp på TMDB-id (Sonarr v4),
+ * TVDB-id eller sökvägen (arr_path_map). blocklist = markera den nuvarande hämtningen som misslyckad först (spärras och
+ * hämtas inte igen). Filen tas aldrig bort – Radarr/Sonarr ersätter den bara med en release som profilen godtar.
+ */
+export async function replaceFile({ kind, tmdbId, tvdbId, path: file, season, episode }, { blocklist = false } = {}) {
+  if (kind === 'movie') {
+    let list = tmdbId ? await arr('movie', `/movie?tmdbId=${+tmdbId}`) : [];
+    let m = (Array.isArray(list) ? list : []).find(x => x.tmdbId === +tmdbId);
+    if (!m) { list = await arr('movie', '/movie'); m = (Array.isArray(list) ? list : []).find(x => (tmdbId && x.tmdbId === +tmdbId) || under(x.path || x.folderPath, file)); }
+    if (!m) return { notInArr: true };
+    const blocked = blocklist ? await markFailed('movie', `/history/movie?movieId=${+m.id}`, () => true) : 0;
+    if (!m.monitored) await arr('movie', '/movie/editor', { method: 'PUT', body: { movieIds: [m.id], monitored: true } });
+    await arr('movie', '/command', { method: 'POST', body: { name: 'MoviesSearch', movieIds: [m.id] } });
+    return { searched: 1, title: m.title, blocked };
+  }
+  const all = await arr('show', '/series');
+  const s = (Array.isArray(all) ? all : []).find(x => (tmdbId && x.tmdbId === +tmdbId) || (tvdbId && x.tvdbId === +tvdbId)) || (Array.isArray(all) ? all : []).find(x => under(x.path, file));
+  if (!s) return { notInArr: true };
+  const eps = await arr('show', `/episode?seriesId=${+s.id}`);
+  const ep = (Array.isArray(eps) ? eps : []).find(e => e.seasonNumber === +season && e.episodeNumber === +episode);
+  if (!ep) return { notInArr: true, series: s.title };
+  const blocked = blocklist ? await markFailed('show', `/history/series?seriesId=${+s.id}`, (r) => r.episodeId === ep.id) : 0;
+  if (!ep.monitored) await arr('show', '/episode/monitor', { method: 'PUT', body: { episodeIds: [ep.id], monitored: true } });
+  await arr('show', '/command', { method: 'POST', body: { name: 'EpisodeSearch', episodeIds: [ep.id] } });
+  return { searched: 1, series: s.title, blocked };
 }
 
 // ---------- önskemål ----------

@@ -27,7 +27,7 @@ export async function loadLibs() {
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
   account: 'Mitt konto', admin: 'Administration', setup: 'Installation', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person',
-  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks', downloads: 'Nedladdat', epg: 'TV-guide', vod: 'Filmer och serier', iptvadmin: 'IPTV' };
+  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks', downloads: 'Nedladdat', epg: 'TV-guide', vod: 'Filmer och serier', iptvadmin: 'IPTV', health: 'Hälsokontroll' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
   const h = (location.hash.slice(2) || '').split('?')[0]; // ?… = vyns parametrar (t.ex. bibliotekets filter)
@@ -72,7 +72,7 @@ export async function boot() {
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
 const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
-  admin: 'panels', iptvadmin: 'panels', vod: 'shelves', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels' };
+  admin: 'panels', iptvadmin: 'panels', vod: 'shelves', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels', health: 'panels' };
 // Vyerna utom startsidan laddas först när de öppnas (eller när pekaren/fokus når en länk dit): vy -> modul i js/
 // (märkt @lazy). need() i lazy.js hämtar modulen och hela dess kedja av beroenden på en gång (samma bygge,
 // /v/<bygge>/js/…). Modulen registrerar sina vyer i views när den laddats.
@@ -82,7 +82,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
-  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads' }));
+  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för

@@ -116,6 +116,20 @@ kommer från en annan filmversion), `kind`, `title` (filmen/serien), `year`, fö
 i `line`), `before`/`after` (repliken före/efter eller `null`), `lang`, `label` och `thumb` (`{ url, col, row, cols,
 rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null`). Apparna använder den inte än.
 
+## Hälsokontroll och rättad språkmärkning: `/api/admin/health*`
+
+Bara för administratören på betrott nät (webbens `#/health`, `server/health.js`). `GET /api/admin/health` →
+`{ issues, overrides, kinds, status, settings, arr }`; varje fynd har `id`, `item`, `kind` (`broken`, `truncated`,
+`length`, `decode`, `sync`, `audiolang`, `sublang`, `bitrate`, `quality`, `duplicate`, `missing`), `key`, `severity`
+(`error`/`warn`/`info`), `detail` (`msg` + typens fält, för språk `track`/`current`/`suggest`), `ignored`, `action`
+(`search`/`blocklist`) och `actions`. `POST /run` (`{ full }`), `PUT /settings` (`{ enabled, samples, maxMbps }`),
+`POST /issues/:id/ignore` (`{ ignored }`), `POST /issues/:id/replace` (`{ blocklist }` – Radarr/Sonarr söker en ny
+version, ev. efter att den hämtade releasen markerats som misslyckad; 409 utan Radarr/Sonarr, 404 när titeln inte finns
+där, 429 vid upprepning inom 5 min) och `PUT /lang` (`{ item, track, lang }`, `track` = `a<index>` ljud, `e<index>`
+inbäddad undertext, `<källa>:<filnamn>` undertextfil; `lang` = tre bokstäver, tomt = ta bort). **För apparna:** en
+rättad märkning syns som vanligt `lang` i `/api/items/:id/playback` (`audio`, `subtitles`) och `/api/items/:id` – inga
+nya fält; filen ändras aldrig och rättelsen gäller bara så länge filen är oförändrad (mtime/storlek).
+
 ## Kö på Chromecast: `queue=1`
 
 `/api/items/:id/playback?cast=1&queue=1` ger samma svar som vanligt (med en egen mediatoken för titeln) men räknas
