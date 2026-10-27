@@ -1,11 +1,14 @@
-// Vyer: startsidan, bibliotek, Min lista och samlingar (sökningen: views/search.js).
+// Vyer: startsidan, bibliotek (filter och sortering: ui/libfilter.js), Min lista och samlingar (sökningen: views/search.js).
 // Startsidans Utvalt-karusell: ui/featured.js, "Anpassa startsidan": views/homecustom.js.
-import { $, act, api, cardW, esc, fmtDur, heroUrl, imgSrc, later, libs, main, me, store, views } from '../core.js';
+import { $, act, api, cardW, esc, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, store, sxe, toast, toastErr, views } from '../core.js';
 import { playSpoken } from '../audio.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
+import { iconButton } from '../ui/buttons.js';
 import { card, colCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
+import { collectionForm } from '../ui/collections.js';
 import { bindFeatured, featuredHtml } from '../ui/featured.js';
+import { SORT_DIR, SORT_LABEL, chips, chipsHtml, filterCount, hasFilter, hashQuery, openFilterPanel } from '../ui/libfilter.js';
 import { emptyState } from '../ui/states.js';
 import { bookCard, podCover } from './books.js';
 import { upcomingCard } from './calendar.js';
@@ -100,35 +103,121 @@ async function renderHome(d, cols, own, fromCache) {
   });
 }
 
-const FIRST = 60, CHUNK = 240;
+const FIRST = 60, CHUNK = 240, PAGE = 300;
 const libCard = (i) => i.kind === 'collection' ? colCard(i) : card(i);
+/** Byter filtret: sparas per bibliotek i webbläsaren och står i adressen (#/lib/1?…) så att länken går att dela */
+function applyFilter(id, qs) {
+  store.set('lf.' + id, new URLSearchParams(qs).toString());
+  history.replaceState(null, '', `#/lib/${+id}${qs ? '?' + qs : ''}`);
+  route();
+}
 views.lib = async (id, folder) => {
   // Hemvideor: mappar som navigering, liggande kort och datum (fälten home_video/folders från servern)
   if (libs.find(l => l.id === +id)?.home_video) return homeVideos(id, folder);
-  const sort = store.get('sort.' + id, 'title'), filter = store.get('filter.' + id, ''), cols = store.get('cols.' + id, '1');
-  const [d, own] = await Promise.all([api(`/libraries/${id}/items?sort=${sort}&filter=${filter}&collections=${cols}`),
+  let qs = hashQuery();
+  if (qs == null) {
+    // Ingen adressdel: senaste filtret för biblioteket (eller de äldre valen sort/filter)
+    qs = store.get('lf.' + id, null);
+    if (qs == null) {
+      const o = new URLSearchParams(), f = store.get('filter.' + id, ''), s = store.get('sort.' + id, '');
+      if (f) o.set('filter', f);
+      if (s && s !== 'title') o.set('sort', s);
+      qs = o.toString();
+    }
+    if (qs) history.replaceState(null, '', `#/lib/${+id}?${qs}`);
+  }
+  const P = new URLSearchParams(qs), scol = +P.get('scol') || null;
+  P.delete('scol');
+  // Blandat: fröet står i adressen så att ordningen ligger still medan man bläddrar (och i en delad länk)
+  if (P.get('sort') === 'random' && !P.get('seed')) {
+    P.set('seed', String(Math.floor(Math.random() * 999999)));
+    history.replaceState(null, '', `#/lib/${+id}?${P}${scol ? '&scol=' + scol : ''}`);
+  }
+  qs = P.toString();
+  store.set('lf.' + id, qs);
+  const cols = store.get('cols.' + id, '1');
+  const url = (off) => `/libraries/${id}/items?${qs ? qs + '&' : ''}collections=${cols}&limit=${PAGE}&offset=${off}`;
+  const [d, own] = await Promise.all([api(url(0)),
     api(`/custom-collections?library=${encodeURIComponent(id)}`).catch(e => { if (e?.aborted) throw e; return []; })]);
-  const movies = d.library.type === 'movie';
-  main.innerHTML = `<div class="toolbar"><h1>${esc(d.library.name)}</h1><span class="muted">${d.items.length} titlar</span>
-    ${movies ? `<select id="cols" title="Visa filmer i samma samling som ett kort"><option value="1">Samlingar</option><option value="0">Alla filmer</option></select>` : ''}
-    <select id="flt"><option value="">Alla</option><option value="unwatched">Osedda</option><option value="watched">Sedda</option></select>
-    <select id="srt"><option value="title">Titel</option><option value="added">Senast tillagda</option><option value="year">År</option><option value="rating">Betyg</option></select></div>
+  const lib = d.library, type = lib.type === 'show' ? 'show' : 'movie', movies = type === 'movie';
+  qs = d.query ?? qs; // serverns normaliserade filter
+  const sort = P.get('sort') || 'title', dir = P.get('order') || SORT_DIR[sort] || 'asc';
+  const filtered = hasFilter(qs), nf = filterCount(qs), ch = chips(qs, type), total = d.total ?? d.items.length;
+  const editing = scol ? own.find(c => c.id === scol && c.smart && c.editable) : null;
+  const unit = movies ? (total === 1 ? 'titel' : 'titlar') : (total === 1 ? 'serie' : 'serier');
+  main.innerHTML = `<div class="toolbar libbar"><h1>${esc(lib.name)}</h1><span class="muted" id="libcount" aria-live="polite">${total} ${unit}</span>
+    <div class="libctl">
+    ${movies ? `<select id="cols" aria-label="Visning" title="Visa filmer i samma samling som ett kort"><option value="1">Samlingar</option><option value="0">Alla filmer</option></select>` : ''}
+    <button type="button" class="ghost" id="fbtn" aria-haspopup="dialog" aria-expanded="false">Filter${nf ? ` <span class="fcount" aria-label="${nf} aktiva">${nf}</span>` : ''}</button>
+    <select id="srt" aria-label="Sortering">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${k === sort ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    ${sort === 'random' ? iconButton({ icon: '↻', label: 'Blanda om', id: 'reshuffle' })
+      : iconButton({ icon: dir === 'asc' ? '↑' : '↓', label: dir === 'asc' ? 'Stigande ordning – byt till fallande' : 'Fallande ordning – byt till stigande', id: 'sdir' })}
+    <button type="button" class="ghost" id="shuffle"${total ? '' : ' disabled'} title="Spela en slumpad titel ur det som visas">🔀 Blanda</button>
+    ${editing ? `<button type="button" class="primary" id="smartupd">Spara filtret i ${esc(editing.name)}</button>`
+      : filtered ? '<button type="button" class="ghost" id="smartsave">Spara som smart samling</button>' : ''}
+    </div></div>
+    ${chipsHtml(ch)}
     ${own.length ? shelfHtml('Egna samlingar', own.map(colCard).join(''), { more: '<a href="#/collections">Alla samlingar</a>' }) : ''}
-    ${d.items.length ? `<div class="grid" id="libgrid">${d.items.slice(0, FIRST).map(libCard).join('')}</div>`
-      : emptyState({ title: filter ? 'Inget som matchar filtret' : 'Inget här ännu', text: filter ? 'Välj Alla för att se hela biblioteket.' : 'Titlarna dyker upp här när biblioteket har skannats.' })}`;
-  // Stora bibliotek: de första korten direkt, resten i omgångar efter att sidan visats (tusentals kort på en gång
-  // låser webbläsaren en stund, särskilt på TV och telefon)
-  const more = (from) => {
+    ${d.items.length ? `<div class="grid" id="libgrid">${d.items.slice(0, FIRST).map(libCard).join('')}</div><div id="libmore" aria-hidden="true"></div>`
+      : emptyState({ title: filtered ? 'Inget som matchar filtret' : 'Inget här ännu', text: filtered ? 'Ta bort ett filter eller välj Rensa alla.' : 'Titlarna dyker upp här när biblioteket har skannats.' })}`;
+  // Stora bibliotek: de första korten direkt, resten av sidan i omgångar och nästa sida när man närmar sig slutet
+  // (tusentals kort på en gång låser webbläsaren en stund, särskilt på TV och telefon)
+  const items = d.items;
+  let loaded = d.items.length, loading = false, shown = Math.min(FIRST, items.length), pumping = true;
+  const pump = () => {
     const g = $('#libgrid');
-    if (!g || from >= d.items.length) return;
-    g.insertAdjacentHTML('beforeend', d.items.slice(from, from + CHUNK).map(libCard).join(''));
-    later(() => more(from + CHUNK), 30);
+    if (!g || shown >= items.length) { pumping = false; return; }
+    const next = items.slice(shown, shown + CHUNK);
+    shown += next.length;
+    g.insertAdjacentHTML('beforeend', next.map(libCard).join(''));
+    later(pump, 30);
   };
-  later(() => more(FIRST), 30);
-  $('#srt').value = sort; $('#flt').value = filter;
+  later(pump, 30);
+  const sentinel = $('#libmore');
+  if (sentinel && loaded < total && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver(async (es) => {
+      if (!es.some(e => e.isIntersecting) || loading || loaded >= total) return;
+      loading = true;
+      try {
+        const n = await api(url(loaded));
+        items.push(...n.items); loaded += n.items.length;
+        if (!n.items.length) loaded = total;
+        if (!pumping) { pumping = true; pump(); }
+      } catch (e) { if (!e?.aborted) toastErr(e); } finally { loading = false; }
+      if (loaded >= total) io.disconnect();
+    }, { rootMargin: '1200px 0px' });
+    io.observe(sentinel);
+    onLeave(() => io.disconnect());
+  }
+  const set = (fn) => { const o = new URLSearchParams(qs); fn(o); if (scol) o.set('scol', scol); applyFilter(id, o.toString()); };
   if ($('#cols')) { $('#cols').value = cols; $('#cols').onchange = (e) => { store.set('cols.' + id, e.target.value); route(); }; }
-  $('#srt').onchange = (e) => { store.set('sort.' + id, e.target.value); route(); };
-  $('#flt').onchange = (e) => { store.set('filter.' + id, e.target.value); route(); };
+  $('#srt').onchange = (e) => set(o => { const v = e.target.value; o.delete('order'); o.delete('seed'); if (v === 'title') o.delete('sort'); else o.set('sort', v); });
+  if ($('#sdir')) $('#sdir').onclick = () => set(o => o.set('order', dir === 'asc' ? 'desc' : 'asc'));
+  if ($('#reshuffle')) $('#reshuffle').onclick = () => set(o => o.delete('seed'));
+  $('#fbtn').onclick = act(async (e) => {
+    const b = e.currentTarget;
+    await openFilterPanel(b, { lib, qs, onApply: (q) => set(o => { for (const k of [...o.keys()]) if (!['sort', 'order', 'seed'].includes(k)) o.delete(k); for (const [k, v] of new URLSearchParams(q)) o.set(k, v); }) });
+  });
+  main.querySelector('.fchips')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-chip]'); if (!b) return;
+    const q = b.dataset.chip === 'all' ? new URLSearchParams([...new URLSearchParams(qs)].filter(([k]) => ['sort', 'order', 'seed'].includes(k))).toString() : ch[+b.dataset.chip].remove;
+    applyFilter(id, q + (scol ? (q ? '&' : '') + 'scol=' + scol : ''));
+    setTimeout(() => ($('.fchip') || $('#fbtn'))?.focus(), 50);
+  });
+  $('#shuffle').onclick = act(async (e) => {
+    const b = e.currentTarget, r = await api(`/libraries/${id}/shuffle${qs ? '?' + qs : ''}`);
+    toast(r.play.kind === 'episode' ? `Blandat: ${r.item.title} · ${sxe(r.play)}` : `Blandat: ${r.play.title}`);
+    startPlay(b, r.play.id, r.play.watched ? 0 : r.play.position || 0);
+  });
+  if ($('#smartsave')) $('#smartsave').onclick = act(async () => {
+    const cid = await collectionForm(null, null, { library: lib.id, query: qs });
+    if (cid) toast('Den smarta samlingen är sparad', { action: { label: 'Visa', onClick: () => { location.hash = `#/ucollection/${cid}`; } } });
+  });
+  if ($('#smartupd')) $('#smartupd').onclick = act(async () => {
+    await api(`/custom-collections/${editing.id}`, { method: 'PUT', body: { smart: { library: lib.id, query: qs } } });
+    toast(`Filtret är sparat i ${editing.name}`);
+    location.hash = `#/ucollection/${editing.id}`;
+  });
 };
 
 // ---------- Hemvideor ----------

@@ -22,9 +22,10 @@ import * as ccol from '../customcollections.js';
 import * as calendar from '../calendar.js';
 import * as homes from '../homeshelves.js';
 import * as playprefs from '../playprefs.js';
+import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
-import { insideMedia, MEDIA_ROOT, ctx, listItems, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
+import { insideMedia, MEDIA_ROOT, ctx, listItems, itemsByIds, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
 
 // Bibliotek. Fälten i svaret (l.*: id, name, type, path, anime, nfo, home_video, count) läses av apparna – bara tillägg.
 // paths = alla bibliotekets mappar (path är den första).
@@ -152,8 +153,6 @@ route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayou
 route('PUT', '/api/me/home-layout', user, async (c) => {
   try { send(c.res, 200, homes.setLayout(c.user.id, await readJson(c.req))); } catch (e) { fail(c.res, 400, e.message); }
 });
-const SORTS = { title: 'i.sort_title', added: 'i.added DESC', year: 'i.year DESC, i.sort_title', rating: 'i.rating DESC NULLS LAST, i.sort_title',
-  date: 'i.taken DESC NULLS LAST, i.added DESC, i.sort_title' };
 /** ?folder= för hemvideor: relativ mapp utan inledande/avslutande snedstreck; '..' och styrtecken godtas inte */
 function folderParam(v) {
   const f = String(v || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').slice(0, 1000);
@@ -180,13 +179,15 @@ function subfolders(uid, libId, f, sort) {
   const out = [...by.values()];
   return sort === 'date' || sort === 'added' ? out.sort((a, b) => (b.latest || 0) - (a.latest || 0)) : out.sort((a, b) => a.name.localeCompare(b.name, 'sv', { numeric: true }));
 }
+// Filter och sortering (server/libfilter.js): de gamla parametrarna sort (title/added/year/rating/date), filter
+// (unwatched/watched), limit/offset, folder och collections gäller som förut (apparna); allt annat är tillägg.
+// Nya fält i svaret: query (det normaliserade filtret som adressdel) och total när filter eller sidindelning används.
 route('GET', '/api/libraries/:id/items', user, (c) => {
   const lib = get('SELECT * FROM libraries WHERE id=?', c.p.id);
   if (!lib || !libOk(c.user.id, lib.id)) return fail(c.res, 404, 'Biblioteket finns inte');
-  const where = [`i.library_id=?`, `i.kind=?`], params = [lib.id, lib.type];
-  const filter = c.q.get('filter');
-  if (filter === 'unwatched') where.push(lib.type === 'show' ? 'ep_watched < ep_total' : 'COALESCE(p.watched,0)=0');
-  if (filter === 'watched') where.push(lib.type === 'show' ? 'ep_watched = ep_total' : 'p.watched=1');
+  const f = libfilter.parse(c.q, lib.type);
+  const q = libfilter.query(lib, f);
+  const { where, params } = q;
   // Valfri sidindelning (?limit=&offset=); utan den skickas hela biblioteket (upp till 5000) som tidigare
   const limit = Math.min(10000, Math.max(1, parseInt(c.q.get('limit')) || 5000)), offset = Math.max(0, parseInt(c.q.get('offset')) || 0);
   // Hemvideor: ?folder= visar en mapp i taget (klippen direkt i mappen + undermapparna som "samlingar") – nya fält folder/folders
@@ -196,16 +197,39 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
     if (folder == null) return fail(c.res, 400, 'Ogiltig mapp');
     where.push(`COALESCE(i.folder, '')=?`); params.push(folder);
   }
-  const out = { library: { ...lib, paths: rootsOf(lib) }, items: listItems(c.user.id, where.join(' AND '), params, SORTS[c.q.get('sort')] || SORTS.title, limit, offset, { slim: true }) };
-  if (folder != null) { out.folder = folder.split(path.sep).join('/'); out.folders = subfolders(c.user.id, lib.id, folder, c.q.get('sort')); }
-  // ?collections=1: filmer i samma samling (minst två synliga i listan) visas som ett samlingskort på den första filmens plats
-  if (lib.type === 'movie' && c.q.get('collections') === '1') out.items = collapseCollections(out.items);
-  if (c.q.has('limit') || c.q.has('offset')) {
-    const age = ageFilter(c.user.id);
-    out.total = get(`SELECT COUNT(*) AS n FROM (SELECT ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where.join(' AND ')})${MAIN_ONLY}${age.sql})`, c.user.id, ...params, ...age.params).n;
-    out.offset = offset; out.limit = limit;
+  const uid = c.user.id, paged = c.q.has('limit') || c.q.has('offset');
+  const out = { library: { ...lib, paths: rootsOf(lib) }, items: [], query: libfilter.toQuery(f) };
+  if (lib.type === 'movie' && c.q.get('collections') === '1') {
+    // ?collections=1: filmer i samma samling (minst två synliga i hela filtreringen) visas som ett samlingskort på den
+    // första filmens plats. Planen räknas på lätta rader för hela listan, så att sidindelningen (limit/offset räknar
+    // kort) inte delar en samling på två sidor; bara sidans titlar hämtas i sin helhet.
+    const age = ageFilter(uid);
+    const light = all(`SELECT i.id, i.collection_id AS collection, i.year, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id
+      WHERE (${where.join(' AND ')})${MAIN_ONLY}${age.sql} ORDER BY ${q.order}`, uid, ...params, ...age.params);
+    const entries = collapseCollections(light), page = entries.slice(offset, offset + limit);
+    const full = new Map(itemsByIds(uid, page.filter(e => e.kind !== 'collection').map(e => e.id)).map(it => [it.id, it]));
+    out.items = page.map(e => e.kind === 'collection' ? e : full.get(e.id)).filter(Boolean);
+    if (paged || libfilter.hasFilter(f)) out.total = entries.length;
+  } else {
+    out.items = listItems(uid, where.join(' AND '), params, q.order, limit, offset, { slim: true });
+    if (paged || libfilter.hasFilter(f)) out.total = !offset && out.items.length < limit ? out.items.length : libfilter.count(uid, where, params);
   }
+  if (folder != null) { out.folder = folder.split(path.sep).join('/'); out.folders = subfolders(uid, lib.id, folder, c.q.get('sort')); }
+  if (paged) { out.offset = offset; out.limit = limit; }
   send(c.res, 200, out);
+});
+// Vilka värden filterpanelen kan erbjuda (genrer, år, språk, upplösning …) – bara titlar som profilen får se
+route('GET', '/api/libraries/:id/facets', user, (c) => {
+  const lib = get('SELECT * FROM libraries WHERE id=?', c.p.id);
+  if (!lib || !libOk(c.user.id, lib.id) || !['movie', 'show'].includes(lib.type)) return fail(c.res, 404, 'Biblioteket finns inte');
+  send(c.res, 200, libfilter.facets(c.user.id, lib));
+});
+// "Blanda": en slumpad titel ur filtreringen (serie → ett slumpat avsnitt). play = det som ska spelas.
+route('GET', '/api/libraries/:id/shuffle', user, (c) => {
+  const lib = get('SELECT * FROM libraries WHERE id=?', c.p.id);
+  if (!lib || !libOk(c.user.id, lib.id) || !['movie', 'show'].includes(lib.type)) return fail(c.res, 404, 'Biblioteket finns inte');
+  const r = libfilter.shuffle(c.user.id, lib, libfilter.parse(c.q, lib.type));
+  r ? send(c.res, 200, r) : fail(c.res, 404, 'Inget att spela med det här filtret');
 });
 route('GET', '/api/items/:id', user, (c) => {
   const uid = c.user.id, row = get('SELECT * FROM items WHERE id=?', c.p.id);

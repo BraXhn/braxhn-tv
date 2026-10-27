@@ -88,6 +88,8 @@ async function probe(file) {
       hi: !!s.disposition?.hearing_impaired,
       // Kommentarsspår och ljudbeskrivning (syntolkning) väljs aldrig automatiskt (playprefs.js)
       ...(s.disposition?.comment ? { comment: true } : {}), ...(s.disposition?.visual_impaired ? { vi: true } : {}),
+      // Ljudets profil (t.ex. "Dolby TrueHD + Dolby Atmos") – bibliotekets filter för Atmos/DTS:X (libfilter.js)
+      ...(s.codec_type === 'audio' && s.profile ? { profile: String(s.profile).slice(0, 80) } : {}),
       pix: s.pix_fmt || null, transfer: s.color_transfer || null, primaries: s.color_primaries || null,
       // Flätad bild (tt/bb/tb/bt) avflätas vid omkodning (stream.js)
       ...(s.codec_type === 'video' && s.field_order && s.field_order !== 'progressive' && s.field_order !== 'unknown' ? { field: s.field_order } : {}),

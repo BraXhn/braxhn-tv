@@ -23,6 +23,7 @@ import * as colors from './imgcolor.js';
 import * as sonic from './sonic.js';
 import * as webhooks from './webhooks.js';
 import { metadataOf, itemMeta } from './activity.js';
+import * as libfilter from './libfilter.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -52,6 +53,8 @@ hooks.subtitlesOf = (it) => st.subtitlesOf(it);
 // Söknycklar för nya och ändrade titlar räknas fram direkt (annars vid första sökningen)
 hooks.afterScan = () => {
   clearRecommendations(); clearHome(); refreshKeys(null, Infinity);
+  // Bibliotekens filter: ljud-/undertextspråk räknas om i bakgrunden (undertextfiler kan ha tillkommit)
+  libfilter.clearFacets(); libfilter.afterScan();
   webhooks.emit('library.scan.done', { scan: { libraries: scanStatus.scanned || [], started: scanStatus.started, seconds: Math.max(0, (scanStatus.last || 0) - (scanStatus.started || 0)), warnings: scanStatus.warnings || [] } });
   return arr.markAvailable();
 };
@@ -78,6 +81,8 @@ hooks.newItems = (ids) => {
 calendar.start();
 // Platshållarfärger för bilder som saknar en (befintliga bibliotek) – i bakgrunden, en bild åt gången
 colors.kick(20000);
+// Filtrens fil-egenskaper för titlar som inte räknats än (t.ex. efter uppgradering)
+setTimeout(() => libfilter.kickFacets(), 15000).unref();
 // Ljudanalysen fortsätter där den slutade (efter omstart) och väntar medan video omkodas eller flera ljudströmmar kodas om
 sonic.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
 sonic.kick(60000);

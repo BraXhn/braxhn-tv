@@ -3,6 +3,7 @@
 //
 // Behörighet: alla inloggade får skapa privata samlingar (syns bara för dem själva). Delade samlingar skapas och
 // ändras bara av administratörer på betrott nät (samma krav som admin-routes, se http/router.js).
+// Smarta samlingar ({ smart: { library, query } }): ett sparat biblioteksfilter – inga titlar läggs till för hand.
 import { send, readJson, fail } from '../util.js';
 import { audit } from '../auth.js';
 import { route, user, adminAnywhere, isTrusted } from '../http/router.js';
@@ -31,10 +32,13 @@ route('POST', '/api/custom-collections', user, async (c) => {
   const shared = !!b.shared;
   if (shared && !adminHere(c)) return fail(c.res, 403, 'Bara administratörer kan skapa delade samlingar (från hemnätverket)');
   if (cc.countOwned(c.user.id) >= cc.MAX_PER_USER) return fail(c.res, 400, `Högst ${cc.MAX_PER_USER} samlingar per profil`);
+  const smart = b.smart != null ? cc.checkSmart(c.user.id, b.smart) : null;
+  if (b.smart != null && !smart) return fail(c.res, 400, 'Välj ett film- eller seriebibliotek för den smarta samlingen');
+  if (smart && b.item != null) return fail(c.res, 400, 'En smart samling fylls av sitt filter');
   // Valfri första titel (t.ex. "Ny samling…" från en titels meny)
   const t = b.item != null ? cc.targetOf(+b.item) : null;
   if (b.item != null && (!t || !allowedFor(c.user.id, t))) return fail(c.res, 404, 'Titeln finns inte');
-  const id = cc.create(c.user, b, shared);
+  const id = cc.create(c.user, b, shared, smart);
   if (t) cc.addItem(cc.get1(id), t.id);
   if (shared) audit('collection_created', { ...ctx(c), detail: String(b.name).trim().slice(0, 100) });
   send(c.res, 200, { ok: true, id });
@@ -42,6 +46,11 @@ route('POST', '/api/custom-collections', user, async (c) => {
 route('GET', '/api/custom-collections/:cid', user, (c) => {
   const d = cc.detail(c.user, +c.p.cid, adminHere(c));
   d ? send(c.res, 200, d) : fail(c.res, 404, 'Samlingen finns inte');
+});
+// "Blanda": en slumpad titel ur samlingen (serie → slumpat avsnitt); play = det som ska spelas
+route('GET', '/api/custom-collections/:cid/shuffle', user, (c) => {
+  const r = cc.shuffle(c.user, +c.p.cid, adminHere(c));
+  r ? send(c.res, 200, r) : fail(c.res, 404, 'Inget att spela i samlingen');
 });
 route('PUT', '/api/custom-collections/:cid', user, async (c) => {
   const col = editable(c); if (!col) return;
@@ -51,7 +60,14 @@ route('PUT', '/api/custom-collections/:cid', user, async (c) => {
   const shared = b.shared === undefined ? col.shared === 1 : !!b.shared;
   if (shared && !adminHere(c)) return fail(c.res, 403, 'Bara administratörer kan dela samlingar');
   if (!shared && col.shared === 1 && col.owner_id !== c.user.id) return fail(c.res, 400, 'Bara den som skapade samlingen kan göra den privat');
-  cc.update(col, b, shared);
+  // Smart samling: nytt filter (samma kontroll som när den skapas); en vanlig samling blir inte smart
+  let smart = null;
+  if (b.smart != null) {
+    if (col.kind !== 'smart') return fail(c.res, 400, 'Samlingen är inte smart');
+    smart = cc.checkSmart(c.user.id, b.smart);
+    if (!smart) return fail(c.res, 400, 'Välj ett film- eller seriebibliotek för den smarta samlingen');
+  }
+  cc.update(col, b, shared, smart);
   send(c.res, 200, { ok: true });
 });
 route('DELETE', '/api/custom-collections/:cid', user, (c) => {
@@ -62,6 +78,7 @@ route('DELETE', '/api/custom-collections/:cid', user, (c) => {
 });
 route('POST', '/api/custom-collections/:cid/items', user, async (c) => {
   const col = editable(c); if (!col) return;
+  if (col.kind === 'smart') return fail(c.res, 400, 'En smart samling fylls av sitt filter');
   const { id } = await readJson(c.req);
   const t = cc.targetOf(+id);
   if (!t || !allowedFor(c.user.id, t)) return fail(c.res, 404, 'Titeln finns inte');
@@ -77,6 +94,7 @@ route('DELETE', '/api/custom-collections/:cid/items/:id', user, (c) => {
 // Manuell ordning: { ids: [titel-id i önskad ordning] } (titlar som inte skickas behåller sin ordning sist)
 route('PUT', '/api/custom-collections/:cid/order', user, async (c) => {
   const col = editable(c); if (!col) return;
+  if (col.kind === 'smart') return fail(c.res, 400, 'En smart samling sorteras av sitt filter');
   const { ids } = await readJson(c.req);
   if (!Array.isArray(ids) || ids.length > 1000) return fail(c.res, 400, 'Ogiltig ordning');
   cc.reorder(col, ids);

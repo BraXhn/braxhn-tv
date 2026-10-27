@@ -1037,3 +1037,35 @@ fieldset.plain{border:0;padding:0;margin:12px 0}fieldset.plain legend{font-size:
 .libpick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:2px 12px;margin:4px 0 0 4px}
 .libpick-list[hidden]{display:none}
 .invite{max-width:420px}
+/* Bibliotekets filter och sortering (ui/libfilter.js, views/home.js) */
+.libbar .libctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fcount{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:var(--r-pill);background:var(--accent);color:#1a0d08;font-size:12px}
+.fchips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:-8px 0 18px}
+.fchip{display:inline-flex;align-items:center;gap:6px;padding:5px 8px 5px 12px;border-radius:var(--r-pill);border:1px solid var(--line);background:var(--bg3);font-size:13px;max-width:100%}
+.fchip span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fchip .x{color:var(--dim);font-size:11px}
+.fchip:hover,.fchip:focus-visible{border-color:var(--dim)}
+.fchip:hover .x{color:var(--text)}
+.pop.filterpop{width:min(560px,calc(100vw - 16px));max-width:min(560px,calc(100vw - 16px))}
+.fpanel{display:flex;flex-direction:column;gap:12px}
+.fsect{border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 12px 10px;margin:0;min-width:0}
+.fsect legend{font-size:13px;color:var(--dim);padding:0 4px;font-weight:600}
+.fopts{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.fopt{display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--text);font-size:13px;padding:4px 10px 4px 8px;border-radius:var(--r-pill);border:1px solid var(--line);cursor:pointer;font-size:13px;min-height:32px}
+.fopt input{margin:0;width:auto;accent-color:var(--accent)}
+.fopt:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.fopt:focus-within{outline:2px solid var(--focus);outline-offset:1px}
+.fsect .ccheck{margin:8px 0 0;font-size:13px}
+.frow{display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:4px}
+.fsel,.fnum{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--dim);min-width:0;margin:0}
+.fsel{flex:1 1 150px}
+.fsel select{width:100%}
+.fnum{flex:0 1 96px}
+.fnum input{width:100%}
+.factions{display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;background:var(--bg2);padding:10px 0;margin-bottom:calc(-1 * var(--sp-4));border-top:1px solid var(--line)}
+@media (max-width:600px){
+  .libbar .libctl{width:100%}
+  .libbar #srt{flex:1 1 120px}
+  .pop.filterpop{width:100%;max-width:none}
+  .fopt{min-height:var(--touch)}
+}
