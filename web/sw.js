@@ -2,16 +2,18 @@
 // Appens filer har en innehållshash i adressen (/m/<fil>?h=<hash>, server/http/static.js) och ändras aldrig på
 // samma adress – de tas ur cachen direkt. Ett nytt bygge ger en ny sw.js (bygget och hasharna står nedan); vid
 // installationen hämtas bara filer vars hash är ny, resten kopieras från den gamla cachen. Sidan själv hämtas
-// alltid från servern. API-anrop, strömmar och bilder går aldrig genom cachen.
+// alltid från servern; svarar den inte används sidan från samma bygge ('/' i cachen), så att appen startar och
+// visar Nedladdat (web/js/offline.js, egen cache 'braxhn-dl-v1' som aldrig rensas här). API-anrop, strömmar och
+// bilder går aldrig genom cachen.
 const BUILD = '{{b}}';
 const V = `/v/${BUILD}`;
 const CACHE = 'braxhn-app-' + BUILD;
 // Webbklientens moduler i /js/ måste finnas med här (annars startar appen inte utan kontakt med servern)
-const MODULES = ['core.js', 'router.js', 'lazy.js', 'passkeys.js', 'screentime.js', 'audio.js', 'audio-extras.js', 'sonic.js', 'musicinfo.js', 'ui/cards.js', 'ui/icons.js', 'ui/dialog.js', 'ui/states.js', 'ui/buttons.js', 'ui/tabs.js', 'ui/menu.js', 'ui/cardmenu.js', 'ui/activity.js', 'ui/shelves.js', 'ui/collections.js', 'player/overlay.js', 'player/video.js', 'player/controls.js', 'player/subs.js', 'player/caps.js', 'player/cast.js', 'player/live.js', 'player/party.js', 'views/login.js', 'views/home.js', 'views/collections.js', 'views/item.js', 'views/person.js', 'views/wrapped.js', 'views/account.js', 'views/books.js', 'views/live.js', 'views/streaming.js', 'views/requests.js', 'views/calendar.js', 'views/stats.js', 'views/admin.js', 'views/admin-ops.js', 'views/admin-users.js', 'views/music.js', 'views/quickconnect.js', 'views/search.js', 'player/comfort.js', 'views/setup.js', 'player/cinema.js', 'player/remote.js', 'ui/featured.js', 'views/homecustom.js', 'views/history.js', 'views/webhooks.js', 'player/autoskip.js', 'player/playprefs.js', 'views/photos.js', 'ui/libfilter.js', 'views/itemedit.js', 'ui/rating.js', 'ui/thememusic.js', 'player/subsync.js', 'views/dvr.js'].map(f => '/js/' + f);
+const MODULES = ['core.js', 'router.js', 'lazy.js', 'passkeys.js', 'screentime.js', 'audio.js', 'audio-extras.js', 'sonic.js', 'musicinfo.js', 'ui/cards.js', 'ui/icons.js', 'ui/dialog.js', 'ui/states.js', 'ui/buttons.js', 'ui/tabs.js', 'ui/menu.js', 'ui/cardmenu.js', 'ui/activity.js', 'ui/shelves.js', 'ui/collections.js', 'player/overlay.js', 'player/video.js', 'player/controls.js', 'player/subs.js', 'player/caps.js', 'player/cast.js', 'player/live.js', 'player/party.js', 'views/login.js', 'views/home.js', 'views/collections.js', 'views/item.js', 'views/person.js', 'views/wrapped.js', 'views/account.js', 'views/books.js', 'views/live.js', 'views/streaming.js', 'views/requests.js', 'views/calendar.js', 'views/stats.js', 'views/admin.js', 'views/admin-ops.js', 'views/admin-users.js', 'views/music.js', 'views/quickconnect.js', 'views/search.js', 'player/comfort.js', 'views/setup.js', 'player/cinema.js', 'player/remote.js', 'ui/featured.js', 'views/homecustom.js', 'views/history.js', 'views/webhooks.js', 'player/autoskip.js', 'player/playprefs.js', 'views/photos.js', 'ui/libfilter.js', 'views/itemedit.js', 'ui/rating.js', 'ui/thememusic.js', 'player/subsync.js', 'views/dvr.js', 'offline.js', 'views/downloads.js'].map(f => '/js/' + f);
 const HASH = JSON.parse('{{hashes}}');
 const hashed = (f) => HASH[f.slice(1)] ? `/m${f}?h=${HASH[f.slice(1)]}` : V + f;
 const SHELL = [...['/app.js', '/start.js', ...MODULES, '/style.css', '/vendor/hls.min.js'].map(hashed),
-  '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg', '/brand/icon-192.png', '/brand/icon-512.png', '/offline.html'];
+  '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg', '/brand/icon-192.png', '/brand/icon-512.png', '/offline.html', '/'];
 const versioned = (p) => p.startsWith('/m/') || p.startsWith(V + '/');
 
 self.addEventListener('install', (e) => {
@@ -24,14 +26,15 @@ self.addEventListener('install', (e) => {
   }))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  // Bara appens gamla cacher – nedladdningarna (braxhn-dl-*) ligger kvar
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && !k.startsWith('braxhn-dl-')).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== 'GET' || u.origin !== location.origin) return;
   // Sidan själv: från servern, annars en enkel sida om att servern inte nås
   if (r.mode === 'navigate') {
-    e.respondWith(fetch(r).catch(() => caches.match('/offline.html')));
+    e.respondWith(fetch(r).catch(async () => (u.pathname !== '/offline.html' && await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html')));
     return;
   }
   const key = u.pathname + u.search;

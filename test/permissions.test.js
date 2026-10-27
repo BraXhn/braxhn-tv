@@ -160,13 +160,14 @@ t('testmatris: titlar, bilder och strömmar från det otillåtna biblioteket ger
     `/api/image/${h}/thumb`, `/api/image/${h}/poster`, `/api/image/${h}/backdrop`,
     `/api/stream/${h}/direct`, `/api/stream/${h}/download`, `/api/stream/${h}/hls/master.m3u8?mode=transcode&q=360`,
     `/api/stream/${h}/hls/index.m3u8?mode=transcode&q=360`, `/api/stream/${h}/hls/seg-0.ts?mode=transcode&q=360`, `/api/stream/${h}/subs/e0.vtt`,
-    `/api/stream/${h}/offline-file`, `/api/stream/${h}/pgs/e0`,
+    `/api/stream/${h}/offline-file`, `/api/stream/${h}/offline-file?q=src`, `/api/items/${h}/offline?q=src&subs=1`, `/api/stream/${h}/pgs/e0`,
     `/api/items/${S.show}/missing`, `/api/collections/77`, `/api/collection-image/77/poster`, `/api/people/${S.person}`, `/api/people/${S.person}/image`,
     `/api/music/${S.M}/home`, `/api/music/${S.M}/albums`, `/api/music/${S.M}/artists`, `/api/music/${S.M}/search?q=hemlig`, `/api/music/${S.M}/smart`,
     `/api/music/${S.M}/smart/recent`, `/api/music/albums/${S.al}`, `/api/music/artists/${S.ar}`, `/api/music/cover/${S.al}`,
     `/api/music/tracks/${S.tr}/stream`, `/api/music/tracks/${S.tr}/play`, `/api/music/tracks/${S.tr}/lyrics`,
     `/api/music/tracks/${S.tr}/similar`, `/api/music/artists/${S.ar}/similar`,
     `/api/audiobooks/${S.BL}`, `/api/audiobooks/book/${S.book}`, `/api/audiobooks/book/${S.book}/play`, `/api/audiobooks/cover/${S.book}`,
+    `/api/music/albums/${S.al}/offline`, `/api/audiobooks/book/${S.book}/offline`,
   ];
   for (const p of denied) {
     const r = await req(p, { tok: bo });
@@ -255,6 +256,10 @@ t('nedladdning nekad: originalfil, offline och offline-synk', async () => {
   assert.equal((await req(`/api/items/${S.a}/offline`, { tok: bo })).status, 403);
   assert.equal((await req(`/api/items/${S.a}/offline`, { method: 'POST', body: { q: '360' }, tok: bo })).status, 403);
   assert.equal((await req(`/api/stream/${S.a}/download`, { tok: kalle })).status, 403);
+  // Webbappens offline (q=src, album, ljudbok) räknas också som nedladdning – kalle ser biblioteken men får inte ladda ner
+  assert.equal((await req(`/api/items/${S.a}/offline?q=src`, { tok: kalle })).status, 403);
+  assert.equal((await req(`/api/music/albums/${S.al}/offline`, { tok: kalle })).status, 403);
+  assert.equal((await req(`/api/audiobooks/book/${S.book}/offline`, { tok: kalle })).status, 403);
   const r = await req(`/api/stream/${S.a}/download`, { raw: true });
   assert.equal(r.status, 200, 'admin får ladda ner'); await r.body?.cancel();
   const sync = (await req(`/api/offline/sync?have=${S.a},${S.h}`, { tok: bo })).data;

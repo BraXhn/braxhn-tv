@@ -198,6 +198,22 @@ Tillägg (apparna behöver inte läsa dem):
   annan sändning av samma program. `POST /api/dvr/program` och `/manual` svarar även med `plan`.
 - `POST /api/dvr/recordings/:rid/play`: en pågående inspelning ger `{ url: …/live.m3u8, live: true }` – HLS (EVENT) av den
   växande filen, segmenten `…/seg-NNNNN.ts` med samma token. En klar inspelning ger som förut `…/stream` (MP4, MKV eller TS).
+## Offline i webbappen
+
+Bara tillägg – apparna påverkas inte.
+
+- `GET /api/items/:id/offline?q=src` (och `POST` med `{ q: 'src' }`): källfilen som den är, utan omkodning (`status: 'ready'`,
+  `original: true`, `size`). Webbappen väljer det bara när uppspelningsbeslutet (`/playback?info=1`) säger `direct`.
+  `/api/stream/:id/offline-file?q=src` serverar filen med Range och rätt `Content-Type`. Apparna skickar aldrig `src`.
+- `subs=1` i `GET /api/items/:id/offline`: när filen är klar finns `subs: [{ id, lang, label, forced, url }]` – textundertexter
+  (inga bild- eller kommentarsspår) som WebVTT med samma kortlivade token som filen.
+- `GET /api/music/albums/:id/offline?a=<format>`: `{ id, title, artist, year, cover, duration, tracks: [{ id, title, track, disc,
+  duration, artist, codec, gain, peak, url }] }` – en mediatoken per spår (scope −spårets id).
+- `GET /api/audiobooks/book/:id/offline?a=<format>`: som `/play` (`files[].url` med en token för boken, `chapters`, `position`, `speed`).
+- Båda kräver rätten att ladda ner (**403** annars) och användarens bibliotek (**404**).
+- `at` (Unix-sekunder) i `POST /api/items/:id/progress` och `POST /api/audiobooks/book/:id/progress`: när positionen sparades
+  offline. Finns ett framsteg som är nyare än `at` ändras inget och svaret har `stale: true`; annars sparas positionen med
+  `updated = at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
 
 ## Kontraktstestet
 

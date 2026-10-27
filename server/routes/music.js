@@ -12,7 +12,7 @@ import * as sonic from '../sonic.js';
 import * as mmeta from '../musicmeta.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio, admin, pub } from '../http/router.js';
-import { screenBlock, libOk, ctx } from '../http/context.js';
+import { screenBlock, libOk, ctx, canDownload } from '../http/context.js';
 
 // ---------- Musik ----------
 // Bibliotek, album, artister och spår kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
@@ -36,6 +36,18 @@ route('GET', '/api/music/albums/:aid', user, (c) => {
   // Tillägg: egna betyg (userRating i stjärnor) för albumet och låtarna – bara när de finns
   ratings.annotate(c.user.id, 'track', a.trackList);
   send(c.res, 200, { ...a, userRating: ratings.toStars(ratings.getOne(c.user.id, 'album', a.id)), type: k.kind, typeGuessed: k.guessed, info });
+});
+// Offline i webbappen: albumets spår med kortlivade länkar (en mediatoken per spår, scope −spårets id).
+// Räknas som nedladdning (perms.js). a = ljudformat webbläsaren spelar – annat kodas om (då utan Range).
+route('GET', '/api/music/albums/:aid/offline', user, (c) => {
+  if (!canDownload(c.user.id)) return fail(c.res, 403, 'Ditt konto får inte ladda ner');
+  const a = music.album(+c.p.aid, c.user.id);
+  if (!a) return fail(c.res, 404, 'Finns inte');
+  const caps = encodeURIComponent(String(c.q.get('a') || 'mp3,aac,flac').replace(/[^a-z0-9,]/g, '').slice(0, 60));
+  const ip = clientIp(c.req);
+  send(c.res, 200, { id: a.id, title: a.title, artist: a.artist, artistId: a.artistId, year: a.year, cover: a.cover, duration: a.duration,
+    tracks: a.trackList.map(t => ({ id: t.id, title: t.title, track: t.track, disc: t.disc, duration: t.duration, artist: t.artist, codec: t.codec, gain: t.gain, peak: t.peak,
+      url: `/api/music/tracks/${t.id}/stream?a=${caps}&t=${createSession(c.user.id, 'media', { item: -t.id, ip })}` })) });
 });
 route('GET', '/api/music/artists/:arid', user, (c) => {
   const a = music.artist(+c.p.arid, c.user.id);

@@ -11,7 +11,7 @@ import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, admin } from '../http/router.js';
-import { screenBlock, ctx, libOk } from '../http/context.js';
+import { screenBlock, ctx, libOk, canDownload } from '../http/context.js';
 
 // ---------- Ljudböcker ----------
 // Bibliotek, böcker och filer kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
@@ -20,8 +20,9 @@ const bookOk = (c, id) => { const b = get('SELECT library_id FROM books WHERE id
 route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: l, continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
 route('GET', '/api/audiobooks/book/:bid', user, (c) => { const b = books.book(+c.p.bid, c.user.id); b ? send(c.res, 200, b) : fail(c.res, 404, 'Finns inte'); });
 route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
-  const { position, speed } = await readJson(c.req);
-  const r = books.saveProgress(c.user.id, +c.p.bid, position, speed); if (!r) return fail(c.res, 404, 'Finns inte');
+  const { position, speed, at } = await readJson(c.req);
+  const r = books.saveProgress(c.user.id, +c.p.bid, position, speed, at); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (r.stale || (at && Number.isFinite(+at))) return send(c.res, 200, r); // offline-synk: ingen skärmtid
   const sc = screen.heartbeat(c.user.id, 'b:' + (+c.p.bid), +position, { audio: true });
   send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: sc } : r);
 });
@@ -90,6 +91,15 @@ route('GET', '/api/audiobooks/book/:bid/play', user, (c) => {
   send(c.res, 200, { ...b, token: t, files: b.files.map(f => ({ ...f, url: `/api/audiobooks/files/${f.id}/stream?a=${a}&t=${t}` })) });
 });
 
+// Offline i webbappen: som /play men räknas som nedladdning (perms.js) – samma token (scope boken) för alla filer
+route('GET', '/api/audiobooks/book/:bid/offline', user, (c) => {
+  if (!canDownload(c.user.id)) return fail(c.res, 403, 'Ditt konto får inte ladda ner');
+  const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
+  const t = createSession(c.user.id, 'media', { item: BOOK_SCOPE + b.id, ip: clientIp(c.req) });
+  const a = encodeURIComponent(String(c.q.get('a') || 'mp3,aac,flac').replace(/[^a-z0-9,]/g, '').slice(0, 60));
+  send(c.res, 200, { id: b.id, title: b.title, author: b.author, narrator: b.narrator, cover: b.cover, duration: b.duration, position: b.position, speed: b.speed, chapters: b.chapters,
+    files: b.files.map(f => ({ id: f.id, offset: f.offset, duration: f.duration, url: `/api/audiobooks/files/${f.id}/stream?a=${a}&t=${t}` })) });
+});
 // ---------- Poddar ----------
 route('GET', '/api/podcasts', user, (c) => send(c.res, 200, { podcasts: pods.list(c.user.id), latest: pods.latest(c.user.id, 30), canAdd: c.user.max_age == null }));
 route('POST', '/api/podcasts', user, async (c) => {

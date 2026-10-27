@@ -32,9 +32,17 @@ route('GET', '/api/items/:id/offline', user, (c) => {
   const q = c.q.get('q') || '720';
   const st = offline.status(it, q);
   if (st.status === 'missing') return fail(c.res, 404, st.error);
-  if (st.status === 'ready') st.url = `/api/stream/${it.id}/offline-file?q=${encodeURIComponent(q)}&t=${createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) })}`;
+  if (st.status === 'ready') {
+    const t = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
+    st.url = `/api/stream/${it.id}/offline-file?q=${encodeURIComponent(q)}&t=${t}`;
+    // Tillägg (webbappen, subs=1): textundertexterna som WebVTT med samma kortlivade token (titelns scope).
+    // Bildundertexter och kommentarsspår följer inte med.
+    if (c.q.get('subs') === '1') st.subs = stSubs(it, t);
+  }
   send(c.res, 200, st);
 });
+const stSubs = (it, t) => st.subtitlesOf(it).filter(s => !s.bitmap && !s.comment).slice(0, 12)
+  .map(s => ({ id: s.id, lang: s.lang || null, label: s.label, forced: !!s.forced, url: `/api/stream/${it.id}/subs/${encodeURIComponent(s.id)}?t=${t}` }));
 route('POST', '/api/items/:id/offline', user, async (c) => {
   if (noDownload(c)) return;
   const it = mediaItem(c); if (!it) return;

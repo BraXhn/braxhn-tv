@@ -27,7 +27,7 @@ export async function loadLibs() {
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
   account: 'Mitt konto', admin: 'Administration', setup: 'Installation', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person',
-  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks' };
+  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks', downloads: 'Nedladdat' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
   const h = (location.hash.slice(2) || '').split('?')[0]; // ?… = vyns parametrar (t.ex. bibliotekets filter)
@@ -57,6 +57,7 @@ export async function boot() {
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
   $$('[data-requests]').forEach(e => e.hidden = me.kid);
+  $$('[data-dlnav]').forEach(e => e.hidden = me.canDownload === false && !store.get('dl.' + me.id, []).length);
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
@@ -81,7 +82,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr',
-  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos' }));
+  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för
@@ -105,7 +106,8 @@ export async function route() {
   const h = (location.hash.slice(2) || '').split('?')[0];
   const [name, arg, arg2] = h.split('/');
   // Inbjudningslänken (#/invite/<token>) öppnas utan inloggning – där skapar mottagaren sitt konto
-  if (!me && name !== 'login' && name !== 'invite') { rememberPage(); location.hash = '#/login'; return; }
+  // Nedladdat (views/downloads.js) visas även när servern inte svarade vid start – vyn kontrollerar det själv
+  if (!me && name !== 'login' && name !== 'invite' && name !== 'downloads') { rememberPage(); location.hash = '#/login'; return; }
   // En film i litet fönster fortsätter spela medan man bläddrar – men aldrig efter utloggning eller vid profilval
   // (då skulle framsteget sparas på fel profil, och en barnprofil kunna titta vidare)
   if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
@@ -198,7 +200,8 @@ $('#install').onclick = async () => {
 // Flikmenyn: Sök fokuserar sökfältet i stället för att byta sida
 $('#tabbar [data-tab="search"]').onclick = (e) => { e.preventDefault(); window.scrollTo(0, 0); $('#q').focus(); };
 
-$('#logout').onclick = async () => { stopAudio(); stopActivity(); stopRemote(); clearHomeCache(); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
+// Utloggning: Nedladdat visas inte längre när servern inte svarar (filerna finns kvar till nästa inloggning)
+$('#logout').onclick = async () => { stopAudio(); stopActivity(); stopRemote(); clearHomeCache(); store.set('dl.last', null); await api('/logout', { method: 'POST' }).catch(() => {}); setMe(null); location.hash = '#/login'; };
 // Sökfältet (resultat medan man skriver, piltangenter, senaste sökningar) sköts av views/search.js
 
 // ---------- sidomenyn ----------
@@ -219,6 +222,7 @@ $('#railmore').onclick = (e) => {
     { icon: '✋', label: 'Önskningar', href: '#/requests', hidden: !!me?.kid },
     { icon: '🎁', label: 'Årssammanfattning', href: '#/wrapped' },
     { icon: '🕘', label: 'Min historik', href: '#/history' },
+    { icon: '⤓', label: 'Nedladdat', href: '#/downloads', hidden: me?.canDownload === false && !store.get('dl.' + me?.id, []).length },
     { icon: '👤', label: 'Mitt konto', href: '#/account' },
     'separator',
     { icon: '📊', label: 'Statistik och aktivitet', href: '#/stats', hidden: !me?.adminHere },

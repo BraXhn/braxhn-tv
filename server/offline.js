@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { CACHE, getSetting } from './db.js';
 import { streamsOf } from './stream.js';
-import { send, fail, streamFile } from './util.js';
+import { fail, streamFile, MIME } from './util.js';
 
 const DIR = path.join(CACHE, 'offline');
 fs.mkdirSync(DIR, { recursive: true });
@@ -25,7 +25,11 @@ function originalOk(it) {
 
 // Filen finns inte (längre): routen svarar 404
 const GONE = () => ({ status: 'missing', error: 'Filen finns inte längre' });
+// q = 'src' (webbappen): källfilen som den är, oavsett format – webbappen väljer det bara när webbläsaren kan spela
+// filen direkt (uppspelningsbeslutet). Apparna skickar aldrig 'src'; för dem gäller orig/1080/720/480 som förut.
+const srcStatus = (it) => { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } };
 export function status(it, q = '720') {
+  if (q === 'src') return srcStatus(it);
   if (!Q[q]) q = '720';
   // Originalfilen kan ha flyttats eller tagits bort sedan skanningen (eller disken svarar inte)
   if (q === 'orig' && originalOk(it)) { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } }
@@ -37,6 +41,7 @@ export function status(it, q = '720') {
 }
 
 export function start(it, q = '720') {
+  if (q === 'src') return srcStatus(it);
   if (!Q[q]) q = '720';
   const st = status(it, q);
   if (st.status !== 'none' && st.status !== 'error') return st;
@@ -103,6 +108,7 @@ function run(it, q, key, job) {
 }
 
 export function cancel(it, q) {
+  if (q === 'src') return;
   if (!Q[q]) q = '720';
   const key = keyOf(it, q), j = jobs.get(key);
   if (j) j.cancelled = true;
@@ -114,6 +120,11 @@ export function cancel(it, q) {
 
 /** Servera filen med Range-stöd (nedladdning kan återupptas). */
 export function serveFile(req, res, it, q) {
+  if (q === 'src') {
+    let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen finns inte längre'); }
+    const ext = path.extname(it.path).toLowerCase();
+    return streamFile(req, res, it.path, st.size, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="braxhn-${it.id}${ext.replace(/[^.\w]/g, '')}"` });
+  }
   const f = q === 'orig' && originalOk(it) ? it.path : fileOf(keyOf(it, Q[q] ? q : '720'));
   let st; try { st = fs.statSync(f); } catch { return fail(res, 404, 'Inte klar än'); }
   streamFile(req, res, f, st.size, { 'Content-Type': 'video/mp4', 'Content-Disposition': `attachment; filename="braxhn-${it.id}.mp4"` });
