@@ -1,4 +1,6 @@
-// Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå
+// Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå.
+// Musik spelas glapplöst/med övertoning av Web Audio-motorn (audioengine.js) när det går, annars av <audio id="maudio">.
+// M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
 import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, routeGen, store, toast } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
@@ -9,57 +11,101 @@ import { P, closeAllPlayers } from './player/video.js';
 import { screenBadge } from './screentime.js';
 import { cover, trackRows } from './views/music.js';
 import { openDialog } from './ui/dialog.js';
+import { openMenu } from './ui/menu.js';
+import { ICON } from './ui/icons.js';
 import { provide } from './lazy.js';
+import * as AE from './audioengine.js';
+import { gainFor } from './audiomix.js';
 import * as self from './audio.js';
 provide('audio', self); // fasaderna i lazy.js når modulen härifrån
 
 // ---------- musikspelare (följer med mellan sidor) ----------
-export const M = { queue: [], idx: -1, cur: null, audio: null, repeat: false, seekSeq: 0 };
+export const M = { queue: [], idx: -1, cur: null, audio: null, el: null, repeat: false, seekSeq: 0, loadSeq: 0 };
+// Fasaden M.audio: motorn när den spelar en buffert, annars elementet
+const FACADE = {
+  get paused() { return AE.on() ? AE.paused() : M.el.paused; },
+  play() { return AE.on() ? AE.resume() : M.el.play(); },
+  pause() { if (AE.on()) AE.pause(); else M.el.pause(); },
+  get currentTime() { return AE.on() ? AE.pos() : M.el.currentTime; },
+  set currentTime(t) { if (AE.on()) AE.seek(t); else M.el.currentTime = t; },
+  get duration() { return AE.on() ? AE.dur() : M.el.duration; },
+  get muted() { return M.el.muted; },
+  set muted(v) { M.el.muted = !!v; applyVolume(); },
+  get volume() { return +store.get('mvol', 1); },
+  set volume(v) { store.set('mvol', v); applyVolume(); },
+  get playbackRate() { return M.el.playbackRate; },
+  set playbackRate(v) { M.el.playbackRate = v; }
+};
 // Stäng musikbaren och sluta ladda ljudet (utan load() fortsätter elementet buffra och håller omkodningen vid liv)
 export function stopAudio() {
   if (!M.audio) return;
   if (M.spoken) spokenSave();
-  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.radio = null;
+  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.loadSeq++; M.radio = null;
   setSleep(0); showLyrics(false);
-  stopVideo(M.audio);
+  AE.stop(); AE.E.elT = null;
+  stopVideo(M.el);
   const bar = $('#mbar'); if (bar) bar.hidden = true;
   document.body.classList.remove('hasbar');
   setSession({});
 }
 const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.textContent = playing ? '⏸' : '▶'; b.title = playing ? 'Pausa' : 'Spela'; b.setAttribute('aria-label', b.title); };
+function setPlaying(playing) {
+  setMplay(playing);
+  if (navigator.mediaSession) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+}
+// Förloppet i spelaren (elementets timeupdate eller motorns tick var 250:e ms)
+function timeUI() {
+  if (M.spoken) return spokenTick();
+  lyricsTick();
+  // Omkodad ström som startats om vid spolning börjar på 0 – lägg till startpositionen
+  const a = M.audio, t = a.currentTime + (M.offset || 0);
+  $('#mcurt').textContent = fmtTime(t); $('#mbar').dataset.t = t.toFixed(1);
+  const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = Math.min(100, t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); }
+}
+// Motorns krokar: nästa låt i kön, byte till den, slut, förlopp, spelar/pausad och att elementet ska tystna
+const HOOKS = {
+  upcoming: () => upcoming(),
+  advance: (t, i) => showTrack(t, i),
+  ended: () => nextTrack(true),
+  time: () => timeUI(),
+  state: (playing) => setPlaying(playing),
+  stopElement: () => stopVideo(M.el)
+};
+function upcoming() {
+  if (M.spoken || SLEEP.end || !M.queue.length) return null;
+  const i = M.idx + 1 < M.queue.length ? M.idx + 1 : M.repeat ? 0 : -1;
+  return i >= 0 ? { t: M.queue[i], i } : null;
+}
 function ensureBar() {
   if ($('#mbar')) return;
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
     <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="Föregående" title="Föregående">⏮</button><button class="primary" id="mplay" aria-label="Pausa" title="Pausa">⏸</button><button class="ghost small" id="mnext" aria-label="Nästa" title="Nästa">⏭</button>
-      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="Casta till Chromecast" aria-label="Casta till Chromecast" ${castReady ? '' : 'hidden'}>📺<button class="ghost small" id="mradio" title="Starta låtradio från låten" aria-label="Starta låtradio från låten" aria-pressed="false">📻</button></div>
+      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="mset" title="Ljudinställningar" aria-label="Ljudinställningar" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="Casta till Chromecast" aria-label="Casta till Chromecast" ${castReady ? '' : 'hidden'}>📺<button class="ghost small" id="mradio" title="Starta låtradio från låten" aria-label="Starta låtradio från låten" aria-pressed="false">📻</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
     <div class="mright"><select id="mspeed" title="Hastighet" aria-label="Uppspelningshastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="Volym" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">Kö</button><button class="ghost small" id="mx" title="Stäng spelaren" aria-label="Stäng spelaren">✕</button></div>`;
   document.body.append(bar);
-  const a = M.audio = $('#maudio');
+  const a = M.el = $('#maudio');
+  M.audio = FACADE;
   a.volume = store.get('mvol', 1);
   ensureLyricsPanel();
-  a.ontimeupdate = () => {
-    if (M.spoken) return spokenTick();
-    lyricsTick();
-    // Omkodad ström som startats om vid spolning börjar på 0 – lägg till startpositionen
-    const t = a.currentTime + (M.offset || 0);
-    $('#mcurt').textContent = fmtTime(t); const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = (t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); } };
-  a.onended = () => M.spoken ? spokenEnded() : nextTrack(true);
+  a.ontimeupdate = () => { if (!AE.on()) timeUI(); };
+  a.onended = () => { if (M.spoken) return spokenEnded(); if (AE.on() || AE.elementEnded()) return; nextTrack(true); };
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
-  a.onplay = () => { if (NORM.ctx?.state === 'suspended') NORM.ctx.resume().catch(() => {}); setMplay(true); if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; };
-  a.onpause = () => { setMplay(false); if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; if (M.spoken) spokenSave(); };
-  a.onerror = () => toast('Kunde inte spela låten', { error: true });
-  $('#mplay').onclick = () => a.paused ? a.play() : a.pause();
+  a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) setPlaying(true); };
+  a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); };
+  a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; toast('Kunde inte spela låten', { error: true }); };
+  $('#mplay').onclick = () => M.audio.paused ? M.audio.play() : M.audio.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
-  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (a.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
+  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (M.audio.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
   $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); $('#mrep').setAttribute('aria-pressed', String(M.repeat)); };
+  $('#mset').onclick = (e) => soundMenu(e.currentTarget);
   $('#mvol').oninput = (e) => { store.set('mvol', +e.target.value); applyVolume(); };
   $('#msleep').onclick = sleepDialog;
   $('#mlyr').onclick = toggleLyrics;
   $('#mradio').onclick = act(() => M.cur?.id ? startRadio({ trackId: M.cur.id }, M.cur.title) : null);
-  $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || a.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
+  $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || M.audio.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
   $('#mx').onclick = stopAudio;
   $('#mq').onclick = showQueue;
   $('#mcast').onclick = castAudio;
@@ -86,7 +132,7 @@ export function musicSession() {
 }
 // ---------- tal: ljudböcker och poddar (flera filer, global position, hastighet, sparad position) ----------
 function setBarMode(spoken) {
-  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
+  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mset').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
   $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
   $('#mprev').title = spoken ? `${b} sekunder bakåt` : 'Föregående'; $('#mnext').title = spoken ? `${f} sekunder framåt` : 'Nästa';
@@ -99,7 +145,8 @@ export function playSpoken(s) {
   loadListenPrefs();
   closeAllPlayers();
   if (M.spoken) spokenSave();
-  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null;
+  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++;
+  AE.stop(); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet, utan jämn ljudnivå
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
   M.sfile = null;
   setBarMode(true);
@@ -111,9 +158,9 @@ export function playSpoken(s) {
   if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.sub || '', artwork: s.cover ? [{ src: s.cover, sizes: '600x600', type: 'image/jpeg' }] : [] });
   spokenSeek(s.position && s.duration && s.duration - s.position > 30 ? s.position : 0);
 }
-export const spokenPos = () => M.spoken && M.sfile ? M.sfile.offset + (M.soff || 0) + M.audio.currentTime : 0;
+export const spokenPos = () => M.spoken && M.sfile ? M.sfile.offset + (M.soff || 0) + M.el.currentTime : 0;
 export async function spokenSeek(t) {
-  const s = M.spoken, a = M.audio; if (!s) return;
+  const s = M.spoken, a = M.el; if (!s) return;
   t = Math.max(0, Math.min(t, (s.duration || 1e9) - 0.5));
   const f = [...s.files].reverse().find(x => x.offset <= t) || s.files[0];
   const local = t - f.offset;
@@ -154,7 +201,8 @@ function spokenEnded() {
 window.addEventListener('pagehide', () => { if (M.spoken) spokenSave(); });
 export function seekTo(t) {
   if (M.spoken) return spokenSeek(t);
-  const a = M.audio;
+  if (AE.on()) return AE.seek(t);
+  const a = M.el;
   // Omkodade strömmar saknar Range – starta om på rätt position
   if (M.transcoded) { M.offset = t; a.src = M.url + (M.url.includes('?') ? '&' : '?') + 'ss=' + t; a.play().catch(() => {}); }
   else { M.offset = 0; a.currentTime = t; }
@@ -168,22 +216,38 @@ export function playQueue(tracks, i, opts = {}) {
   if (M.spoken) { spokenSave(); M.spoken = null; }
   setBarMode(false);
   closeAllPlayers();
-  ensureGainNode(); // i användarens klick – annars får ljudsammanhanget inte starta
+  ensureEngine(); // i användarens klick – annars får ljudsammanhanget inte starta
   loadListenPrefs();
   M.queue = tracks; loadTrack(i);
 }
+/** Startar låt i i kön: som buffert (glapplöst/övertoning) om den hinner avkodas inom GRACE, annars i elementet. */
 async function loadTrack(i) {
   const t = M.queue[i]; if (!t) return;
-  M.idx = i; M.cur = t;
-  const a = M.audio, bar = $('#mbar');
-  bar.hidden = false; document.body.classList.add('hasbar');
-  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  const seq = ++M.loadSeq, el = M.el;
+  showTrack(t, i);
   M.offset = 0; M.transcoded = false; // inte föregående spårs (eller bokens) värden
+  if (AE.wants(t)) {
+    const p = AE.prepare(t).catch(() => null);
+    AE.stop();
+    if (!el.paused) el.pause();
+    const dec = await Promise.race([p, new Promise(r => setTimeout(r, AE.GRACE))]);
+    if (seq !== M.loadSeq) return; // en annan låt hann starta
+    if (dec) { stopVideo(el); AE.play(t, i, dec); return; }
+  } else AE.stop();
+  // Elementet: nästa låt kan ändå bli en buffert (motorn tar över vid övergången)
+  AE.E.elT = t; AE.E.paused = false; AE.applyGains();
+  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  el.src = M.url;
+  el.play().catch(() => {});
+  fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
+}
+/** Visar låten i spelaren och gör det som hör till en ny låt (text, mediesession, låtradio, "spelad"). */
+function showTrack(t, i) {
+  M.idx = i; M.cur = t;
+  const bar = $('#mbar');
+  bar.hidden = false; document.body.classList.add('hasbar');
   applyVolume(); // spårets egen ljudnivå
   loadLyrics();
-  a.src = M.url;
-  a.play().catch(() => {});
-  fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
   $('#mcov').innerHTML = cover(t.albumId, t.cover, 'small');
   $('#mtitle').textContent = t.title;
   $('#martist').textContent = t.artist || ''; $('#martist').href = t.artistId ? `#/artist/${t.artistId}` : '#';
@@ -230,63 +294,87 @@ function showQueue() {
   $('tr.playing', d)?.focus();
 }
 
-// ================= LYSSNING: inställningar, jämn ljudnivå, sovtimer, låttexter och smarta listor =================
-let LPREFS = { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, choices: { skipBack: [5, 10, 15, 30, 45, 60], skipForward: [10, 15, 30, 45, 60, 90] } };
+// ================= LYSSNING: inställningar, jämn ljudnivå, glapplöst och övertoning =================
+let LPREFS = { normalize: true, normMode: 'track', gapless: true, crossfade: 0, skipBack: 15, skipForward: 30, skipSilence: false,
+  choices: { skipBack: [5, 10, 15, 30, 45, 60], skipForward: [10, 15, 30, 45, 60, 90], crossfade: [0, 2, 4, 6, 8, 10, 12] } };
+const normMode = () => LPREFS.normalize === false ? 'off' : (LPREFS.normMode || 'track');
+function enginePrefs() { AE.setPrefs({ gapless: LPREFS.gapless !== false, crossfade: +LPREFS.crossfade || 0, normMode: M.spoken ? 'off' : normMode() }); }
 // Hämtas när uppspelning startar (kan ha ändrats i en annan app eller profil)
 function loadListenPrefs() {
   return api('/me/listening', { bg: true }).then(p => {
     LPREFS = p;
-    if (M.audio) { if (M.spoken) setBarMode(true); else applyVolume(); }
+    enginePrefs();
+    if (M.el) { if (M.spoken) setBarMode(true); else applyVolume(); }
     return p;
   }).catch(() => LPREFS);
+}
+async function saveListen(body) {
+  LPREFS = await api('/me/listening', { method: 'PUT', body, bg: true });
+  if (M.el && !M.spoken && (normMode() !== 'off' || LPREFS.gapless || LPREFS.crossfade)) ensureEngine();
+  enginePrefs();
+  if (M.el) { if (M.spoken) setBarMode(true); else applyVolume(); }
+}
+const NORM_LABEL = { track: 'Spår', album: 'Album', off: 'Av' };
+const fadeLabel = (s) => s ? `${s} s` : 'Av';
+/** Musikspelarens meny med ljudinställningar (jämn ljudnivå, glapplöst, övertoning) – sparas på kontot. */
+function soundMenu(anchor) {
+  const save = (body, msg) => act(async () => { await saveListen(body); toast(msg); })();
+  const nm = normMode(), cf = +LPREFS.crossfade || 0, noWa = !AE.ready() && AE.E.failed;
+  openMenu(anchor, [
+    { icon: '⚖', label: 'Jämn ljudnivå', hint: NORM_LABEL[nm], submenu: [
+      { label: 'Spår – varje låt lika högt', icon: nm === 'track' ? '✓' : '', onSelect: () => save({ normMode: 'track' }, 'Jämn ljudnivå per spår') },
+      { label: 'Album – behåll skillnaderna inom albumet', icon: nm === 'album' ? '✓' : '', onSelect: () => save({ normMode: 'album' }, 'Jämn ljudnivå per album') },
+      { label: 'Av', icon: nm === 'off' ? '✓' : '', onSelect: () => save({ normMode: 'off' }, 'Jämn ljudnivå av') }] },
+    { icon: '∞', label: 'Glapplös uppspelning', hint: LPREFS.gapless === false ? 'Av' : 'På', disabled: noWa,
+      onSelect: () => save({ gapless: LPREFS.gapless === false }, LPREFS.gapless === false ? 'Glapplös uppspelning på' : 'Glapplös uppspelning av') },
+    { icon: '⤨', label: 'Övertoning', hint: fadeLabel(cf), disabled: noWa, submenu: (LPREFS.choices?.crossfade || [0, 2, 4, 6, 8, 10, 12]).map(s => ({
+      label: s ? `${s} sekunder` : 'Av', icon: s === cf ? '✓' : '', onSelect: () => save({ crossfade: s }, s ? `Övertoning ${s} sekunder` : 'Övertoning av') })) },
+    'separator',
+    { label: noWa ? 'Webbläsaren saknar Web Audio – bara ljudnivån gäller' : 'Gäller inte vid Chromecast', disabled: true },
+    { label: 'Fler lyssningsinställningar', href: '#/account' }
+  ], { title: 'Ljud' });
 }
 export async function renderListenPrefs(box) {
   const gen = routeGen;
   const p = await api('/me/listening');
   if (gen !== routeGen || !box.isConnected) return;
   const opts = (list, v) => list.map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${n} sekunder</option>`).join('');
+  const nm = p.normalize === false ? 'off' : (p.normMode || 'track');
   box.innerHTML = `<h2>Lyssning</h2>
-    <label class="row"><input type="checkbox" id="lpnorm" ${p.normalize ? 'checked' : ''} style="width:auto"> Jämn ljudnivå i musik</label>
-    <p class="muted small" style="margin:4px 0 12px">Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.</p>
+    <div class="row"><div><label for="lpnorm">Jämn ljudnivå i musik</label><select id="lpnorm">${['track', 'album', 'off'].map(m => `<option value="${m}" ${m === nm ? 'selected' : ''}>${{ track: 'Per spår', album: 'Per album', off: 'Av' }[m]}</option>`).join('')}</select></div>
+      <div><label for="lpfade">Övertoning mellan låtar</label><select id="lpfade">${(p.choices.crossfade || [0]).map(s => `<option value="${s}" ${s === p.crossfade ? 'selected' : ''}>${s ? `${s} sekunder` : 'Av'}</option>`).join('')}</select></div></div>
+    <p class="muted small" style="margin:4px 0 12px">Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. <i>Per album</i> behåller skillnaden mellan albumets låtar. Toppvärdet hindrar att något klipps. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.</p>
+    <label class="row"><input type="checkbox" id="lpgap" ${p.gapless !== false ? 'checked' : ''} style="width:auto"> Glapplös uppspelning</label>
+    <p class="muted small" style="margin:4px 0 12px">Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).</p>
     <div class="row"><div><label>Hopp bakåt (ljudböcker och poddar)</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
       <div><label>Hopp framåt</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
     <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> Hoppa över tystnad i poddar</label>
     <p class="muted small" style="margin:4px 0 0">Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.</p>`;
   const save = act(async () => {
-    LPREFS = await api('/me/listening', { method: 'PUT', body: { normalize: $('#lpnorm').checked, skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked }, bg: true });
-    if (M.audio) { if (LPREFS.normalize && M.cur && !M.spoken) ensureGainNode(); if (M.spoken) setBarMode(true); else applyVolume(); }
+    await saveListen({ normMode: $('#lpnorm').value, crossfade: +$('#lpfade').value, gapless: $('#lpgap').checked,
+      skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked });
     toast('Sparat');
   });
-  for (const id of ['#lpnorm', '#lpback', '#lpfwd', '#lpsil']) $(id, box).onchange = save;
+  for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil']) $(id, box).onchange = save;
 }
 
-// ---------- jämn ljudnivå ----------
-// Web Audio (GainNode) kan även höja tysta låtar. iOS-Safari pausar Web Audio när skärmen låses, så där används den inte
-// (och där går det inte heller att ändra volymen – normaliseringen gör då ingenting).
-const NORM = { ctx: null, node: null, failed: false };
-const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-function ensureGainNode() {
-  if (NORM.node || NORM.failed || !LPREFS.normalize || !M.audio) return;
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC || isIOS()) { NORM.failed = true; return; }
-  try {
-    const ctx = new AC(), src = ctx.createMediaElementSource(M.audio), node = ctx.createGain();
-    src.connect(node); node.connect(ctx.destination);
-    NORM.ctx = ctx; NORM.node = node;
-  } catch { NORM.failed = true; }
+// ---------- jämn ljudnivå och motorn ----------
+// Web Audio (GainNode) kan även höja tysta låtar och gör glapplöst/övertoning möjligt. iOS-Safari pausar Web Audio när
+// skärmen låses, så där används den inte (och där går det inte heller att ändra volymen – normaliseringen gör då ingenting).
+function ensureEngine() {
+  if (!M.el) return;
+  if (AE.init(M.el, HOOKS, audioCaps())) { enginePrefs(); applyVolume(); }
 }
-/** Spårets förstärkning (linjär) mot referensen -18 LUFS; aldrig så mycket att toppen klipps, högst +12 dB. */
-function trackGain() {
-  const t = M.cur;
-  if (M.spoken || !LPREFS.normalize || !t || t.gain == null) return 1;
-  let g = 10 ** (t.gain / 20);
-  if (t.peak > 0) g = Math.min(g, 1 / t.peak);
-  return Math.min(g, 4);
-}
-/** Volym = reglaget × (bara dämpning om Web Audio saknas) × sovtimerns nedtoning */
+/** Volym = reglaget × sovtimerns nedtoning; spårets förstärkning i motorn (eller bara dämpning om Web Audio saknas) */
 export function applyVolume() {
-  const a = M.audio; if (!a) return;
-  const g = trackGain(), vol = +store.get('mvol', 1), fade = M.fade ?? 1;
-  if (NORM.node) { NORM.node.gain.value = g; a.volume = Math.max(0, Math.min(1, vol * fade)); }
-  else a.volume = Math.max(0, Math.min(1, vol * Math.min(1, g) * fade));
+  const a = M.el; if (!a) return;
+  const vol = +store.get('mvol', 1), fade = M.fade ?? 1;
+  if (AE.ready()) {
+    a.volume = 1;
+    AE.setVolume(Math.max(0, Math.min(1, vol * fade)), a.muted);
+    enginePrefs();
+  } else {
+    const g = M.spoken ? 1 : gainFor(M.cur, normMode());
+    a.volume = Math.max(0, Math.min(1, vol * Math.min(1, g) * fade));
+  }
 }

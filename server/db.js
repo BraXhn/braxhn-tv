@@ -192,6 +192,19 @@ addCol('tracks', 'rg_track', 'REAL');
 addCol('tracks', 'rg_album', 'REAL');
 addCol('tracks', 'rg_peak', 'REAL');
 addCol('tracks', 'loudness', 'TEXT');
+// Albumläge och glapplöst: albumets toppvärde ur taggen, albumets ljudnivå räknad ur spårens (albums.rg_*) och trim/tystnad i kanterna
+// (tracks.gl, JSON från server/gapless.js – NULL = inte analyserat)
+addCol('tracks', 'rg_album_peak', 'REAL');
+addCol('tracks', 'gl', 'TEXT');
+addCol('albums', 'rg_gain', 'REAL');
+addCol('albums', 'rg_peak', 'REAL');
+// Lyssningsinställningar (server/listening.js): skapas här så att nya kolumner når befintliga databaser
+db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  normalize INTEGER NOT NULL DEFAULT 1, skip_back INTEGER NOT NULL DEFAULT 15, skip_fwd INTEGER NOT NULL DEFAULT 30,
+  skip_silence INTEGER NOT NULL DEFAULT 0, updated INTEGER);`);
+addCol('listen_prefs', 'norm_mode', "TEXT NOT NULL DEFAULT 'track'");
+addCol('listen_prefs', 'gapless', 'INTEGER NOT NULL DEFAULT 1');
+addCol('listen_prefs', 'crossfade', 'INTEGER NOT NULL DEFAULT 0');
 // Skärmtid, notiser om nya avsnitt och automatisk offline-synk (JSON per användare)
 addCol('users', 'screen_time', 'TEXT');
 addCol('users', 'notify_personal', 'TEXT');

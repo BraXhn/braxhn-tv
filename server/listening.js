@@ -10,9 +10,7 @@ import * as custom from './smartlists.js';
 import * as sonic from './sonic.js';
 import { libOk } from './perms.js';
 
-db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  normalize INTEGER NOT NULL DEFAULT 1, skip_back INTEGER NOT NULL DEFAULT 15, skip_fwd INTEGER NOT NULL DEFAULT 30,
-  skip_silence INTEGER NOT NULL DEFAULT 0, updated INTEGER);`);
+// Tabellen listen_prefs skapas i db.js (där får den nya kolumner)
 
 // ---------------- jämn ljudnivå ----------------
 /** ReplayGain 2 riktar in sig på -18 LUFS; gain i API:t är alltid relativt den referensen (dB). */
@@ -31,7 +29,33 @@ export function parseReplayGain(tags = {}) {
   let track = num(t.replaygain_track_gain), album = num(t.replaygain_album_gain);
   if (!Number.isFinite(track)) track = r128(t.r128_track_gain);
   if (!Number.isFinite(album)) album = r128(t.r128_album_gain);
-  return { track: okGain(track), album: okGain(album), peak: okPeak(num(t.replaygain_track_peak)) };
+  return { track: okGain(track), album: okGain(album), peak: okPeak(num(t.replaygain_track_peak)), albumPeak: okPeak(num(t.replaygain_album_peak)) };
+}
+
+/**
+ * Albumets ljudnivå när taggarna saknar albumvärde: spårens ljudstyrka (−18 − gain) medelvärdesbildas som energi,
+ * viktat med längden – samma idé som ReplayGains albumvärde (utan grindning per block). Toppvärdet = högsta spårets.
+ * tracks: [{ gain, peak, duration }]. Null om något spår saknar värde.
+ */
+export function albumLoudness(tracks) {
+  if (!tracks.length || tracks.some(t => t.gain == null)) return null;
+  let e = 0, w = 0, peak = 0;
+  for (const t of tracks) {
+    const d = t.duration > 0 ? t.duration : 1;
+    e += d * 10 ** ((REFERENCE_LUFS - t.gain) / 10); w += d;
+    if (t.peak > peak) peak = t.peak;
+  }
+  const lufs = 10 * Math.log10(e / w);
+  return { gain: okGain(REFERENCE_LUFS - lufs), peak: peak ? okPeak(peak) : null };
+}
+/** Räknar om albums.rg_gain/rg_peak för albumen (alla när ids saknas). */
+export function refreshAlbumGains(ids = null) {
+  const list = ids ? [...new Set(ids)].filter(Boolean) : all('SELECT id FROM albums').map(r => r.id);
+  for (const id of list) {
+    const rows = all('SELECT rg_track AS gain, rg_peak AS peak, duration FROM tracks WHERE album_id=?', id);
+    const r = albumLoudness(rows);
+    run('UPDATE albums SET rg_gain=?, rg_peak=? WHERE id=?', r?.gain ?? null, r?.peak ?? null, id);
+  }
 }
 
 /** Tolkar sammanfattningen från ffmpeg-filtret ebur128 (integrerad ljudstyrka och toppvärde). */
@@ -71,7 +95,7 @@ export function scheduleLoudness(limit = perScan()) {
   return running;
 }
 async function loudnessBatch(limit) {
-  const rows = all('SELECT id, path FROM tracks WHERE loudness IS NULL ORDER BY added DESC LIMIT ?', limit);
+  const rows = all('SELECT id, path, album_id FROM tracks WHERE loudness IS NULL ORDER BY added DESC LIMIT ?', limit);
   let measured = 0;
   for (const r of rows) {
     let res = null, src = 'fel';
@@ -80,8 +104,10 @@ async function loudnessBatch(limit) {
     if (!res) {
       try { const m = await measureLoudness(r.path); res = { track: m.gain, album: null, peak: m.peak }; src = 'mätt'; measured++; } catch {}
     }
-    run('UPDATE tracks SET rg_track=?, rg_album=?, rg_peak=?, loudness=? WHERE id=? AND loudness IS NULL', res?.track ?? null, res?.album ?? null, res?.peak ?? null, src, r.id);
+    run('UPDATE tracks SET rg_track=?, rg_album=?, rg_peak=?, rg_album_peak=?, loudness=? WHERE id=? AND loudness IS NULL',
+      res?.track ?? null, res?.album ?? null, res?.peak ?? null, res?.albumPeak ?? null, src, r.id);
   }
+  refreshAlbumGains(rows.map(r => r.album_id)); // albumläget för spår utan albumtagg
   if (measured) console.log(`[music] ljudnivå mätt för ${measured} spår`);
 }
 
@@ -215,21 +241,33 @@ export function smartName(id, uid) {
 
 // ---------------- inställningar per användare ----------------
 export const SKIP_BACK = [5, 10, 15, 30, 45, 60], SKIP_FORWARD = [10, 15, 30, 45, 60, 90];
+/** Övertoning i sekunder (0 = av) och lägen för jämn ljudnivå (webbens musikspelare; normalize = av/på för apparna). */
+export const CROSSFADE = [0, 2, 4, 6, 8, 10, 12], NORM_MODES = ['track', 'album'];
 export function getPrefs(uid) {
   const r = get('SELECT * FROM listen_prefs WHERE user_id=?', uid);
-  return { normalize: r ? !!r.normalize : true, skipBack: r?.skip_back ?? 15, skipForward: r?.skip_fwd ?? 30, skipSilence: !!r?.skip_silence,
-    choices: { skipBack: SKIP_BACK, skipForward: SKIP_FORWARD }, reference: REFERENCE_LUFS };
+  const normalize = r ? !!r.normalize : true;
+  return { normalize, skipBack: r?.skip_back ?? 15, skipForward: r?.skip_fwd ?? 30, skipSilence: !!r?.skip_silence,
+    normMode: normalize ? (NORM_MODES.includes(r?.norm_mode) ? r.norm_mode : 'track') : 'off', gapless: r ? !!r.gapless : true, crossfade: r?.crossfade ?? 0,
+    choices: { skipBack: SKIP_BACK, skipForward: SKIP_FORWARD, crossfade: CROSSFADE, normMode: ['track', 'album', 'off'] }, reference: REFERENCE_LUFS };
 }
 /** Sparar de fält som skickats med. Kastar Error med svensk text vid ogiltiga värden. */
 export function setPrefs(uid, b = {}) {
   const cur = getPrefs(uid);
-  const next = { ...cur };
+  const next = { ...cur, normMode: cur.normMode === 'off' ? (get('SELECT norm_mode FROM listen_prefs WHERE user_id=?', uid)?.norm_mode || 'track') : cur.normMode };
   if (b.normalize !== undefined) next.normalize = !!b.normalize;
+  if (b.normMode !== undefined) {
+    if (b.normMode === 'off') next.normalize = false;
+    else if (NORM_MODES.includes(b.normMode)) { next.normalize = true; next.normMode = b.normMode; }
+    else throw new Error('Ogiltigt läge för jämn ljudnivå');
+  }
   if (b.skipSilence !== undefined) next.skipSilence = !!b.skipSilence;
+  if (b.gapless !== undefined) next.gapless = !!b.gapless;
+  if (b.crossfade !== undefined) { if (!CROSSFADE.includes(+b.crossfade)) throw new Error('Ogiltig längd på övertoningen'); next.crossfade = +b.crossfade; }
   if (b.skipBack !== undefined) { if (!SKIP_BACK.includes(+b.skipBack)) throw new Error('Ogiltigt hopp bakåt'); next.skipBack = +b.skipBack; }
   if (b.skipForward !== undefined) { if (!SKIP_FORWARD.includes(+b.skipForward)) throw new Error('Ogiltigt hopp framåt'); next.skipForward = +b.skipForward; }
-  run(`INSERT INTO listen_prefs(user_id,normalize,skip_back,skip_fwd,skip_silence,updated) VALUES(?,?,?,?,?,?)
+  run(`INSERT INTO listen_prefs(user_id,normalize,skip_back,skip_fwd,skip_silence,norm_mode,gapless,crossfade,updated) VALUES(?,?,?,?,?,?,?,?,?)
     ON CONFLICT(user_id) DO UPDATE SET normalize=excluded.normalize, skip_back=excluded.skip_back, skip_fwd=excluded.skip_fwd,
-    skip_silence=excluded.skip_silence, updated=excluded.updated`, uid, next.normalize ? 1 : 0, next.skipBack, next.skipForward, next.skipSilence ? 1 : 0, now());
+    skip_silence=excluded.skip_silence, norm_mode=excluded.norm_mode, gapless=excluded.gapless, crossfade=excluded.crossfade, updated=excluded.updated`,
+    uid, next.normalize ? 1 : 0, next.skipBack, next.skipForward, next.skipSilence ? 1 : 0, next.normMode, next.gapless ? 1 : 0, next.crossfade, now());
   return getPrefs(uid);
 }

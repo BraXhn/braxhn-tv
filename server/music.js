@@ -8,7 +8,8 @@ import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { ranked, parseQuery } from './search.js';
 import { send, fail, deletionBlocked, streamFile } from './util.js';
 import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
-import { parseReplayGain, scheduleLoudness } from './listening.js';
+import { parseReplayGain, scheduleLoudness, refreshAlbumGains } from './listening.js';
+import * as gapless from './gapless.js';
 import * as sonic from './sonic.js';
 import { libOk, libFilter } from './perms.js';
 
@@ -93,7 +94,7 @@ export async function scanMusic(lib, status) {
   for (const d of failed) if (!roots.includes(d)) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length; status.phase = 'Läser taggar';
   const known = new Map(all('SELECT id, path, size, mtime FROM tracks WHERE library_id=?', lib.id).map(r => [r.path, r]));
-  const seen = new Set();
+  const seen = new Set(), changedAlbums = new Set();
   for (const f of files) {
     status.done++; seen.add(f);
     let st; try { st = await fs.promises.stat(f); } catch { continue; }
@@ -112,16 +113,20 @@ export async function scanMusic(lib, status) {
     const title = String(t.title || fp.title).slice(0, 300);
     // Jämn ljudnivå: ReplayGain-taggar om de finns, annars mäts spåret senare i bakgrunden (loudness=NULL)
     const rg = parseReplayGain(t), loud = rg.track != null || rg.album != null ? 'tag' : null;
+    // gl=NULL: trim och tystnad i kanterna räknas om (gapless.js)
     if (k) run(`UPDATE tracks SET album_id=?,artist_id=?,title=?,track_no=?,disc_no=?,duration=?,size=?,mtime=?,codec=?,bitrate=?,sample_rate=?,channels=?,
-      rg_track=?,rg_album=?,rg_peak=?,loudness=? WHERE id=?`,
-      alId, trackArtist, title, trackNo, discNo, info.duration, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, rg.track, rg.album, rg.peak, loud, k.id);
-    else run(`INSERT INTO tracks(library_id,album_id,artist_id,title,track_no,disc_no,duration,path,size,mtime,codec,bitrate,sample_rate,channels,added,rg_track,rg_album,rg_peak,loudness)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, alId, trackArtist, title, trackNo, discNo, info.duration, f, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, now(),
-      rg.track, rg.album, rg.peak, loud);
+      rg_track=?,rg_album=?,rg_peak=?,rg_album_peak=?,loudness=?,gl=NULL WHERE id=?`,
+      alId, trackArtist, title, trackNo, discNo, info.duration, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, rg.track, rg.album, rg.peak, rg.albumPeak, loud, k.id);
+    else run(`INSERT INTO tracks(library_id,album_id,artist_id,title,track_no,disc_no,duration,path,size,mtime,codec,bitrate,sample_rate,channels,added,rg_track,rg_album,rg_peak,rg_album_peak,loudness)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lib.id, alId, trackArtist, title, trackNo, discNo, info.duration, f, st.size, mtime, info.codec, info.bitrate, info.sampleRate, info.channels, now(),
+      rg.track, rg.album, rg.peak, rg.albumPeak, loud);
+    changedAlbums.add(alId);
     const al = get('SELECT cover FROM albums WHERE id=?', alId);
     if (!al.cover && await ensureCover(alId, path.dirname(f), f, info.hasPic)) run('UPDATE albums SET cover=1 WHERE id=?', alId);
   }
+  if (changedAlbums.size) refreshAlbumGains([...changedAlbums]); // albumläget: ljudnivå ur spårens taggar
   scheduleLoudness(); // jämn ljudnivå mäts i bakgrunden, skanningen väntar inte
+  gapless.kick(); // trim och tystnad i kanterna (glapplöst och övertoning) likaså
   sonic.kick(); // ljudanalysen (tempo, energi, klang) likaså – nya och ändrade spår
   // Raderingsskyddet per mapp (libpaths.js): en mapp som saknas eller ser tömd ut tar inte bort något
   const missing = removable({ name: lib.name, list, rows: [...known.values()], seen, found: files,
@@ -155,13 +160,15 @@ const ALBUM_FROM = 'FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id';
 const ALBUM_SQL = `SELECT ${ALBUM_COLS} ${ALBUM_FROM}`;
 const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
 const TRACK_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
-  t.rg_track, t.rg_album, t.rg_peak`;
+  t.rg_track, t.rg_album, t.rg_peak, t.rg_album_peak, al.rg_gain AS al_gain, al.rg_peak AS al_peak, t.gl`;
 const TRACK_FROM = 'FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id';
 export const TRACK_SQL = `SELECT ${TRACK_COLS} ${TRACK_FROM}`;
 export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
   albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined,
   // Jämn ljudnivå: dB mot -18 LUFS (spårets värde, annars albumets) och toppvärde (linjärt) – null om okänt
-  gain: t.rg_track ?? t.rg_album ?? null, albumGain: t.rg_album ?? null, peak: t.rg_peak ?? null });
+  gain: t.rg_track ?? t.rg_album ?? null, albumGain: t.rg_album ?? t.al_gain ?? null, peak: t.rg_peak ?? null,
+  // Albumläge: albumets toppvärde (tagg, annars högsta spårets). Glapplöst: trim och tystnad i kanterna (gapless.js), null = okänt
+  albumPeak: t.rg_album_peak ?? t.al_peak ?? null, gapless: gapless.shapeGapless(t.gl) });
 
 export function albums(libId, sort = 'title', limit = 5000) {
   const order = { title: 'al.sort_title', added: 'al.added DESC', year: 'al.year DESC, al.sort_title', artist: 'ar.sort_name, al.year' }[sort] || 'al.sort_title';
@@ -254,12 +261,15 @@ export function streamTrack(req, res, t, query, uid = 0) {
   const ss = Math.max(0, parseFloat(query.get('ss')) || 0);
   const kbps = Math.min(320, maxKbps || 256);
   const useMp3 = !caps.has('aac');
-  if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' }); return res.end(); }
+  // gl=1 (webbens glapplösa spelare): FLAC utan kodarfördröjning när webbläsaren spelar FLAC och ingen bithastighet är begärd
+  const lossless = query.get('gl') === '1' && caps.has('flac') && !maxKbps;
+  const type = lossless ? 'audio/flac' : useMp3 ? 'audio/mpeg' : 'audio/aac';
+  if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Transcoded': '1' }); return res.end(); }
   for (const x of audioJobs) if (x.uid === uid && x.file === t.path) { audioJobs.delete(x); x.p.kill('SIGKILL'); }
   if ([...audioJobs].filter(x => x.uid === uid).length >= AUDIO_LIMITS.user || audioJobs.size >= AUDIO_LIMITS.total)
     return fail(res, 503, 'För många ljudströmmar omkodas samtidigt just nu – försök igen strax');
   const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', ...(ss ? ['-ss', String(ss)] : []), '-i', t.path,
-    '-map', '0:a:0', '-vn', ...(useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
+    '-map', '0:a:0', '-vn', ...(lossless ? ['-c:a', 'flac', '-compression_level', '1', '-f', 'flac'] : useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
     { stdio: ['ignore', 'pipe', 'ignore'] });
   const job = { uid, file: t.path, p };
   audioJobs.add(job);
@@ -269,7 +279,7 @@ export function streamTrack(req, res, t, query, uid = 0) {
     console.warn('[music] kunde inte starta ffmpeg:', e.message);
     if (!res.headersSent) fail(res, 500, 'Omkodningen kunde inte startas'); else res.destroy();
   });
-  res.writeHead(200, { 'Content-Type': useMp3 ? 'audio/mpeg' : 'audio/aac', 'Cache-Control': 'no-store', 'X-Transcoded': '1' });
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Transcoded': '1' });
   pipeline(p.stdout, res, () => p.kill('SIGKILL'));
   req.on('close', () => p.kill('SIGKILL'));
 }

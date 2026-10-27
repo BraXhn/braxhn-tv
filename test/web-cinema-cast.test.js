@@ -349,7 +349,7 @@ t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
     await page.goto(B + '/#/album/' + S.album);
     await page.click('tr[data-ti="0"]');
     await page.waitForSelector('#mbar:not([hidden]) #mcast:not([hidden])');
-    await page.waitForFunction(() => document.querySelector('#maudio').currentTime > 0.3);
+    await page.waitForFunction(() => +document.querySelector('#mbar').dataset.t > 0.3);
     await page.click('#mcast');
     await page.waitForSelector('#castbar:not([hidden])');
     const log = () => page.evaluate(() => JSON.parse(JSON.stringify(window.__castSim.log)));

@@ -47,6 +47,7 @@ route('GET', '/api/music/albums/:aid/offline', user, (c) => {
   const ip = clientIp(c.req);
   send(c.res, 200, { id: a.id, title: a.title, artist: a.artist, artistId: a.artistId, year: a.year, cover: a.cover, duration: a.duration,
     tracks: a.trackList.map(t => ({ id: t.id, title: t.title, track: t.track, disc: t.disc, duration: t.duration, artist: t.artist, codec: t.codec, gain: t.gain, peak: t.peak,
+      albumGain: t.albumGain, albumPeak: t.albumPeak, gapless: t.gapless,
       url: `/api/music/tracks/${t.id}/stream?a=${caps}&t=${createSession(c.user.id, 'media', { item: -t.id, ip })}` })) });
 });
 route('GET', '/api/music/artists/:arid', user, (c) => {

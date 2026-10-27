@@ -21,6 +21,7 @@ import { allowedFor, clearRecommendations } from './http/context.js';
 import { clearHome } from './homeshelves.js';
 import * as colors from './imgcolor.js';
 import * as sonic from './sonic.js';
+import * as gapless from './gapless.js';
 import * as webhooks from './webhooks.js';
 import * as photos from './photos.js';
 import { metadataOf, itemMeta } from './activity.js';
@@ -109,6 +110,9 @@ setTimeout(() => libfilter.kickFacets(), 15000).unref();
 // Ljudanalysen fortsätter där den slutade (efter omstart) och väntar medan video omkodas eller flera ljudströmmar kodas om
 sonic.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
 sonic.kick(60000);
+// Glapplöst/övertoning: trim och tystnad i kanterna för spår som inte analyserats (lägsta prioritet, väntar under omkodning)
+gapless.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
+gapless.kick(75000);
 // Repliksökningen fortsätter där den slutade och väntar medan video omkodas
 sublines.setBusyCheck(() => st.activeTranscodes().length > 0);
 sublines.kick(90000);
