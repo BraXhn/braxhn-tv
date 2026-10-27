@@ -327,9 +327,13 @@ function guessCharenc(file) {
 }
 
 // ---------------- direktuppspelning ----------------
+// Snabbstart (server/prestart.js, kopplas in av app.js): direct serverar början/slutet ur startcachen medan
+// disken vaknar, input ger ffmpeg en sammansatt indata (cachen + originalfilen) vid start från början
+export const fastStart = { direct: null, input: null };
 export function serveDirect(req, res, it) {
-  let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
   const type = MIME[path.extname(it.path).toLowerCase()] || 'application/octet-stream';
+  if (fastStart.direct?.(req, res, it, type)) return;
+  let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
   streamFile(req, res, it.path, st.size, { 'Content-Type': type, 'Cache-Control': 'no-store' });
 }
 
@@ -830,12 +834,15 @@ function startFfmpeg(s, it, n) {
   // Nyckelbildsmönstret för de korta startsegmenten gäller bara när omkodningen börjar från början
   if (d.mode === 'transcode' && n > 0 && n < HEAD.length) n = 0;
   const t = segs[n].start;
+  // Från början utan inbränning: början av filen kan komma ur startcachen (ffmpeg läser då från stdin)
+  const pipeIn = n === 0 && !d.burn && fastStart.input ? fastStart.input(it) : null;
+  const src = pipeIn ? 'pipe:0' : it.path;
   let args, gpuRun = null;
   if (d.mode === 'remux' && d.fmt === 'fmp4') {
     // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
       '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
       '-output_ts_offset', ss.toFixed(6),
       '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
@@ -850,7 +857,7 @@ function startFfmpeg(s, it, n) {
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segTimes(segs, n, ss);
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
       '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
@@ -861,7 +868,7 @@ function startFfmpeg(s, it, n) {
     const va = videoArgs(it, d, n === 0);
     gpuRun = va.gpu || null;
     const times = segTimes(segs, n, t);
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', it.path,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', src,
       ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
@@ -874,7 +881,14 @@ function startFfmpeg(s, it, n) {
     // gamla filer framåt kan komma från en annan körning – skapa om dem för entydig klarsignal
     for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.ts$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
   }
-  const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const p = spawn('ffmpeg', args, { stdio: [pipeIn ? 'pipe' : 'ignore', 'ignore', 'pipe'] });
+  if (pipeIn) {
+    // Originalfilen ändrades eller gick inte att läsa: avbryt (nästa segment startar om från filen)
+    pipeIn.on('error', (e) => { console.warn('[hls] startcachen:', e.message); p.kill('SIGKILL'); });
+    p.stdin.on('error', () => {});
+    pipeIn.pipe(p.stdin);
+    p.on('exit', () => pipeIn.destroy()); p.on('error', () => pipeIn.destroy());
+  }
   let err = '';
   p.on('error', (e) => {
     // ffmpeg saknas eller kunde inte startas – väntande förfrågningar ser !s.proc och svarar med fel

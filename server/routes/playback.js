@@ -14,13 +14,14 @@ import * as offline from '../offline.js';
 import * as trakt from '../trakt.js';
 import * as ver from '../versions.js';
 import { route, user, media, admin } from '../http/router.js';
-import { mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia, canDownload, permsOf, remoteMax } from '../http/context.js';
+import { allowedFor, mediaItem, screenBlock, chaptersOf, ageFilter, genreProfile, insideMedia, canDownload, permsOf, remoteMax } from '../http/context.js';
 import { minQuality } from '../perms.js';
 import * as cinema from '../cinema.js';
 import * as pp from '../playprefs.js';
 import { TRAILER_SCOPE } from '../trailers.js';
 import * as libfilter from '../libfilter.js';
 import * as subsync from '../subsync.js';
+import * as prestart from '../prestart.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
@@ -148,6 +149,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (c.res.writableEnded || c.req.destroyed) return;
   // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först, och inte när trailers
   // spelas först – då hämtar spelaren filmen på nytt efteråt)
+  // Snabbstart: väck disken direkt och räkna träff/miss i startcachen (före ffmpeg, som kan läsa ur den)
+  if (!info) prestart.notePlay(it, startAt, d.mode);
   if (hp && !info && !d.abr && !preroll.length) st.prewarm(it, hp, c.user.id, startAt);
   if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', startAt / it.duration * 100).catch(() => {});
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
@@ -229,6 +232,17 @@ route('PUT', '/api/me/playback-prefs', user, async (c) => {
 });
 // remoteCap = administratörens tak utanför hemmet (visas i Mitt konto)
 const playbackPrefsOut = (uid) => ({ ...pp.getPrefs(uid), remoteCap: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080') });
+// Väck disken i förväg (pekaren på Spela): läser lite av filen i bakgrunden. Serie = nästa avsnitt för profilen.
+route('POST', '/api/items/:id/wake', user, (c) => {
+  let row = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!row || !allowedFor(c.user.id, row)) return fail(c.res, 404, 'Finns inte');
+  if (row.kind === 'show') {
+    row = get(`SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.parent_id=? AND i.kind='episode' AND i.path IS NOT NULL
+      AND COALESCE(p.watched,0)=0 ORDER BY (COALESCE(p.position,0)>0) DESC, i.season, i.episode LIMIT 1`, c.user.id, row.id);
+    if (!row || !allowedFor(c.user.id, row)) return send(c.res, 200, { ok: true, woke: false });
+  }
+  send(c.res, 200, { ok: true, woke: prestart.wake(row) });
+});
 route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
 route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
 route('GET', '/api/stream/:id/download', user, (c) => { const it = mediaItem(c); if (it) st.serveDownload(c.req, c.res, it); });
