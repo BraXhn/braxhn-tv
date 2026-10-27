@@ -22,6 +22,7 @@ export const SHELVES = [
   { id: 'short', name: 'Kort film ikväll' },
   { id: 'toprated', name: 'Topprankat i biblioteket' },
   { id: 'onthisday', name: 'Den här dagen' },
+  { id: 'memories', name: 'Minnen från fotobiblioteket' },
   { id: 'genre', name: 'Dagens genre' },
   { id: 'gems', name: 'Glömda guldkorn' },
   { id: 'collections', name: 'Samlingar' }

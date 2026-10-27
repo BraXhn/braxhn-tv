@@ -10,7 +10,7 @@ import { emptyState, errorState, bindRetry, loadingState } from '../ui/states.js
 const STEPS = [
   { id: 'welcome', title: 'Välkommen' }, { id: 'metadata', title: 'Metadata' }, { id: 'libraries', title: 'Bibliotek' },
   { id: 'hardware', title: 'Omkodning' }, { id: 'remote', title: 'Utanför hemmet' }, { id: 'household', title: 'Hushållet' }, { id: 'done', title: 'Klart' }];
-const TYPES = { movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' };
+const TYPES = { movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker', photo: 'Foton' };
 const LANGS = [['sv-SE', 'Svenska'], ['en-US', 'Engelska'], ['nb-NO', 'Norska'], ['da-DK', 'Danska'], ['fi-FI', 'Finska'], ['de-DE', 'Tyska']];
 const REPO = 'https://github.com/BraXhn/braxhn-tv';
 const ext = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
@@ -166,7 +166,7 @@ const STEP = {
       Hur filerna bör heta står i README under <i>Namnge filer</i>.</p>`;
     let libs = S.checks.libraries;
     const drawLibs = () => {
-      $('#stlibs').innerHTML = libs.length ? `<h3>Dina bibliotek</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? 'Hemvideor' : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? 'böcker' : 'titlar'}</span></li>`).join('')}</ul>` : '';
+      $('#stlibs').innerHTML = libs.length ? `<h3>Dina bibliotek</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? 'Hemvideor' : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? 'böcker' : l.type === 'photo' ? 'foton' : 'titlar'}</span></li>`).join('')}</ul>` : '';
     };
     drawLibs();
     const add = async (name, type, p, homeVideo = false) => {

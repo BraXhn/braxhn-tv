@@ -10,6 +10,11 @@ import { execFile } from 'node:child_process';
 import { CACHE, CONFIG } from './db.js';
 
 export const SIZES = [160, 240, 320, 480, 720, 1280];
+// Foton (server/photos.js) visas även i helskärm: två större bredder, bara för fotobibliotekens bilder
+export const PHOTO_SIZES = [...SIZES, 1920, 2560];
+// EXIF-orienteringen (1–8) som ffmpeg-filter. Bilden läses med -noautorotate så att resultatet är detsamma oavsett
+// om ffmpeg-versionen själv vrider JPEG efter EXIF (6.x gör det, 5.1 inte).
+export const ORIENT_FILTER = { 2: 'hflip', 3: 'hflip,vflip', 4: 'vflip', 5: 'transpose=0', 6: 'transpose=1', 7: 'transpose=3', 8: 'transpose=2' };
 const DIR = path.join(CACHE, 'img');
 // Samtidiga skalningar: halva processorn, minst 2 och högst 4 (strömningen får aldrig svältas ut)
 const LIMIT = Math.min(4, Math.max(2, os.cpus().length >> 1)), MAX_WAITING = 300;
@@ -20,11 +25,12 @@ const WAIT_MS = 300;
 export const stats = { resized: 0, failed: 0 };
 
 /** ?w= till närmaste fasta bredd uppåt; ogiltigt, saknat eller större än största bredden → null (originalet) */
-export function snapWidth(v) {
+export function snapWidth(v, sizes = SIZES) {
+  if (!Array.isArray(sizes)) sizes = SIZES; // t.ex. list.map(snapWidth): andra argumentet är indexet
   if (v == null || !/^\d{1,5}$/.test(String(v))) return null;
   const n = +v;
-  if (!n || n > SIZES.at(-1)) return null;
-  return SIZES.find(s => s >= n);
+  if (!n || n > sizes.at(-1)) return null;
+  return sizes.find(s => s >= n);
 }
 
 /** Bildens bredd ur JPEG- eller PNG-huvudet, null om den inte går att läsa */
@@ -73,12 +79,16 @@ export function dropVariants(src) { fs.rm(path.join(DIR, keyOf(src)), { recursiv
 let active = 0;
 const waiting = [], inflight = new Map(), failedAt = new Map();
 const release = () => { const next = waiting.shift(); next ? next() : active--; };
-function resize(src, out, w, stamp) {
+function resize(src, out, w, stamp, orient = 0) {
   return new Promise((resolve) => {
     const run = () => {
       const tmp = out + '.tmp';
-      execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file', '-i', src,
-        '-frames:v', '1', '-vf', `scale='min(${w},iw)':-2:flags=lanczos`, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', '-update', '1', tmp],
+      // orient: EXIF-orienteringen tillämpas efter skalningen; 0 = ffmpeg bestämmer själv (som tidigare)
+      // Kvarts varv (5–8): bredden w gäller bilden som den visas, alltså filens höjd
+      const rot = ORIENT_FILTER[orient] ? ',' + ORIENT_FILTER[orient] : '';
+      const scale = orient >= 5 ? `scale=-2:'min(${w},ih)':flags=lanczos` : `scale='min(${w},iw)':-2:flags=lanczos`;
+      execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file', ...(orient ? ['-noautorotate'] : []), '-i', src,
+        '-frames:v', '1', '-vf', `${scale}${rot}`, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', '-update', '1', tmp],
       { timeout: 30000 }, (e) => {
         let ok = !e;
         if (ok) { try { fs.renameSync(tmp, out); stats.resized++; } catch { ok = false; } }
@@ -103,23 +113,25 @@ const waitFor = (p, src, ms) => ms === Infinity ? p : Promise.race([p, new Promi
  * @param {string} src  källbilden
  * @param {string|null} wq  värdet på ?w=
  * @param {number} [wait]  längsta väntan på en ny variant (ms) innan originalet används; Infinity = vänta tills den är klar
+ * @param {{ sizes?: number[], orient?: number, force?: boolean }} [opts]  foton: bredderna (PHOTO_SIZES), EXIF-orienteringen
+ *   (1–8, tillämpas på varianten) och force = gör alltid en JPEG-variant (format som webbläsaren inte kan visa, t.ex. HEIC)
  * @returns {Promise<string>}
  */
-export async function sized(src, wq, wait = WAIT_MS) {
-  const w = snapWidth(wq);
+export async function sized(src, wq, wait = WAIT_MS, { sizes = SIZES, orient = 0, force = false } = {}) {
+  const w = snapWidth(wq, sizes);
   if (!w || !src) return src;
   let st; try { st = await fs.promises.stat(src); } catch { return src; }
-  const sw = widthOf(src, st);
+  const sw = force ? null : widthOf(src, st);
   if (sw != null && sw <= w) return src;
   // Ändras källbilden får varianten ett nytt namn (ändringstid och storlek i namnet)
-  const stamp = `-${Math.floor(st.mtimeMs)}-${st.size}.jpg`;
+  const stamp = `-${Math.floor(st.mtimeMs)}-${st.size}${orient > 1 ? '-o' + orient : ''}.jpg`;
   const out = path.join(DIR, keyOf(src), w + stamp);
   if (fs.existsSync(out)) return out;
   if ((failedAt.get(out) || 0) > Date.now() - 3600e3) return src;
   if (inflight.has(out)) return waitFor(inflight.get(out), src, wait);
   if (waiting.length >= MAX_WAITING) return src;
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch { return src; }
-  const p = resize(src, out, w, stamp).finally(() => inflight.delete(out));
+  const p = resize(src, out, w, stamp, orient).finally(() => inflight.delete(out));
   inflight.set(out, p);
   return waitFor(p, src, wait);
 }

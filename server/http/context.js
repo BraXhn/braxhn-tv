@@ -65,6 +65,9 @@ export function allowedFor(uid, it) {
   }
   const max = pm.maxAge;
   if (max == null) return true;
+  // Fotobibliotekens videoklipp har ingen åldersgräns: barnprofiler bara när administratören tillåtit biblioteket
+  const kids = photoLibKids(), libId = it.library_id ?? (it.id != null && kids.size ? get('SELECT library_id FROM items WHERE id=?', it.id)?.library_id : null);
+  if (kids.has(libId)) return kids.get(libId) === 1;
   let age = it.age;
   // Avsnitt ärver seriens och filmversioner huvudradens åldersgräns
   const from = it.parent_id || it.version_of;
@@ -73,17 +76,33 @@ export function allowedFor(uid, it) {
 }
 /** Begränsad på något sätt (åldersgräns eller bibliotek)? Då kontrolleras även bilder och liknande billiga routes. */
 export const restricted = (uid) => { const pm = permsOf(uid); return pm.maxAge != null || pm.libs != null; };
-/** Ålders- och biblioteksfilter för SQL (alias i = titeln, s = ev. serie). Alla listfrågor över titlar går genom det. */
-export function ageFilter(uid) {
+// Fotobibliotekens id → kids (libraries.kids), en kort stund i minnet (allowedFor anropas per titel i listor)
+let kidsCache = { t: 0, m: new Map() };
+export const forgetPhotoLibs = () => { kidsCache.t = 0; };
+export function photoLibKids() {
+  if (Date.now() - kidsCache.t > 5000) kidsCache = { t: Date.now(), m: new Map(all("SELECT id, kids FROM libraries WHERE type='photo'").map(r => [r.id, r.kids])) };
+  return kidsCache.m;
+}
+// Fotobibliotekens videoklipp (rader i items för spelaren, server/photos.js) hör inte hemma i film- och serielistor
+const NO_PHOTOS = " AND i.library_id NOT IN (SELECT id FROM libraries WHERE type='photo')";
+/**
+ * Ålders- och biblioteksfilter för SQL (alias i = titeln, s = ev. serie). Alla listfrågor över titlar går genom det.
+ * photos: true tar med fotobibliotekens videoklipp (bara uppslag på id – allowedFor gäller ändå).
+ */
+export function ageFilter(uid, { photos = false } = {}) {
   const pm = permsOf(uid), max = pm.maxAge;
   const lib = pm.libs == null ? { sql: '', params: [] } : { sql: ' AND i.library_id IN (SELECT value FROM json_each(?))', params: [JSON.stringify(pm.libs)] };
-  return max == null ? lib : { sql: ` AND COALESCE(i.age, s.age, ?) <= ?${lib.sql}`, params: [allowUnrated() ? max : 999, max, ...lib.params] };
+  const np = photos ? '' : NO_PHOTOS;
+  // Barnprofiler: klippen i ett fotobibliotek som de får se (kids) har ingen åldersgräns
+  const kidsOk = photos && max != null ? [...photoLibKids()].filter(([, k]) => k === 1).map(([id]) => id) : [];
+  const age = kidsOk.length ? `(COALESCE(i.age, s.age, ?) <= ? OR i.library_id IN (${kidsOk.map(Number).join(',')}))` : 'COALESCE(i.age, s.age, ?) <= ?';
+  return max == null ? { sql: lib.sql + np, params: lib.params } : { sql: ` AND ${age}${lib.sql}${np}`, params: [allowUnrated() ? max : 999, max, ...lib.params] };
 }
 // Filmversioner (version_of) listas aldrig – bara huvudraden syns i listor, sök och rekommendationer
 export const MAIN_ONLY = ' AND i.version_of IS NULL';
 /** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
 export const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
-  const age = ageFilter(uid);
+  const age = ageFilter(uid, { photos: versions });
   return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };

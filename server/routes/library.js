@@ -24,17 +24,21 @@ import * as homes from '../homeshelves.js';
 import * as playprefs from '../playprefs.js';
 import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
+import * as photos from '../photos.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
-import { insideMedia, MEDIA_ROOT, ctx, listItems, itemsByIds, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
+import { forgetPhotoLibs, insideMedia, MEDIA_ROOT, ctx, listItems, itemsByIds, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
 
 // Bibliotek. Fälten i svaret (l.*: id, name, type, path, anime, nfo, home_video, count) läses av apparna – bara tillägg.
 // paths = alla bibliotekets mappar (path är den första).
-// Bara de bibliotek användaren får se (rättigheter per användare, perms.js).
+// Bara de bibliotek användaren får se (rättigheter per användare, perms.js). Fotobibliotek (typen 'photo') bara för
+// webben – apparna känner inte till typen och skulle visa det som ett tomt filmbibliotek – och för barnprofiler bara
+// när administratören tillåtit det (photos.canSeeLib).
 route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
   WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
-  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook'), l.type, l.name`)
-  .filter(l => libOk(c.user.id, l.id)).map(l => ({ ...l, paths: rootsOf(l) }))));
+  WHEN l.type='photo' THEN (SELECT COUNT(*) FROM photos p WHERE p.library_id=l.id)
+  ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook','photo'), l.type, l.name`)
+  .filter(l => l.type === 'photo' ? c.user.kind !== 'app' && photos.canSeeLib(c.user.id, l) : libOk(c.user.id, l.id)).map(l => ({ ...l, paths: rootsOf(l) }))));
 /** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
 function checkPaths(list) {
   const out = [];
@@ -52,14 +56,17 @@ function checkPaths(list) {
   return { paths: out };
 }
 route('POST', '/api/libraries', admin, async (c) => {
-  const { name, type, path: p, paths, anime, nfo, homeVideo } = await readJson(c.req);
-  if (!name?.trim() || !['movie', 'show', 'music', 'audiobook'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
+  const { name, type, path: p, paths, anime, nfo, homeVideo, kids } = await readJson(c.req);
+  if (!name?.trim() || !['movie', 'show', 'music', 'audiobook', 'photo'].includes(type)) return fail(c.res, 400, 'Namn och typ krävs');
   const chk = checkPaths(Array.isArray(paths) ? paths : [p]);
   if (chk.error) return fail(c.res, 400, chk.error);
   const real = chk.paths[0];
   const id = Number(run('INSERT INTO libraries(name,type,path,anime,nfo,home_video) VALUES(?,?,?,?,?,?)', name.trim().slice(0, 60), type, real,
     anime && type === 'show' ? 1 : 0, nfo === false ? 0 : 1, homeVideo && type === 'movie' ? 1 : 0).lastInsertRowid);
   if (chk.paths.length > 1) setRoots(id, chk.paths);
+  // Fotobibliotek: barnprofiler ser det bara om administratören väljer det (standard nej)
+  if (type === 'photo' && kids === true) run('UPDATE libraries SET kids=1 WHERE id=?', id);
+  forgetPhotoLibs();
   audit('library_added', { ...ctx(c), detail: `${name.trim()} (${chk.paths.join(', ')})` });
   act.watchLibraries(scan);
   scan(id);
@@ -69,6 +76,7 @@ route('DELETE', '/api/libraries/:id', admin, (c) => {
   for (const r of all('SELECT id FROM items WHERE library_id=?', c.p.id)) removeImages(r.id);
   audit('library_removed', { ...ctx(c), detail: get('SELECT name FROM libraries WHERE id=?', c.p.id)?.name });
   run('DELETE FROM libraries WHERE id=?', c.p.id);
+  forgetPhotoLibs();
   act.watchLibraries(scan);
   send(c.res, 200, { ok: true });
 });
@@ -120,7 +128,7 @@ route('GET', '/api/home', user, (c) => {
   cont.sort((a, b) => (at.get(b.id) || 0) - (at.get(a.id) || 0));
   cont.length = Math.min(cont.length, CONTINUE_MAX);
   // Musik och ljudböcker har egna startsidor (och inga titlar i items)
-  const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook') ORDER BY name").filter(l => libOk(uid, l.id)).map(l => {
+  const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook','photo') ORDER BY name").filter(l => libOk(uid, l.id)).map(l => {
     const row = { library: l, title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
     // Serier: nya avsnitt grupperade per säsong (nytt fält – items är oförändrat för apparna)
     if (l.type === 'show') row.seasons = groupNewEpisodes(listItems(uid, `i.library_id=? AND i.kind='episode'`, [l.id],
@@ -144,9 +152,11 @@ route('GET', '/api/home', user, (c) => {
   const recommended = th.recommended;
   const featured = homeLayout.hero === 'off' ? [] : homes.featured(uid, recommended, th.heroIds);
   const listening = off.has('listening') ? [] : homes.listening(uid);
+  // Minnen ur fotobiblioteken: foton från dagens datum tidigare år, ett kort per år (nytt fält – bara webben)
+  const photoMemories = off.has('memories') || c.user.kind === 'app' ? [] : photos.memories(uid);
   send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming,
     featured, because: th.because, topRated: th.topRated, hiddenGems: th.hiddenGems, shortTonight: th.shortTonight, onThisDay: th.onThisDay,
-    genreOfDay: th.genreOfDay, listening, homeLayout });
+    genreOfDay: th.genreOfDay, listening, photoMemories, homeLayout });
 });
 // Startsidans ordning, dolda hyllor och Utvalt per användare (följer med mellan enheter)
 route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayout(c.user.id)));
@@ -395,6 +405,11 @@ route('PUT', '/api/libraries/:id', admin, async (c) => {
     // Av: NFO-värdena glöms och titlarna hämtas från TMDB igen (skanningen tar bort resten); på: läses vid skanningen
     if (!b.nfo) run(`UPDATE items SET meta_done=CASE WHEN kind IN ('movie','show') AND meta_done IN (1,2) AND match_locked=0 THEN 0 ELSE meta_done END WHERE library_id=? AND nfo_sig IS NOT NULL`, l.id);
     changes.push(b.nfo ? 'NFO på' : 'NFO av'); rescan = true;
+  }
+  if (b.kids != null && l.type === 'photo' && !!b.kids !== (l.kids === 1)) {
+    run('UPDATE libraries SET kids=? WHERE id=?', b.kids ? 1 : 0, l.id);
+    forgetPhotoLibs();
+    changes.push(b.kids ? 'synligt för barnprofiler' : 'dolt för barnprofiler');
   }
   if (b.homeVideo != null && l.type === 'movie' && !!b.homeVideo !== !!l.home_video) {
     tx(() => {

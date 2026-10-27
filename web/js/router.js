@@ -15,7 +15,7 @@ import { RAIL_ICON } from './ui/icons.js';
 import { openMenu } from './ui/menu.js';
 
 // ---------- routing ----------
-const LIB_PATH = { music: 'music', audiobook: 'books' };
+const LIB_PATH = { music: 'music', audiobook: 'books', photo: 'photos' };
 const railItem = (href, icon, label) => `<a class="ri" href="${href}" title="${esc(label)}">${RAIL_ICON[icon] || RAIL_ICON.movie}<span class="lbl">${esc(label)}</span></a>`;
 const libIcon = (l) => /barn|kids|junior/i.test(l.name) && (l.type === 'movie' || l.type === 'show') ? 'kids' : l.type;
 export async function loadLibs() {
@@ -45,7 +45,7 @@ function markNav() {
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
-  const lib = ['lib', 'music', 'books'].includes(name) ? libs.find(l => String(l.id) === arg) : null;
+  const lib = ['lib', 'music', 'books', 'photos'].includes(name) ? libs.find(l => String(l.id) === arg) : null;
   $('#crumb').textContent = lib ? lib.name : CRUMB[name] ?? '';
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
@@ -71,13 +71,13 @@ export async function boot() {
   return true;
 }
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
-const SKELETON = { home: 'shelves', lib: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
+const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
   admin: 'panels', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels' };
 // Sällan använda vyer laddas först när de öppnas: vy -> modul i views/ (märkt @lazy, förladdas inte).
 // Relativ dynamisk import → samma bygge (/v/<bygge>/js/views/…). Modulen registrerar sina vyer i views när den laddats.
 const LAZY = new Map(Object.entries({ admin: 'admin', stats: 'stats', wrapped: 'wrapped', requests: 'requests', streaming: 'streaming', live: 'live', guide: 'live', dvr: 'live',
-  history: 'history', playstats: 'history', webhooks: 'webhooks' }));
+  history: 'history', playstats: 'history', webhooks: 'webhooks', photos: 'photos' }));
 export async function route() {
   const gen = nextRoute();
   // Stoppa timers/slingor från föregående vy

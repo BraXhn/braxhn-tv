@@ -28,12 +28,14 @@ function editLibrary(l, mediaRoot) {
     <div class="row"><input id="le-add" value="${esc(mediaRoot)}" style="flex:1;min-width:0"><button type="button" class="ghost small" id="le-addb">Lägg till mappen</button></div>
     <div class="fsb" id="le-fsb"></div>
     ${video ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-nfo" ${l.nfo !== 0 ? 'checked' : ''}> Använd NFO-filer (movie.nfo, tvshow.nfo, &lt;avsnitt&gt;.nfo från Kodi, Jellyfin eller tinyMediaManager) – värdena går före TMDB</label>` : ''}
+    ${l.type === 'photo' ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-kids" ${l.kids ? 'checked' : ''}> Barnprofiler får se fotona (foton har ingen åldersgräns)</label>` : ''}
     ${l.type === 'movie' ? `<label class="switch"><input type="checkbox" id="le-hv" ${l.home_video ? 'checked' : ''}> Hemvideor / andra videor – ingen TMDB, titel från filnamnet, datum från filen, mapparna blir navigering</label>` : ''}
     <p class="small libwarn" id="le-warn" role="status" hidden></p>`;
   const d = openDialog({ title: `Ändra ${l.name}`, body, form: true, size: 'wide', actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: async (h) => {
     const b = { name: h.$('#le-name').value.trim(), paths };
     if (h.$('#le-nfo')) b.nfo = h.$('#le-nfo').checked;
     if (h.$('#le-hv')) b.homeVideo = h.$('#le-hv').checked;
+    if (h.$('#le-kids')) b.kids = h.$('#le-kids').checked;
     await api('/libraries/' + l.id, { method: 'PUT', body: b });
     toast('Biblioteket sparat – skannar');
     await loadLibs();
@@ -103,14 +105,15 @@ views.admin = async (sec) => {
   </div>
   <div class="panel"><h2>Bibliotek</h2>
     <table><tr><th>Namn</th><th>Typ</th><th>Mapp</th><th>Titlar</th><th></th></tr>
-    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker' }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted small">${(l.paths || [l.path]).map(esc).join('<br>')}${l.home_video ? ' <span class="ok-badge">Hemvideor</span>' : ''}${(l.type === 'movie' || l.type === 'show') && l.nfo === 0 ? ' <span class="warn-badge">NFO av</span>' : ''}</td><td>${l.count}</td>
+    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: 'Filmer', show: 'Serier', music: 'Musik', audiobook: 'Ljudböcker', photo: 'Foton' }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted small">${(l.paths || [l.path]).map(esc).join('<br>')}${l.home_video ? ' <span class="ok-badge">Hemvideor</span>' : ''}${(l.type === 'movie' || l.type === 'show') && l.nfo === 0 ? ' <span class="warn-badge">NFO av</span>' : ''}${l.type === 'photo' && l.kids ? ' <span class="ok-badge">Barnprofiler ser det</span>' : ''}</td><td>${l.count}</td>
       <td class="r"><button class="ghost small" data-ledit="${l.id}">Ändra…</button> <button class="ghost small" data-scan="${l.id}">Skanna</button> <button class="danger small" data-del="${l.id}">Ta bort</button></td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <h3 style="margin:22px 0 4px;font-size:15px">Lägg till bibliotek</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label>Namn</label><input id="ln" placeholder="Filmer" required></div>
-      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option></select></div></div>
+      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option><option value="photo">Foton</option></select></div></div>
       <label class="switch" id="lanimew" hidden><input type="checkbox" id="lanime"> Anime (absolut avsnittsnumrering som "Serie - 1071" mappas till säsonger)</label>
+      <label class="switch" id="lkidsw" hidden><input type="checkbox" id="lkids"> Barnprofiler får se fotona (foton har ingen åldersgräns – standard är att barnprofiler inte ser fotobiblioteket)</label>
       <label class="switch" id="lhvw"><input type="checkbox" id="lhv"> Hemvideor / andra videor (ingen TMDB – titel från filnamnet, sorteras på datum, mapparna blir navigering)</label>
       <label>Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
@@ -278,10 +281,10 @@ views.admin = async (sec) => {
   browse(S.mediaRoot);
   $('#addlib').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked, homeVideo: $('#lt').value === 'movie' && $('#lhv').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
+    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked, homeVideo: $('#lt').value === 'movie' && $('#lhv').checked, kids: $('#lt').value === 'photo' && $('#lkids').checked } }); toast('Bibliotek tillagt – skannar'); await loadLibs(); route(); }
     catch (er) { toastErr(er); }
   };
-  const typeOpts = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; $('#lhvw').hidden = $('#lt').value !== 'movie'; };
+  const typeOpts = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; $('#lhvw').hidden = $('#lt').value !== 'movie'; $('#lkidsw').hidden = $('#lt').value !== 'photo'; };
   $('#lt').onchange = typeOpts;
   typeOpts();
   $$('[data-ledit]').forEach(b => b.onclick = () => editLibrary(L.find(l => l.id === +b.dataset.ledit), S.mediaRoot));

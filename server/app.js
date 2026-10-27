@@ -22,6 +22,7 @@ import { clearHome } from './homeshelves.js';
 import * as colors from './imgcolor.js';
 import * as sonic from './sonic.js';
 import * as webhooks from './webhooks.js';
+import * as photos from './photos.js';
 import { metadataOf, itemMeta } from './activity.js';
 import * as libfilter from './libfilter.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
@@ -41,6 +42,7 @@ import './routes/calendar.js';
 import './routes/subsonic.js'; // /rest/* (musikappar) och /api/me/subsonic
 import './routes/remote.js';
 import './routes/history.js';
+import './routes/photos.js';
 export { handle } from './http/router.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
@@ -60,6 +62,10 @@ hooks.afterScan = () => {
 };
 // Metadata och kapitel från nätet hämtas i bakgrunden efter skanningen (väntar inte – skanningskön går vidare)
 hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
+// Fotobibliotek: miniatyrerna görs i bakgrunden efter skanningen (och väntar medan video omkodas)
+hooks.photos = (lib, status) => photos.scanPhotos(lib, status);
+photos.setBusyCheck(() => st.activeTranscodes().length > 0);
+photos.kickThumbs(30000);
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 // Webhooks för nya titlar: en händelse per film/avsnitt – många nya avsnitt av samma serie (säsongspaket) blir en händelse
 hooks.newItems = (ids) => {

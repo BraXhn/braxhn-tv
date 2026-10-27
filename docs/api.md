@@ -88,6 +88,8 @@ bara som att titlar saknas och att vissa anrop nekas:
 
 - **Bibliotek:** `/api/libraries` och alla listor visar bara tillåtna bibliotek. En titel, låt, bok, bild eller ström i ett
   otillåtet bibliotek ger **403** eller **404**, precis som en titel över barnprofilens åldersgräns.
+  Fotobibliotek (typen `photo`, `/api/photos/*`) är bara för webben: de listas inte i `/api/libraries` för apptoken
+  (apparna känner inte till typen), och `/api/home` har fältet `photoMemories` som alltid är tomt för appar.
 - **Nedladdning:** utan rätten ger `/api/stream/:id/download`, `/api/stream/:id/offline-file` och `/api/items/:id/offline`
   **403** (`Ditt konto får inte ladda ner`), och `/api/offline/sync` svarar `items: []` och lägger allt i `have` i `remove`.
   `/api/status` har `user.canDownload` (nytt fält, `Bool`).
