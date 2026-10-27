@@ -435,6 +435,22 @@ function allowPhotoLibraries() {
     } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
   } finally { db.exec('PRAGMA foreign_keys=ON'); }
 }
+// Redigerad metadata (server/itemmeta.js): locked = JSON fält → administratörens värde för låsta fält, img_locked = JSON
+// bildtyp → 'tmdb:<sökväg>' | 'upload' för vald/uppladdad bild, logo = 1 när titeln har en logotyp (<id>-logo.png).
+// Utlösaren skriver tillbaka de låsta värdena efter varje ändring av fälten, så att ingen väg (TMDB, NFO, filnamnet,
+// en äldre programversion) kan skriva över dem. SQLite kör inte om utlösaren för sin egen UPDATE (recursive_triggers av).
+addCol('items', 'tagline', 'TEXT');
+addCol('items', 'locked', 'TEXT');
+addCol('items', 'img_locked', 'TEXT');
+addCol('items', 'logo', 'INTEGER NOT NULL DEFAULT 0');
+{
+  const F = ['title', 'sort_title', 'original_title', 'year', 'released', 'premiered', 'overview', 'genres', 'studio', 'cert', 'age', 'rating', 'tagline', 'season', 'episode'];
+  const set = F.map(f => `${f}=CASE WHEN json_type(NEW.locked,'$.${f}') IS NULL THEN ${f} ELSE json_extract(NEW.locked,'$.${f}') END`).join(', ');
+  const sql = `CREATE TRIGGER items_locked_upd AFTER UPDATE OF ${F.join(', ')}, locked ON items WHEN NEW.locked IS NOT NULL AND json_valid(NEW.locked)
+BEGIN UPDATE items SET ${set} WHERE id=NEW.id; END`;
+  // Skapas om bara när listan ändrats (en andra start ska inte ändra databasen)
+  if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='items_locked_upd'").get()?.sql !== sql) db.exec(`DROP TRIGGER IF EXISTS items_locked_upd; ${sql};`);
+}
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 6;

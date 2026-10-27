@@ -7,7 +7,8 @@ import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
 import { audit, createSession } from '../auth.js';
 import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie, matchQuery } from '../scanner.js';
 import { rootsOf, setRoots, nested, MAX_ROOTS, relOf } from '../libpaths.js';
-import { imageFile, seasonPosters } from '../localmeta.js';
+import { imageFile, seasonPosters, hasLocal } from '../localmeta.js';
+import * as itemmeta from '../itemmeta.js';
 import * as st from '../stream.js';
 import * as act from '../activity.js';
 import * as trick from '../trickplay.js';
@@ -252,6 +253,10 @@ route('GET', '/api/items/:id', user, (c) => {
   const wanted = row.version_of ? row.id : +c.q.get('version') || it.id;
   const file = versions.find(v => v.id === wanted) || it;
   if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
+  // Nya fält (bara när de finns): tagline, logotyp (/api/image/:id/logo, PNG) och originaltitel
+  if (it.tagline) out.tagline = it.tagline;
+  if (it.logo) out.logo = true;
+  if (it.original_title) out.originalTitle = it.original_title;
   out.inWatchlist = !!get('SELECT 1 FROM watchlist WHERE user_id=? AND item_id=?', uid, it.kind === 'episode' ? it.parent_id : it.id);
   Object.assign(out, titleExtras(c.user, it)); // rollista och trailers
   if (it.collection_id) {
@@ -332,7 +337,8 @@ route('POST', '/api/items/:id/refresh', admin, async (c) => {
   const { tmdbId } = await readJson(c.req);
   try {
     if (it.kind !== 'episode' && (getSetting('tmdb_key') || process.env.TMDB_API_KEY)) await refreshItem(it, tmdbId ? +tmdbId : null);
-    if (it.kind !== 'show' && it.path) { run('UPDATE items SET thumb=0 WHERE id=?', it.id); await extractThumb(it); }
+    // En lokal, vald eller uppladdad miniatyr ersätts inte av en bild ur filmen
+    if (it.kind !== 'show' && it.path && !hasLocal(it.id, 'thumb')) { run('UPDATE items SET thumb=0 WHERE id=?', it.id); await extractThumb(it); }
     send(c.res, 200, { ok: true });
   } catch (e) { fail(c.res, 502, 'Metadata misslyckades: ' + e.message); }
 });
@@ -436,11 +442,14 @@ route('PUT', '/api/libraries/:id', admin, async (c) => {
   if (rescan) scan(l.id);
   send(c.res, 200, { ok: true, paths: rootsOf(get('SELECT * FROM libraries WHERE id=?', l.id)) });
 });
+// Äldre redigering ({ title, year, overview, age }): samma kontroller och lås som PUT /api/items/:id/metadata (routes/metadata.js)
 route('PUT', '/api/items/:id', admin, async (c) => {
-  const { title, year, overview, age } = await readJson(c.req);
-  run(`UPDATE items SET title=COALESCE(?,title), sort_title=COALESCE(lower(?),sort_title), year=?, overview=? WHERE id=?`,
-    title || null, title || null, year ? +year : null, overview ?? null, c.p.id);
-  if (age !== undefined) run('UPDATE items SET age=?, cert=? WHERE id=?', age === '' || age == null ? null : Math.max(0, Math.min(18, parseInt(age) || 0)), age === '' || age == null ? null : 'manuell', c.p.id);
+  const b = await readJson(c.req);
+  const row = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!row) return fail(c.res, 404, 'Finns inte');
+  const allowed = itemmeta.fieldsFor(row.kind), values = {};
+  for (const k of ['title', 'year', 'overview', 'age']) if (b[k] !== undefined && allowed.includes(k) && !(k === 'title' && !b[k])) values[k] = b[k];
+  itemmeta.save(row, { values });
   send(c.res, 200, { ok: true });
 });
 
@@ -564,18 +573,19 @@ route('GET', '/api/collection-image/:cid/:type', img, async (c) => {
 });
 route('GET', '/api/image/:id/:type', img, async (c) => {
   // season<N> = lokal säsongsaffisch (season01-poster.jpg bredvid serien, localmeta.js)
-  if (!['poster', 'backdrop', 'thumb'].includes(c.p.type) && !/^season\d{1,4}$/.test(c.p.type)) return fail(c.res, 404, '');
+  if (!['poster', 'backdrop', 'thumb', 'logo'].includes(c.p.type) && !/^season\d{1,4}$/.test(c.p.type)) return fail(c.res, 404, '');
   // Begränsade profiler (barn, eller utan åtkomst till biblioteket) ska inte kunna hämta bilder (t.ex. stillbilder ur filmen)
   if (restricted(c.user.id) && !allowedFor(c.user.id, get('SELECT * FROM items WHERE id=?', +c.p.id))) return fail(c.res, 404, 'Ingen bild');
-  const f = imageFile(+c.p.id, c.p.type);
-  const ok = (data) => send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
-  const w = c.q.get('w');
+  const f = imageFile(+c.p.id, c.p.type), logo = c.p.type === 'logo';
+  const ok = (data) => send(c.res, 200, data, { 'Content-Type': logo ? 'image/png' : 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ETag: 'auto' });
+  // Logotypen skalas inte (varianterna är JPEG och skulle tappa genomskinligheten)
+  const w = logo ? null : c.q.get('w');
   fs.readFile(await sized(f, w), async (e, data) => {
     if (!e) return ok(data);
     // Filmversioner har ingen egen affisch – använd filmens (t.ex. när Chromecast fått en token för versionen)
     const main = c.p.type !== 'thumb' && get('SELECT version_of FROM items WHERE id=?', +c.p.id)?.version_of;
     if (!main) return fail(c.res, 404, 'Ingen bild');
-    fs.readFile(await sized(path.join(IMAGES, `${main}-${c.p.type}.jpg`), w), (e2, d2) => e2 ? fail(c.res, 404, 'Ingen bild') : ok(d2));
+    fs.readFile(await sized(imageFile(main, c.p.type), w), (e2, d2) => e2 ? fail(c.res, 404, 'Ingen bild') : ok(d2));
   });
 });
 

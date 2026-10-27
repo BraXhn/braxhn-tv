@@ -30,6 +30,7 @@ import './routes/auth.js';
 import './routes/admin.js';
 import './routes/setup.js';
 import './routes/library.js';
+import './routes/metadata.js'; // Redigera: fält med lås och bilder
 import './routes/collections.js';
 import './routes/search.js';
 import './routes/music.js';

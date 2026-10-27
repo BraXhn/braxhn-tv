@@ -425,7 +425,7 @@ function showIdOfFolder(lib, folder) {
 export const hooks = {};
 
 export function removeImages(id) {
-  for (const t of ['poster', 'backdrop', 'thumb']) { const f = path.join(IMAGES, `${id}-${t}.jpg`); fs.rm(f, { force: true }, () => {}); dropVariants(f); }
+  for (const t of ['poster', 'backdrop', 'thumb', 'logo']) { const f = localMeta.imageFile(id, t); fs.rm(f, { force: true }, () => {}); dropVariants(f); }
   // Lokala säsongsaffischer (localmeta.js)
   fs.rm(path.join(IMAGES, 'season', String(+id)), { recursive: true, force: true }, () => {});
 }
@@ -477,6 +477,8 @@ export function forgetFolder(lib, root, keep = []) {
 // ---------- Metadata via TMDB (valfritt, egen gratis API-nyckel) ----------
 // TMDB_API_URL: annan adress till TMDB:s API (t.ex. en låtsasserver i testerna)
 const TMDB_API = (process.env.TMDB_API_URL || 'https://api.themoviedb.org/3').replace(/\/+$/, '');
+// TMDB_IMAGE_URL: annan adress till TMDB:s bilder (tester); bara den här värden används för bilder från TMDB
+export const TMDB_IMG = (process.env.TMDB_IMAGE_URL || 'https://image.tmdb.org/t/p').replace(/\/+$/, '');
 function tmdbKey() { return getSetting('tmdb_key') || process.env.TMDB_API_KEY || ''; }
 export async function tmdb(p, params = {}, attempt = 0) {
   const key = tmdbKey();
@@ -497,13 +499,23 @@ async function image(tmdbPath, size, id, type) {
   // En lokal bild (poster.jpg, fanart.jpg … bredvid filen) går före TMDB:s
   if (/^\d+$/.test(String(id)) && localMeta.hasLocal(+id, type)) return 1;
   try {
-    const r = await fetch(`https://image.tmdb.org/t/p/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
+    const r = await fetch(`${TMDB_IMG}/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return 0;
-    fs.writeFileSync(path.join(IMAGES, `${id}-${type}.jpg`), Buffer.from(await r.arrayBuffer()));
+    fs.writeFileSync(/^\d+$/.test(String(id)) ? localMeta.imageFile(+id, type) : path.join(IMAGES, `${id}-${type}.jpg`), Buffer.from(await r.arrayBuffer()));
     if (/^\d+$/.test(String(id))) colors.forget(+id, [type]); // samlingar ('c12') har ingen färg
     return 1;
   } catch { return 0; }
 }
+
+// Logotyp (genomskinlig PNG) på titelns språk, annars engelska eller utan text – SVG-logotyper hoppas över
+const LOGO_RE = /^\/[A-Za-z0-9_-]{1,80}\.png$/;
+export function pickLogo(list) {
+  const lang = String(getSetting('language', 'sv-SE') || 'sv').split('-')[0].toLowerCase();
+  const ok = (list || []).filter(l => LOGO_RE.test(l.file_path || ''));
+  for (const want of [lang, 'en', null]) { const l = ok.find(x => (x.iso_639_1 || null) === want); if (l) return l.file_path; }
+  return null;
+}
+const imageLangs = () => ({ include_image_language: [...new Set([String(getSetting('language', 'sv-SE') || 'sv').split('-')[0].toLowerCase(), 'en'])].join(',') + ',null' });
 
 // Åldersgräns: svensk klassning i första hand, annars amerikansk (tabellen AGE delas med NFO-tolkningen, nfo.js)
 function pickCert(list) {
@@ -628,6 +640,11 @@ export function matchQuery(item) {
   }
   return q;
 }
+/**
+ * Hämtar titelns metadata från TMDB (och NFO:ns värden efteråt). Fält som administratören låst (items.locked,
+ * itemmeta.js) skrivs aldrig över: utlösaren items_locked_upd i db.js lägger tillbaka dem efter varje UPDATE här, och
+ * valda/uppladdade bilder (items.img_locked) räknas som lokala (hasLocal) så att image() inte hämtar TMDB:s.
+ */
 export async function refreshItem(item, tmdbId = null) {
   // Låst matchning ("Fel titel?"): alltid den valda titeln, aldrig en ny sökning
   if (!tmdbId && item.match_locked && item.tmdb_id) tmdbId = item.tmdb_id;
@@ -637,17 +654,19 @@ export async function refreshItem(item, tmdbId = null) {
     let id = tmdbId;
     if (!id) id = (await matchTmdb(mq))?.id;
     if (!id) return false;
-    const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos', ...people.videoLangs() });
+    const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos,images', ...people.videoLangs(), ...imageLangs() });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
+    const logo = await image(pickLogo(d.images?.logos), 'w500', item.id, 'logo');
     const certs = (d.release_dates?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: (r.release_dates || []).map(x => x.certification).find(Boolean) }));
     const { cert, age } = pickCert(certs);
     const coll = await saveCollection(d.belongs_to_collection).catch(() => null);
     run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,
-      genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age), collection_id=?, original_title=?, released=COALESCE(?,released) WHERE id=?`,
+      genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age), collection_id=?, original_title=?, released=COALESCE(?,released), tagline=?, logo=MAX(logo,?) WHERE id=?`,
       d.title || item.title, sortTitle(d.title || item.title), parseInt(d.release_date) || item.year,
       d.overview || null, d.vote_average || null, id, poster, backdrop,
-      JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, originalOf(d.original_title, d.title || item.title), dateOf(d.release_date), item.id);
+      JSON.stringify((d.genres || []).map(g => g.name)), cert, age, coll, originalOf(d.original_title, d.title || item.title), dateOf(d.release_date),
+      String(d.tagline || '').trim().slice(0, 300) || null, logo, item.id);
     saveExtras(item, d);
     localMeta.reapplyNfo(item.id); // NFO:ns fält går före TMDB:s
     return true;
@@ -656,14 +675,17 @@ export async function refreshItem(item, tmdbId = null) {
     let id = tmdbId;
     if (!id) id = (await matchTmdb(mq))?.id;
     if (!id) return false;
-    const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos', ...people.videoLangs() });
+    const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos,images', ...people.videoLangs(), ...imageLangs() });
     const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
     run('UPDATE items SET genres=?, cert=COALESCE(?,cert), age=COALESCE(?,age) WHERE id=?', JSON.stringify((d.genres || []).map(g => g.name)), cert, age, item.id);
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
     const backdrop = await image(d.backdrop_path, 'w1280', item.id, 'backdrop');
-    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,original_title=?,released=COALESCE(?,released) WHERE id=?`,
+    const logo = await image(pickLogo(d.images?.logos), 'w500', item.id, 'logo');
+    run(`UPDATE items SET title=?,sort_title=?,year=?,overview=?,rating=?,tmdb_id=?,poster=MAX(poster,?),backdrop=MAX(backdrop,?),meta_done=1,original_title=?,released=COALESCE(?,released),
+      tagline=?, logo=MAX(logo,?) WHERE id=?`,
       d.name || item.title, sortTitle(d.name || item.title), parseInt(d.first_air_date) || item.year,
-      d.overview || null, d.vote_average || null, id, poster, backdrop, originalOf(d.original_name, d.name || item.title), dateOf(d.first_air_date), item.id);
+      d.overview || null, d.vote_average || null, id, poster, backdrop, originalOf(d.original_name, d.name || item.title), dateOf(d.first_air_date),
+      String(d.tagline || '').trim().slice(0, 300) || null, logo, item.id);
     saveExtras(item, d);
     localMeta.reapplyNfo(item.id);
     remapAbsolute(item, d.seasons || []);

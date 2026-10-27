@@ -124,7 +124,8 @@ export function cardActions(it, st, el) {
     { icon: '⟳', label: 'Uppdatera metadata', hidden: !admin, onSelect: () => refreshMeta(it) },
     { icon: '?', label: 'Fel titel?', hidden: !admin || ep, onSelect: () => matchItem(it) },
     // Listorna saknar beskrivningen – hämta hela titeln så att Redigera inte tömmer den
-    { icon: '✎', label: 'Redigera…', hidden: !admin, onSelect: act(async () => editItem(await api('/items/' + it.id, { bg: true }))) },
+    { icon: '✎', label: 'Redigera…', hidden: !admin, onSelect: () => editItem(it) },
+    { icon: '🖼', label: 'Byt bild…', hidden: !admin, onSelect: () => editItem(it, 'images') },
     { icon: '⟲', label: 'Analysera intro och eftertexter igen', hidden: !admin || !ep,
       onSelect: act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast('Analyserar i bakgrunden'); }) },
   ];

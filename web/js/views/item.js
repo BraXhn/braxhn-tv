@@ -43,8 +43,8 @@ function heroHtml(it, extra = '') {
   const bg = /^#[0-9a-f]{6}$/i.test(it.phBackdrop || '') ? `background-color:${it.phBackdrop};` : '';
   return `<div class="hero">${it.backdrop ? `<div class="bd" style="${bg}background-image:url(${heroUrl(`/api/image/${+it.id}/backdrop`)})"></div>` : ''}
     <div class="in"><div class="poster card">${art({ ...it, position: 0 }, false, innerWidth <= 700 ? 130 : 210)}</div>
-    <div><h1>${esc(it.title)}</h1><div class="meta">${meta}</div>
-    ${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;
+    <div>${it.logo ? `<h1 class="hlogo"><img src="/api/image/${+it.id}/logo" alt="${esc(it.title)}" decoding="async" data-fb="1"></h1>` : `<h1>${esc(it.title)}</h1>`}<div class="meta">${meta}</div>
+    ${it.tagline ? `<p class="tagline">${esc(it.tagline)}</p>` : ''}${it.overview ? `<p class="overview">${esc(it.overview)}</p>` : ''}${extra}${it.kind !== 'episode' && !me.kid ? `<div class="watchprov" data-wid="${it.id}"></div>` : ''}</div></div></div>`;
 }
 
 views.item = async (id, season) => {
@@ -226,16 +226,9 @@ export function matchItem(it) {
   $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
   search();
 }
-export function editItem(it) {
-  openDialog({ title: 'Redigera', form: true,
-    body: `<label for="et">Titel</label><input id="et" value="${esc(it.title)}">
-    <label for="ey">År</label><input id="ey" type="number" value="${it.year || ''}">
-    <label for="eo">Beskrivning</label><textarea id="eo" rows="4">${esc(it.overview || '')}</textarea>
-    ${it.kind !== 'episode' ? `<label for="eage">Åldersgräns (år, tomt = okänd)</label><input id="eage" type="number" min="0" max="18" value="${it.age ?? ''}">` : ''}`,
-    actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: async ({ $: q }) => {
-      await api(`/items/${it.id}`, { method: 'PUT', body: { title: q('#et').value, year: q('#ey').value, overview: q('#eo').value, ...(q('#eage') ? { age: q('#eage').value } : {}) }, bg: true });
-      toast('Sparat'); route();
-    } }] });
+/** Dialogen "Redigera" (fält med lås, bilder, avancerat) – views/itemedit.js laddas först när den behövs (@lazy) */
+export async function editItem(it, tab = 'general') {
+  try { return await (await import('./itemedit.js')).openEditor(it, tab); } catch (e) { toastErr(e); }
 }
 
 // ---------- undertexter online ----------
