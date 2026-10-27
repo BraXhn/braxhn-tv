@@ -11,6 +11,10 @@ import * as self from './live.js';
 provide('live', self); // fasaderna i lazy.js når modulen härifrån
 
 export let LP = null, RP = null; // live-spelare, inspelningsspelare
+// Tillägg till livespelaren (player/iptv.js: kanalbyte, favorit, återanslutning) – anropas med lp när kanalen öppnas
+export const liveHooks = new Set();
+/** Annan uppspelning i samma ruta som en inspelning (catch-up/VOD i player/iptv.js): stängs som en inspelning (rp.onClose) */
+export function setRec(rp) { RP = rp; }
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || document.fullscreenElement || document.querySelector('dialog[open]')) return;
   if (RP) closeRec(); else if (LP) closeLive();
@@ -35,6 +39,7 @@ export async function playLive(ch) {
   const setStat = (t) => { if (cur()) stat.textContent = t; };
   videoSession(v);
   $('#lclose', el).onclick = () => closeLive(lp);
+  for (const f of liveHooks) { try { f(lp); } catch {} }
   const rb = $('#lrec', el);
   if (rb) rb.onclick = act(async () => { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id }, bg: true }); toast('Spelar in ' + ch.now.title); rb.disabled = true; });
   try {
@@ -46,13 +51,14 @@ export async function playLive(ch) {
       if (!cur()) return;
       // Timeshift: servern sparar upp till några timmar bakåt. Spelaren hoppar inte själv tillbaka till live
       // (liveMaxLatencyDurationCount är oändlig som standard) och håller bara en kort buffert bakåt i minnet.
-      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, backBufferLength: 90, xhrSetup: (x) => { x.withCredentials = true; } });
+      const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, backBufferLength: 90, enableWorker: false, xhrSetup: (x) => { x.withCredentials = true; } });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || !cur() || lp.hls !== hls) return;
         if (d.response?.code === 403) { hls.destroy(); lp.hls = null; if (screenSt?.limited) { closeLive(lp); timeUp(); } else setStat('Uppspelningen nekades'); }
         else if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
         else if (d.type === 'networkError') setTimeout(() => { if (cur() && lp.hls === hls) hls.startLoad(); }, 1500);
-        else if (d.type === 'mediaError') hls.recoverMediaError();
+        // Kan inte avkodas (t.ex. HEVC i en webbläsare utan stöd): ett par försök, sedan besked i stället för en evig slinga
+        else if (d.type === 'mediaError') { if ((lp.recovers = (lp.recovers || 0) + 1) > 3) { setStat('Kanalen kan inte spelas i den här webbläsaren'); hls.destroy(); lp.hls = null; } else hls.recoverMediaError(); }
       });
       hls.loadSource(r.url); hls.attachMedia(v);
     }
@@ -158,6 +164,7 @@ export function closeRec(rp = RP) {
   if (!rp || RP !== rp) return;
   RP = null;
   if (rp.hls) { rp.hls.destroy(); rp.hls = null; }
+  try { rp.onClose?.(); } catch {}
   stopVideo(rp.v);
   overlayClose(rp.el);
   musicSession();

@@ -166,6 +166,7 @@ views.admin = async (sec) => {
     ${LT.tuners.length ? `<table>${LT.tuners.map(t => `<tr><td><b>${esc(t.name)}</b><div class="muted small">${t.kind === 'hdhr' ? 'HDHomeRun' : 'IPTV'} · ${esc(t.url)}${t.epg_url ? ' · guide: ' + esc(t.epg_url) : ''}</div>${t.error ? `<div class="err small">${esc(t.error)}</div>` : ''}</td>
       <td>${t.channels} kanaler · ${LT.inUse[t.id] || 0}/${t.tuner_count} tuners används</td>
       <td class="r"><button class="ghost small" data-trf="${t.id}">Uppdatera</button><button class="ghost small" data-tepg="${t.id}">TV-guide…</button><button class="danger small" data-tdel="${t.id}">Ta bort</button></td></tr>`).join('')}</table>` : ''}
+    <p><a class="btn ghost small" href="#/iptvadmin">IPTV: M3U, Xtream Codes, TV-guider, kanaler och grupper →</a></p>
     <form id="ltadd" style="margin-top:12px"><div class="row" style="align-items:flex-end"><div><label>Källa</label><select id="ltk"><option value="hdhr">HDHomeRun</option><option value="m3u">IPTV (M3U)</option></select></div>
       <div style="flex:2;min-width:220px"><label id="ltul">IP-adress till HDHomeRun</label><input id="ltu" placeholder="192.168.1.50" required></div>
       <div style="flex:2;min-width:220px"><label>TV-guide, XMLTV (valfri)</label><input id="lte" placeholder="https://…/guide.xml.gz"></div>

@@ -11,24 +11,30 @@ import * as dvr from '../dvr.js';
 import * as comskip from '../comskip.js';
 import * as timeshift from '../timeshift.js';
 import * as screen from '../screentime.js';
+import { channelAllowed, kidsHaveChannels } from '../iptv/channels.js';
 import { allowUnrated, screenBlock, ctx } from '../http/context.js';
 import { route, user, img, admin } from '../http/router.js';
 
 // ---------- Live-TV och inspelningar ----------
 const LIVE_SCOPE = 4e9, REC_SCOPE = 5e9;
-const liveOk = (c) => { if (c.user.max_age != null && !allowUnrated()) { fail(c.res, 403, 'Live-TV är inte tillgängligt i barnprofiler'); return false; } return true; };
+// Barnprofiler: kanaler inom åldersgränsen (kanalens/gruppens, server/iptv/channels.js). lists: kanallistan, guiden och
+// sökningen (filtreras per kanal) – inspelningarna som förut bara med allow_unrated.
+const liveOk = (c, lists = false) => {
+  if (c.user.max_age != null && !(c.p.cid ? channelAllowed(c.user, +c.p.cid) : allowUnrated() || (lists && kidsHaveChannels(c.user)))) { fail(c.res, 403, 'Live-TV är inte tillgängligt i barnprofiler'); return false; }
+  return true;
+};
 const liveStream = { auth: true, media: true, scope: (p) => LIVE_SCOPE + (+p.cid) };
 const recStream = { auth: true, media: true, scope: (p) => REC_SCOPE + (+p.rid) };
-route('GET', '/api/live/channels', user, (c) => { if (liveOk(c)) send(c.res, 200, { channels: live.channelList(false), tuners: get('SELECT COUNT(*) AS n FROM tuners WHERE enabled=1').n, active: live.activeLive() }); });
+route('GET', '/api/live/channels', user, (c) => { if (liveOk(c, true)) send(c.res, 200, { channels: live.channelList(false).filter(ch => channelAllowed(c.user, ch.id)), tuners: get('SELECT COUNT(*) AS n FROM tuners WHERE enabled=1').n, active: live.activeLive() }); });
 route('GET', '/api/live/guide', user, (c) => {
-  if (!liveOk(c)) return;
+  if (!liveOk(c, true)) return;
   // Guiden sparar sändningar ett dygn bakåt (livetv.js) – så långt går det att bläddra
   const from = Math.max(now() - 25 * 3600, parseInt(c.q.get('from')) || now() - 1800), hours = Math.max(1, Math.min(24, parseInt(c.q.get('hours')) || 6));
-  send(c.res, 200, { from, to: from + hours * 3600, channels: live.guide(from, from + hours * 3600), guide: live.guideState });
+  send(c.res, 200, { from, to: from + hours * 3600, channels: live.guide(from, from + hours * 3600).filter(ch => channelAllowed(c.user, ch.id)), guide: live.guideState });
 });
 route('GET', '/api/live/programs/:pid', user, (c) => {
-  if (!liveOk(c)) return;
-  const p = live.program(+c.p.pid); if (!p) return fail(c.res, 404, 'Finns inte');
+  if (!liveOk(c, true)) return;
+  const p = live.program(+c.p.pid); if (!p || !channelAllowed(c.user, p.channel_id)) return fail(c.res, 404, 'Finns inte');
   const rec = get("SELECT id, status FROM recordings WHERE channel_id=? AND start=? AND status IN ('scheduled','recording','processing','done')", p.channel_id, p.start);
   const rule = get('SELECT id FROM dvr_rules WHERE title=? COLLATE NOCASE', p.title);
   send(c.res, 200, { ...p, recording: rec || null, rule: rule?.id || null,
@@ -54,7 +60,7 @@ route('GET', '/api/live/logo/:cid', img, async (c) => {
   c.res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'private, max-age=604800', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
   c.res.end(all_.subarray(32));
 });
-route('GET', '/api/live/search', user, (c) => { if (liveOk(c)) send(c.res, 200, live.searchPrograms(String(c.q.get('q') || '').slice(0, 80))); });
+route('GET', '/api/live/search', user, (c) => { if (liveOk(c, true)) send(c.res, 200, live.searchPrograms(String(c.q.get('q') || '').slice(0, 80)).filter(p => channelAllowed(c.user, p.channel_id))); });
 route('POST', '/api/live/:cid/play', user, (c) => {
   if (!liveOk(c) || screenBlock(c)) return;
   if (!get('SELECT 1 FROM channels WHERE id=?', +c.p.cid)) return fail(c.res, 404, 'Kanalen finns inte');

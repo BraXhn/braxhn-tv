@@ -13,6 +13,7 @@ import { ranked, parseQuery } from './search.js';
 import { TRANSCODE, liveEncoder } from './stream.js';
 import { send, fail, streamFile } from './util.js';
 import { listSize, rewritePlaylist, enforceCap, SEG_RE, segNum } from './timeshift.js';
+import * as iptv from './iptv/live.js'; // IPTV: listor/Xtream, flera guider, rubriker, reservström (server/iptv/)
 
 db.exec(`CREATE TABLE IF NOT EXISTS tuners(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN('hdhr','m3u')), name TEXT NOT NULL, url TEXT NOT NULL,
   epg_url TEXT, tuner_count INTEGER NOT NULL DEFAULT 2, device_auth TEXT, enabled INTEGER NOT NULL DEFAULT 1, last_refresh INTEGER, error TEXT);
@@ -225,7 +226,7 @@ function syncChannels(tunerId, list) {
   }
   const claimed = new Set(), seenUrl = new Set();
   const rows = [];
-  list.slice(0, 5000).forEach((c, i) => { if (!seenUrl.has(c.url)) { seenUrl.add(c.url); rows.push({ c, i, match: null }); } });
+  list.slice(0, 20000).forEach((c, i) => { if (!seenUrl.has(c.url)) { seenUrl.add(c.url); rows.push({ c, i, match: null }); } });
   const take = (r, ex) => { if (ex && !claimed.has(ex.id)) { claimed.add(ex.id); r.match = ex; } };
   const keyOf = (c) => nameKey(String(c.name).slice(0, 120), c.number || null);
   // 1) samma adress och samma kanal, 2) samma namn+nummer (adressen har bytts), 3) samma adress (kanalen har bytt namn), 4) samma tvg-id
@@ -259,9 +260,11 @@ export async function refreshTuner(id, { guide = true } = {}) {
       const info = await hdhrInfo(t.url);
       run('UPDATE tuners SET tuner_count=?, device_auth=? WHERE id=?', info.tuners, info.auth, id);
       list = info.channels.map(c => ({ ...c, epg: null, logo: null, group: c.hd ? 'HD' : null }));
-    } else list = parseM3U(await fetchText(t.url));
-    if (!list.length) throw new Error('Inga kanaler hittades');
+    } else list = await iptv.loadChannels(t); // M3U eller Xtream (server/iptv/sources.js)
+    if (!list.length && !iptv.allowEmpty(t)) throw new Error('Inga kanaler hittades');
+    if (t.kind === 'm3u') iptv.beforeSync(id);
     syncChannels(id, list);
+    if (t.kind === 'm3u') iptv.afterSync(id, list);
     run('UPDATE tuners SET last_refresh=?, error=NULL WHERE id=?', now(), id);
     if (guide) await refreshGuide(id).catch(e => console.warn('[livetv] guide:', e.message));
     return { channels: list.length };
@@ -413,17 +416,26 @@ export function refreshGuide(tunerId = null) {
     const tuners = tunerId ? all('SELECT * FROM tuners WHERE id=? AND enabled=1', tunerId) : all('SELECT * FROM tuners WHERE enabled=1');
     guideState.running = true;
     const errors = [];
+    let units = 0;
     try {
       for (const t of tuners) {
+        if (t.kind === 'm3u') continue; // IPTV: alla guider tillsammans nedan
+        units++;
         // En källa som inte svarar ska inte stoppa de andra
         try {
           if (t.epg_url) await guideFromXmltv(t);
           else if (t.kind === 'hdhr' && t.device_auth) await guideFromHdhr(t);
         } catch (e) { errors.push(`${t.name}: ${e.message}`); console.warn('[livetv] guide', t.name, e.message); }
       }
-      run('DELETE FROM programs WHERE stop < ?', now() - 86400);
+      // IPTV-källornas guider (egen, listans, Xtream och de gemensamma) i prioritetsordning – server/iptv/guide.js
+      const m3u = tuners.filter(t => t.kind === 'm3u');
+      if (m3u.length) {
+        try { const r = await iptv.importGuides(m3u, { globals: true }); errors.push(...r.errors); units += r.jobs; }
+        catch (e) { errors.push(`IPTV: ${e.message}`); units++; }
+      }
+      iptv.pruneOld(); // ett dygn bakåt, catch-up-kanaler så långt som arkivet räcker
       guideState.last = now(); guideState.error = errors.length ? errors.join('; ') : null;
-      if (errors.length && errors.length === tuners.length) throw new Error(guideState.error);
+      if (errors.length && errors.length === units) throw new Error(guideState.error);
     } finally { guideState.running = false; longest = null; }
   })().finally(() => { guideRun = null; });
   guideRun = { tunerId, promise };
@@ -487,7 +499,8 @@ export const tunersInUse = () => Object.fromEntries([...inUse].map(([k, v]) => [
 const LIVE = path.join(TRANSCODE, 'live');
 const starting = new Map(); // channelId → Promise (pågående start)
 const sessions = new Map(); // channelId → { proc, dir, last, tunerId, key, started, error, minSeg }
-export const httpOpts = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'] : [];
+// Rubrikerna (User-Agent/Referer från IPTV-listan eller källan) slås upp på adressen – även för inspelningar
+export const httpOpts = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', ...iptv.headerOpts(u)] : [];
 export const SAFE_LIVE = ['-protocol_whitelist', 'http,https,tcp,tls,udp,rtp,crypto,hls,httpproxy'];
 
 function startLive(ch) {
@@ -503,6 +516,7 @@ function startLive(ch) {
     // auto: försök kopiera H.264, annars koda om (MPEG-2 från antenn kräver omkodning för webbläsare)
     const copyV = transcode !== 'always' && /h264|avc/i.test(ch.codec || '');
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
+      ...(/^https?:/i.test(ch.stream_url) ? ['-rw_timeout', '15000000'] : []), // en källa som slutar svara ger fel (och reservström) i stället för att hänga
       ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a:0?',
       ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
       '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4',
@@ -515,7 +529,8 @@ function startLive(ch) {
     const end = (code, msg) => {
       if (ended) return; ended = true;
       releaseTuner(ch.tuner_id, key); // nyckeln är unik för sessionen
-      if (sessions.get(ch.id) === s) { s.error = msg || (code ? (err.trim().split('\n').pop() || 'Strömmen avbröts') : null); s.proc = null; }
+      // Adresser i ffmpegs fel kan innehålla inloggning (Xtream) – bara värden visas
+      if (sessions.get(ch.id) === s) { s.error = iptv.redact(msg || (code ? (err.trim().split('\n').pop() || 'Strömmen avbröts') : '')) || null; s.proc = null; }
     };
     proc.on('error', (e) => end(1, 'ffmpeg kunde inte startas: ' + e.message));
     proc.on('close', (code) => end(code));
@@ -555,7 +570,7 @@ async function probeCodec(ch) {
   if (codecCache.has(ch.id)) return codecCache.get(ch.id);
   const c = await new Promise((resolve) => {
     let p;
-    try { p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'] }); }
+    try { p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, ...iptv.headerOpts(ch.stream_url), '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'] }); }
     catch { return resolve(null); }
     let out = ''; p.stdout.on('data', d => out += d);
     const t = setTimeout(() => p.kill('SIGKILL'), 8000);
@@ -566,21 +581,54 @@ async function probeCodec(ch) {
   return c;
 }
 
+/** Ger kanalens ström (startar den vid behov). Flera samtidiga förfrågningar väntar på samma start. */
+export function ensureLive(ch) {
+  if (starting.has(ch.id)) return starting.get(ch.id);
+  const s = sessions.get(ch.id);
+  if (s && s.proc) return Promise.resolve(s);
+  if (s) stopLive(ch.id);
+  const p = startWithFallback(ch).finally(() => starting.delete(ch.id));
+  starting.set(ch.id, p);
+  return p;
+}
+/** En anslutning som ingen hämtat något från på idleMs lämnas över (snabbt kanalbyte hos IPTV-leverantörer med en
+ *  enda anslutning: den förra kanalen släpper tunern direkt i stället för efter 45 s). Inspelningar rörs aldrig. */
+export function stealIdle(tunerId, idleMs = 8000) {
+  const idle = [...sessions].filter(([, s]) => s.tunerId === tunerId && Date.now() - s.last > idleMs).sort((a, b) => a[1].last - b[1].last)[0];
+  if (!idle) return false;
+  stopLive(idle[0]);
+  return true;
+}
+async function readyOrFailed(s) {
+  const f = path.join(s.dir, 'live.m3u8');
+  for (let i = 0; i < 100 && !fs.existsSync(f); i++) { if (s.error || !s.proc) break; await new Promise(r => setTimeout(r, 200)); }
+  return fs.existsSync(f);
+}
+/** Kanalen, och om den inte går att starta samma kanal i andra källor (reservström, server/iptv/live.js) */
+async function startWithFallback(ch) {
+  const cands = [ch, ...iptv.alternatives(ch)];
+  let err = null;
+  for (const c of cands) {
+    try {
+      await iptv.checkStream(c);
+      // HDHomeRun: probe tar en tuner en kort stund – kopiera bara för IPTV, koda om antenn-TV (oftast MPEG-2/flätad)
+      const t = get('SELECT kind FROM tuners WHERE id=?', c.tuner_id);
+      const cc = { ...c, id: ch.id, codec: t?.kind === 'm3u' ? await probeCodec(c) : null };
+      let s;
+      try { s = startLive(cc); } catch (e) { if (e.status === 409 && stealIdle(c.tuner_id)) s = startLive(cc); else throw e; }
+      if (await readyOrFailed(s)) { if (c !== ch) console.log(`[livetv] ${ch.name}: reservström från en annan källa`); return s; }
+      const why = s.error;
+      stopLive(ch.id);
+      err = Object.assign(new Error('Kanalen kunde inte startas' + (why ? ': ' + why : '')), { status: 502 });
+    } catch (e) { err = e; }
+  }
+  throw err;
+}
 export async function servePlaylist(res, chId, token = null) {
   const ch = get('SELECT * FROM channels WHERE id=?', chId);
   if (!ch) return fail(res, 404, 'Kanalen finns inte');
-  let s = sessions.get(ch.id);
-  if (s && !s.proc) { stopLive(ch.id); s = null; }
-  if (!s) {
-    // Flera samtidiga förfrågningar väntar på samma start (annars startas ffmpeg två gånger)
-    if (!starting.has(ch.id)) starting.set(ch.id, (async () => {
-      // HDHomeRun: probe tar en tuner en kort stund – kopiera bara för IPTV, koda om antenn-TV (oftast MPEG-2/flätad)
-      const t = get('SELECT kind FROM tuners WHERE id=?', ch.tuner_id);
-      ch.codec = t?.kind === 'm3u' ? await probeCodec(ch) : null;
-      return startLive(ch);
-    })().finally(() => starting.delete(ch.id)));
-    try { s = await starting.get(ch.id); } catch (e) { return fail(res, e.status || 500, e.message); }
-  }
+  let s;
+  try { s = await ensureLive(ch); } catch (e) { return fail(res, e.status || 500, e.message); }
   s.last = Date.now();
   const f = path.join(s.dir, 'live.m3u8');
   for (let i = 0; i < 100 && !fs.existsSync(f); i++) { if (s.error || !s.proc) break; await new Promise(r => setTimeout(r, 200)); }

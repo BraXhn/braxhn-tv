@@ -237,6 +237,40 @@ Bara tillägg – apparna påverkas inte.
 - `at` (Unix-sekunder) i `POST /api/items/:id/progress` och `POST /api/audiobooks/book/:id/progress`: när positionen sparades
   offline. Finns ett framsteg som är nyare än `at` ändras inget och svaret har `stale: true`; annars sparas positionen med
   `updated = at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
+## IPTV: `/api/iptv/*`
+
+Tillägg (apparna behöver inte läsa dem; `/api/live/*` är oförändrat). Barnprofiler ser bara kanaler med en åldersgräns
+inom profilens (kanalens, annars gruppens; okänd = `allow_unrated`) – det gäller nu även `/api/live/channels`,
+`/api/live/guide`, `/api/live/search`, `/api/live/programs/:pid` och strömmarna `/api/live/:cid/*` (förut nekades
+barnprofiler helt utan `allow_unrated`). `/api/status` → `user.iptvVod` (filmer/serier finns och får ses).
+
+- `GET /api/iptv/channels` → `{ channels: [{ id, number, name, logo, group, hd, tuner, favorite, pinned, epgId, catchup
+  (dagar, 0 = inget arkiv), radio, now, next }], groups: [{ name, count }], favorites, prestart, vod }`. `favorite` är
+  per profil, `pinned` administratörens gamla favoritmarkering.
+- `GET /api/iptv/epg?ids=1,2&from=&to=` (högst 300 kanaler och 26 timmar, bakåt högst 31 dagar) → `{ programs: { <kanal>:
+  [{ id, start, stop, title, subtitle, category, season, episode, isNew, catchup?, reminder? }] } }`.
+- `GET /api/iptv/programs/:pid` → program med `channel`, `live`, `catchup`, `reminder`, `recording`, `rule`, `airings`.
+  `GET /api/iptv/search?q=` som `/api/live/search` men per profil.
+- `PUT /api/iptv/favorites/:cid` `{ on }`. `POST /api/iptv/channels/:cid/prestart` (snabbt kanalbyte, bara när källan har
+  en ledig anslutning). `POST|DELETE /api/iptv/programs/:pid/reminder`, `GET /api/iptv/reminders[?due=1]`.
+- **Catch-up:** `POST /api/iptv/programs/:pid/catchup?offset=<s>` → `{ sid, url, token, offset, duration, start, stop }`.
+  `url` = `/api/iptv/play/:sid/index.m3u8` (HLS EVENT, `?t=` mediatoken för appar/Chromecast, scope `9e9 + sid`),
+  segmenten `seg-N.ts`. `GET /api/iptv/play/:sid/status`, `POST /api/iptv/play/:sid/stop`. Sessionen är profilens egen
+  och stängs efter en minut utan hämtning. Spola längre än det som skrivits = nytt anrop med `offset`.
+- **Filmer och serier (Xtream):** `GET /api/iptv/vod?kind=movie|series[&shelves=1|&category=|&q=|&sort=added|name|rating|year
+  &offset&limit]`, `GET /api/iptv/vod/:id` (detaljer, `episodes` för serier, `progress`), bilder `GET /api/iptv/vod/:id/cover.jpg`,
+  `/backdrop.jpg`, `/api/iptv/episodes/:eid/image.jpg` (bildtoken går), `POST /api/iptv/vod/:id/play[?ss=&hls=1]` och
+  `POST /api/iptv/episodes/:eid/play` → `{ direct, url, hls?, token, duration, title, position }`. `direct: true` = MP4
+  med Range på `/api/iptv/vod/:id/file` (scope `8e9 + id`; avsnitt `/api/iptv/episodes/:eid/file`, `8.5e9 + eid`),
+  annars en HLS-session som catch-up. `POST /api/iptv/progress` `{ kind: movie|episode, id, position, duration }`.
+- **Administration** (admin, betrott nät): `GET /api/iptv/admin`, `POST /api/iptv/sources` (`type: m3u|xtream`, `url` |
+  `server`+`username`+`password`, `epgUrl`, `epgUrls`, `userAgent`, `referer`, `connections`, `refreshHours`,
+  `allowLan`, `vod`), `PUT /api/iptv/sources/:id`, `POST /api/iptv/sources/:id/refresh[?vod=0]` (borttagning:
+  `DELETE /api/live/tuners/:id`), `GET /api/iptv/admin/channels`, `PUT /api/iptv/admin/channels/:cid` (`name`,
+  `number`, `group`, `logo`, `hidden`, `age`, `epgId`, `sort`; tomt/`null` = listans värde), `PUT
+  /api/iptv/admin/channels/order`, `PUT /api/iptv/admin/groups` (`kind`, `name`, `hidden`, `age`, `sort` eller `order`),
+  `POST|PUT|DELETE /api/iptv/guides[/:id]`, `PUT /api/iptv/settings`. Xtream-lösenordet lämnas aldrig ut; adresser
+  visas maskerade.
 
 ## Kontraktstestet
 
