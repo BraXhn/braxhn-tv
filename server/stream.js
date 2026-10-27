@@ -139,7 +139,17 @@ export const QUALITIES = {
 /** Är q en kvalitet i QUALITIES? Bara egna nycklar – ?q=constructor eller __proto__ ska inte räknas som en kvalitet */
 export const isQuality = (q) => typeof q === 'string' && Object.hasOwn(QUALITIES, q);
 
-export const streamsOf = (it) => { try { return JSON.parse(it.streams || '[]'); } catch { return []; } };
+// Rättad språkmärkning (server/health.js, kopplas i app.js): fn(it) → { 'a1': 'swe', 'e3': 'eng', 'external:x.srt': 'swe' } | null.
+// Läggs på spåren här, så att uppspelningen, förvalen och filtren ser den – filen ändras aldrig.
+let langFix = () => null;
+export function setLangFix(fn) { langFix = fn; }
+const fixOf = (it) => { try { return it?.id != null ? langFix(it) : null; } catch { return null; } };
+export const streamsOf = (it) => {
+  let s; try { s = JSON.parse(it.streams || '[]'); } catch { return []; }
+  const f = Array.isArray(s) && fixOf(it);
+  if (f) for (const x of s) { const k = x.type === 'audio' ? 'a' + x.index : x.type === 'subtitle' ? 'e' + x.index : null; if (k && f[k]) x.lang = f[k]; }
+  return s;
+};
 const videoOf = (it) => streamsOf(it).find(s => s.type === 'video');
 const is10bit = (v) => /10|12/.test(v?.pix || '');
 
@@ -181,17 +191,18 @@ export function subtitlesOf(it) {
     });
   }
   const dir = path.dirname(it.path), base = path.basename(it.path, path.extname(it.path));
+  const fix = fixOf(it) || {};
   try {
     listDir(dir).filter(f => f.startsWith(base) && /\.(srt|vtt|ass|ssa)$/i.test(f)).sort().forEach((f, i) => {
       const tag = f.slice(base.length).replace(/\.(srt|vtt|ass|ssa)$/i, '').replace(/^[._-]+/, '');
-      out.push({ id: 'x' + i, file: path.join(dir, f), lang: tag.split(/[._-]/)[0] || null, label: (tag || 'Extern') + ' (fil)', forced: /forced/i.test(tag), bitmap: false, source: 'external' });
+      out.push({ id: 'x' + i, file: path.join(dir, f), lang: fix['external:' + f] || tag.split(/[._-]/)[0] || null, label: (tag || 'Extern') + ' (fil)', forced: /forced/i.test(tag), bitmap: false, source: 'external' });
     });
   } catch {}
   try {
     const d = path.join(SUBS_DIR, String(it.id));
     listDir(d).filter(f => /\.(srt|vtt|ass)$/i.test(f)).sort().forEach((f, i) => {
-      const lang = f.split('.')[0];
-      out.push({ id: 'd' + i, file: path.join(d, f), lang, label: `${lang} (nedladdad)`, forced: false, bitmap: false, source: 'downloaded' });
+      const lang = fix['downloaded:' + f] || f.split('.')[0];
+      out.push({ id: 'd' + i, file: path.join(d, f), lang, label: `${f.split('.')[0]} (nedladdad)`, forced: false, bitmap: false, source: 'downloaded' });
     });
   } catch {}
   return out;

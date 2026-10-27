@@ -446,6 +446,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS sub_index(item_id INTEGER NOT NULL REFERENCE
 CREATE TABLE IF NOT EXISTS sub_lines(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, sub TEXT NOT NULL, s REAL NOT NULL, e REAL NOT NULL,
   text TEXT NOT NULL, norm TEXT, FOREIGN KEY(item_id, sub) REFERENCES sub_index(item_id, sub) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS sub_lines_item ON sub_lines(item_id, sub, s);`);
+// Hälsokontroll av biblioteket (server/health.js). health_files: en rad per kontrollerad fil – sig = filens mtime:storlek,
+// sub_sig = undertextfilernas version, ver = kontrollernas version (ändras något kontrolleras filen om). health_issues:
+// fynden, unika per titel, typ och nyckel (spår, säsong …); detail = JSON, sig = vad fyndet gällde – ignored och action
+// gäller så länge sig är densamma. lang_overrides: rättad språkmärkning per spår (track = 'a<index>' ljud, 'e<index>'
+// inbäddad undertext, '<källa>:<filnamn>' undertextfil; sig = filens mtime:storlek när den rättades) – stream.js lägger
+// den på spåren, filerna skrivs aldrig om. Allt försvinner med titeln (kaskad).
+db.exec(`CREATE TABLE IF NOT EXISTS health_files(item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE, sig TEXT NOT NULL,
+  sub_sig TEXT, ver INTEGER NOT NULL DEFAULT 0, checked INTEGER NOT NULL, ms INTEGER);
+CREATE TABLE IF NOT EXISTS health_issues(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, key TEXT NOT NULL DEFAULT '', severity TEXT NOT NULL DEFAULT 'warn', detail TEXT, sig TEXT, found INTEGER NOT NULL,
+  ignored INTEGER NOT NULL DEFAULT 0, action TEXT, action_at INTEGER, UNIQUE(item_id, kind, key));
+CREATE TABLE IF NOT EXISTS lang_overrides(item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, track TEXT NOT NULL,
+  lang TEXT NOT NULL, orig TEXT, sig TEXT, created INTEGER NOT NULL, PRIMARY KEY(item_id, track));`);
 /** Finns FTS5 i den här SQLite-versionen? (Nodes inbyggda SQLite har det; annars söker sublines.js med LIKE).
  *  SUBINDEX_FTS=0 provar reserven (tester). */
 export const FTS5 = (() => {

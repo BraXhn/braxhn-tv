@@ -241,6 +241,15 @@ body:has(#tabbar:not([hidden])) #toast,body.hasbar #toast{bottom:calc(96px + env
 .ok-badge,.warn-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;vertical-align:middle}
 .ok-badge{background:rgba(76,195,138,.18);color:var(--ok)}
 .warn-badge{background:rgba(255,200,87,.16);color:#ffc857}
+/* Hälsokontrollen (views/health.js): fel och info */
+.warn-badge.hb-err{background:rgba(255,95,95,.16);color:var(--err)}
+.ok-badge.hb-info{background:var(--bg3);color:var(--dim)}
+.hlist{list-style:none;margin:0;padding:0}
+.hlist li{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.hlist li:last-child{border-bottom:0}
+.hlist .hmain{flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
+.hlist .hact{display:flex;flex-wrap:wrap;gap:6px}
+.hlist li>span:first-child{min-width:112px;text-align:center}
 .switch{display:flex!important;gap:8px;align-items:center;color:var(--text)!important;font-size:14px!important}
 .switch[hidden]{display:none!important}
 .checks{display:flex;flex-direction:column;gap:10px}
