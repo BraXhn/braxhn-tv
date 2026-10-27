@@ -179,6 +179,26 @@ Tillägg (apparna behöver inte läsa dem):
   mapp; `play` = profilens val (`GET/PUT /api/me/theme-music` → `{ shows, movies }`, standard på för serier, av för
   filmer). Filen: `GET /api/items/:id/theme`.
 
+## Inspelning (DVR): regler, konflikter och titta medan den spelas in
+
+- `GET /api/dvr` (som förut, bara tillägg): `scheduled[]` har `plan` (`ok`|`late`|`cut`|`missed`), `planText`, `watchable`
+  (pågår – kan spelas), `priority`, `pad_before`/`pad_after` (s, `null` = serverns), `format`, `transcode`, `is_new`;
+  `done[]` har `keep_forever`; `rules[]` har `priority`, `days` (bitmask sön=1 … lör=64), `time_from`/`time_to`
+  (minuter efter midnatt), `skip_library`, `enabled`, `recorded`; nya `conflicts` (antal), `disk` (`free`, `total`,
+  `used`, `upcoming` = uppskattat för kommande vecka, `bytesPerHour`) och `defaults`.
+- `GET /api/dvr/conflicts` → `{ conflicts: [{ recording, outcome, text, from, to, with: [...], alternatives: [{ programId,
+  channelId, channel, start, stop }] }] }` – en simulering av tunrarna (`server/dvrplan.js`).
+- `POST /api/dvr/rules` och `PUT /api/dvr/rules/:id` (skaparen eller admin) med `{ title, channelId, newOnly, skipLibrary,
+  keep, priority, padBefore, padAfter, days: [0–6], timeFrom: "HH:MM", timeTo, format: mp4|mkv|ts, transcode:
+  auto|always|never, enabled }`; `POST /api/dvr/rules/preview` med samma fält → `{ airings: [{ programId, channel, start,
+  stop, subtitle, season, episode, isNew, record, reason }] }` utan att boka. `POST /api/dvr/program` med `series: true`
+  tar samma fält (och `anyChannel`).
+- `PUT /api/dvr/recordings/:rid` `{ priority, padBefore, padAfter, format, transcode, keepForever }` (marginaler och format
+  bara innan inspelningen börjat) och `POST /api/dvr/recordings/:rid/swap` `{ programId }` – flytta en bokning till en
+  annan sändning av samma program. `POST /api/dvr/program` och `/manual` svarar även med `plan`.
+- `POST /api/dvr/recordings/:rid/play`: en pågående inspelning ger `{ url: …/live.m3u8, live: true }` – HLS (EVENT) av den
+  växande filen, segmenten `…/seg-NNNNN.ts` med samma token. En klar inspelning ger som förut `…/stream` (MP4, MKV eller TS).
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

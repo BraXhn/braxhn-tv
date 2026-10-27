@@ -68,22 +68,26 @@ route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => {
   live.serveSegment(c.req, c.res, +c.p.cid, `seg-${c.p.n}.ts`);
 });
 // DVR
+const mine = (c, r) => c.user.is_admin || r.created_by === c.user.id;
 route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
+// Konflikter i förväg: bokningar som börjar sent, avbryts eller missas när tunrarna inte räcker, med alternativa sändningar
+route('GET', '/api/dvr/conflicts', user, (c) => { if (liveOk(c)) send(c.res, 200, { conflicts: dvr.conflictList() }); });
 route('POST', '/api/dvr/program', user, async (c) => {
   if (!liveOk(c)) return;
-  const { programId, series, newOnly, keep } = await readJson(c.req);
+  const b = await readJson(c.req);
+  const { programId, series, newOnly } = b;
   try {
+    const p = live.program(+programId); if (!p) return fail(c.res, 404, 'Finns inte');
     if (series) {
-      const p = live.program(+programId); if (!p) return fail(c.res, 404, 'Finns inte');
-      const id = dvr.addRule({ title: p.title, channelId: c.q.get('anyChannel') === '1' ? null : p.channel_id, newOnly: newOnly !== false, keep }, c.user);
+      const id = dvr.addRule({ ...b, title: p.title, channelId: c.q.get('anyChannel') === '1' || b.anyChannel ? null : p.channel_id, newOnly: newOnly !== false }, c.user);
       dvr.scheduleProgram(+programId, c.user, id);
       audit('dvr_rule', { ...ctx(c), detail: p.title });
       return send(c.res, 200, { rule: id });
     }
-    const p = live.program(+programId);
     // Varna om fler inspelningar än det finns tuners överlappar
-    const conflict = p ? dvr.conflicts(p.start, p.stop, { channelId: p.channel_id }).find(x => x.conflict) || null : null;
-    send(c.res, 200, { id: dvr.scheduleProgram(+programId, c.user), conflict });
+    const conflict = dvr.conflicts(p.start, p.stop, { channelId: p.channel_id }).find(x => x.conflict) || null;
+    const id = dvr.scheduleProgram(+programId, c.user, null, dvr.bookingOpts(b));
+    send(c.res, 200, { id, conflict, plan: dvr.plan().get(id)?.outcome || 'ok' });
   } catch (e) { fail(c.res, 400, e.message); }
 });
 route('POST', '/api/dvr/manual', user, async (c) => {
@@ -91,39 +95,80 @@ route('POST', '/api/dvr/manual', user, async (c) => {
   const b = await readJson(c.req);
   try {
     const conflict = dvr.conflicts(+b.start, +b.stop, { channelId: +b.channelId }).find(x => x.conflict) || null;
-    send(c.res, 200, { id: dvr.scheduleManual({ channelId: +b.channelId, start: +b.start, stop: +b.stop, title: b.title }, c.user), conflict });
+    const id = dvr.scheduleManual({ ...b, channelId: +b.channelId, start: +b.start, stop: +b.stop }, c.user);
+    send(c.res, 200, { id, conflict, plan: dvr.plan().get(id)?.outcome || 'ok' });
   } catch (e) { fail(c.res, 400, e.message); }
+});
+// Serieinspelningar med regler
+route('POST', '/api/dvr/rules', user, async (c) => {
+  if (!liveOk(c)) return;
+  const b = await readJson(c.req);
+  try { const id = dvr.addRule(b, c.user); audit('dvr_rule', { ...ctx(c), detail: String(b.title || '').slice(0, 200) }); send(c.res, 200, { rule: id }); }
+  catch (e) { fail(c.res, 400, e.message); }
+});
+route('POST', '/api/dvr/rules/preview', user, async (c) => {
+  if (!liveOk(c)) return;
+  try { send(c.res, 200, { airings: dvr.previewRule(await readJson(c.req)) }); } catch (e) { fail(c.res, 400, e.message); }
+});
+route('PUT', '/api/dvr/rules/:id', user, async (c) => {
+  const r = get('SELECT * FROM dvr_rules WHERE id=?', +c.p.id); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som skapade serieinspelningen kan ändra den');
+  try { dvr.updateRule(r.id, await readJson(c.req)); send(c.res, 200, { ok: true }); } catch (e) { fail(c.res, 400, e.message); }
 });
 route('DELETE', '/api/dvr/rules/:id', user, (c) => {
   const r = get('SELECT * FROM dvr_rules WHERE id=?', +c.p.id); if (!r) return fail(c.res, 404, 'Finns inte');
-  if (!c.user.is_admin && r.created_by !== c.user.id) return fail(c.res, 403, 'Bara den som skapade serieinspelningen kan ta bort den');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som skapade serieinspelningen kan ta bort den');
   dvr.removeRule(r.id); send(c.res, 200, { ok: true });
+});
+route('PUT', '/api/dvr/recordings/:rid', user, async (c) => {
+  const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan ändra den');
+  try { dvr.updateRecording(r.id, await readJson(c.req)); send(c.res, 200, { ok: true, plan: dvr.plan().get(r.id)?.outcome || null }); } catch (e) { fail(c.res, 400, e.message); }
+});
+// Flytta en bokning till en annan sändning av samma program (förslagen i /api/dvr/conflicts)
+route('POST', '/api/dvr/recordings/:rid/swap', user, async (c) => {
+  if (!liveOk(c)) return;
+  const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan flytta den');
+  const { programId } = await readJson(c.req);
+  try { const id = dvr.swapRecording(r.id, +programId, c.user); send(c.res, 200, { id, plan: dvr.plan().get(id)?.outcome || 'ok' }); } catch (e) { fail(c.res, 400, e.message); }
 });
 route('DELETE', '/api/dvr/recordings/:rid', user, (c) => {
   const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
-  if (!c.user.is_admin && r.created_by !== c.user.id) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan ta bort den');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan ta bort den');
   if (r.status === 'scheduled') dvr.cancel(r.id); else dvr.removeRecording(r.id);
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/dvr/recordings/:rid/stop', user, (c) => {
   if (!liveOk(c)) return;
   const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
-  if (!c.user.is_admin && r.created_by !== c.user.id) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan stoppa den');
+  if (!mine(c, r)) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan stoppa den');
   dvr.stopRecording(r.id); send(c.res, 200, { ok: true });
 });
+// Spela: en klar inspelning som fil (Range), en pågående som HLS av den växande filen (titta medan den spelas in)
 route('POST', '/api/dvr/recordings/:rid/play', user, (c) => {
   if (!liveOk(c) || screenBlock(c)) return;
+  const r = get('SELECT status FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
   const t = c.user.via !== 'cookie' || c.q.get('cast') === '1' ? createSession(c.user.id, 'media', { item: REC_SCOPE + (+c.p.rid), ip: clientIp(c.req) }) : null;
-  send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/stream${t ? '?t=' + t : ''}` });
+  const q = t ? '?t=' + t : '';
+  if (r.status === 'recording') return send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/live.m3u8${q}`, live: true });
+  send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/stream${q}` });
 });
 route('GET', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
 route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
+route('GET', '/api/dvr/recordings/:rid/live.m3u8', recStream, async (c) => { if (liveOk(c) && !screenBlock(c)) await dvr.serveGrowing(c.res, +c.p.rid, c.q.get('t')); });
+route('GET', '/api/dvr/recordings/:rid/seg-:n.ts', recStream, (c) => {
+  if (!liveOk(c) || screenBlock(c)) return;
+  screen.heartbeat(c.user.id, 'r:' + (+c.p.rid));
+  dvr.serveGrowingSegment(c.req, c.res, +c.p.rid, `seg-${c.p.n}.ts`);
+});
 // Administration av källor
 route('GET', '/api/live/tuners', admin, (c) => send(c.res, 200, {
   tuners: all('SELECT id, kind, name, url, epg_url, tuner_count, enabled, last_refresh, error, (SELECT COUNT(*) FROM channels WHERE tuner_id=tuners.id) AS channels FROM tuners'),
   inUse: live.tunersInUse(), guide: live.guideState, channels: live.channelList(true),
   settings: { dvrDir: dvr.dvrDir(), padBefore: +getSetting('dvr_pad_before', '60'), padAfter: +getSetting('dvr_pad_after', '180'), liveTranscode: getSetting('live_transcode', 'auto'), keepTs: getSetting('dvr_keep_ts', '0') === '1',
-    timeshiftMinutes: timeshift.timeshiftMinutes(), timeshiftMaxGb: timeshift.timeshiftMaxGb(), comskip: comskip.enabled(), comskipAutoSkip: comskip.autoSkipDefault() }
+    timeshiftMinutes: timeshift.timeshiftMinutes(), timeshiftMaxGb: timeshift.timeshiftMaxGb(), comskip: comskip.enabled(), comskipAutoSkip: comskip.autoSkipDefault(),
+    format: getSetting('dvr_format', 'mp4'), transcode: getSetting('dvr_transcode', 'auto'), nfo: getSetting('dvr_nfo', '1') !== '0' }
 }));
 route('POST', '/api/live/discover', admin, async (c) => send(c.res, 200, { found: await live.discoverHdhr() }));
 route('POST', '/api/live/tuners', admin, async (c) => {
@@ -159,6 +204,10 @@ route('PUT', '/api/live/settings', admin, async (c) => {
   if (b.padAfter != null) setSetting('dvr_pad_after', Math.max(0, Math.min(3600, parseInt(b.padAfter) || 0)));
   if (['auto', 'always'].includes(b.liveTranscode)) setSetting('live_transcode', b.liveTranscode);
   if (b.keepTs != null) setSetting('dvr_keep_ts', b.keepTs ? '1' : '0');
+  // Efterbearbetning: format (mp4|mkv|ts), omkodning (auto|always|never) och NFO bredvid filen
+  if (dvr.FORMATS.includes(b.format)) setSetting('dvr_format', b.format);
+  if (dvr.TRANSCODES.includes(b.transcode)) setSetting('dvr_transcode', b.transcode);
+  if (b.nfo != null) setSetting('dvr_nfo', b.nfo ? '1' : '0');
   // Timeshift (gäller nya live-strömmar) och reklamavbrott
   if (b.timeshiftMinutes != null && b.timeshiftMinutes !== '') setSetting('live_timeshift_minutes', Math.max(0, Math.min(720, parseInt(b.timeshiftMinutes) || 0)));
   if (b.timeshiftMaxGb != null && b.timeshiftMaxGb !== '') setSetting('live_timeshift_max_gb', Math.max(0.5, Math.min(2000, parseFloat(b.timeshiftMaxGb) || 20)));
