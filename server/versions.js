@@ -8,7 +8,7 @@ import { get, all, run, tx, IMAGES } from './db.js';
 import * as colors from './imgcolor.js';
 
 // Kolumner som beskriver filmen (inte filen) – flyttas till en ny huvudrad när huvudfilen försvinner
-const META_COLS = 'title, sort_title, year, overview, rating, tmdb_id, meta_done, poster, backdrop, genres, cert, age, collection_id, match_locked, added, credits_done, trailer_yt';
+const META_COLS = 'title, sort_title, year, overview, rating, tmdb_id, meta_done, poster, backdrop, genres, cert, age, collection_id, match_locked, added, credits_done, trailer_yt, tagline, locked, img_locked, logo';
 
 /** Grupperingsnyckel: samma titel och år i samma bibliotek. Filer utan årtal grupperas aldrig (för osäkert). */
 export function versionKey(parsed) {
@@ -112,6 +112,7 @@ export function moveImages(moves) {
     for (const t of ['poster', 'backdrop']) {
       try { fs.renameSync(path.join(IMAGES, `${from}-${t}.jpg`), path.join(IMAGES, `${to}-${t}.jpg`)); } catch {}
     }
+    try { fs.renameSync(path.join(IMAGES, `${from}-logo.png`), path.join(IMAGES, `${to}-logo.png`)); } catch {}
     colors.forget(to, ['poster', 'backdrop']);
   }
 }

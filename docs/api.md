@@ -132,6 +132,14 @@ Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` =
 - Smarta samlingar: `POST/PUT /api/custom-collections` med `smart: { library, query }`; samlingen får fälten `smart`,
   `library` och `query`. `GET /api/custom-collections/:cid/shuffle` som ovan.
 
+## Redigerad metadata: `tagline`, `logo`, `originalTitle`
+
+`/api/items/:id` har tre nya valfria fält (bara när de finns): `tagline` (sträng), `logo: true` (bilden finns som
+`/api/image/:id/logo`, PNG med genomskinlighet, skalas inte med `?w=`) och `originalTitle` (sträng). Fält som
+administratören låst under *Redigera* har samma typ som förut (`genres` är en lista, `year`/`age` heltal, `rating` tal).
+Redigeringen sker via admin-endpoints (`GET/PUT /api/items/:id/metadata`, `GET/POST/PUT/DELETE /api/items/:id/images/:type`)
+som apparna inte behöver.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

@@ -2,6 +2,7 @@
 // filerna (poster.jpg, fanart.jpg, <film>-poster.jpg, season01-poster.jpg, <avsnitt>-thumb.jpg …).
 // Körs av skannern efter fillistningen (scanner.js → syncLocal). Lokala värden går före TMDB:
 //  - NFO: fälten som finns i filen skrivs efter TMDB-matchningen (reapplyNfo) och vid varje ändring av filen.
+//    Fält som administratören låst (items.locked, itemmeta.js) skrivs aldrig över – utlösaren i db.js lägger tillbaka dem.
 //    Ett TMDB-id i filen ger exakt matchning (nfoIds i scanner.js).
 //  - Bilder: konverteras till bildmappen (som TMDB-bilderna), TMDB skriver aldrig över dem (hasLocal), och de
 //    byts när filen ändras (signatur = sökväg|ändringstid|storlek i items.local_img).
@@ -52,13 +53,20 @@ const MAXW = { poster: 1000, backdrop: 1920, thumb: 960, season: 680 };
 /** Bildfilen i bildmappen: <id>-poster.jpg osv., säsongsaffischer i season/<id>/<säsong>.jpg */
 export function imageFile(id, type) {
   const s = /^season(\d{1,4})$/.exec(type);
-  return s ? path.join(IMAGES, 'season', String(+id), `${+s[1]}.jpg`) : path.join(IMAGES, `${+id}-${type}.jpg`);
+  // Logotyper behåller genomskinligheten (PNG), allt annat är JPEG
+  return s ? path.join(IMAGES, 'season', String(+id), `${+s[1]}.jpg`) : path.join(IMAGES, `${+id}-${type}${type === 'logo' ? '.png' : '.jpg'}`);
 }
 const localOf = (row) => { try { return JSON.parse(row?.local_img || '{}') || {}; } catch { return {}; } };
-/** Har titeln en lokal bild av typen? (då hämtas ingen från TMDB) */
-export function hasLocal(id, type) { return !!localOf(get('SELECT local_img FROM items WHERE id=?', id))[type]; }
-/** Säsongerna som har en lokal affisch */
-export const seasonPosters = (row) => Object.keys(localOf(row)).map(k => /^season(\d+)$/.exec(k)).filter(Boolean).map(m => +m[1]).sort((a, b) => a - b);
+/** Bilder som administratören valt eller laddat upp (itemmeta.js): typ → 'tmdb:<sökväg>' | 'upload' */
+export const imgLocksOf = (row) => { try { const v = JSON.parse(row?.img_locked || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; } };
+/** Har titeln en lokal eller vald bild av typen? (då hämtas ingen från TMDB) */
+export function hasLocal(id, type) {
+  const row = get('SELECT local_img, img_locked FROM items WHERE id=?', id);
+  return !!(localOf(row)[type] || imgLocksOf(row)[type]);
+}
+/** Säsongerna som har en lokal eller vald affisch */
+export const seasonPosters = (row) => [...new Set([...Object.keys(localOf(row)), ...Object.keys(imgLocksOf(row))])]
+  .map(k => /^season(\d+)$/.exec(k)).filter(Boolean).map(m => +m[1]).sort((a, b) => a - b);
 
 /** Konvertera till JPEG (högst maxW bred) via en temporär fil – en trasig bild lämnar aldrig en halv fil */
 function convert(src, out, maxW) {
@@ -83,6 +91,9 @@ function convert(src, out, maxW) {
 async function syncImages(row, want) {
   const local = localOf(row);
   for (const k of Object.keys(local)) if (!(k in want)) want[k] = null;
+  // En bild som administratören valt eller laddat upp är låst – den lokala filen läses igen först när låset tas bort
+  const locks = imgLocksOf(get('SELECT img_locked FROM items WHERE id=?', row.id));
+  for (const k of Object.keys(locks)) want[k] = undefined;
   let changed = false, removed = false;
   const forget = [];
   for (const [type, src] of Object.entries(want)) {

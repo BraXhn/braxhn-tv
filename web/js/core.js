@@ -48,7 +48,7 @@ export async function api(path, opts = {}) {
   const { bg, ...rest } = opts;
   const gen = routeGen;
   const o = { headers: {}, ...rest };
-  if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
+  if (o.body && typeof o.body !== 'string' && !(globalThis.Blob && o.body instanceof Blob)) { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; }
   let r;
   // Förhämtat vid start (start.js) – används en gång, bara för vanliga läsningar och om svaret är färskt
   // Alla skrivningar (inloggning, profilbyte …) gör förhämtningarna ogiltiga: de kan gälla fel profil.
