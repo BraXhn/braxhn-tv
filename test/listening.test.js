@@ -22,13 +22,13 @@ after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 test('ReplayGain: taggar, R128 och orimliga värden', () => {
   assert.deepEqual(L.parseReplayGain({ REPLAYGAIN_TRACK_GAIN: '-7.89 dB', REPLAYGAIN_ALBUM_GAIN: '-8,5 dB', REPLAYGAIN_TRACK_PEAK: '0.988' }),
-    { track: -7.89, album: -8.5, peak: 0.988 });
-  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: '+2.10 dB' }), { track: 2.1, album: null, peak: null });
+    { track: -7.89, album: -8.5, peak: 0.988, albumPeak: null });
+  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: '+2.10 dB' }), { track: 2.1, album: null, peak: null, albumPeak: null });
   // Opus: Q7.8 mot -23 LUFS → +5 dB till ReplayGain-referensen
-  assert.deepEqual(L.parseReplayGain({ R128_TRACK_GAIN: '-512', R128_ALBUM_GAIN: '256' }), { track: 3, album: 6, peak: null });
-  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: 'skräp', replaygain_track_peak: '-1' }), { track: null, album: null, peak: null });
-  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: '-99 dB' }), { track: null, album: null, peak: null });
-  assert.deepEqual(L.parseReplayGain(undefined), { track: null, album: null, peak: null });
+  assert.deepEqual(L.parseReplayGain({ R128_TRACK_GAIN: '-512', R128_ALBUM_GAIN: '256' }), { track: 3, album: 6, peak: null, albumPeak: null });
+  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: 'skräp', replaygain_track_peak: '-1' }), { track: null, album: null, peak: null, albumPeak: null });
+  assert.deepEqual(L.parseReplayGain({ replaygain_track_gain: '-99 dB' }), { track: null, album: null, peak: null, albumPeak: null });
+  assert.deepEqual(L.parseReplayGain(undefined), { track: null, album: null, peak: null, albumPeak: null });
 });
 
 test('ebur128-sammanfattning tolkas till gain mot -18 LUFS', () => {
@@ -86,7 +86,7 @@ test('smarta spellistor per användare', () => {
 
 test('lyssningsinställningar: standard, sparas och valideras', () => {
   assert.deepEqual({ ...L.getPrefs(1), choices: undefined, reference: undefined },
-    { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, choices: undefined, reference: undefined });
+    { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, normMode: 'track', gapless: true, crossfade: 0, choices: undefined, reference: undefined });
   const p = L.setPrefs(1, { skipBack: 10, skipForward: '45', skipSilence: true, normalize: false });
   assert.equal(p.skipBack, 10); assert.equal(p.skipForward, 45); assert.equal(p.skipSilence, true); assert.equal(p.normalize, false);
   assert.equal(L.setPrefs(1, { skipBack: 30 }).skipForward, 45); // andra fält behålls

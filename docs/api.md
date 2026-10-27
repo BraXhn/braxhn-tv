@@ -195,6 +195,20 @@ Bara tillägg – apparna kan läsa dem när de vill (alla kan saknas eller vara
 - `GET /api/music/:lib/artists`: `image` (Bool) per artist.
 - `GET /api/music/tracks/:tid/lyrics`: `source` kan nu vara `lrclib` (hämtad från nätet), och `instrumental: true` när låten saknar text.
 
+## Glapplöst, övertoning och jämn ljudnivå
+
+Bara tillägg (server/gapless.js, server/listening.js) – apparna kan använda dem när de vill:
+
+- Spåren i musiklistorna (album, spellistor, smarta listor, låtradio …) har `albumPeak` (linjärt toppvärde för albumläget, `null`
+  om okänt) och `gapless`: `null` tills låten analyserats, annars `{ sampleRate, samples, skip, pad, silenceStart, silenceEnd }`.
+  `samples` = exakt antal sampel i filens takt; `skip`/`pad` = sampel som avkodaren lämnar före/efter ljudet (MP3: LAME-taggens
+  fördröjning + 529, AAC: iTunSMPB eller edts/elst). Enskilda fält kan vara `null`. `silenceStart`/`silenceEnd` = sekunder tystnad
+  (under −50 dBFS) i början/slutet, högst 30. `albumGain` räknas fram ur spårens nivå när albumtaggen saknas.
+- `GET/PUT /api/me/listening`: `normMode` (`track`, `album`, `off` – `off` är samma sak som `normalize: false`), `gapless` (Bool) och
+  `crossfade` (sekunder, `choices.crossfade`). `normalize` finns kvar för apparna.
+- `gl=1` på `/api/music/tracks/:tid/stream`: måste låten kodas om och klienten klarar FLAC (`a=…flac`, ingen `br`) blir det FLAC
+  (exakt längd, ingen kodarfördröjning) i stället för MP3/AAC.
+
 ## Bibliotekets filter: `/api/libraries/:id/items`, `/facets`, `/shuffle`
 
 Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` = `title`/`added`/`year`/`rating`/`date`,

@@ -192,7 +192,7 @@ function groupSql(match, rules, at, P) {
 }
 
 const SELECT_FROM = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
-  t.rg_track, t.rg_album, t.rg_peak, f.track_id AS fav FROM tracks t
+  t.rg_track, t.rg_album, t.rg_peak, t.rg_album_peak, al.rg_gain AS al_gain, al.rg_peak AS al_peak, t.gl, f.track_id AS fav FROM tracks t
   JOIN libraries lb ON lb.id=t.library_id AND lb.type='music'
   LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id LEFT JOIN artists aar ON aar.id=al.artist_id
   LEFT JOIN (SELECT track_id, COUNT(*) AS n, MAX(ts) AS last FROM track_plays WHERE user_id=? GROUP BY track_id) pc ON pc.track_id=t.id
