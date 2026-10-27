@@ -1,11 +1,14 @@
 package net.braxhn.tv
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,8 +39,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.put
 import java.io.IOException
 
@@ -51,10 +57,12 @@ sealed class Screen {
     data object Settings : Screen()
     data class Lib(val library: Library) : Screen()
     data class Detail(val id: Int) : Screen()
-    data class Play(val id: Int, val start: Double, val audio: Int?, val sub: SubtitleTrack?) : Screen()
+    /** nonce: ny uppspelning av samma titel (t.ex. nattläge på/av); skipPreroll: inget bio-läge (omstart mitt i) */
+    data class Play(val id: Int, val start: Double, val audio: Int?, val sub: SubtitleTrack?, val nonce: Int = 0, val skipPreroll: Boolean = false) : Screen()
     data object Live : Screen()
     data object Recordings : Screen()
     data class LivePlay(val id: Int, val title: String) : Screen()
+    data object Profiles : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -66,11 +74,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Startad från Google TV:s Fortsätt titta: öppna titeln
+        if (savedInstanceState == null) DeepLink.from(intent)
+        addOnPictureInPictureModeChangedListener { info -> Pip.active.value = info.isInPictureInPictureMode }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Bg, onPrimary = Color.Black)) {
                 Surface(Modifier.fillMaxSize(), color = Bg) { AppRoot() }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        DeepLink.from(intent)
+    }
+
+    /** Hemknappen under en video (telefon): fortsätt som bild-i-bild */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        Pip.enter(this)
     }
 }
 
@@ -78,11 +100,14 @@ class MainActivity : ComponentActivity() {
 fun AppRoot() {
     val token by Api.token.collectAsState()
     if (token == null) { LoginScreen(); return }
-    val stack: SnapshotStateList<Screen> = remember { mutableStateListOf(Screen.Home) }
+    // Ny token (inloggning eller profilbyte): börja om på startsidan
+    val stack: SnapshotStateList<Screen> = remember(token) { mutableStateListOf(Screen.Home) }
     val current = stack.last()
     val push: (Screen) -> Unit = { stack.add(it) }
     val pop: () -> Unit = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     BackHandler(enabled = stack.size > 1) { pop() }
+    val link by DeepLink.item.collectAsState()
+    LaunchedEffect(link) { link?.let { id -> DeepLink.item.value = null; stack.add(Screen.Detail(id)) } }
 
     if (current is Screen.Play) {
         PlayerScreen(current, onClose = pop, onPlay = { stack[stack.lastIndex] = it })
@@ -103,7 +128,7 @@ fun AppRoot() {
                 icon = { Icon(Icons.Filled.Search, null) }, label = { Text("Sök") })
             if (hasLive) NavigationRailItem(selected = current == Screen.Live || current == Screen.Recordings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Live) },
                 icon = { Icon(Icons.Filled.LiveTv, null) }, label = { Text("Live-TV") })
-            NavigationRailItem(selected = current == Screen.Settings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
+            NavigationRailItem(selected = current == Screen.Settings || current == Screen.Profiles, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
                 icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Inställningar") })
         }
         Column(Modifier.fillMaxSize()) {
@@ -118,6 +143,7 @@ fun AppRoot() {
                 is Screen.Detail -> DetailScreen(current.id, push)
                 is Screen.Live -> LiveScreen(onPlay = push, push = push)
                 is Screen.Recordings -> RecordingsScreen(onPlay = push)
+                is Screen.Profiles -> ProfilesScreen()
                 is Screen.Play, is Screen.LivePlay -> {}
             }
         }
@@ -174,7 +200,7 @@ fun LoginScreen() {
 // ---------------- kort ----------------
 
 @Composable
-fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (landscape) 280 else 160, onClick: (() -> Unit)?) {
+fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (landscape) 280 else 160, note: String? = null, onClick: (() -> Unit)?) {
     val h = if (landscape) width * 9 / 16 else width * 3 / 2
     // onClick = null: kortet är bara en bild (t.ex. inuti en rad som själv är klickbar) och tar inte fokus
     val click = if (onClick != null) Modifier.focusRing().clickable(onClick = onClick) else Modifier
@@ -194,18 +220,18 @@ fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (lan
             }
         }
         Text(if (landscape && item.isEpisode) item.showTitle ?: item.title else item.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-        Text(if (landscape && item.isEpisode) "${item.sxe} · ${item.title}" else item.subtitleLine, color = Color.Gray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(note ?: if (landscape && item.isEpisode) "${item.sxe} · ${item.title}" else item.subtitleLine, color = Color.Gray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 fun hue(s: String): Float { var h = 0; for (c in s) h = (h * 31 + c.code) % 360; return h.toFloat() }
 
 @Composable
-fun Shelf(title: String, items: List<MediaItem>, landscape: Boolean = false, push: (Screen) -> Unit) {
+fun Shelf(title: String, items: List<MediaItem>, landscape: Boolean = false, push: (Screen) -> Unit, note: ((MediaItem) -> String?)? = null) {
     Column(Modifier.padding(vertical = 10.dp)) {
         Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(items, key = { it.id }) { PosterCard(it, landscape) { push(Screen.Detail(it.id)) } }
+            items(items, key = { it.id }) { PosterCard(it, landscape, note = note?.invoke(it)) { push(Screen.Detail(it.id)) } }
         }
     }
 }
@@ -221,12 +247,24 @@ fun ErrorText(msg: String) = Box(Modifier.fillMaxSize(), contentAlignment = Alig
 @Composable
 fun HomeScreen(push: (Screen) -> Unit) {
     var home by remember { mutableStateOf<HomeResponse?>(null) }
+    var extras by remember { mutableStateOf<HomeExtras?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var libs by remember { mutableStateOf<List<Library>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         Api.refreshImageToken()
         // Musik och ljudböcker har egna vyer – i rutnätet för film/serier blir de tomma
-        try { libs = Api.get<List<Library>>("/api/libraries").filter { it.type == "movie" || it.type == "show" }; home = Api.get("/api/home") } catch (e: Exception) { error = e.message }
+        try {
+            libs = Api.get<List<Library>>("/api/libraries").filter { it.type == "movie" || it.type == "show" }
+            // Ett anrop: grundhyllorna (HomeResponse) och de nyare, valfria hyllorna (HomeExtras) ur samma svar
+            val text = Api.requestPublic("/api/home", "GET", emptyMap(), null)
+            val h = Api.json.decodeFromString<HomeResponse>(text)
+            extras = runCatching { Api.json.decodeFromString<HomeExtras>(text) }.getOrNull()
+            home = h
+            // Google TV: samma titlar i systemets rad Fortsätt titta
+            withContext(Dispatchers.IO) { WatchNext.sync(context, h.continueWatching) }
+        } catch (e: Exception) { error = e.message }
     }
     val h = home
     when {
@@ -242,9 +280,8 @@ fun HomeScreen(push: (Screen) -> Unit) {
                     }
                 }
             }
-            if (h.forYou.isNotEmpty()) item { Shelf("Nytt för dig", h.forYou, true, push) }
-            if (h.continueWatching.isNotEmpty()) item { Shelf("Fortsätt titta", h.continueWatching, true, push) }
-            items(h.rows.filter { it.items.isNotEmpty() }, key = { "${it.library.id}:${it.title}" }) { r -> Shelf(r.title, r.items, false, push) }
+            // Hyllorna i användarens ordning (Anpassa startsidan i webben); dolda hyllor visas inte
+            homeShelves(h, extras, push) { e -> scope.launch { AudioRemote.play(context, e) } }
         }
     }
 }
@@ -300,6 +337,8 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     var skipSilence by remember { mutableStateOf(Api.skipSilence) }
     var normalize by remember { mutableStateOf(Api.normalize) }
     var listenError by remember { mutableStateOf<String?>(null) }
+    var night by remember { mutableStateOf(Api.nightMode) }
+    var dialog by remember { mutableStateOf(Api.dialogBoost) }
     LaunchedEffect(Unit) {
         Api.refreshListenPrefs()
         skipBack = Api.skipBack; skipForward = Api.skipForward; skipSilence = Api.skipSilence; normalize = Api.normalize
@@ -313,6 +352,11 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Inställningar", fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         item { Text("Server: ${Api.server.value}", color = Color.Gray) }
+        item {
+            OutlinedButton(onClick = { push(Screen.Profiles) }, modifier = Modifier.height(52.dp)) {
+                Icon(Icons.Filled.People, null); Spacer(Modifier.width(8.dp)); Text("Byt profil", fontSize = 17.sp)
+            }
+        }
         item { Text("Kvalitet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item {
             FlowRowCompat(listOf("auto" to "Automatisk", "orig" to "Original", "1080" to "1080p", "720" to "720p", "480" to "480p", "360" to "360p"), quality) { quality = it; Api.quality = it }
@@ -321,6 +365,10 @@ fun SettingsScreen(push: (Screen) -> Unit) {
         item {
             FlowRowCompat(listOf("" to "Inga", "sv" to "Svenska", "en" to "Engelska", "no" to "Norska", "da" to "Danska", "fi" to "Finska"), lang) { lang = it; Api.subtitleLang = it }
         }
+        item { Text("Ljud i filmer och serier", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { FlowRowCompat(listOf("on" to "Nattläge (jämnare ljud)", "off" to "Nattläge av"), if (night) "on" else "off") { v -> night = v == "on"; Api.nightMode = night } }
+        item { FlowRowCompat(listOf("on" to "Tydligare dialog", "off" to "Originalljud"), if (dialog) "on" else "off") { v -> dialog = v == "on"; Api.dialogBoost = dialog } }
+        item { Text("Kan också slås på i spelaren. Ljudet bearbetas av servern, så filmen omkodas då. Bio-läge (trailers före filmen) ställer du in i webben.", color = Color.Gray, fontSize = 13.sp) }
         item { Text("Lyssning", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item { Text("Hopp bakåt (ljudböcker och poddar)", color = Color.Gray) }
         item {
@@ -378,6 +426,13 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
 
     var season by remember(it.id) { mutableIntStateOf(it.next?.season ?: it.children?.firstOrNull()?.season ?: 1) }
     var audio by remember(it.id) { mutableStateOf((it.audio?.firstOrNull { a -> a.default == true } ?: it.audio?.firstOrNull())?.index) }
+    // Min lista (inWatchlist saknas hos äldre servrar – då visas ingen knapp)
+    var inList by remember(it.id) { mutableStateOf(it.inWatchlist == true) }
+    val toggleList: () -> Unit = {
+        val add = !inList
+        inList = add
+        scope.launch { if (runCatching { Api.setWatchlist(it.id, add) }.isFailure) inList = !add }
+    }
     var sub by remember(it.id) {
         mutableStateOf(it.subtitles?.firstOrNull { s -> s.forced == true && s.bitmap != true }
             ?: it.subtitles?.firstOrNull { s -> Api.subtitleLang.isNotEmpty() && s.lang == Api.subtitleLang && s.bitmap != true })
@@ -396,7 +451,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     // Rollista: regi/skapare och de första skådespelarna
                     castLine(it.cast)?.let { c -> Text(c, color = Color.Gray, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
                     if (!it.isShow) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
                             if (pos > 30) {
                                 Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp)) { Icon(Icons.Filled.PlayArrow, null); Text(" Fortsätt ${formatTime(pos)}", fontSize = 17.sp) }
@@ -407,6 +462,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                             OutlinedButton(onClick = { scope.launch { runCatching { Api.setWatched(it.id, it.watched != true) }; reload++ } }, Modifier.height(56.dp)) {
                                 Text(if (it.watched == true) "Markera osedd" else "Markera sedd")
                             }
+                            if (it.inWatchlist != null) MyListButton(inList, toggleList)
                         }
                         DownloadRow(it)
                         it.audio?.takeIf { a -> a.size > 1 }?.let { list ->
@@ -423,10 +479,13 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                             }
                         }
                     } else {
-                        it.next?.let { n ->
-                            Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp)) {
-                                Icon(Icons.Filled.PlayArrow, null); Text(" ${if ((n.position ?: 0.0) > 0) "Fortsätt" else "Spela"} S${n.season}E${n.episode}", fontSize = 17.sp)
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            it.next?.let { n ->
+                                Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp)) {
+                                    Icon(Icons.Filled.PlayArrow, null); Text(" ${if ((n.position ?: 0.0) > 0) "Fortsätt" else "Spela"} S${n.season}E${n.episode}", fontSize = 17.sp)
+                                }
                             }
+                            if (it.inWatchlist != null) MyListButton(inList, toggleList)
                         }
                     }
                 }
@@ -452,6 +511,13 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun MyListButton(inList: Boolean, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.height(56.dp)) {
+        Icon(if (inList) Icons.Filled.Check else Icons.Filled.Add, null); Text(if (inList) " I Min lista" else " Min lista")
     }
 }
 

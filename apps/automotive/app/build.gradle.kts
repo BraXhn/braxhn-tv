@@ -13,8 +13,8 @@ android {
         applicationId = "net.braxhn.tv"
         minSdk = 29          // Android Automotive i Polestar 4 kör Android 12+ (API 31+)
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.5.1"
+        versionCode = 5
+        versionName = "0.6.0"
     }
 
     signingConfigs {
@@ -58,6 +58,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:$media3")
     implementation("androidx.media3:media3-session:$media3")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Google TV / Android TV: Fortsätt titta (Watch Next) – används bara på TV
+    implementation("androidx.tvprovider:tvprovider:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.8.1")

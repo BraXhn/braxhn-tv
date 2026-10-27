@@ -6,6 +6,10 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 
 > **Android Auto ≠ Android Automotive.** Android Auto (telefonen speglad till bilskärmen) tillåter inte video alls. Polestar 4 kör Android Automotive OS, där parkerade videoappar är tillåtna.
 
+**Android Auto (telefonen i bilen):** med appen installerad på telefonen syns BraXhn TV bland mediaapparna i Android Auto, med flikarna *Musik*, *Ljudböcker* och *Poddar* (bara ljud – video är inte tillåtet i Android Auto). En app som inte kommer från Google Play visas bara om du slår på *Okända källor*: öppna Android Auto-inställningarna på telefonen, tryck tio gånger på *Version* för att låsa upp utvecklarinställningarna och välj ⋮ → *Utvecklarinställningar* → *Okända källor*. Logga in i appen på telefonen först.
+
+**Google TV – Fortsätt titta:** appen lägger det du håller på med i systemets rad *Fortsätt titta* (Watch Next) när startsidan öppnas. Google TV visar raden bara för appar som Google har godkänt, så för en sideloadad app syns den troligen inte (äldre Android TV-startsidor brukar visa den). Inget annat påverkas om den inte syns.
+
 **Funktioner**
 - stor sidomeny anpassad för bilskärmar
 - hem med *Fortsätt titta*
@@ -19,6 +23,14 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - byte av ljudspår och undertexter under uppspelning, kapitel
 - musik, **ljudböcker och poddar i bilens mediaspelare** (får användas under körning)
 - offline-nedladdning
+- **byt profil** i hushållet (PIN eller huvudkontots lösenord när servern kräver det)
+- **Min lista** på titelsidan och som hylla på startsidan
+- startsidans hyllor i den ordning du valt i webben (*Anpassa startsidan*), även *Fortsätt lyssna* (spelas i ljudspelaren), *Kommer snart*, *Eftersom du såg …*, egna samlingar m.fl.
+- **bild-i-bild** på telefon och surfplatta (knappen i spelaren eller hemknappen) och **uppspelningshastighet** 0,75–2×
+- **bio-läge**: trailers och förfilm före filmen med *Hoppa över* när det är påslaget under *Mitt konto → Bio-läge* i webben
+- **nattläge och tydligare dialog** (Inställningar eller ljudmenyn i spelaren; servern filtrerar ljudet)
+- Android Auto (ljud) och Google TV:s *Fortsätt titta*, se ovan
+- i bilens mediaspelare och Android Auto: flikarna Musik, Ljudböcker och Poddar, **Stationer** (låtradio och stationer från serverns ljudanalys), *Radio: artist* överst på varje artistsida, sökning i musik, ljudböcker och poddar och **röststyrning** ("Hey Google, spela … på BraXhn TV" spelar bästa träffen: låten med sitt album, ett album, en ljudbok eller poddens senaste avsnitt)
 
 Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning.
 

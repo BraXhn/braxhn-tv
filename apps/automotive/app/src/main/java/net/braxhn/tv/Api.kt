@@ -76,7 +76,7 @@ fun castLine(cast: List<CastMember>?): String? {
     val children: List<MediaItem>? = null, val next: ItemRef? = null,
     val audio: List<AudioStream>? = null, val subtitles: List<SubtitleTrack>? = null,
     val nextId: Int? = null, val prevId: Int? = null,
-    val cast: List<CastMember>? = null
+    val cast: List<CastMember>? = null, val inWatchlist: Boolean? = null, val onThisDay: DayNote? = null
 ) {
     val isShow get() = kind == "show"
     val isEpisode get() = kind == "episode"
@@ -99,11 +99,11 @@ fun castLine(cast: List<CastMember>?): String? {
     val mode: String, val url: String, val reasons: List<String> = emptyList(), val subtitles: List<PlaybackSubtitle> = emptyList(),
     val intro: Marker? = null, val recap: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
     val remote: Boolean? = null, val tonemap: Boolean? = null,
-    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null
+    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null, val preroll: List<PrerollEntry> = emptyList()
 )
 @Serializable data class Chapter(val start: Double, val end: Double, val title: String)
 
-class ApiException(msg: String, val need2fa: Boolean = false) : IOException(msg)
+class ApiException(msg: String, val need2fa: Boolean = false, val needPassword: Boolean = false) : IOException(msg)
 
 @Serializable data class TokenResponse(val token: String)
 
@@ -196,12 +196,12 @@ object Api {
                 }
                 val code = c.responseCode
                 val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-                if (code == 401 && token.value != null && path != "/api/login" && path != "/api/media-token") { clearLogin(); throw ApiException("Du har loggats ut") }
+                if (code == 401 && token.value != null && path != "/api/login" && path != "/api/media-token" && path != "/api/profiles/switch") { clearLogin(); throw ApiException("Du har loggats ut") }
                 if (code !in 200..299) {
                     val obj = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
                     val msg = obj?.get("error")?.jsonPrimitive?.content
                     val need2fa = obj?.get("need2fa")?.jsonPrimitive?.content == "true"
-                    throw ApiException(msg ?: "Servern svarade $code", need2fa)
+                    throw ApiException(msg ?: "Servern svarade $code", need2fa, obj?.get("needPassword")?.jsonPrimitive?.content == "true")
                 }
                 text
             } finally { c.disconnect() }
@@ -308,6 +308,34 @@ object Api {
         }
         return r.status
     }
+
+    // ---- profiler, Min lista och tittarkomfort (efter inloggning med kod av samma skäl) ----
+
+    /** Byter profil i hushållet. Servern ger en ny token för profilen; den gamla slutar gälla. Kastar ApiException vid fel PIN/lösenord. */
+    suspend fun switchProfile(id: Int, pin: String?, password: String?) {
+        val r: LoginResponse = json.decodeFromString(request("/api/profiles/switch", "POST", body = buildJsonObject {
+            put("id", id)
+            if (!pin.isNullOrBlank()) put("pin", pin.trim())
+            if (!password.isNullOrBlank()) put("password", password)
+        }))
+        prefs.edit().putString("token", r.token).apply()
+        token.value = r.token
+        refreshImageToken(force = true)
+    }
+
+    /** Lägger till i eller tar bort från Min lista (ett avsnitt räknas som hela serien på servern). */
+    suspend fun setWatchlist(id: Int, add: Boolean) {
+        post("/api/items/$id/watchlist", buildJsonObject { put("add", JsonPrimitive(add)) })
+    }
+
+    /** Nattläge (jämnare ljudnivå) och tydligare dialog – servern filtrerar ljudet, sparas per enhet */
+    var nightMode: Boolean
+        get() = prefs.getBoolean("night", false)
+        set(v) { prefs.edit().putBoolean("night", v).apply() }
+    var dialogBoost: Boolean
+        get() = prefs.getBoolean("dialog", false)
+        set(v) { prefs.edit().putBoolean("dialog", v).apply() }
+    fun comfortQuery(): Map<String, String?> = mapOf("night" to (if (nightMode) "1" else null), "dialog" to (if (dialogBoost) "1" else null))
 }
 
 fun formatTime(s: Double): String {
