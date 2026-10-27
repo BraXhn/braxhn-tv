@@ -36,8 +36,10 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -67,12 +69,24 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     val pipOk = remember { Pip.supported(context) }
     val inPip by Pip.active.collectAsState()
     val skipFocus = remember { FocusRequester() }
+    // Google TV: bildfrekvensväxling (av/rate/res, Inställningar) och ljudspår valt i spelaren vid direktuppspelning
+    val frameMode = remember { if (tv) TvOutput.frameRateMode(context) else "off" }
+    var rateChecked by remember(req) { mutableStateOf(false) }
+    var audioApplied by remember(req) { mutableStateOf(false) }
+    var localAudio by remember(req) { mutableStateOf<Int?>(null) }
+    var modeNote by remember { mutableStateOf<String?>(null) }
 
     val player = remember {
         val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
-        ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
+        // Avkodarreserv (t.ex. Dolby Vision → HEVC-avkodaren). På TV: ljudutgångens hastighetsstyrning, så att
+        // bitström (Dolby/DTS till förstärkaren) och hastighetsändring fungerar ihop
+        val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        if (tv) renderers.setEnableAudioTrackPlaybackParams(true)
+        ExoPlayer.Builder(context, renderers).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
             setAudioAttributes(androidx.media3.common.AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true) // hanterar ljudfokus
+            // Egen växling av skärmläget: ExoPlayers Surface.setFrameRate (bara sömlösa byten) stängs av så att de inte krockar
+            if (frameMode != "off") setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
         }
     }
 
@@ -111,7 +125,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             pb = p
             currentSub = sub
             status = listOfNotNull(when (p.mode) { "direct" -> "Direkt"; "remux" -> "Remux"; else -> "Omkodning" },
-                if (p.tonemap == true) "HDR→SDR" else null, if (p.remote == true) "utanför hemmet" else null).joinToString(" · ")
+                if (p.tonemap == true) "HDR→SDR" else hdrLabel(it.hdr), if (p.remote == true) "utanför hemmet" else null).joinToString(" · ")
             // Alla textundertexter bifogas så att de kan bytas direkt; den valda markeras som standard
             val subs = p.subtitles.map { s ->
                 M3Item.SubtitleConfiguration.Builder(Uri.parse(Api.absolute(s.url)))
@@ -119,7 +133,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     .setSelectionFlags(if (s.id == sub?.id) C.SELECTION_FLAG_DEFAULT else 0).build()
             }
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, sub == null || sub.bitmap == true).build()
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, sub == null || sub.bitmap == true).build()
             val mi = M3Item.Builder()
                 .setUri(Api.absolute(p.url))
                 .apply { if (p.mode != "direct") setMimeType(MimeTypes.APPLICATION_M3U8) }
@@ -163,9 +177,60 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
     }
 
+    /**
+     * Direktuppspelning (atrack=1): välj ljudspåret i spelaren i stället för att servern remuxar. Serverns spårlista
+     * och spelarens ljudgrupper har filens ordning; stämmer inte antalet görs inget (servern får välja).
+     */
+    fun selectLocalAudio(index: Int, tracks: Tracks = player.currentTracks): Boolean {
+        val p = pb ?: return false
+        if (p.mode != "direct" || offline) return false
+        val pos = p.audio.indexOfFirst { a -> a.index == index }
+        val groups = tracks.groups.filter { g -> g.type == C.TRACK_TYPE_AUDIO }
+        if (pos < 0 || groups.size != p.audio.size || groups[pos].length < 1) return false
+        val g = groups[pos]
+        // Format som varken avkodas eller tas emot som bitström: låt servern konvertera
+        if (!g.isTrackSupported(0)) return false
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+        localAudio = index
+        return true
+    }
+
+    /** Byter skärmläge efter videons bildfrekvens; spelaren väntar medan TV:n/HDMI byter (några svarta sekunder) */
+    fun matchFrameRate(fps: Float, width: Int, height: Int) {
+        val a = activity ?: return
+        val id = TvOutput.pickMode(a, fps, width, height, frameMode == "res") ?: return
+        val resume = player.playWhenReady
+        player.playWhenReady = false
+        modeNote = "Anpassar skärmen till %.3f bilder/s".format(fps).replace('.', ',')
+        TvOutput.setMode(a, id)
+        scope.launch {
+            var n = 0
+            while (n++ < 50 && TvOutput.currentModeId(a) != id) delay(100)
+            delay(1200)
+            modeNote = null
+            if (resume) player.playWhenReady = true
+        }
+    }
+
     // Avsnitt slut → nästa
     DisposableEffect(req) {
         val l = object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) {
+                // Trailers/förfilm påverkar varken ljudspår eller skärmläge
+                if (player.currentMediaItemIndex < mainIndex || tracks.groups.isEmpty()) return
+                if (!audioApplied && pb != null) {
+                    audioApplied = true
+                    pb?.audioSelected?.toIntOrNull()?.let { sel -> selectLocalAudio(sel, tracks) }
+                }
+                if (frameMode != "off" && !rateChecked) {
+                    val vg = tracks.groups.firstOrNull { g -> g.type == C.TRACK_TYPE_VIDEO && g.isSelected } ?: return
+                    val vi = (0 until vg.length).firstOrNull { i -> vg.isTrackSelected(i) } ?: return
+                    val f = vg.getTrackFormat(vi)
+                    rateChecked = true
+                    if (f.frameRate > 0f) matchFrameRate(f.frameRate, f.width, f.height)
+                }
+            }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) {
                     report(final = true)
@@ -198,7 +263,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
-    DisposableEffect(Unit) { onDispose { Pip.aspect = null; latestReport(true); player.release() } }
+    // Skärmläget tillbaka till det vanliga när spelaren stängs
+    DisposableEffect(Unit) { onDispose { Pip.aspect = null; latestReport(true); player.release(); if (frameMode != "off") TvOutput.restore(activity) } }
 
     /** Startar om samma titel där man är (t.ex. nytt ljud från servern), utan bio-läge */
     fun restart(audio: Int? = req.audio, sub: SubtitleTrack? = currentSub) {
@@ -237,7 +303,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             }
             Spacer(Modifier.width(12.dp))
             Text(item?.let { if (it.isEpisode) "${it.showTitle} · ${it.sxe} · ${it.title}" else it.title } ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(prerollLabel ?: status, color = Color.LightGray, fontSize = 12.sp)
+            Text(prerollLabel ?: modeNote ?: status, color = Color.LightGray, fontSize = 12.sp)
             val p = pb
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { menu = "speed" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
@@ -283,11 +349,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                         } else if (p != null) {
                             if (p.audio.size > 1) {
                                 this.item { Text("Ljud", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
-                                val sel = p.audioSelected?.toIntOrNull() ?: req.audio
+                                val sel = localAudio ?: p.audioSelected?.toIntOrNull() ?: req.audio
                                 items(p.audio) { a ->
                                     OptionRow(a.label, a.index == sel) {
                                         menu = null
-                                        if (a.index != sel) restart(audio = a.index)
+                                        // Direktuppspelning: byt i spelaren (ingen omstart, ljudet orört); annars via servern
+                                        if (a.index != sel && !selectLocalAudio(a.index)) restart(audio = a.index)
                                     }
                                 }
                             }
@@ -329,6 +396,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
         } // !inPip
     }
+}
+
+/** HDR-typ i statusraden (serverns namn) */
+private fun hdrLabel(hdr: String?): String? = when (hdr) {
+    "hdr10" -> "HDR10"; "hlg" -> "HLG"; "dovi" -> "Dolby Vision"; else -> hdr?.uppercase()
 }
 
 private val SPEEDS = listOf(0.75f to "0,75×", 1f to "Normal", 1.25f to "1,25×", 1.5f to "1,5×", 1.75f to "1,75×", 2f to "2×")

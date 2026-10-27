@@ -30,6 +30,7 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - **bio-läge**: trailers och förfilm före filmen med *Hoppa över* när det är påslaget under *Mitt konto → Bio-läge* i webben
 - **nattläge och tydligare dialog** (Inställningar eller ljudmenyn i spelaren; servern filtrerar ljudet)
 - Android Auto (ljud) och Google TV:s *Fortsätt titta*, se ovan
+- **på Google TV: bitström till förstärkaren** (Dolby Digital, Dolby Digital Plus/Atmos, DTS/DTS-HD, Dolby TrueHD spelas orört när förstärkaren tar emot formatet), **HDR10/HDR10+/HLG/Dolby Vision** direkt när TV:n klarar det och **automatisk bildfrekvensväxling** (*Inställningar → Bild och ljud på TV:n*: Av / Bara bildfrekvens / Bildfrekvens och upplösning)
 - i bilens mediaspelare och Android Auto: flikarna Musik, Ljudböcker och Poddar, **Stationer** (låtradio och stationer från serverns ljudanalys), *Radio: artist* överst på varje artistsida, sökning i musik, ljudböcker och poddar och **röststyrning** ("Hey Google, spela … på BraXhn TV" spelar bästa träffen: låten med sitt album, ett album, en ljudbok eller poddens senaste avsnitt)
 
 Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning.

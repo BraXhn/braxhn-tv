@@ -262,14 +262,14 @@ object Api {
         if ("video/hevc" in types) v += "hevc"
         if ("video/x-vnd.on2.vp9" in types) v += "vp9"
         if ("video/av01" in types) v += "av1"
-        val a = mutableListOf("aac", "mp3", "opus", "flac", "vorbis")
-        if ("audio/ac3" in types) a += "ac3"
-        if ("audio/eac3" in types) a += "eac3"
+        // Dolby/DTS/TrueHD: egen avkodare eller bitström till förstärkaren (TvOutput) – då skickas ljudet orört
+        val a = mutableListOf("aac", "mp3", "opus", "flac", "vorbis") + TvOutput.surroundCodecs(ctx, types)
+        // hdr/hdrt/dv efter skärmen; atrack=1: spelaren väljer ljudspår själv i en direktuppspelad fil
         return mapOf(
-            "c" to "mp4,mkv,webm", "v" to v.joinToString(","), "a" to a.joinToString(","), "hdr" to "0",
+            "c" to "mp4,mkv,webm", "v" to v.joinToString(","), "a" to a.joinToString(","), "atrack" to "1",
             "q" to quality.takeIf { it != "auto" }, "audio" to audio?.toString(),
             "sub" to sub?.takeIf { it.bitmap == true }?.id
-        )
+        ) + TvOutput.hdrQuery(ctx, types)
     }
 
     suspend fun reportProgress(id: Int, position: Double, duration: Double) {
