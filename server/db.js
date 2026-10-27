@@ -430,6 +430,11 @@ addCol('trailers', 'title', 'TEXT');
 // Temamusik: items.theme = theme.mp3/theme.m4a i filmens/seriens mapp (skannern), users.theme_music = val per profil (JSON)
 addCol('items', 'theme', 'TEXT');
 addCol('users', 'theme_music', 'TEXT');
+// Synkade undertexter (server/subsync.js): per titel och undertextfil (sub = '<källa>:<filnamn>'). shift/ratio läggs på
+// när undertexten skickas (t' = t · ratio + shift); auto_* = senaste automatiska resultat (cache per ljudspår och filversion)
+db.exec(`CREATE TABLE IF NOT EXISTS sub_sync(item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, sub TEXT NOT NULL,
+  sub_mtime INTEGER, shift REAL NOT NULL DEFAULT 0, ratio REAL NOT NULL DEFAULT 1, auto_shift REAL, auto_ratio REAL, auto_score REAL,
+  auto_audio TEXT, auto_mtime INTEGER, updated INTEGER NOT NULL, PRIMARY KEY(item_id, sub));`);
 
 // Fotobibliotek (server/photos.js): libraries.type får även 'photo'. SQLite kan inte ändra en CHECK-begränsning, så
 // tabellen byggs om med samma kolumner (även de som addCol lagt till) och alla rader. Främmande nycklar stängs av under

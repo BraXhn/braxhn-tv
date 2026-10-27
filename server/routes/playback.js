@@ -20,6 +20,7 @@ import * as cinema from '../cinema.js';
 import * as pp from '../playprefs.js';
 import { TRAILER_SCOPE } from '../trailers.js';
 import * as libfilter from '../libfilter.js';
+import * as subsync from '../subsync.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
@@ -151,9 +152,12 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Förvalda spår enligt användarens val (nya fält): ljudet ovan, undertexten bland textundertexterna (subtitles)
   const selAudio = audios.find(a => String(a.index) === String(d.audio)) || prefAudio;
   const defSub = pp.pickSub(allSubs, selAudio, prefs);
-  const subs = allSubs.filter(s => !s.bitmap).map(s => ({
-    id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`
-  }));
+  // source/syncable/sync (tillägg): webbens "Synka automatiskt" – servern lägger själv på sparad synk i url
+  const subs = allSubs.filter(s => !s.bitmap).map(s => {
+    const sync = subsync.syncable(s) ? subsync.adjustment(it, s) : null;
+    return { id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`,
+      source: s.source, syncable: subsync.syncable(s), ...(sync ? { sync } : {}) };
+  });
   // Bildundertexter (PGS) som webbspelaren ritar själv – appar använder inbränning via sub=
   const imageSubs = allSubs.filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
   send(c.res, 200, {
@@ -165,7 +169,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     audioSelected: d.audio ?? null,
     defaultAudio: prefAudio ? prefAudio.index : null, defaultSub: defSub ? defSub.id : null,
     autoSkip: { intro: prefs.skipIntro, recap: prefs.skipRecap, credits: prefs.skipCredits },
-    autoNext: { enabled: prefs.autoNext, countdown: prefs.nextCountdown },
+    autoNext: { enabled: prefs.autoNext, countdown: prefs.nextCountdown }, subAutoSync: prefs.autoSync,
     ...(preroll.length ? { preroll } : {}),
     ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
@@ -226,7 +230,7 @@ route('GET', '/api/stream/:id/hls/init.mp4', media, async (c) => { const it = me
 route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
-route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q); });
+route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q, (sub) => subsync.adjustment(it, sub)); });
 const pgsSub = (it, sid) => st.subtitlesOf(it).find(s => s.id === sid && s.pgs);
 route('GET', '/api/stream/:id/pgs/:sid', media, async (c) => {
   const it = mediaItem(c); if (!it) return;
@@ -264,14 +268,48 @@ route('POST', '/api/items/:id/subdownload', user, async (c) => {
   const it = mediaItem(c); if (!it) return;
   const { fileId, lang } = await readJson(c.req);
   if (!fileId) return fail(c.res, 400, 'fileId saknas');
-  try { const r = await os.download(it, fileId, lang); st.forgetSubtitles(it); libfilter.forget(it.id); send(c.res, 200, r); }
-  catch (e) { fail(c.res, e.status || 502, e.message); }
+  try {
+    const r = await os.download(it, fileId, lang); st.forgetSubtitles(it); libfilter.forget(it.id);
+    // Synka direkt i bakgrunden (Mitt konto → Uppspelning) – klart när filmen startas
+    const sub = st.subtitlesOf(it).find(s => s.source === 'downloaded' && path.basename(s.file) === r.file);
+    if (sub && pp.getPrefs(c.user.id).autoSync) { startSync(it, sub, null); r.syncing = true; }
+    send(c.res, 200, r);
+  } catch (e) { fail(c.res, e.status || 502, e.message); }
+});
+// Automatisk synk av en undertextfil mot ljudet (server/subsync.js). audio = ljudspårets index (spelarens val),
+// annars filens standardspår.
+const defAudioOf = (it) => { const a = st.streamsOf(it).filter(s => s.type === 'audio'); return (a.find(x => x.default) || a[0])?.index ?? null; };
+const startSync = (it, sub, audio, force = false) => subsync.start(it, sub, { audio: audio ?? defAudioOf(it), force, getVtt: () => st.subtitleVtt(it, sub) });
+const syncSub = (c, it) => {
+  const sub = st.subtitlesOf(it).find(s => s.id === c.p.sid);
+  if (!sub || !subsync.syncable(sub)) { fail(c.res, 400, 'Bara undertextfiler (externa eller nedladdade) kan synkas'); return null; }
+  return sub;
+};
+route('GET', '/api/items/:id/subs/:sid/sync', user, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const sub = syncSub(c, it); if (sub) send(c.res, 200, subsync.status(it, sub));
+});
+route('POST', '/api/items/:id/subs/:sid/sync', user, async (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const sub = syncSub(c, it); if (!sub) return;
+  const b = await readJson(c.req);
+  const audio = st.streamsOf(it).find(s => s.type === 'audio' && String(s.index) === String(b?.audio ?? ''))?.index ?? null;
+  send(c.res, 200, startSync(it, sub, audio, !!b?.force));
+});
+route('PUT', '/api/items/:id/subs/:sid/sync', user, async (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const sub = syncSub(c, it); if (!sub) return;
+  const b = await readJson(c.req);
+  if (!b || !Number.isFinite(+b.offset)) return fail(c.res, 400, 'Ogiltig förskjutning');
+  subsync.save(it, sub, { offset: +b.offset, ratio: b.ratio == null ? 1 : +b.ratio });
+  send(c.res, 200, subsync.status(it, sub));
 });
 route('DELETE', '/api/items/:id/subs/:sid', admin, (c) => {
   const it = mediaItem(c); if (!it) return;
   const s = st.subtitlesOf(it).find(x => x.id === c.p.sid);
   if (!s || s.source !== 'downloaded') return fail(c.res, 400, 'Endast nedladdade undertexter kan tas bort');
   os.removeDownloaded(it, s.file);
+  subsync.forget(it, s);
   st.forgetSubtitles(it);
   libfilter.forget(it.id); // undertextspråken i bibliotekets filter
   send(c.res, 200, { ok: true });

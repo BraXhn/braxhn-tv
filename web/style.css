@@ -536,6 +536,8 @@ dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8p
 #player .setp summary{cursor:pointer}
 #player .setp details[open]>summary{margin-bottom:8px}
 #player .setp details label{margin-top:8px}
+#player .setp .psync{display:flex;flex-direction:column;gap:6px}
+#player .setp .psyncs{color:#ccd}
 #player .setp label.chk{flex-direction:row;align-items:center;gap:8px;font-size:13px;color:#eee;flex-wrap:wrap}
 #player .setp label.chk .muted{font-size:11px;width:100%;padding-left:24px;margin-top:-4px}
 /* Fjärrkontroll/tangentbord: tydlig markering i spelaren (mot mörk bild) */

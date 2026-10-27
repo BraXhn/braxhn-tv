@@ -11,7 +11,8 @@ export const ORIG = 'orig'; // "originalspråk" i ljudlistan = filens standardsp
 const DEFAULTS = Object.freeze({
   audioLangs: [], subMode: 'forced', subLangs: [], sdh: 'avoid',
   skipIntro: false, skipRecap: false, skipCredits: false,
-  autoNext: true, nextCountdown: 8, qualityHome: 'auto', qualityRemote: 'auto'
+  autoNext: true, nextCountdown: 8, qualityHome: 'auto', qualityRemote: 'auto',
+  autoSync: true // synka nedladdade undertexter mot ljudet automatiskt (subsync.js)
 });
 
 // ISO 639-2 (B och T) → 639-1. Filernas språktaggar är oftast tre bokstäver (swe, eng), användarens val två (sv, en).
@@ -58,7 +59,8 @@ export function normalize(p = {}) {
     autoNext: bool(p.autoNext, DEFAULTS.autoNext),
     nextCountdown: Number.isFinite(n) ? Math.max(0, Math.min(60, n)) : DEFAULTS.nextCountdown,
     qualityHome: QUALITY_PREFS.includes(String(p.qualityHome)) ? String(p.qualityHome) : DEFAULTS.qualityHome,
-    qualityRemote: QUALITY_PREFS.includes(String(p.qualityRemote)) ? String(p.qualityRemote) : DEFAULTS.qualityRemote
+    qualityRemote: QUALITY_PREFS.includes(String(p.qualityRemote)) ? String(p.qualityRemote) : DEFAULTS.qualityRemote,
+    autoSync: bool(p.autoSync, DEFAULTS.autoSync)
   };
 }
 
