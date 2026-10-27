@@ -31,7 +31,7 @@ export async function fillWatch() {
   const el = $('[data-wid]'); if (!el) return;
   const w = await api(`/items/${el.dataset.wid}/watch`).catch(() => null);
   const html = provBlock(w);
-  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:15px;margin:14px 0 6px">Finns även på</h3>${html}`;
+  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:.9375rem;margin:14px 0 6px">Finns även på</h3>${html}`;
 }
 
 function heroHtml(it, extra = '') {
@@ -134,7 +134,7 @@ function showView(it, season) {
     // Lokal säsongsaffisch (season01-poster.jpg bredvid serien)
     const sp = (it.seasonPosters || []).includes(cur) ? `<img class="season-poster" ${imgSrc(`/api/image/${+it.id}/season${+cur}`, 90)} alt="" width="90" height="135" data-fb="1">` : '';
     $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button>${me.canDownload === false || !offlineOk() ? '' : '<button class="ghost small" id="seasonOff" title="Spara avsnitten i webbläsaren och titta utan nät">⤓ Spara säsongen offline</button>'}</div>
-      <div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
+      <h2 class="sr-only">${cur === 0 ? 'Specialavsnitt' : 'Säsong ' + cur}</h2><div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
       <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? ' · Sedd' : e.position ? ` · ${fmtTime(e.position)} kvar: ${fmtTime(e.duration - e.position)}` : ''}</div>
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}
       <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">▶ Spela</button>

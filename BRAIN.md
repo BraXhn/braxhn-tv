@@ -117,7 +117,8 @@ Skrivs efter ett misslyckande under press, ett tydligt lyckat resultat eller en 
 ### Invarianter (bryts de blir det fel – testa dem)
 - Webbens musikspelare: en ren ton delad mitt i en period över flera spår spelas utan glapp eller fasfel, övertoning sker aldrig mellan spår som går ihop på samma album, och förstärkningen överskrider aldrig 1/toppvärdet (`test/web-gapless.test.js`, `test/gapless.test.js`).
 - Låsta fält (`items.locked`) och valda bilder (`items.img_locked`) skrivs aldrig över av TMDB, NFO eller omskanning (`test/itemmeta.test.js`).
-- Kommentarsspår och ljudbeskrivning (disposition `comment`/`visual_impaired` eller titeln) och bildundertexter som kräver inbränning väljs aldrig automatiskt (`server/playprefs.js`).
+- Kommentarsspår (disposition `comment` eller titeln) och bildundertexter som kräver inbränning väljs aldrig automatiskt; ljudbeskrivning (`visual_impaired`/"Syntolkning"/"AD") bara när profilen valt `audioDesc` (`server/playprefs.js`, `test/playprefs.test.js`).
+- Webbens tillgänglighet (`test/web-a11y.test.js` med granskningsskriptet `test/helpers/a11y-audit.js`): alla vyer utan fynd vid 375/1280 px och i TV-läge. `router.js` ger varje sida en h1 (dold om vyn saknar en), fliktitel och fokus på rubriken efter sidbyte; helskärmsspelaren gör sidan bakom `inert` (`player/overlay.js`, följer `#player`:s hidden/class); textstorleken är `rem` överallt i `style.css` (sätt aldrig `font-size` i px – valet i Mitt konto skalar `html`).
 - `web/style.css` har balanserade klamrar – ett ostängt `@media` slukade en gång resten av filen (`test/unit.test.js`).
 - All servertext i HTML går genom `esc()`.
 - Admin-routes kräver betrott nät; mediatoken gäller bara sin titel (`scope`).

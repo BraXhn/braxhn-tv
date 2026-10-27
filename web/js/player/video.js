@@ -5,7 +5,7 @@ import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
-import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
+import { closeOverlays, noteOpener, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
 import { openRemotePicker } from './remote.js';
 import { remoteButton } from '../ui/buttons.js';
@@ -38,7 +38,7 @@ export function loadHls() {
 }
 // Startknapp: inaktiveras medan spelaren startar (dubbelklick ger inte två spelare)
 export function startPlay(b, ...args) {
-  if (b) { if (b.disabled) return; b.disabled = true; }
+  if (b) { if (b.disabled) return; b.disabled = true; noteOpener(b); }
   return play(...args).catch(e => toastErr(e)).finally(() => { if (b) b.disabled = false; });
 }
 
@@ -87,7 +87,7 @@ export async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">Avbryt</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">Avbryt</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
       <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
       ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
@@ -101,7 +101,7 @@ export async function play(id, start = 0, opts = {}) {
         <label class="chk"><input type="checkbox" id="pdialog"> Tydligare dialog <span class="muted">rösterna förstärks</span></label></div>
       <details class="setgrp"><summary>Undertextens utseende</summary>${subStyleFields('pst')}</details></div>
     <div class="ctl" id="ctl">
-      <div class="scrub" id="scrub"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
+      <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Tidslinje" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
         <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
       <div class="crow">
         <div class="cinfo"><b>${esc(it.kind === 'episode' ? it.showTitle || it.title : it.title)}</b><span>${line2}</span><span id="ctime">0:00</span></div>
@@ -110,7 +110,7 @@ export async function play(id, start = 0, opts = {}) {
           <button id="cback" title="10 s bakåt (←)" aria-label="10 s bakåt (←)">${ICON.back10}</button>
           <button id="cplay" class="big" title="Spela/pausa (mellanslag)" aria-label="Spela/pausa (mellanslag)">${ICON.play}</button>
           <button id="cfwd" title="30 s framåt (→)" aria-label="30 s framåt (→)">${ICON.fwd30}</button>
-          <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
+          <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" aria-label="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
           <button id="cstop" title="Stoppa" aria-label="Stoppa">${ICON.stop}</button>
         </div>
         <div class="cright">
@@ -122,6 +122,7 @@ export async function play(id, start = 0, opts = {}) {
         </div>
       </div>
     </div>`;
+  el.setAttribute('aria-label', 'Videospelare: ' + (it.kind === 'episode' ? `${it.showTitle} ${sxe(it)} ${it.title}` : it.title));
   overlayOpen(el);
   const v = q('#vid');
   applySubStyle(el);

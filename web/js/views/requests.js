@@ -11,8 +11,8 @@ views.requests = async () => {
   const R = await api('/requests');
   const kind = store.get('reqkind', 'movie');
   main.innerHTML = `<div class="toolbar"><h1>Önskningar</h1><span class="muted">Önska filmer och serier som saknas${R.radarr || R.sonarr ? ' – de laddas ner automatiskt när de godkänts' : ''}</span></div>
-    ${R.canRequest ? `<form id="rqf" class="row panel" style="align-items:flex-end"><div><label>Typ</label><select id="rqk"><option value="movie">Film</option><option value="show">Serie</option></select></div>
-      <div style="flex:1;min-width:200px"><label>Sök</label><input id="rqq" placeholder="Titel…" autocomplete="off"></div><button class="primary">Sök</button></form>
+    ${R.canRequest ? `<form id="rqf" class="row panel" style="align-items:flex-end"><div><label for="rqk">Typ</label><select id="rqk"><option value="movie">Film</option><option value="show">Serie</option></select></div>
+      <div style="flex:1;min-width:200px"><label for="rqq">Sök</label><input id="rqq" placeholder="Titel…" autocomplete="off"></div><button class="primary">Sök</button></form>
       <div id="rqres" class="matchgrid" style="max-height:none"></div>` : '<p class="muted">Önskemål är avstängda.</p>'}
     <div class="panel"><h2>Alla önskemål</h2><table>${R.items.map(r => `<tr><td style="width:48px">${r.poster ? `<img src="${esc(r.poster)}" alt="" style="width:40px;border-radius:4px">` : ''}</td>
       <td><b>${esc(r.title)}</b> ${r.year ? `<span class="muted">(${r.year})</span>` : ''}<div class="muted small">${r.kind === 'movie' ? 'Film' : 'Serie'} · ${esc(r.user || '')} · ${fmtDate(r.created)}${r.note ? ' · ' + esc(r.note) : ''}</div></td>

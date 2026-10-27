@@ -196,6 +196,40 @@ Panelen (popover, ark på telefon) grupperar `GET /api/jobs` per sort med förlo
 när något pågår eller panelen är öppen, annars var 20:e; pausar när fliken är dold, aldrig mer än ett anrop i
 luften, och slutar tyst vid 401/403/404.
 
+## Tillgänglighet (WCAG 2.2 AA)
+
+Målet är att hela appen ska gå att använda med bara tangentbord, fjärrkontroll eller skärmläsare. `test/web-a11y.test.js`
+kör granskningsskriptet `test/helpers/a11y-audit.js` över alla vyer (lägg till nya vyer i `VIEWS` där) vid 375 och
+1280 px och i TV-läge, och provar tangentbordsflödena. Det ska vara grönt.
+
+- **Sidan:** varje vy får en `h1` (finns ingen synlig lägger `router.js` en dold med menyradens namn) och fliken får
+  titeln "Sida – BraXhn TV". Rubriknivåerna hoppar inte (h1 → h2 → h3; dölj en rubrik med `.sr-only` hellre än att
+  hoppa över en nivå). Efter ett sidbyte flyttas fokus till rubriken. *Hoppa till innehållet* är första tabbstoppet.
+- **Namn:** varje fält har en `<label for>` (eller ligger i sin `<label>`), annars `aria-label`. Knappar med bara en
+  ikon via `iconButton`. Ett `aria-label` ska innehålla den synliga texten (2.5.3). Placeholder är ingen etikett.
+- **Reglage:** egna reglage får `role="slider"`, `tabindex="0"`, `aria-valuemin/max/now` och `aria-valuetext` i ord
+  ("12:30 av 1:45:00", "3,5 av 5 stjärnor", "50 %") och styrs med ←/→, Home/End, Page Up/Down.
+- **aria:** varje `aria-labelledby/-describedby/-controls` pekar på ett id som finns; roller med obligatoriska föräldrar
+  (`tab` i `tablist`, `menuitem` i `menu`, `gridcell` i `row`) och attribut (`aria-checked`, `aria-valuenow`) får dem.
+  Aldrig `tabindex` > 0. Inget fokuserbart inuti `aria-hidden` – använd `inert` för det som ligger bakom något modalt.
+- **Live-regioner sparsamt:** `toast` (`role=status`, fel `role=alert`), laddning (`aria-busy` och skelettets dolda
+  "Laddar…") och spelarens läge (`say(el, text)` i `player/controls.js` – bara efter något användaren gjort eller när
+  laddningen dröjer). Lägg inte `aria-live` på text som ändras hela tiden (tid, undertexter).
+- **Modalt:** dialoger via `openDialog` (fokusfälla, Escape, fokus tillbaka). Helskärmsspelaren gör `#top`, `#rail`,
+  `#main` och `#tabbar` inerta och lämnar fokus på knappen som startade den. Menyer lämnar fokus där det var.
+- **Kontrast:** text minst 4,5:1 (stor text 3:1) mot sin bakgrund – dämpa inte text med `opacity` (TV-guidens äldre
+  program använder `--dim` i stället). Fokusmarkeringen syns mot alla bakgrunder (`:focus-visible`, 3 px).
+- **Klickytor:** minst 24 × 24 px (2.5.8), på pekskärm 44 px (`--touch`).
+- **Textstorlek:** `font-size` alltid i `rem` (eller `em`), aldrig i px – *Mitt konto → Tillgänglighet* skalar `html`
+  100–200 % (`web/start.js` sätter det före första ritningen, `html.bigtext` från 130 %). Inget får klippas vid 200 %
+  (fasta höjder på textlådor, `overflow:hidden` utan `text-overflow`); testet kontrollerar det.
+- **Rörelse och kontrast:** animationer bara utan `prefers-reduced-motion`/`html.reduce-motion` (JS: kontrollera båda,
+  se `ui/shelves.js`). `prefers-contrast: more`/`html.more-contrast` höjer `--dim`, `--line` och fokusramen.
+  Under `forced-colors: active` försvinner skuggor och bakgrundsfärger: markera val och förlopp med `outline` eller
+  systemfärger (`Highlight`, `ButtonText`), aldrig bara med `box-shadow`/bakgrund.
+- **Undertexter:** utseendet styrs av användaren (`player/comfort.js`: storlek, typsnitt, färg, kantlinje, bakgrund
+  och färg, placering) – rita undertextytor med CSS-variablerna `--subcolor`, `--subbg`, `--subshadow`, `--subfont`.
+
 ## Riktlinjer
 
 - **esc() på all servertext** som hamnar i HTML. Komponenterna escapar sina egna parametrar (rubriker,
@@ -215,6 +249,7 @@ luften, och slutar tyst vid 401/403/404.
 
 ## Testa
 
+- `test/web-a11y.test.js` granskar alla vyer och tangentbordsflödena (se *Tillgänglighet* ovan).
 - `test/ui-components.test.js` testar strängbyggarna (escapning, aria-attribut, kortmenyns val per sort och roll).
 - `test/card-actions.test.js` testar `/api/items/:id/state` och `/api/items/:id/continue` mot en riktig server,
   även att barnprofiler inte kan nå titlar över åldersgränsen.

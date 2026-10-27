@@ -22,7 +22,7 @@ function editLibrary(l, mediaRoot) {
   let paths = [...orig];
   const video = l.type === 'movie' || l.type === 'show';
   const body = `<div class="field"><label for="le-name">Namn</label><input id="le-name" value="${esc(l.name)}" maxlength="60" required></div>
-    <h3 style="font-size:15px;margin:14px 0 4px">Mappar</h3>
+    <h3 style="font-size:.9375rem;margin:14px 0 4px">Mappar</h3>
     <p class="muted small" style="margin:0 0 6px">Samma sorts innehåll kan ligga på flera diskar eller delningar. Går en mapp inte att läsa tas ingenting bort.</p>
     <ul class="libpaths" id="le-paths"></ul>
     <label for="le-add" style="margin-top:12px">Lägg till en mapp (under ${esc(mediaRoot)})</label>
@@ -111,13 +111,13 @@ views.admin = async (sec) => {
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <p><a class="btn ghost small" href="#/health">Hälsokontroll: trasiga filer, synk, språk, dubbletter och saknade avsnitt →</a></p>
-    <h3 style="margin:22px 0 4px;font-size:15px">Lägg till bibliotek</h3>
-    <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label>Namn</label><input id="ln" placeholder="Filmer" required></div>
-      <div><label>Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option><option value="photo">Foton</option></select></div></div>
+    <h3 style="margin:22px 0 4px;font-size:.9375rem">Lägg till bibliotek</h3>
+    <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label for="ln">Namn</label><input id="ln" placeholder="Filmer" required></div>
+      <div><label for="lt">Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option><option value="photo">Foton</option></select></div></div>
       <label class="switch" id="lanimew" hidden><input type="checkbox" id="lanime"> Anime (absolut avsnittsnumrering som "Serie - 1071" mappas till säsonger)</label>
       <label class="switch" id="lkidsw" hidden><input type="checkbox" id="lkids"> Barnprofiler får se fotona (foton har ingen åldersgräns – standard är att barnprofiler inte ser fotobiblioteket)</label>
       <label class="switch" id="lhvw"><input type="checkbox" id="lhv"> Hemvideor / andra videor (ingen TMDB – titel från filnamnet, sorteras på datum, mapparna blir navigering)</label>
-      <label>Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
+      <label for="lp">Mapp (under ${esc(S.mediaRoot)})</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
   </div>
@@ -136,8 +136,8 @@ views.admin = async (sec) => {
       ${u.id !== me.id && !u.parent_id ? `<button class="ghost small" data-adm="${u.id}" data-v="${u.is_admin ? 0 : 1}">${u.is_admin ? 'Ta bort admin' : 'Gör till admin'}</button>
       <button class="danger small" data-udel="${u.id}">Ta bort</button>` : ''}</td></tr>`).join('')}</table>
     <form id="adduser" class="row" style="margin-top:14px;align-items:flex-end">
-      <div style="flex:1;min-width:140px"><label>Namn</label><input id="un" required maxlength="64"></div>
-      <div style="flex:1;min-width:140px"><label>Lösenord (minst 10 tecken)</label><input id="up" type="password" minlength="10" required autocomplete="new-password"></div>
+      <div style="flex:1;min-width:140px"><label for="un">Namn</label><input id="un" required maxlength="64"></div>
+      <div style="flex:1;min-width:140px"><label for="up">Lösenord (minst 10 tecken)</label><input id="up" type="password" minlength="10" required autocomplete="new-password"></div>
       <label style="display:flex;gap:6px;align-items:center;margin:0 0 10px"><input type="checkbox" id="ua"> Admin</label>
       <label style="display:flex;gap:6px;align-items:center;margin:0 0 10px"><input type="checkbox" id="ur" checked> Får titta utanför hemmet</label>
       <button class="primary">Lägg till</button></form>
@@ -149,13 +149,13 @@ views.admin = async (sec) => {
     <label class="switch"><input type="checkbox" id="ssub" ${S.subsonic !== false ? 'checked' : ''}> Tillåt musikappar (Subsonic: Symfonium, Amperfy, play:Sub …) – var och en skapar ett eget lösenord för musikappar under Mitt konto</label>
     <label class="switch"><input type="checkbox" id="sadm" ${S.adminAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Tillåt administration från internet <span class="muted">(rekommenderas inte)</span></label>
     <label class="switch"><input type="checkbox" id="svpn" ${S.trustVpnRange ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> Räkna VPN-nätet 100.64.0.0/10 (NetBird/Tailscale) som hemma <span class="muted">(behövs normalt inte om VPN:et routas via routern)</span></label>
-    <label>Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="kommaseparerade CIDR">
+    <label for="stn">Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="kommaseparerade CIDR">
     <label class="switch"><input type="checkbox" id="sunr" ${S.allowUnrated ? 'checked' : ''}> Barnprofiler får se titlar utan känd åldersgräns</label>
     <label class="switch"><input type="checkbox" id="strick" ${S.trickplay ? 'checked' : ''}> Skapa förhandsbilder för spolning (kräver lite diskutrymme och tid vid skanning)</label>
     <label class="switch"><input type="checkbox" id="srecap" ${S.detectRecap ? 'checked' : ''}> Leta efter "tidigare i serien" (analyserar hela föregående avsnitt)</label>
     <label class="switch"><input type="checkbox" id="swatch" ${S.watchEnabled ? 'checked' : ''}> Skanna direkt när filer läggs till (filbevakning – ${S.watching} bibliotek bevakas)</label>
-    <div class="row"><div style="flex:1"><label>Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
-    <div style="flex:1"><label>Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
+    <div class="row"><div style="flex:1"><label for="smt">Max samtidiga omkodningar (totalt)</label><input id="smt" type="number" min="1" max="32" value="${S.maxTranscodes}"></div>
+    <div style="flex:1"><label for="smu">Max samtidiga omkodningar per användare</label><input id="smu" type="number" min="1" max="16" value="${S.maxTranscodesUser}"></div></div>
     <div class="row" style="margin-top:14px"><button class="primary">Spara säkerhetsinställningar</button></div></form>
   </div>
   <div class="panel"><h2>Version ${esc(UP.current)} ${UP.available ? `<span class="warn-badge">${esc(UP.latest)} finns</span>` : UP.latest ? '<span class="ok-badge">Senaste</span>' : ''}</h2>
@@ -169,20 +169,20 @@ views.admin = async (sec) => {
       <td>${t.channels} kanaler · ${LT.inUse[t.id] || 0}/${t.tuner_count} tuners används</td>
       <td class="r"><button class="ghost small" data-trf="${t.id}">Uppdatera</button><button class="ghost small" data-tepg="${t.id}">TV-guide…</button><button class="danger small" data-tdel="${t.id}">Ta bort</button></td></tr>`).join('')}</table>` : ''}
     <p><a class="btn ghost small" href="#/iptvadmin">IPTV: M3U, Xtream Codes, TV-guider, kanaler och grupper →</a></p>
-    <form id="ltadd" style="margin-top:12px"><div class="row" style="align-items:flex-end"><div><label>Källa</label><select id="ltk"><option value="hdhr">HDHomeRun</option><option value="m3u">IPTV (M3U)</option></select></div>
+    <form id="ltadd" style="margin-top:12px"><div class="row" style="align-items:flex-end"><div><label for="ltk">Källa</label><select id="ltk"><option value="hdhr">HDHomeRun</option><option value="m3u">IPTV (M3U)</option></select></div>
       <div style="flex:2;min-width:220px"><label id="ltul">IP-adress till HDHomeRun</label><input id="ltu" placeholder="192.168.1.50" required></div>
-      <div style="flex:2;min-width:220px"><label>TV-guide, XMLTV (valfri)</label><input id="lte" placeholder="https://…/guide.xml.gz"></div>
-      <div id="ltnw" hidden><label>Samtidiga strömmar</label><input id="ltn" type="number" min="1" max="20" value="2" style="width:80px"></div></div>
+      <div style="flex:2;min-width:220px"><label for="lte">TV-guide, XMLTV (valfri)</label><input id="lte" placeholder="https://…/guide.xml.gz"></div>
+      <div id="ltnw" hidden><label for="ltn">Samtidiga strömmar</label><input id="ltn" type="number" min="1" max="20" value="2" style="width:80px"></div></div>
       <div class="row" style="margin-top:10px"><button class="primary">Lägg till</button><button type="button" class="ghost" id="ltdisc">Sök efter HDHomeRun</button><button type="button" class="ghost" id="ltgr">Uppdatera TV-guiden</button></div></form>
     ${LT.channels.length ? `<details style="margin-top:12px"><summary>Kanaler (${LT.channels.length}) – dölj eller markera favoriter</summary><table>${LT.channels.map(c => `<tr><td>${esc(c.number || '')}</td><td>${esc(c.name)}</td><td class="muted small">${c.now ? esc(c.now.title) : 'ingen guide'}${c.epgId ? '' : ' · <span class="warn-badge">ej kopplad</span>'}</td>
       <td><label class="small"><input type="checkbox" data-chfav="${c.id}" ${c.favorite ? 'checked' : ''}> favorit</label> <label class="small"><input type="checkbox" data-chhide="${c.id}" ${c.hidden ? 'checked' : ''}> dold</label> <button class="ghost small" data-chepg="${c.id}" data-epgid="${esc(c.epgId || '')}">Guide-id</button></td></tr>`).join('')}</table></details>` : ''}
-    <form id="ltset" class="row" style="margin-top:12px;align-items:flex-end"><div style="flex:1;min-width:160px"><label>Inspelningsmapp</label><input id="lsd" value="${esc(LT.settings.dvrDir)}"></div>
-      <div><label>Starta före (s)</label><input id="lsb" type="number" min="0" value="${LT.settings.padBefore}" style="width:90px"></div><div><label>Sluta efter (s)</label><input id="lsa" type="number" min="0" value="${LT.settings.padAfter}" style="width:90px"></div>
-      <div><label>Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
-      <div><label title="Hur långt bakåt man kan pausa och spola i live-TV (0 = av)">Timeshift (min)</label><input id="lsts" type="number" min="0" max="720" value="${LT.settings.timeshiftMinutes ?? 120}" style="width:90px"></div>
-      <div><label title="Högsta diskanvändning för timeshift, alla kanaler tillsammans">Timeshift max (GB)</label><input id="lstg" type="number" min="0.5" step="0.5" value="${LT.settings.timeshiftMaxGb ?? 20}" style="width:90px"></div>
-      <div><label title="Vad inspelningarna blir efteråt">Inspelningsformat</label><select id="lsfm">${[['mp4', 'MP4 (spelas överallt)'], ['mkv', 'MKV (alla ljudspår och undertexter)'], ['ts', 'TS (orörd)']].map(([v, l]) => `<option value="${v}" ${LT.settings.format === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div><label title="Koda om videon till H.264 efter inspelningen">Omkodning</label><select id="lstc">${[['auto', 'Bara vid behov'], ['always', 'Alltid (mindre filer)'], ['never', 'Aldrig']].map(([v, l]) => `<option value="${v}" ${LT.settings.transcode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <form id="ltset" class="row" style="margin-top:12px;align-items:flex-end"><div style="flex:1;min-width:160px"><label for="lsd">Inspelningsmapp</label><input id="lsd" value="${esc(LT.settings.dvrDir)}"></div>
+      <div><label for="lsb">Starta före (s)</label><input id="lsb" type="number" min="0" value="${LT.settings.padBefore}" style="width:90px"></div><div><label for="lsa">Sluta efter (s)</label><input id="lsa" type="number" min="0" value="${LT.settings.padAfter}" style="width:90px"></div>
+      <div><label for="lst">Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
+      <div><label for="lsts" title="Hur långt bakåt man kan pausa och spola i live-TV (0 = av)">Timeshift (min)</label><input id="lsts" type="number" min="0" max="720" value="${LT.settings.timeshiftMinutes ?? 120}" style="width:90px"></div>
+      <div><label for="lstg" title="Högsta diskanvändning för timeshift, alla kanaler tillsammans">Timeshift max (GB)</label><input id="lstg" type="number" min="0.5" step="0.5" value="${LT.settings.timeshiftMaxGb ?? 20}" style="width:90px"></div>
+      <div><label for="lsfm" title="Vad inspelningarna blir efteråt">Inspelningsformat</label><select id="lsfm">${[['mp4', 'MP4 (spelas överallt)'], ['mkv', 'MKV (alla ljudspår och undertexter)'], ['ts', 'TS (orörd)']].map(([v, l]) => `<option value="${v}" ${LT.settings.format === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label for="lstc" title="Koda om videon till H.264 efter inspelningen">Omkodning</label><select id="lstc">${[['auto', 'Bara vid behov'], ['always', 'Alltid (mindre filer)'], ['never', 'Aldrig']].map(([v, l]) => `<option value="${v}" ${LT.settings.transcode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <label class="small"><input type="checkbox" id="lsnfo" ${LT.settings.nfo !== false ? 'checked' : ''}> NFO bredvid inspelningen (för seriebiblioteket)</label>
       <label class="small"><input type="checkbox" id="lscs" ${LT.settings.comskip ? 'checked' : ''}> Leta reklamavbrott i inspelningar</label>
       <label class="small"><input type="checkbox" id="lsca" ${LT.settings.comskipAutoSkip ? 'checked' : ''}> Hoppa över reklam automatiskt (standard)</label>
@@ -190,32 +190,32 @@ views.admin = async (sec) => {
   </div>
   <div class="panel"><h2>Sonarr, Radarr och Trakt</h2>
     <p class="muted small"><b>Direkt skanning:</b> lägg till en webhook i Sonarr och Radarr (Settings → Connect → + → Webhook, händelser <i>On Import</i>, <i>On Upgrade</i>, <i>On Rename</i> och <i>On Delete</i>) med adressen nedan. Då dyker nya avsnitt upp direkt efter nedladdning.</p>
-    <div class="row"><input id="whurl" readonly value="${esc((S.publicUrl || location.origin) + IN.webhookPath)}" style="flex:1"><button type="button" class="ghost small" id="whcopy">Kopiera</button><button type="button" class="ghost small" id="whnew">Ny nyckel</button></div>
+    <div class="row"><input id="whurl" readonly aria-label="Webhook-adress för Sonarr och Radarr" value="${esc((S.publicUrl || location.origin) + IN.webhookPath)}" style="flex:1"><button type="button" class="ghost small" id="whcopy">Kopiera</button><button type="button" class="ghost small" id="whnew">Ny nyckel</button></div>
     <form id="inform">
-      <label>Sökvägar i Sonarr/Radarr → här (om de skiljer sig), t.ex. <code>/tv=/media/Serier,/movies=/media/Filmer</code></label><input id="inpm" value="${esc(IN.pathMap)}">
-      ${['radarr', 'sonarr'].map(k => `<h3 style="margin:18px 0 0;font-size:15px">${k === 'radarr' ? 'Radarr (filmer)' : 'Sonarr (serier)'}</h3>
+      <label for="inpm">Sökvägar i Sonarr/Radarr → här (om de skiljer sig), t.ex. <code>/tv=/media/Serier,/movies=/media/Filmer</code></label><input id="inpm" value="${esc(IN.pathMap)}">
+      ${['radarr', 'sonarr'].map(k => `<h3 style="margin:18px 0 0;font-size:.9375rem">${k === 'radarr' ? 'Radarr (filmer)' : 'Sonarr (serier)'}</h3>
       <div class="row"><div style="flex:2;min-width:200px"><label>Adress</label><input id="${k}u" value="${esc(IN[k + 'Url'])}" placeholder="http://192.168.1.10:${k === 'radarr' ? 7878 : 8989}"></div>
       <div style="flex:1;min-width:160px"><label>API-nyckel</label><input id="${k}k" type="password" autocomplete="off" placeholder="${IN[k + 'KeySet'] ? '•••••• (sparad)' : 'Settings → General'}"></div></div>
-      <div class="row"><div style="flex:1"><label>Kvalitetsprofil</label><select id="${k}p"><option value="0">Första</option></select></div>
-      <div style="flex:1"><label>Rotmapp</label><select id="${k}r"><option value="">Första</option></select></div><button type="button" class="ghost small" data-arrload="${k}">Hämta från ${k === 'radarr' ? 'Radarr' : 'Sonarr'}</button></div>`).join('')}
+      <div class="row"><div style="flex:1"><label for="${k}p">Kvalitetsprofil</label><select id="${k}p"><option value="0">Första</option></select></div>
+      <div style="flex:1"><label for="${k}r">Rotmapp</label><select id="${k}r"><option value="">Första</option></select></div><button type="button" class="ghost small" data-arrload="${k}">Hämta från ${k === 'radarr' ? 'Radarr' : 'Sonarr'}</button></div>`).join('')}
       <label class="switch"><input type="checkbox" id="inre" ${IN.requestsEnabled ? 'checked' : ''}> Användare kan önska filmer och serier</label>
       <label class="switch"><input type="checkbox" id="inra" ${IN.requestsAuto ? 'checked' : ''}> Godkänn önskemål automatiskt (annars godkänner en administratör)</label>
-      <h3 style="margin:18px 0 0;font-size:15px">Trakt</h3>
+      <h3 style="margin:18px 0 0;font-size:.9375rem">Trakt</h3>
       <p class="muted small">Skapa en gratis app på <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">trakt.tv/oauth/applications</a> (Redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>). Varje användare kopplar sedan sitt konto under Mitt konto.</p>
-      <div class="row"><div style="flex:1;min-width:180px"><label>Client ID</label><input id="trid" value="${esc(IN.traktClientId)}" autocomplete="off"></div>
-      <div style="flex:1;min-width:180px"><label>Client Secret</label><input id="trsec" type="password" autocomplete="off" placeholder="${IN.traktSecretSet ? '•••••• (sparad)' : ''}"></div></div>
-      <h3 style="margin:18px 0 0;font-size:15px">Last.fm (scrobbling av musik)</h3>
+      <div class="row"><div style="flex:1;min-width:180px"><label for="trid">Client ID</label><input id="trid" value="${esc(IN.traktClientId)}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label for="trsec">Client Secret</label><input id="trsec" type="password" autocomplete="off" placeholder="${IN.traktSecretSet ? '•••••• (sparad)' : ''}"></div></div>
+      <h3 style="margin:18px 0 0;font-size:.9375rem">Last.fm (scrobbling av musik)</h3>
       <p class="muted small">Skapa ett API-konto på <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">last.fm/api/account/create</a> (Callback URL kan lämnas tom). Varje användare kopplar sedan sitt Last.fm-konto under Mitt konto. ListenBrainz behöver ingen nyckel här.</p>
-      <div class="row"><div style="flex:1;min-width:180px"><label>API key</label><input id="lfkey" value="${esc(IN.lastfmApiKey || '')}" autocomplete="off"></div>
-      <div style="flex:1;min-width:180px"><label>Shared secret</label><input id="lfsec" type="password" autocomplete="off" placeholder="${IN.lastfmSecretSet ? '•••••• (sparad)' : ''}"></div></div>
+      <div class="row"><div style="flex:1;min-width:180px"><label for="lfkey">API key</label><input id="lfkey" value="${esc(IN.lastfmApiKey || '')}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label for="lfsec">Shared secret</label><input id="lfsec" type="password" autocomplete="off" placeholder="${IN.lastfmSecretSet ? '•••••• (sparad)' : ''}"></div></div>
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button></div></form>
   </div>
   <div class="panel"><h2>Notiser till mobilen</h2>
     <p class="muted small">Få larm vid t.ex. attacker, spärrade konton, certifikatproblem och misslyckade säkerhetskopior. Enklast är <b>ntfy</b>: installera ntfy-appen, hitta på ett långt hemligt ämnesnamn och ange <code>https://ntfy.sh/ditt-ämne</code> (eller din egen ntfy-server).</p>
-    <form id="noform"><div class="row"><div><label>Tjänst</label><select id="nok">${NO.kinds.map(k => `<option value="${k}" ${k === NO.kind ? 'selected' : ''}>${{ none: 'Av', ntfy: 'ntfy', pushover: 'Pushover', gotify: 'Gotify', discord: 'Discord', telegram: 'Telegram', webhook: 'Webhook (JSON)' }[k]}</option>`).join('')}</select></div>
-      <div style="flex:2;min-width:220px"><label>Adress <span class="muted small">(ntfy/Gotify/Discord/webhook)</span></label><input id="nou" value="${esc(NO.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne"></div></div>
-      <div class="row"><div style="flex:1;min-width:180px"><label>Token/nyckel <span class="muted small">(Pushover app-token, Telegram bot-token, Gotify app-token)</span></label><input id="not" type="password" placeholder="${NO.tokenSet ? '•••••• (sparad)' : ''}" autocomplete="off"></div>
-      <div style="flex:1;min-width:180px"><label>Mottagare <span class="muted small">(Pushover user key / Telegram chat-id)</span></label><input id="nous" value="${esc(NO.user)}"></div></div>
+    <form id="noform"><div class="row"><div><label for="nok">Tjänst</label><select id="nok">${NO.kinds.map(k => `<option value="${k}" ${k === NO.kind ? 'selected' : ''}>${{ none: 'Av', ntfy: 'ntfy', pushover: 'Pushover', gotify: 'Gotify', discord: 'Discord', telegram: 'Telegram', webhook: 'Webhook (JSON)' }[k]}</option>`).join('')}</select></div>
+      <div style="flex:2;min-width:220px"><label for="nou">Adress <span class="muted small">(ntfy/Gotify/Discord/webhook)</span></label><input id="nou" value="${esc(NO.url)}" placeholder="https://ntfy.sh/mitt-hemliga-amne"></div></div>
+      <div class="row"><div style="flex:1;min-width:180px"><label for="not">Token/nyckel <span class="muted small">(Pushover app-token, Telegram bot-token, Gotify app-token)</span></label><input id="not" type="password" placeholder="${NO.tokenSet ? '•••••• (sparad)' : ''}" autocomplete="off"></div>
+      <div style="flex:1;min-width:180px"><label for="nous">Mottagare <span class="muted small">(Pushover user key / Telegram chat-id)</span></label><input id="nous" value="${esc(NO.user)}"></div></div>
       <label>Skicka notis vid</label>${Object.entries(NO.allEvents).map(([k, v]) => `<label class="switch"><input type="checkbox" data-nev="${k}" ${NO.events.includes(k) ? 'checked' : ''}> ${esc(v)}</label>`).join('')}
       <div class="row" style="margin-top:12px"><button class="primary">Spara</button><button type="button" class="ghost" id="notest">Skicka testnotis</button><a class="btn" href="#/webhooks/server">Webhooks för händelser</a></div></form>
     <p class="muted small">Webhooks skickar uppspelningar (start, paus, stopp, sedd), nya titlar, skanningar, önskningar, inspelningar och nya versioner till Home Assistant, n8n, Discord eller ntfy.</p>
@@ -224,8 +224,8 @@ views.admin = async (sec) => {
   <div class="panel" id="adm-acme"><h2>HTTPS med Let's Encrypt ${AC.cert ? `<span class="ok-badge">${AC.cert.daysLeft} dagar kvar</span>` : '<span class="warn-badge">Inget certifikat</span>'}</h2>
     <p class="muted small">Inbyggt gratis certifikat som förnyas automatiskt. Kräver ett domännamn som pekar på din publika IP (t.ex. via DuckDNS eller din DNS-leverantör) och att port <b>80</b> i routern vidarebefordras till BraXhn TV:s port 8420 under valideringen. HTTPS serveras på port ${AC.httpsPort} – vidarebefordra 443 dit. Använder du redan en omvänd proxy (Nginx Proxy Manager, SWAG) behövs inte detta.</p>
     ${AC.cert ? `<p class="small">Certifikat för <b>${esc(AC.cert.san || AC.cert.subject)}</b> från ${esc(AC.cert.issuer || '')}, gäller till ${esc(AC.cert.validTo)}.</p>` : ''}
-    <form id="acmeform"><div class="row"><div style="flex:1;min-width:180px"><label>Domän</label><input id="acd" value="${esc(AC.domain)}" placeholder="tv.dindomän.se"></div>
-      <div style="flex:1;min-width:180px"><label>E-post för påminnelser (valfri)</label><input id="ace" type="email" value="${esc(AC.email)}"></div></div>
+    <form id="acmeform"><div class="row"><div style="flex:1;min-width:180px"><label for="acd">Domän</label><input id="acd" value="${esc(AC.domain)}" placeholder="tv.dindomän.se"></div>
+      <div style="flex:1;min-width:180px"><label for="ace">E-post för påminnelser (valfri)</label><input id="ace" type="email" value="${esc(AC.email)}"></div></div>
       <label class="switch"><input type="checkbox" id="acs" ${AC.staging ? 'checked' : ''}> Testmiljö (staging) – prova först utan att riskera Let's Encrypts gränser</label>
       <label class="switch"><input type="checkbox" id="aca" ${AC.auto ? 'checked' : ''}> Förnya automatiskt (30 dagar före utgång)</label>
       <div class="row" style="margin-top:12px"><button class="ghost">Spara</button><button type="button" class="primary" id="acgo" ${AC.running ? 'disabled' : ''}>${AC.cert ? 'Förnya nu' : 'Hämta certifikat'}</button></div></form>
@@ -241,40 +241,40 @@ views.admin = async (sec) => {
   <div class="panel" id="adm-sonic" aria-live="polite"></div>
   <div class="panel" id="adm-mmeta"></div>
   <div class="panel"><h2>Inställningar</h2><form id="settings">
-    <label>TMDB API-nyckel (gratis på themoviedb.org – ger affischer, beskrivningar och betyg)</label>
+    <label for="tk">TMDB API-nyckel (gratis på themoviedb.org – ger affischer, beskrivningar och betyg)</label>
     <input id="tk" type="password" placeholder="${S.tmdbKeySet ? (S.tmdbFromEnv ? 'Satt via miljövariabel' : '•••••••• (sparad – lämna tomt för att behålla)') : 'Ingen nyckel – endast filnamn och miniatyrer används'}">
-    <div class="row"><div style="flex:1"><label>Språk för metadata</label><select id="lang">
+    <div class="row"><div style="flex:1"><label for="lang">Språk för metadata</label><select id="lang">
       ${[['sv-SE', 'Svenska'], ['en-US', 'Engelska'], ['nb-NO', 'Norska'], ['da-DK', 'Danska'], ['fi-FI', 'Finska'], ['de-DE', 'Tyska']].map(([v, n]) => `<option value="${v}" ${S.language === v ? 'selected' : ''}>${n}</option>`).join('')}
-    </select></div><div style="flex:1"><label>Automatisk skanning (minuter, 0 = av)</label><input id="si" type="number" min="0" value="${S.scanInterval}"></div></div>
-    <h3 style="margin:22px 0 0;font-size:15px">Undertexter (OpenSubtitles.com)</h3>
-    <p class="muted" style="font-size:13px;margin:4px 0 0">Gratis API-nyckel under <i>API Consumers</i> på opensubtitles.com. Konto ger fler nedladdningar per dygn.</p>
-    <label>API-nyckel</label><input id="osk" type="password" placeholder="${S.osKeySet ? '•••••••• (sparad)' : 'Ingen nyckel'}">
-    <div class="row"><div style="flex:1"><label>Användarnamn (valfritt)</label><input id="osu" value="${esc(S.osUser || '')}" autocomplete="off"></div>
-    <div style="flex:1"><label>Lösenord</label><input id="osp" type="password" autocomplete="new-password" placeholder="${S.osPassSet ? '•••••••• (sparat)' : ''}"></div></div>
-    <label>Språk att söka (kommaseparerade, t.ex. sv,en)</label><input id="osl" value="${esc(S.subLangs)}">
+    </select></div><div style="flex:1"><label for="si">Automatisk skanning (minuter, 0 = av)</label><input id="si" type="number" min="0" value="${S.scanInterval}"></div></div>
+    <h3 style="margin:22px 0 0;font-size:.9375rem">Undertexter (OpenSubtitles.com)</h3>
+    <p class="muted" style="font-size:.8125rem;margin:4px 0 0">Gratis API-nyckel under <i>API Consumers</i> på opensubtitles.com. Konto ger fler nedladdningar per dygn.</p>
+    <label for="osk">API-nyckel</label><input id="osk" type="password" placeholder="${S.osKeySet ? '•••••••• (sparad)' : 'Ingen nyckel'}">
+    <div class="row"><div style="flex:1"><label for="osu">Användarnamn (valfritt)</label><input id="osu" value="${esc(S.osUser || '')}" autocomplete="off"></div>
+    <div style="flex:1"><label for="osp">Lösenord</label><input id="osp" type="password" autocomplete="new-password" placeholder="${S.osPassSet ? '•••••••• (sparat)' : ''}"></div></div>
+    <label for="osl">Språk att söka (kommaseparerade, t.ex. sv,en)</label><input id="osl" value="${esc(S.subLangs)}">
     <label class="switch"><input type="checkbox" id="osa" ${S.subAuto ? 'checked' : ''}> Hämta undertexter automatiskt vid skanning när de saknas</label>
-    <div class="row"><div style="flex:1"><label>Språk att hämta automatiskt</label><input id="osal" value="${esc(S.subAutoLangs)}"></div>
-    <div><label>Max per skanning</label><input id="osam" type="number" min="1" max="100" value="${S.subAutoMax}" style="width:110px"></div></div>
+    <div class="row"><div style="flex:1"><label for="osal">Språk att hämta automatiskt</label><input id="osal" value="${esc(S.subAutoLangs)}"></div>
+    <div><label for="osam">Max per skanning</label><input id="osam" type="number" min="1" max="100" value="${S.subAutoMax}" style="width:110px"></div></div>
     <label class="switch"><input type="checkbox" id="osah" ${S.subAutoHash ? 'checked' : ''}> Bara exakta träffar (filhash) – rekommenderas, annars kan tiderna vara fel</label>
     <p class="muted small" style="margin:4px 0 0">Hämtade hittills: ${S.subAutoStats.downloaded}${S.subAutoStats.error ? ' · senaste fel: ' + esc(S.subAutoStats.error) : ''}. Gratiskonton får ett begränsat antal nedladdningar per dygn – resten hämtas vid nästa skanning.</p>
-    <h3 style="margin:22px 0 0;font-size:15px">Ljudböcker</h3>
+    <h3 style="margin:22px 0 0;font-size:.9375rem">Ljudböcker</h3>
     <label class="switch"><input type="checkbox" id="bmeta" ${S.bookMeta ? 'checked' : ''}> Hämta beskrivning, omslag, serie och kapitel från nätet (Google Books, Open Library, Audnexus)</label>
     <p class="muted small" style="margin:4px 0 0">Körs i bakgrunden efter skanningen, en bok i taget. Matchade böcker hämtas inte om – använd <i>Fel bok?</i> på bokens sida.${S.bookMetaStatus?.running ? ` Pågår: ${esc(S.bookMetaStatus.library || '')} ${S.bookMetaStatus.done}/${S.bookMetaStatus.total}.` : ''}${S.bookMetaStatus?.error ? ' Senaste fel: ' + esc(S.bookMetaStatus.error) : ''}</p>
-    <h3 style="margin:22px 0 0;font-size:15px">Bio-läge</h3>
+    <h3 style="margin:22px 0 0;font-size:.9375rem">Bio-läge</h3>
     <p class="muted small" style="margin:4px 0 0">Var och en väljer under <i>Mitt konto</i> om trailers ska spelas före filmer. Här kan du dessutom ange en egen förfilm (t.ex. en "stäng av mobilen"-film) som spelas allra sist före filmen: en videofil eller en mapp att slumpa från, under ${esc(S.mediaRoot)}. Lägg den utanför biblioteksmapparna, annars blir den en egen film.</p>
-    <label>Förfilm (fil eller mapp, tomt = ingen)</label><input id="cpre" value="${esc(S.cinemaPreroll || '')}" placeholder="${esc(S.mediaRoot)}/Förfilmer">
+    <label for="cpre">Förfilm (fil eller mapp, tomt = ingen)</label><input id="cpre" value="${esc(S.cinemaPreroll || '')}" placeholder="${esc(S.mediaRoot)}/Förfilmer">
     ${S.cinemaPreroll ? `<p class="muted small" style="margin:4px 0 0">${S.cinemaPrerollFiles ? `${S.cinemaPrerollFiles} ${S.cinemaPrerollFiles === 1 ? 'fil' : 'filer'} att välja bland.` : '<span class="err">Inga spelbara videofiler hittades.</span>'}</p>` : ''}
-    <h3 style="margin:22px 0 0;font-size:15px">Utanför hemmet</h3>
-    <div class="row"><div style="flex:1"><label>Maxkvalitet utanför hemmet (automatisk)</label><select id="rq">
+    <h3 style="margin:22px 0 0;font-size:.9375rem">Utanför hemmet</h3>
+    <div class="row"><div style="flex:1"><label for="rq">Maxkvalitet utanför hemmet (automatisk)</label><select id="rq">
       ${[['orig', 'Original (ingen gräns)'], ['1080', '1080p – 8 Mbit/s'], ['720', '720p – 4 Mbit/s'], ['480', '480p – 1,5 Mbit/s'], ['360', '360p – 0,8 Mbit/s']].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
-    </select></div><div style="flex:1"><label>Publik adress (används för Chromecast och appar)</label><input id="pu" placeholder="https://tv.dindomän.se" value="${esc(S.publicUrl || '')}"></div></div>
-    <p class="muted" style="font-size:13px;margin:8px 0 0">Du är just nu ansluten ${S.youAreLocal ? '<b>från hemnätverket</b>' : '<b>utifrån</b>'} via ${S.https ? 'HTTPS ✓' : 'HTTP (okrypterat)'}${S.tlsBuiltin ? ' · inbyggd HTTPS aktiv på port 8443' : ''}. Se README → <i>Titta utanför hemmet</i>.</p>
-    <h3 style="margin:22px 0 0;font-size:15px">Omkodning</h3>
-    <label>Videoformat när något måste omkodas</label><select id="tvc">
+    </select></div><div style="flex:1"><label for="pu">Publik adress (används för Chromecast och appar)</label><input id="pu" placeholder="https://tv.dindomän.se" value="${esc(S.publicUrl || '')}"></div></div>
+    <p class="muted" style="font-size:.8125rem;margin:8px 0 0">Du är just nu ansluten ${S.youAreLocal ? '<b>från hemnätverket</b>' : '<b>utifrån</b>'} via ${S.https ? 'HTTPS ✓' : 'HTTP (okrypterat)'}${S.tlsBuiltin ? ' · inbyggd HTTPS aktiv på port 8443' : ''}. Se README → <i>Titta utanför hemmet</i>.</p>
+    <h3 style="margin:22px 0 0;font-size:.9375rem">Omkodning</h3>
+    <label for="tvc">Videoformat när något måste omkodas</label><select id="tvc">
       ${[['auto', 'HEVC/AV1 med grafikkortet, annars H.264'], ['cpu', 'HEVC/AV1 även med processorn (tungt)'], ['h264', 'Alltid H.264']].map(([v, n]) => `<option value="${v}" ${S.transcodeVcodec === v ? 'selected' : ''}>${n}</option>`).join('')}
     </select>
     ${S.transcode ? `<p class="muted small" style="margin:4px 0 0">HEVC och AV1 ger samma bild med 40–50 % lägre bithastighet – mest märkbart utanför hemmet – när enheten kan spela det; annars blir det H.264. Med processorn (x265/SVT-AV1) krävs en snabb processor. ffmpeg ${esc(S.transcode.ffmpeg || '?')} · HEVC: ${esc(S.transcode.hevc || 'ingen kodare')} · AV1: ${esc(S.transcode.av1 || 'ingen kodare')}${S.transcode.cpu && (S.transcode.cpu.hevc || S.transcode.cpu.av1) && S.transcodeVcodec !== 'cpu' ? ` (processorn klarar ${esc([S.transcode.cpu.hevc, S.transcode.cpu.av1].filter(Boolean).join(', '))})` : ''} · HDR-tonmappning: ${esc(S.transcode.tonemap === 'processor' ? 'processorn' : S.transcode.tonemap)}${S.transcode.dv5 ? ' (även Dolby Vision profil 5)' : ''}.${S.transcode.failed?.length ? ` <span class="err">Avstängd efter fel: ${esc(S.transcode.failed.join(', '))}.</span>` : ''}</p>` : ''}
-    <p class="muted" style="font-size:13px;margin:14px 0 0">Hårdvaruomkodning: <b>${esc(S.hwaccel)}</b> (sätts med miljövariabeln HWACCEL) · Pågående omkodningar: ${S.activeTranscodes} · Version ${esc(S.version)}</p>
+    <p class="muted" style="font-size:.8125rem;margin:14px 0 0">Hårdvaruomkodning: <b>${esc(S.hwaccel)}</b> (sätts med miljövariabeln HWACCEL) · Pågående omkodningar: ${S.activeTranscodes} · Version ${esc(S.version)}</p>
     <div class="row" style="margin-top:16px"><button class="primary">Spara</button><button type="button" class="ghost" id="remeta">Hämta om all metadata</button><button type="button" class="ghost" id="remark">Leta intro igen</button></div></form></div>`;
 
   // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig

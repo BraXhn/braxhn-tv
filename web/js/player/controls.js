@@ -18,7 +18,29 @@ export function bindControls(cur, v) {
   v.volume = +store.get('pvol', 1); syncVol();
   ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
   v.addEventListener('volumechange', syncVol);
-  v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; });
+  // Tidslinjen är ett reglage för skärmläsare och tangentbord (←/→ via keys(), Home/End, Page Up/Down)
+  const scrub = q('#scrub');
+  const syncScrub = () => {
+    if (!scrub) return;
+    const d = Math.round(dur()), t = Math.min(d || Infinity, Math.round(v.currentTime || 0));
+    scrub.setAttribute('aria-valuemax', String(d)); scrub.setAttribute('aria-valuenow', String(t));
+    scrub.setAttribute('aria-valuetext', `${fmtTime(t)} av ${fmtTime(d)}`);
+  };
+  v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; syncScrub(); });
+  v.addEventListener('durationchange', syncScrub);
+  if (scrub) scrub.addEventListener('keydown', (e) => {
+    const d = dur();
+    const to = { Home: 0, End: d ? d - 1 : null, PageUp: v.currentTime + 60, PageDown: v.currentTime - 60 }[e.key];
+    if (to == null) return;
+    e.preventDefault(); e.stopPropagation();
+    v.currentTime = Math.max(0, Math.min(d || Infinity, to)); syncScrub();
+  });
+  // Spelarens läge för skärmläsare (sparsamt: bara paus/spela, laddning som dröjer och ändringar man gjort själv)
+  let wait = 0;
+  v.addEventListener('waiting', () => { clearTimeout(wait); wait = setTimeout(() => say(el, 'Laddar…'), 1500); });
+  v.addEventListener('playing', () => clearTimeout(wait));
+  v.addEventListener('pause', () => { if (!v.ended && v.readyState > 1) say(el, 'Pausad'); });
+  v.addEventListener('play', () => { if (v.currentTime > 0.5) say(el, 'Spelar'); });
   // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
   const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? 'Startar omkodning…' : 'Laddar…'; };
   v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
@@ -51,8 +73,16 @@ export function bindControls(cur, v) {
   q('#cstop').onclick = () => closePlayer();
   q('#cmini').onclick = () => setMini(!cur.mini);
   q('#cset').onclick = (e) => { e.stopPropagation(); q('#chlist').hidden = true; q('#setp').hidden = !q('#setp').hidden; };
-  muteBtn.onclick = () => { if (cur.ff?.muted) { cur.ff.user = !cur.ff.user; return syncVol(); } v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
+  muteBtn.onclick = () => { if (cur.ff?.muted) { cur.ff.user = !cur.ff.user; return syncVol(); } v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; say(el, v.muted ? 'Ljudet av' : 'Ljudet på'); };
   vol.oninput = () => { v.volume = +vol.value; v.muted = v.volume === 0; store.set('pvol', v.volume); };
+  const volText = () => vol.setAttribute('aria-valuetext', v.muted ? 'Ljudet av' : Math.round(v.volume * 100) + ' %');
+  v.addEventListener('volumechange', volText); volText();
+}
+
+/** Läser upp spelarens läge (role=status i spelaren, töms så att samma text kan sägas igen) */
+export function say(el, text) {
+  const s = el && $('#pstate', el); if (!s) return;
+  s.textContent = ''; setTimeout(() => { s.textContent = text; }, 30);
 }
 
 export function keys(e) {
@@ -76,13 +106,30 @@ export function keys(e) {
   else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
     v.volume = Math.max(0, Math.min(1, Math.round((v.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10)); v.muted = v.volume === 0;
-    store.set('pvol', v.volume);
+    store.set('pvol', v.volume); say(P.el, `Volym ${Math.round(v.volume * 100)} %`);
   }
   // 0–9: hoppa till 0 %, 10 % … 90 % av filmen (som YouTube)
   else if (/^[0-9]$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && isFinite(v.duration)) v.currentTime = v.duration * (+e.key / 10);
   else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
   else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
-  else if (e.key === 'm') v.muted = !v.muted;
+  else if (e.key === 'm') { v.muted = !v.muted; say(P.el, v.muted ? 'Ljudet av' : 'Ljudet på'); }
+  // c: undertexterna av/på (senast valda kommer tillbaka), < och >: långsammare/snabbare
+  else if (e.key === 'c') toggleSubs();
+  else if (e.key === '<' || e.key === '>') {
+    const r = $('#prate', P.el); if (!r) return;
+    const i = r.selectedIndex + (e.key === '>' ? 1 : -1);
+    if (i < 0 || i >= r.options.length) return;
+    r.selectedIndex = i; r.dispatchEvent(new Event('change')); say(P.el, 'Hastighet ' + r.options[i].text);
+  }
+}
+
+let lastSub = '';
+function toggleSubs() {
+  const ps = $('#ps', P.el); if (!ps || ps.options.length < 2) return say(P.el, 'Inga undertexter');
+  if (ps.value) { lastSub = ps.value; ps.value = ''; }
+  else ps.value = lastSub && [...ps.options].some(o => o.value === lastSub) ? lastSub : ps.options[1].value;
+  ps.dispatchEvent(new Event('change'));
+  say(P.el, ps.value ? 'Undertexter: ' + ps.options[ps.selectedIndex].text : 'Undertexter av');
 }
 
 // Fjärrkontroll och tangentbord: när en knapp i spelaren har synligt fokus flyttar pilarna fokus mellan knapparna

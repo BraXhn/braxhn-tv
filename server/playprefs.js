@@ -12,7 +12,8 @@ const DEFAULTS = Object.freeze({
   audioLangs: [], subMode: 'forced', subLangs: [], sdh: 'avoid',
   skipIntro: false, skipRecap: false, skipCredits: false,
   autoNext: true, nextCountdown: 8, qualityHome: 'auto', qualityRemote: 'auto',
-  autoSync: true // synka nedladdade undertexter mot ljudet automatiskt (subsync.js)
+  autoSync: true, // synka nedladdade undertexter mot ljudet automatiskt (subsync.js)
+  audioDesc: false // syntolkning: välj ljudspåret med ljudbeskrivning (visual_impaired/AD) när filmen har ett
 });
 
 // ISO 639-2 (B och T) → 639-1. Filernas språktaggar är oftast tre bokstäver (swe, eng), användarens val två (sv, en).
@@ -60,7 +61,8 @@ export function normalize(p = {}) {
     nextCountdown: Number.isFinite(n) ? Math.max(0, Math.min(60, n)) : DEFAULTS.nextCountdown,
     qualityHome: QUALITY_PREFS.includes(String(p.qualityHome)) ? String(p.qualityHome) : DEFAULTS.qualityHome,
     qualityRemote: QUALITY_PREFS.includes(String(p.qualityRemote)) ? String(p.qualityRemote) : DEFAULTS.qualityRemote,
-    autoSync: bool(p.autoSync, DEFAULTS.autoSync)
+    autoSync: bool(p.autoSync, DEFAULTS.autoSync),
+    audioDesc: bool(p.audioDesc, DEFAULTS.audioDesc)
   };
 }
 
@@ -83,10 +85,14 @@ export function setPrefs(uid, b = {}) {
 }
 
 // ---------------- spårval ----------------
-// Kommentarsspår och ljudbeskrivning (syntolkning) väljs aldrig automatiskt: ffprobes disposition (comment,
-// visual_impaired) eller spårets titel.
+// Kommentarsspår väljs aldrig automatiskt, ljudbeskrivning (syntolkning) bara när profilen valt det (audioDesc):
+// ffprobes disposition (comment, visual_impaired) eller spårets titel.
 const SPECIAL_AUDIO = /comment|kommentar|description|beskrivning|syntolk/i;
 export const isSpecialAudio = (a) => !!(a?.comment || a?.vi || SPECIAL_AUDIO.test(a?.title || '') || /\bAD\b/.test(a?.title || ''));
+const COMMENT_AUDIO = /comment|kommentar/i;
+/** Ljudbeskrivning/syntolkning (inte kommentarsspår) */
+export const isAudioDesc = (a) => !!a && !a.comment && !COMMENT_AUDIO.test(a.title || '') &&
+  !!(a.vi || /description|beskrivning|syntolk/i.test(a.title || '') || /\bAD\b/.test(a.title || ''));
 const COMMENT_SUB = /comment|kommentar/i;
 export const isSdh = (s) => {
   const t = `${s?.label || ''} ${s?.title || ''}`;
@@ -95,10 +101,20 @@ export const isSdh = (s) => {
 
 /**
  * Ljudspåret som ska spelas: första språket i listan som filen har (originalspråk = filens standardspår), annars
- * filens standardspår. audios = ljudströmmar ({ index, lang, title, default, comment?, vi? }).
+ * filens standardspår. Med audioDesc går ett syntolkat spår på samma språk före. audios = ljudströmmar ({ index, lang, title, default, comment?, vi? }).
  */
 export function pickAudio(audios, prefs) {
   if (!audios?.length) return null;
+  // Syntolkning: på det språk som annars skulle spelas, annars på första språket i listan som har en
+  if (prefs?.audioDesc) {
+    const ad = audios.filter(isAudioDesc);
+    if (ad.length) {
+      const main = pickAudio(audios, { ...prefs, audioDesc: false });
+      const same = ad.find(a => langKey(a.lang) === langKey(main?.lang)) || (!langKey(main?.lang) ? ad[0] : null);
+      if (same) return same;
+      for (const l of prefs.audioLangs || []) { const m = ad.find(a => langKey(a.lang) === l); if (m) return m; }
+    }
+  }
   const pool = audios.filter(a => !isSpecialAudio(a));
   const base = pool.length ? pool : audios;
   const fallback = base.find(a => a.default) || base[0];

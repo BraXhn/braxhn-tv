@@ -65,6 +65,18 @@ test('ljud: kommentarsspår och syntolkning väljs aldrig automatiskt', () => {
   assert.equal(pp.isSpecialAudio({ title: 'Read along' }), false);
 });
 
+test('ljud: syntolkning väljs när profilen vill (samma språk, aldrig kommentarsspår)', () => {
+  const audios = [A(1, 'swe', { default: true }), A(2, 'eng'), A(3, 'swe', { vi: true }), A(4, 'eng', { title: 'Commentary', comment: true }), A(5, 'eng', { title: 'English AD' })];
+  assert.equal(P().audioDesc, false); assert.equal(P({ audioDesc: true }).audioDesc, true);
+  assert.equal(pp.pickAudio(audios, P({ audioDesc: true })).index, 3); // standardspråket svenska → svensk syntolkning
+  assert.equal(pp.pickAudio(audios, P({ audioDesc: true, audioLangs: ['en'] })).index, 5);
+  assert.equal(pp.pickAudio(audios, P({ audioLangs: ['en'] })).index, 2); // utan valet som förut
+  // Syntolkning bara på ett annat språk: det föredragna språket utan syntolkning går före
+  assert.equal(pp.pickAudio([A(1, 'eng', { default: true }), A(2, 'swe', { title: 'Syntolkning' })], P({ audioDesc: true, audioLangs: ['en'] })).index, 1);
+  assert.equal(pp.pickAudio([A(1, 'eng', { default: true }), A(2, 'swe', { title: 'Syntolkning' })], P({ audioDesc: true, audioLangs: ['en', 'sv'] })).index, 2);
+  assert.equal(pp.isAudioDesc({ title: "Director's Commentary", vi: true }), false);
+});
+
 // Undertexter: e1 eng, e2 eng tvingade, e3 swe, e4 eng SDH, e5 swe PGS, e6 dvdsub swe, e7 kommentar
 const SUBS = [S('e1', 'eng'), S('e2', 'eng', { forced: true }), S('e3', 'swe'), S('e4', 'eng', { hi: true }),
   S('e5', 'swe', { bitmap: true, pgs: true }), S('e6', 'swe', { bitmap: true }), S('e7', 'eng', { label: 'Commentary · eng' })];

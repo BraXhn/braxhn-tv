@@ -27,7 +27,10 @@ export async function loadLibs() {
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': 'Hem', home: 'Hem', watchlist: 'Min lista', search: 'Sök', podcasts: 'Poddar', podcast: 'Poddar', live: 'Live-TV', streaming: 'Strömmande',
   account: 'Mitt konto', admin: 'Administration', setup: 'Installation', stats: 'Statistik', requests: 'Önskningar', calendar: 'Kommande', wrapped: 'Årssammanfattning', collection: 'Samling', collections: 'Samlingar', ucollection: 'Samling', person: 'Person',
-  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks', downloads: 'Nedladdat', epg: 'TV-guide', vod: 'Filmer och serier', iptvadmin: 'IPTV', health: 'Hälsokontroll' };
+  history: 'Min historik', playstats: 'Tittarstatistik', webhooks: 'Webhooks', downloads: 'Nedladdat', epg: 'TV-guide', vod: 'Filmer och serier', iptvadmin: 'IPTV', health: 'Hälsokontroll',
+  quickconnect: 'Godkänn inloggning', guide: 'TV-guide', dvr: 'Inspelningar', photos: 'Foton', lib: 'Bibliotek', music: 'Musik', books: 'Ljudböcker' };
+// Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
+const PAGE = { login: 'Logga in', profiles: 'Välj profil', invite: 'Skapa konto', timeup: 'Skärmtiden är slut' };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
 function markNav() {
   const h = (location.hash.slice(2) || '').split('?')[0]; // ?… = vyns parametrar (t.ex. bibliotekets filter)
@@ -58,6 +61,7 @@ export async function boot() {
   $$('[data-admin]').forEach(e => e.hidden = !me.adminHere);
   $$('[data-requests]').forEach(e => e.hidden = me.kid);
   $$('[data-dlnav]').forEach(e => e.hidden = me.canDownload === false && !store.get('dl.' + me.id, []).length);
+  $('#userbtn').setAttribute('aria-label', `${me.name} – konto och meny`);
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
@@ -142,6 +146,7 @@ export async function route() {
       if (!v) { location.hash = '#/'; return; }
     }
     await v(arg, arg2); if (gen !== routeGen) return; main.removeAttribute('aria-busy'); window.scrollTo(0, 0);
+    announcePage(name);
     // "Finns även på" på titelsidan (views/item.js är laddad när rutan finns)
     if ($('[data-wid]')) need('views/item.js').then(m => m.fillWatch()).catch(() => {}); }
   catch (e) {
@@ -150,7 +155,30 @@ export async function route() {
     if (me) { main.innerHTML = errorState(e, { retry: true }); bindRetry(main, () => route()); }
   }
 }
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => { navigated = true; route(); });
+
+// Tillgänglighet efter varje sidbyte: en h1 (dold om vyn inte har en egen – menyradens rubrik visar namnet),
+// flikens titel efter sidan (2.4.2) och fokus till rubriken när fokus annars tappats eller låg i menyerna,
+// så att skärmläsaren läser den nya sidan och Tab fortsätter i innehållet (inte vid första laddningen).
+let navigated = false;
+function announcePage(name) {
+  let h = main.querySelector('h1');
+  if (!h) {
+    h = document.createElement('h1'); h.className = 'sr-only pageh';
+    h.textContent = PAGE[name] || $('#crumb').textContent || CRUMB[name || ''] || 'BraXhn TV';
+    main.prepend(h);
+  }
+  const t = (h.textContent || '').replace(/\s+/g, ' ').trim();
+  document.title = t && t !== 'BraXhn TV' ? `${t} – BraXhn TV` : 'BraXhn TV';
+  if (!navigated) return;
+  navigated = false;
+  const a = document.activeElement;
+  if (a && a !== document.body && a.isConnected && !a.closest('#rail, #toptabs, #tabbar, #usermenu, .pop')) return;
+  if (!h.hasAttribute('tabindex')) h.tabIndex = -1;
+  h.focus({ preventScroll: true });
+}
+// Hoppa till innehållet: länken först på sidan (hash-adresserna styr routern, därför flyttas fokus här)
+$('#skiplink').onclick = (e) => { e.preventDefault(); const h = main.querySelector('h1'); (h || main).tabIndex = -1; (h || main).focus(); };
 
 // Sparade startsidor (views/home.js) tas bort vid utloggning – nästa person på datorn ska inte se dem
 function clearHomeCache() { try { for (const k of Object.keys(localStorage)) if (k.startsWith('bxhome')) localStorage.removeItem(k); } catch {} }
@@ -177,9 +205,13 @@ document.addEventListener('click', () => userMenu(false));
 $('#usermenu').addEventListener('keydown', (e) => { if (e.key === 'Escape') { userMenu(false); $('#userbtn').focus(); } });
 // ---------- tangentbordsgenvägar ----------
 // ? visar alla genvägar, / går till sökrutan. Inte när man skriver i ett fält eller en dialog är öppen.
-const SHORTCUTS = [['Överallt', [['?', 'Visa den här listan'], ['/', 'Sök'], ['← → ↑ ↓', 'Flytta mellan korten i en hylla eller ett rutnät'], ['Enter', 'Öppna det markerade kortet']]],
+const SHORTCUTS = [['Överallt', [['?', 'Visa den här listan'], ['/', 'Sök'], ['Tab', 'Första tabbstoppet: Hoppa till innehållet'], ['← → ↑ ↓', 'Flytta mellan korten i en hylla eller ett rutnät'],
+    ['Enter', 'Öppna det markerade kortet'], ['Shift+F10 eller Menu', 'Kortets meny (spela, Min lista, sedd …)'], ['Esc', 'Stäng dialog, meny eller panel']]],
   ['Spelaren', [['Mellanslag eller k', 'Spela/pausa'], ['← eller j', '10 sekunder bakåt'], ['→ eller l', '10 sekunder framåt'], ['↑ ↓', 'Volym'],
-    ['m', 'Ljud av/på'], ['f', 'Helskärm'], ['0–9', 'Hoppa till 0 %, 10 % … 90 %'], ['s', 'Hoppa över intro/eftertexter (när knappen visas)'], ['Esc', 'Litet fönster']]]];
+    ['m', 'Ljud av/på'], ['c', 'Undertexter av/på'], ['< >', 'Långsammare/snabbare'], ['f', 'Helskärm'], ['0–9', 'Hoppa till 0 %, 10 % … 90 %'],
+    ['Home End', 'Början/slutet (på tidslinjen)'], ['PageUp PageDown', 'En minut framåt/bakåt (på tidslinjen)'],
+    ['s', 'Hoppa över intro/eftertexter (när knappen visas)'], ['Esc', 'Litet fönster']]],
+  ['TV-guiden och foton', [['← → ↑ ↓', 'Flytta mellan program/kanaler och foton'], ['PageUp PageDown', 'En skärm i taget'], ['Enter', 'Öppna programmet eller fotot'], ['Esc', 'Stäng fotovisaren']]]];
 export function showShortcuts() {
   openDialog({ title: 'Kortkommandon', body: SHORTCUTS.map(([h, list]) => `<h3>${esc(h)}</h3><table class="tbl keys">${list.map(([k, t]) =>
     `<tr><td>${k.split(' ').map(x => ['eller', '…'].includes(x) ? esc(x) : `<kbd>${esc(x)}</kbd>`).join(' ')}</td><td>${esc(t)}</td></tr>`).join('')}</table>`).join('') });

@@ -59,7 +59,8 @@ export async function renderPlaybackPrefs(box) {
     <p class="muted small">Gäller ditt konto på alla enheter – webbläsare, appar och Chromecast. Du kan alltid byta spår under ⚙ medan du tittar.</p>
     <h3 class="pph">Ljud</h3>
     <fieldset class="pplangs"><legend>Föredraget ljudspråk, i ordning</legend><div class="row">${langRow('ppa', N_AUDIO, p.audioLangs, true)}</div></fieldset>
-    <p class="muted small">Första språket som filmen har spelas. Originalspråk = filens förvalda ljudspår. Kommentarsspår och syntolkning väljs aldrig automatiskt.</p>
+    <p class="muted small">Första språket som filmen har spelas. Originalspråk = filens förvalda ljudspår. Kommentarsspår väljs aldrig automatiskt.</p>
+    <div class="ppchk"><label class="ccheck"><input type="checkbox" id="ppad" ${p.audioDesc ? 'checked' : ''}> Syntolkning: välj ljudspåret med ljudbeskrivning när filmen har ett</label></div>
     <h3 class="pph">Undertexter</h3>
     <div class="row ppgrid">
       <div><label for="ppmode">Visa undertexter</label>${sel('ppmode', SUB_MODES, p.subMode)}</div>
@@ -87,7 +88,7 @@ export async function renderPlaybackPrefs(box) {
       audioLangs: langs('ppa', N_AUDIO), subLangs: langs('pps', N_SUB), subMode: $('#ppmode', box).value, sdh: $('#ppsdh', box).value,
       skipIntro: $('#ppintro', box).checked, skipRecap: $('#pprecap', box).checked, skipCredits: $('#ppcred', box).checked,
       autoNext: $('#ppnext', box).checked, nextCountdown: +$('#ppcd', box).value, qualityHome: $('#ppqh', box).value, qualityRemote: $('#ppqr', box).value,
-      autoSync: $('#ppsync', box).checked
+      autoSync: $('#ppsync', box).checked, audioDesc: $('#ppad', box).checked
     };
     await api('/me/playback-prefs', { method: 'PUT', body, bg: true });
     toast('Sparat');

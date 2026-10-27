@@ -346,8 +346,8 @@ export async function renderListenPrefs(box) {
     <p class="muted small" style="margin:4px 0 12px">Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. <i>Per album</i> behåller skillnaden mellan albumets låtar. Toppvärdet hindrar att något klipps. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.</p>
     <label class="row"><input type="checkbox" id="lpgap" ${p.gapless !== false ? 'checked' : ''} style="width:auto"> Glapplös uppspelning</label>
     <p class="muted small" style="margin:4px 0 12px">Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).</p>
-    <div class="row"><div><label>Hopp bakåt (ljudböcker och poddar)</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
-      <div><label>Hopp framåt</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
+    <div class="row"><div><label for="lpback">Hopp bakåt (ljudböcker och poddar)</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
+      <div><label for="lpfwd">Hopp framåt</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
     <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> Hoppa över tystnad i poddar</label>
     <p class="muted small" style="margin:4px 0 0">Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.</p>`;
   const save = act(async () => {
