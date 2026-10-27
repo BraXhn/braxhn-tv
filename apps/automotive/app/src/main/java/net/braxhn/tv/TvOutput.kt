@@ -25,10 +25,12 @@ object TvOutput {
     }.getOrNull()
 
     /** HDR-typer som skärmen visar (på en TV-box: TV:n via HDMI), med serverns namn: hdr10, hlg, dovi, hdr10plus */
-    fun hdrTypes(ctx: Context): Set<String> = runCatching {
-        @Suppress("DEPRECATION")
-        val types: IntArray = display(ctx)?.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
-        types.mapNotNull { t ->
+    @Suppress("DEPRECATION")
+    private fun rawHdrTypes(ctx: Context): IntArray = display(ctx)?.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
+
+    fun hdrTypes(ctx: Context): Set<String> = runCatching<Set<String>> {
+        val types: IntArray = rawHdrTypes(ctx)
+        types.toList().mapNotNull { t: Int ->
             when (t) {
                 Display.HdrCapabilities.HDR_TYPE_HDR10 -> "hdr10"
                 Display.HdrCapabilities.HDR_TYPE_HLG -> "hlg"
@@ -80,8 +82,8 @@ object TvOutput {
      * ExoPlayers ljudutgång gör när den väljer bitström. Namnen: ac3, eac3, eac3-joc (Atmos), dts, dts-hd, truehd.
      */
     @OptIn(UnstableApi::class)
-    fun bitstream(ctx: Context): Set<String> = runCatching {
-        @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION")
+    fun bitstream(ctx: Context): Set<String> = runCatching<Set<String>> {
         val caps = AudioCapabilities.getCapabilities(ctx)
         val out = mutableSetOf<String>()
         if (caps.supportsEncoding(C.ENCODING_AC3)) out += "ac3"
