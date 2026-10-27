@@ -40,14 +40,20 @@ const lit = (v) => v === null ? 'NULL'
 export function dumpSql(db) {
   const out = ['BEGIN;'];
   const objs = db.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all();
-  for (const t of objs.filter(o => o.type === 'table')) {
+  // Virtuella tabeller (FTS5, repliksökningen) skapar sina egna skuggtabeller (<namn>_data …, ibland WITHOUT ROWID):
+  // bara CREATE dumpas och indexet byggs om ur innehållstabellen sist
+  const vtabs = objs.filter(o => o.type === 'table' && /^CREATE VIRTUAL TABLE/i.test(o.sql)).map(o => o.name);
+  const shadow = (n) => vtabs.some(v => n.startsWith(v + '_'));
+  for (const t of objs.filter(o => o.type === 'table' && !shadow(o.name))) {
     out.push(t.sql + ';');
+    if (vtabs.includes(t.name)) continue;
     const q = `"${t.name.replace(/"/g, '""')}"`;
     for (const r of db.prepare(`SELECT * FROM ${q} ORDER BY rowid`).all()) {
       out.push(`INSERT INTO ${q}(${Object.keys(r).map(k => `"${k}"`).join(',')}) VALUES(${Object.values(r).map(lit).join(',')});`);
     }
   }
   for (const o of objs.filter(o => o.type !== 'table')) out.push(o.sql + ';');
+  for (const v of vtabs) out.push(`INSERT INTO "${v}"("${v}") VALUES('rebuild');`);
   out.push(`PRAGMA user_version=${db.prepare('PRAGMA user_version').get().user_version};`, 'COMMIT;');
   return out.join('\n') + '\n';
 }

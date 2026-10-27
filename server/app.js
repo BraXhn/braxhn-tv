@@ -25,6 +25,7 @@ import * as webhooks from './webhooks.js';
 import * as photos from './photos.js';
 import { metadataOf, itemMeta } from './activity.js';
 import * as libfilter from './libfilter.js';
+import * as sublines from './sublines.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -59,6 +60,8 @@ hooks.afterScan = () => {
   clearRecommendations(); clearHome(); refreshKeys(null, Infinity);
   // Bibliotekens filter: ljud-/undertextspråk räknas om i bakgrunden (undertextfiler kan ha tillkommit)
   libfilter.clearFacets(); libfilter.afterScan();
+  // Repliksökningen: nya och ändrade undertexter indexeras i bakgrunden, borttagna tas bort
+  sublines.kick(5000);
   webhooks.emit('library.scan.done', { scan: { libraries: scanStatus.scanned || [], started: scanStatus.started, seconds: Math.max(0, (scanStatus.last || 0) - (scanStatus.started || 0)), warnings: scanStatus.warnings || [] } });
   return arr.markAvailable();
 };
@@ -94,6 +97,9 @@ setTimeout(() => libfilter.kickFacets(), 15000).unref();
 // Ljudanalysen fortsätter där den slutade (efter omstart) och väntar medan video omkodas eller flera ljudströmmar kodas om
 sonic.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
 sonic.kick(60000);
+// Repliksökningen fortsätter där den slutade och väntar medan video omkodas
+sublines.setBusyCheck(() => st.activeTranscodes().length > 0);
+sublines.kick(90000);
 
 // Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)
 setTimeout(() => act.watchLibraries(scan), 5000);

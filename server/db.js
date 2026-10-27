@@ -435,6 +435,31 @@ addCol('users', 'theme_music', 'TEXT');
 db.exec(`CREATE TABLE IF NOT EXISTS sub_sync(item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, sub TEXT NOT NULL,
   sub_mtime INTEGER, shift REAL NOT NULL DEFAULT 0, ratio REAL NOT NULL DEFAULT 1, auto_shift REAL, auto_ratio REAL, auto_score REAL,
   auto_audio TEXT, auto_mtime INTEGER, updated INTEGER NOT NULL, PRIMARY KEY(item_id, sub));`);
+// Repliksökning (server/sublines.js): en rad per indexerad undertext (sub = 'e<strömindex>' för inbäddade spår, annars
+// '<källa>:<filnamn>' som i sub_sync), sig = filens version (ändras den indexeras undertexten om), fmtime = filens mtime
+// för att känna igen en giltig rad i sub_sync, state 1 = klar, 2 = misslyckad. sub_lines = replikerna (oförskjutna tider,
+// synken läggs på vid sökning), norm = normaliserad text – bara när FTS5 saknas (reserv med LIKE). Allt försvinner med
+// titeln (kaskad) och sub_fts följer sub_lines via utlösare.
+db.exec(`CREATE TABLE IF NOT EXISTS sub_index(item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, sub TEXT NOT NULL,
+  sig TEXT NOT NULL, fmtime INTEGER, lang TEXT, label TEXT, lines INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL DEFAULT 1, error TEXT,
+  updated INTEGER NOT NULL, PRIMARY KEY(item_id, sub));
+CREATE TABLE IF NOT EXISTS sub_lines(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, sub TEXT NOT NULL, s REAL NOT NULL, e REAL NOT NULL,
+  text TEXT NOT NULL, norm TEXT, FOREIGN KEY(item_id, sub) REFERENCES sub_index(item_id, sub) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS sub_lines_item ON sub_lines(item_id, sub, s);`);
+/** Finns FTS5 i den här SQLite-versionen? (Nodes inbyggda SQLite har det; annars söker sublines.js med LIKE).
+ *  SUBINDEX_FTS=0 provar reserven (tester). */
+export const FTS5 = (() => {
+  try {
+    if (process.env.SUBINDEX_FTS === '0') throw new Error('avstängd (SUBINDEX_FTS=0)');
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS sub_fts USING fts5(text, content='sub_lines', content_rowid='id', tokenize='unicode61 remove_diacritics 0');
+CREATE TRIGGER IF NOT EXISTS sub_lines_ai AFTER INSERT ON sub_lines BEGIN INSERT INTO sub_fts(rowid, text) VALUES(new.id, new.text); END;
+CREATE TRIGGER IF NOT EXISTS sub_lines_ad AFTER DELETE ON sub_lines BEGIN INSERT INTO sub_fts(sub_fts, rowid, text) VALUES('delete', old.id, old.text); END;`);
+    return true;
+  } catch (e) {
+    try { db.exec('DROP TRIGGER IF EXISTS sub_lines_ai; DROP TRIGGER IF EXISTS sub_lines_ad;'); } catch {}
+    console.warn('[db] FTS5 saknas – repliksökningen använder en enklare sökning:', e.message); return false;
+  }
+})();
 
 // Fotobibliotek (server/photos.js): libraries.type får även 'photo'. SQLite kan inte ändra en CHECK-begränsning, så
 // tabellen byggs om med samma kolumner (även de som addCol lagt till) och alla rader. Främmande nycklar stängs av under

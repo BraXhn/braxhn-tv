@@ -1,12 +1,15 @@
 // Vy: universell sökning (/api/search/all) – grupperna som hyllor och listor i relevansordning, resultat medan man
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // skriver, piltangenter från sökrutan till träffarna, senaste sökningar (bara i den här webbläsaren) och förslag
-// när rutan är tom. Sökrutan i menyraden (#q) kopplas här.
+// när rutan är tom. Sökrutan i menyraden (#q) kopplas här. Fliken Repliker (#/search/<fråga>?t=lines) söker i
+// undertexterna – den delen laddas först när fliken väljs (views/searchlines.js).
 import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views } from '../core.js';
 import { bookCard, card, chLogo, personArt, personCard, podCover, shelfHtml } from '../ui/cards.js';
 import { bindRetry, emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTracks, cover, trackRows } from './music.js';
 import { playLive } from '../player/live.js';
+import { bindTabs, tabsHtml } from '../ui/tabs.js';
+import { need } from '../lazy.js';
 
 const LIMIT = 12, RECENT = 'search.recent', DEBOUNCE = 200;
 const box = $('#q');
@@ -58,10 +61,41 @@ function emptyView() {
     ${places.length ? `<section class="section"><h2>Bläddra i stället</h2><div class="row">${places.map(p => `<a class="btn ghost small" data-snav href="${p.href}">${esc(p.label)}</a>`).join('')}</div></section>` : ''}`;
 }
 
+// ---------- flikarna: Allt | Repliker ----------
+let tab = 'all';
+const tabOf = () => /[?&]t=lines(&|$)/.test(location.hash) ? 'lines' : 'all';
+const hrefOf = (q) => (q ? '#/search/' + encodeURIComponent(q) : '#/search') + (tab === 'lines' ? '?t=lines' : '');
+const tabsBar = () => tabsHtml({ id: 'stabs', label: 'Sök i', panel: 'sres', current: tab,
+  items: [{ key: 'all', label: 'Allt' }, { key: 'lines', label: 'Repliker' }] });
+function bindSearchTabs() {
+  bindTabs($('#stabs'), (key) => {
+    if (key === tab) return;
+    tab = key;
+    liveSearch(cur, true).then(() => $('#stabs [aria-selected="true"]')?.focus()); // fokus stannar på fliken
+  });
+}
+/** Repliker: träffarna står kvar medan nästa sökning görs; modulen laddas vid första användningen */
+async function renderLines(q) {
+  if (!$('#sres[data-tab="lines"]')) {
+    main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1><span class="muted" id="sstatus"></span></div>${tabsBar()}
+      <div id="sres" role="tabpanel" data-tab="lines">${loadingState({ label: 'Söker i repliker…' })}</div>`;
+    bindSearchTabs();
+  } else {
+    $('.toolbar h1', main).textContent = `Sök: ”${q}”`;
+    $('#sstatus').innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
+  }
+  main.removeAttribute('aria-busy');
+  const m = await need('views/searchlines.js');
+  if (cur !== q) return;
+  const n = await m.renderLines($('#sres'), q); // kastar (aborted) om en nyare sökning startat
+  $('#sstatus').textContent = n ? `${n} ${n === 1 ? 'replik' : 'repliker'}` : '';
+}
+
 // ---------- rendering ----------
 let cur = '';
 async function render(q) {
   cur = q;
+  if (q && tab === 'lines') return renderLines(q);
   if (!q) {
     main.innerHTML = emptyView();
     main.removeAttribute('aria-busy');
@@ -75,9 +109,10 @@ async function render(q) {
   const d = await api(`/search/all?q=${encodeURIComponent(q)}&limit=${LIMIT}`); // avbryts (kastar) om en nyare sökning startat
   const n = d.order.reduce((a, g) => a + d[g].length, 0);
   main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1><span class="muted" id="sstatus">${n ? `${n} ${n === 1 ? 'träff' : 'träffar'}` : ''}</span></div>
-    <div id="sres">${n ? d.order.map(g => GROUPS[g]?.html(d[g]) || '').join('')
-      : emptyState({ icon: '🔍', title: 'Inga träffar', text: 'Prova en annan stavning, en del av titeln, originaltiteln eller ett namn.' })}</div>`;
+    ${tabsBar()}<div id="sres" role="tabpanel" data-tab="all">${n ? d.order.map(g => GROUPS[g]?.html(d[g]) || '').join('')
+      : emptyState({ icon: '🔍', title: 'Inga träffar', text: 'Prova en annan stavning, en del av titeln, originaltiteln eller ett namn – eller sök efter en replik under Repliker.' })}</div>`;
   main.removeAttribute('aria-busy');
+  bindSearchTabs();
   const res = $('#sres');
   if (d.tracks.length) bindTracks(d.tracks, $('[data-tracks]', res));
   $$('[data-ch]', res).forEach(b => b.onclick = () => playLive(d.channels[+b.dataset.ch]));
@@ -91,6 +126,7 @@ const showError = (e, q) => {
 };
 
 views.search = async (q) => {
+  tab = tabOf();
   try { q = decodeURIComponent(q || ''); } catch { q = q || ''; }
   if (box.value.trim() !== q && document.activeElement !== box) box.value = q;
   await render(q.trim());
@@ -99,9 +135,10 @@ views.search = async (q) => {
  * Ny fråga på söksidan utan ny sidvisning: adressen byts med replaceState (ingen ny post i historiken – Bakåt går till
  * sidan före sökningen) och en ny navigeringsgeneration gör att svaret på den förra frågan kastas (api() avbryter).
  */
-export function liveSearch(q) {
-  history.replaceState(history.state, '', q ? '#/search/' + encodeURIComponent(q) : '#/search');
+export function liveSearch(q, redraw = false) {
+  history.replaceState(history.state, '', hrefOf(q));
   nextRoute();
+  if (redraw) main.innerHTML = loadingState({ label: 'Söker…' }); // fliken byttes: inga kvarstående träffar från den andra fliken
   return render(q).catch(e => showError(e, q));
 }
 
@@ -112,7 +149,7 @@ function go() {
   clearTimeout(timer); timer = 0;
   const q = box.value.trim();
   if (onSearchPage()) { if (q !== cur) pending = liveSearch(q); return pending; }
-  if (q) location.hash = '#/search/' + encodeURIComponent(q);
+  if (q) location.hash = hrefOf(q);
   return null;
 }
 box.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(go, DEBOUNCE); });
