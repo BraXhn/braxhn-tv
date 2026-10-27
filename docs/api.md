@@ -116,6 +116,33 @@ kommer från en annan filmversion), `kind`, `title` (filmen/serien), `year`, fö
 i `line`), `before`/`after` (repliken före/efter eller `null`), `lang`, `label` och `thumb` (`{ url, col, row, cols,
 rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null`). Apparna använder den inte än.
 
+## Familjefilter: `filter` i `/api/items/:id/playback`
+
+Nytt, valfritt fält (bara när profilens familjefilter är på, `server/familyfilter.js`):
+`filter: { mode: 'mute'|'skip', item, ready, server, mute: [[start, slut], …], skip: [{ id, start, end, label }, …] }`.
+`mute` = sekunder att tysta (hela repliker med en svordom, med marginal och undertextsynken inräknad), `skip` = scener att
+hoppa över (bara läget `skip`), `item` = filen som markeringar gäller (versionen som spelas), `ready` = undertexterna är
+indexerade (annars tom lista tills repliksökningens jobb läst dem), `server` = strömmen är redan tystad av servern.
+
+- **Utan klientstöd (apparna, Chromecast):** servern tystar själv – ett ljudspår kodas om (AAC) med ett volymfilter, bilden
+  kopieras (`mode` blir `remux`/`transcode` i stället för `direct`, `reasons` innehåller *familjefiltret tystar
+  svordomar*, HLS-adressen har `ff=1`). Inga nya fält behöver läsas.
+- **Klienter som tystar själva** skickar `ffc=1` (webbspelaren): beslutet är då som utan filter (direktuppspelning
+  behålls) och `server` är `false`; klienten tystar i `mute` och hoppar över `skip`.
+- **Undertexterna** (`subtitles[].url`, `/api/stream/:id/subs/:sid`) maskeras av servern efter profilen (`***` i
+  stället för ordet, tiderna orörda); adressen får `ff=1` så att cachen skiljer profilerna åt. Repliksökningen
+  (`/api/search/lines`) maskerar `line`/`before`/`after` på samma sätt.
+
+Övriga routes (inloggad):
+- `GET`/`PUT /api/me/family-filter` – `{ mode, setting ('' = standard), kid, canChange, kidsDefault }`; `PUT { mode }`
+  (`''`, `off`, `mute`, `skip`) nekas för barnprofiler (**403**). Huvudkontot ändrar en profil med
+  `PUT /api/profiles/:pid { familyFilter }`; `GET /api/profiles` har `familyFilter` och `familyMode`.
+- `GET /api/items/:id/skips` → `{ skips: [{ id, start, end, label, scope, by, mine, canDelete }], canAdd, canShareAll, mode }`,
+  `POST /api/items/:id/skips { start, end, label?, scope: 'me'|'household'|'all' }` (minst 0,5 s, högst 30 min; barnprofiler
+  **403**, `all` bara administratören), `DELETE /api/skips/:sid` (den som skapade, huvudkontot för hushållets, administratören).
+- Administratören (betrott nät): `GET`/`PUT /api/admin/family-filter` (`{ builtin, custom: { sv, en, off }, kidsDefault }`;
+  `PUT { kidsDefault?, sv?, en?, off? }`) och `POST /api/admin/family-filter/test { text, lang? }` → `{ masked, hit }`.
+
 ## Hälsokontroll och rättad språkmärkning: `/api/admin/health*`
 
 Bara för administratören på betrott nät (webbens `#/health`, `server/health.js`). `GET /api/admin/health` →

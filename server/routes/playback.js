@@ -22,6 +22,8 @@ import { TRAILER_SCOPE } from '../trailers.js';
 import * as libfilter from '../libfilter.js';
 import * as subsync from '../subsync.js';
 import * as prestart from '../prestart.js';
+import * as family from '../familyfilter.js';
+import * as sublines from '../sublines.js';
 import crypto from 'node:crypto';
 
 // ---------- Offline-nedladdning (appar) ----------
@@ -124,6 +126,16 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const audios = st.streamsOf(it).filter(s => s.type === 'audio');
   const prefAudio = pp.pickAudio(audios, prefs);
   if (!o.audio && prefAudio && prefAudio !== (audios.find(a => a.default) || audios[0])) o.audio = String(prefAudio.index);
+  // Familjefilter (profilens val): tysta intervall ur undertexterna i ljudspårets språk. Klienter som tystar själva
+  // (webbspelaren, ffc=1) får bara planen; övriga (apparna, Chromecast) får ljudet tystat av servern (o.mute → decide)
+  const fmode = family.modeFor(c.user.id);
+  let fmute = null;
+  if (fmode !== 'off') {
+    const aSel = audios.find(a => String(a.index) === o.audio) || audios.find(a => a.default) || audios[0];
+    fmute = family.muteIntervals(it, aSel?.lang);
+    if (c.q.get('ffc') !== '1') o.mute = fmute;
+    if (!family.indexed(it)) sublines.kick(5000); // undertexterna har inte lästs än – nästa uppspelning har planen
+  }
   const d = st.decide(it, o);
   // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
   // Bara utanför hemmet: hemma räcker bandbredden, och byten mellan steg startar om omkodningen i onödan
@@ -164,9 +176,11 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const selAudio = audios.find(a => String(a.index) === String(d.audio)) || prefAudio;
   const defSub = pp.pickSub(allSubs, selAudio, prefs);
   // source/syncable/sync (tillägg): webbens "Synka automatiskt" – servern lägger själv på sparad synk i url
+  // ff=1: maskerad text (familjefiltret) – en egen adress så att webbläsarens cache inte blandar ihop profilerna
+  const sq = fmode !== 'off' ? (tq ? tq + '&ff=1' : '?ff=1') : tq;
   const subs = allSubs.filter(s => !s.bitmap).map(s => {
     const sync = subsync.syncable(s) ? subsync.adjustment(it, s) : null;
-    return { id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${tq}`,
+    return { id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/subs/${s.id}.vtt${sq}`,
       source: s.source, syncable: subsync.syncable(s), ...(sync ? { sync } : {}) };
   });
   // Bildundertexter (PGS) som webbspelaren ritar själv – appar använder inbränning via sub=
@@ -184,6 +198,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     autoSkip: { intro: prefs.skipIntro, recap: prefs.skipRecap, credits: prefs.skipCredits },
     autoNext: { enabled: prefs.autoNext, countdown: prefs.nextCountdown }, subAutoSync: prefs.autoSync,
     ...(preroll.length ? { preroll } : {}),
+    // Familjefiltret (tillägg, bara när det är på): mute = [[start, slut]] att tysta, skip = scener att hoppa över,
+    // server = strömmen är redan tystad av servern
+    ...(fmode !== 'off' ? { filter: family.planFor(it, c.user.id, { mute: fmute, serverMute: !!d.ff }) } : {}),
     ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
@@ -254,7 +271,9 @@ route('GET', '/api/stream/:id/hls/init.mp4', media, async (c) => { const it = me
 route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
-route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q, (sub) => subsync.adjustment(it, sub)); });
+route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q, (sub) => subsync.adjustment(it, sub), subMask(c)); });
+// Familjefiltret maskerar svordomar i undertexten efter profilens val (oavsett adress – ff=1 skiljer bara cachen åt)
+const subMask = (c) => family.modeFor(c.user.id) !== 'off' ? (vtt, sub) => family.maskVtt(vtt, sub.lang) : null;
 const pgsSub = (it, sid) => st.subtitlesOf(it).find(s => s.id === sid && s.pgs);
 route('GET', '/api/stream/:id/pgs/:sid', media, async (c) => {
   const it = mediaItem(c); if (!it) return;

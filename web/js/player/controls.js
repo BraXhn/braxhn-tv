@@ -12,7 +12,9 @@ export function bindControls(cur, v) {
   const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
   const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
   const sync = () => { setIconButton(playBtn, v.paused ? 'play' : 'pause', v.paused ? 'Spela (mellanslag)' : 'Pausa (mellanslag)'); el.classList.toggle('paused', v.paused); };
-  const syncVol = () => { const off = v.muted || v.volume === 0; setIconButton(muteBtn, off ? 'mute' : 'vol', off ? 'Slå på ljudet (m)' : 'Stäng av ljudet (m)'); vol.value = v.muted ? 0 : v.volume; };
+  // Familjefiltret (familyfilter.js) tystar med video.muted – knappen visar användarens eget val
+  const userMuted = () => cur.ff?.muted ? cur.ff.user : v.muted;
+  const syncVol = () => { const off = userMuted() || v.volume === 0; setIconButton(muteBtn, off ? 'mute' : 'vol', off ? 'Slå på ljudet (m)' : 'Stäng av ljudet (m)'); vol.value = userMuted() ? 0 : v.volume; };
   v.volume = +store.get('pvol', 1); syncVol();
   ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
   v.addEventListener('volumechange', syncVol);
@@ -49,7 +51,7 @@ export function bindControls(cur, v) {
   q('#cstop').onclick = () => closePlayer();
   q('#cmini').onclick = () => setMini(!cur.mini);
   q('#cset').onclick = (e) => { e.stopPropagation(); q('#chlist').hidden = true; q('#setp').hidden = !q('#setp').hidden; };
-  muteBtn.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
+  muteBtn.onclick = () => { if (cur.ff?.muted) { cur.ff.user = !cur.ff.user; return syncVol(); } v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
   vol.oninput = () => { v.volume = +vol.value; v.muted = v.volume === 0; store.set('pvol', v.volume); };
 }
 

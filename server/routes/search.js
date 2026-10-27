@@ -9,6 +9,7 @@ import * as pods from '../podcasts.js';
 import * as live from '../livetv.js';
 import { parseQuery, searchItemIds } from '../search.js';
 import * as sublines from '../sublines.js';
+import * as family from '../familyfilter.js';
 import { searchKey, rowScore } from '../searchkey.js';
 import { route, user } from '../http/router.js';
 import { ageFilter, itemsByIds, allowUnrated, allowedFor } from '../http/context.js';
@@ -48,7 +49,13 @@ route('GET', '/api/search/people', user, (c) => {
 route('GET', '/api/search/lines', user, (c) => {
   const q = queryOf(c).trim(), uid = c.user.id;
   const lim = Math.min(60, Math.max(1, parseInt(c.q.get('limit')) || 30));
-  const lines = q ? sublines.search(q, { age: ageFilter(uid), allowed: (r) => allowedFor(uid, r), limit: lim }) : [];
+  let lines = q ? sublines.search(q, { age: ageFilter(uid), allowed: (r) => allowedFor(uid, r), limit: lim }) : [];
+  // Familjefiltret: svordomar visas som *** även här (markeringen räknas om på den maskerade texten)
+  if (lines.length && family.modeFor(uid) !== 'off') {
+    const words = sublines.wordsOf(q);
+    lines = lines.map(l => { const line = family.maskText(l.line, l.lang); return { ...l, line, marks: line === l.line ? l.marks : sublines.marksOf(line, words),
+      before: l.before && family.maskText(l.before, l.lang), after: l.after && family.maskText(l.after, l.lang) }; });
+  }
   // Antalet indexerade titlar gäller hela servern – bara administratören får siffrorna
   const st = sublines.status();
   send(c.res, 200, { q, lines, status: c.user.is_admin ? st : { enabled: st.enabled, indexing: !!st.indexing } });

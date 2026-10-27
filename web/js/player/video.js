@@ -12,6 +12,7 @@ import { remoteButton } from '../ui/buttons.js';
 import { pgsStop, restyleSubs, setSubs, subBurns, textStop } from './subs.js';
 import { SKIP_DELAY, nextPlan, skipPlan } from './autoskip.js';
 import { migrateLocalPrefs } from './playprefs.js';
+import { applyFilter, initFilter, stopFilter } from './familyfilter.js';
 import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, serverFxParams, setAudioFx, stopAudioFx, subStyleFields, thumbStyle, webAudioFx } from './comfort.js';
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
@@ -125,6 +126,7 @@ export async function play(id, start = 0, opts = {}) {
   const v = q('#vid');
   applySubStyle(el);
   bindControls(cur, v);
+  initFilter(cur, v); // familjefiltret: tysta svordomar, hoppa över scener, markera scener under ⚙
   q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
   q('#prate').value = String(rate);
   q('#prate').onchange = (e) => { rate = +e.target.value; v.defaultPlaybackRate = v.playbackRate = rate; };
@@ -299,6 +301,7 @@ async function load(start, { play = true } = {}) {
   if (cur.h264) extra.tc = ''; // HEVC/AV1 fungerade inte – omkodning till H.264
   if (cur.cinema) extra.cinema = '1';
   Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
+  extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
   // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
@@ -329,6 +332,7 @@ async function load(start, { play = true } = {}) {
     }
   }
   cur.pb = pb;
+  applyFilter(cur, v, pb);
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
   const pm = $('#pmode', el);
   const vcl = pb.mode === 'transcode' && pb.vcodec && pb.vcodec !== 'h264' ? ' · ' + pb.vcodec.toUpperCase() : '';
@@ -451,7 +455,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
-  pgsStop(P); textStop(P); stopAudioFx(v);
+  pgsStop(P); textStop(P); stopAudioFx(v); stopFilter(P);
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);
