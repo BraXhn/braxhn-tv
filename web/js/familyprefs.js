@@ -45,8 +45,8 @@ export async function renderFamilyAdmin(el) {
       Ord matchas på ordgräns med vanliga böjningar. <code>ord*</code> = allt som börjar med ordet, <code>*ord</code> = sammansättningar som slutar med det, <code>ord!</code> = bara exakt ordet. Flera ord = en fras.</p>
     <form id="fff">
       <label>Standard för barnprofiler<select id="ffkids">${opts(A.kidsDefault, '')}</select></label>
-      <label>Egna ord – svenska (kommatecken eller en per rad)</label><textarea id="ffsv" rows="2">${esc(list(A.custom.sv))}</textarea>
-      <label>Egna ord – engelska</label><textarea id="ffen" rows="2">${esc(list(A.custom.en))}</textarea>
+      <label for="ffsv">Egna ord – svenska (kommatecken eller en per rad)</label><textarea id="ffsv" rows="2">${esc(list(A.custom.sv))}</textarea>
+      <label for="ffen">Egna ord – engelska</label><textarea id="ffen" rows="2">${esc(list(A.custom.en))}</textarea>
       <details><summary class="muted small">Inbyggda ord (${A.builtin.sv.length + A.builtin.en.length}) – kryssa ur för att stänga av</summary>
         <div class="ffwords">${['sv', 'en'].map(l => `<p class="muted small">${l === 'sv' ? 'Svenska' : 'Engelska'}</p>` + A.builtin[l].map(w =>
           `<label class="switch"><input type="checkbox" data-ffw="${esc(w)}" ${A.custom.off.includes(w) ? '' : 'checked'}> ${esc(w)}</label>`).join('')).join('')}</div></details>
