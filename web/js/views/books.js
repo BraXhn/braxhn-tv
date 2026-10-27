@@ -3,6 +3,7 @@
 import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, me, store, toast, views, toastErr } from '../core.js';
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
+import { downloadBook, stateOf, supported as offlineOk } from '../offline.js';
 import { loadLibs, route } from '../router.js';
 import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
@@ -63,7 +64,7 @@ views.book = async (id) => {
       ${b.position > 30 ? `<span>${fmtDur(left)} kvar</span>` : ''}${b.finished ? '<span>✓ Utläst</span>' : ''}</div>
     ${b.series ? `<div class="meta"><span>Serie: <a href="${filterHash(lid, 'serie', b.series)}">${esc(seriesLabel(b))}</a></span></div>` : ''}
     <div class="row"><button class="primary" id="bp">${b.position > 30 ? '▶ Fortsätt' : '▶ Lyssna'}</button>${b.position > 30 || b.finished ? '<button class="ghost" id="bstart">Börja om</button>' : ''}
-      <button class="ghost" id="bmark">🔖 Bokmärke</button>${b.finished ? '' : '<button class="ghost" id="bdone">Markera som utläst</button>'}
+      <button class="ghost" id="bmark">🔖 Bokmärke</button>${b.finished ? '' : '<button class="ghost" id="bdone">Markera som utläst</button>'}${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="boff" title="Spara i webbläsaren och lyssna utan nät">${stateOf('book', b.id) === 'done' ? '✓ Sparad offline' : '⤓ Spara offline'}</button>`}
       ${me?.is_admin ? '<button class="ghost" id="bmatch">Fel bok?</button><button class="ghost" id="bedit">Redigera</button>' : ''}</div>
     ${b.description ? `<p class="overview">${esc(b.description)}</p>` : ''}
     ${facts ? `<p class="muted small">${esc(facts)}</p>` : ''}</div></div>
@@ -84,6 +85,7 @@ views.book = async (id) => {
   });
   if ($('#bdone')) $('#bdone').onclick = act(async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: b.duration } }); route(); });
   if ($('#bmatch')) $('#bmatch').onclick = () => matchBook(b);
+  if ($('#boff')) $('#boff').onclick = () => downloadBook(b.id);
   if ($('#bedit')) $('#bedit').onclick = () => editBook(b);
 };
 

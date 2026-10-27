@@ -3,7 +3,7 @@
 // kedjan, server/http/static.js). Övriga vyer laddas av router.js första gången de öppnas (LAZY) och spelaren
 // genom fasaderna i js/lazy.js – i förväg när sidan är ritad och när pekaren eller fokus når ett kort.
 // Alla moduler ska även finnas i MODULES i sw.js så att appen kan starta utan kontakt med servern.
-import { me, rememberPage } from './js/core.js';
+import { me, rememberPage, store } from './js/core.js';
 import { boot, prefetchView, route } from './js/router.js';
 import { idle, loadPlayer, need, pageDrawn } from './js/lazy.js';
 import { initCardMenus } from './js/ui/cardmenu.js';
@@ -35,7 +35,16 @@ initCardSize();
 prefetchView(location.hash.slice(2).split('/')[0] || 'home');
 
 (async () => {
-  try { await boot(); } catch {}
+  let offline = false;
+  try { await boot(); } catch (e) { offline = !!e?.offline; }
+  // Servern svarar inte (appen startade ur service workerns cache): Nedladdat för den senast inloggade profilen
+  // (utan sparad profil: sidan om att servern inte svarar, som förut)
+  if (!me && offline) {
+    if (!store.get('dl.last', null)) return location.replace('/offline.html');
+    try { (await need('views/downloads.js')).offlineStart(); } catch { location.replace('/offline.html'); }
+    pageDrawn();
+    return;
+  }
   // Djuplänk utan inloggning (t.ex. QR-koden för inloggning med kod): öppnas efter inloggningen
   if (!me && location.hash.startsWith('#/invite/')) route(); // inbjudan: skapa konto utan att logga in först
   else if (!me) { rememberPage(); location.hash = '#/login'; if (location.hash === '#/login') route(); }
@@ -45,5 +54,7 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
   idle(() => {
     loadPlayer().then(() => need('player/cast.js')).then(m => m.initCast()).catch(() => {});
     if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); }
+    // Offline: nedladdningar som inte är klara och positioner som sparats utan nät fortsätter
+    if (me && store.get('dlwork', false)) need('offline.js').then(m => m.resume()).catch(() => {});
   });
 })();

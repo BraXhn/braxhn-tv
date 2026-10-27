@@ -220,12 +220,15 @@ export function book(id, uid) {
     sameAuthor: others('author=? AND (? IS NULL OR series IS NULL OR series != ? COLLATE NOCASE) ORDER BY year, sort_title LIMIT 20', b.author, b.series, b.series).map(card),
     sameSeries: b.series ? others('series=? COLLATE NOCASE ORDER BY CAST(series_no AS REAL) NULLS LAST, year, sort_title LIMIT 50', b.series).map(card) : [] };
 }
-export function saveProgress(uid, id, position, speed) {
+/** at (valfri): när positionen sparades (Unix-sekunder, webbappens offline-läge) – ett senare framsteg vinner */
+export function saveProgress(uid, id, position, speed, at = null) {
   const b = get('SELECT duration, library_id FROM books WHERE id=?', id); if (!b || !libOk(uid, b.library_id)) return null;
+  at = Number.isFinite(+at) && +at > 0 ? Math.min(Math.floor(+at), now()) : null;
+  if (at) { const p = get('SELECT updated, finished FROM book_progress WHERE user_id=? AND book_id=?', uid, id); if (p && p.updated >= at) return { finished: !!p.finished, stale: true }; }
   const pos = Math.max(0, Math.min(+position || 0, b.duration || 1e9));
   const finished = b.duration && b.duration - pos < Math.min(30, b.duration * 0.02) ? 1 : 0;
   run(`INSERT INTO book_progress(user_id,book_id,position,finished,speed,updated) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,book_id) DO UPDATE SET
-    position=excluded.position, finished=excluded.finished, speed=COALESCE(excluded.speed, speed), updated=excluded.updated`, uid, id, finished ? 0 : pos, finished, speed ? Math.max(0.5, Math.min(3, +speed)) : null, now());
+    position=excluded.position, finished=excluded.finished, speed=COALESCE(excluded.speed, speed), updated=excluded.updated`, uid, id, finished ? 0 : pos, finished, speed ? Math.max(0.5, Math.min(3, +speed)) : null, at || now());
   return { finished: !!finished };
 }
 export const fileRow = (fid) => get('SELECT f.*, b.library_id FROM book_files f JOIN books b ON b.id=f.book_id WHERE f.id=?', fid);

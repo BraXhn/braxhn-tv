@@ -15,6 +15,8 @@ const refreshMeta = (it) => need('views/item.js').then(m => m.refreshMeta(it));
 const rateDialog = (o) => need('ui/rating.js').then(m => m.rateDialog(o));
 const fmtStars = (v) => String(v).replace('.', ',');
 const addToCollection = (it) => need('ui/collections.js').then(m => m.addToCollection(it));
+// Spara offline (js/offline.js laddas när det väljs)
+const saveOffline = (it) => need('offline.js').then(m => m.downloadItem(it)).catch(toastErr);
 
 /** Ritar om alla kort för titeln (samma titel kan finnas i flera rader) och behåller fokus */
 function redraw(it) {
@@ -125,6 +127,7 @@ export function cardActions(it, st, el) {
     { icon: st.following ? '🔕' : '🔔', label: st.following ? 'Sluta följa serien' : 'Följ serien', hidden: st.following == null,
       onSelect: act(() => setFollow(it, !st.following)) },
     { icon: '👥', label: 'Titta tillsammans…', hidden: !media || !!me?.kid, onSelect: () => play(it.id, pos, { startParty: true }).catch(toastErr) },
+    { icon: '⤓', label: 'Spara offline…', hidden: !media || me?.canDownload === false || !window.caches, onSelect: () => saveOffline(it) },
     { icon: '⤓', label: 'Ladda ner filen', hidden: !media || me?.canDownload === false, href: `/api/stream/${+it.id}/download`, download: true },
     'separator',
     { icon: 'ℹ', label: 'Visa information', href: `#/item/${+it.id}` },

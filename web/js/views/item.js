@@ -13,6 +13,7 @@ import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
 import { playTheme } from '../ui/thememusic.js';
 import { missingBox } from './calendar.js';
+import { downloadEpisodes, downloadItem, stateOf, supported as offlineOk } from '../offline.js';
 
 // ---------- "Finns även på" (streamingtjänster för titeln) ----------
 // Här och inte i views/streaming.js: den vyn laddas först när den öppnas, men rutan syns på varje titelsida
@@ -62,6 +63,7 @@ views.item = async (id, season) => {
     ${remoteButton('playon')}
     <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
+    ${me.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="dloff" title="Spara i webbläsaren och titta utan nät">${stateOf(it.kind, it.id) === 'done' ? '✓ Sparad offline' : stateOf(it.kind, it.id) ? '⤓ Sparas offline…' : '⤓ Spara offline'}</button>`}
     ${me.canDownload === false ? '' : `<a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>`}
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.taken ? '' : '<button class="ghost" id="match">Fel titel?</button>'}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
@@ -91,6 +93,7 @@ views.item = async (id, season) => {
     if (auto && $('#ver')) $('#ver').options[0].textContent = 'Automatiskt (' + auto.label + ')';
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
+  if ($('#dloff')) $('#dloff').onclick = () => downloadItem(verSel ? { ...it, version: +verSel } : it);
   bindWatchlist(it);
   bindCollections(it);
   bindTrailers(it);
@@ -130,13 +133,14 @@ function showView(it, season) {
     const allSeen = eps.every(e => e.watched);
     // Lokal säsongsaffisch (season01-poster.jpg bredvid serien)
     const sp = (it.seasonPosters || []).includes(cur) ? `<img class="season-poster" ${imgSrc(`/api/image/${+it.id}/season${+cur}`, 90)} alt="" width="90" height="135" data-fb="1">` : '';
-    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button></div>
+    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button>${me.canDownload === false || !offlineOk() ? '' : '<button class="ghost small" id="seasonOff" title="Spara avsnitten i webbläsaren och titta utan nät">⤓ Spara säsongen offline</button>'}</div>
       <div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
       <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? ' · Sedd' : e.position ? ` · ${fmtTime(e.position)} kvar: ${fmtTime(e.duration - e.position)}` : ''}</div>
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}
       <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">▶ Spela</button>
       <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? 'Osedd' : 'Sedd'}</button></div></div></div>`).join('')}</div>`;
     $$('[data-play]', $('#eps')).forEach(b => b.onclick = () => startPlay(b, +b.dataset.play, +b.dataset.pos));
+    if ($('#seasonOff')) $('#seasonOff').onclick = () => downloadEpisodes({ id: it.id, title: it.title }, eps);
     $$('[data-seen]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.seen}/watched`, { method: 'POST', body: { watched: b.dataset.w !== '1' } }); route(); }));
     $('#seasonSeen').onclick = act(async () => { await api(`/items/${it.id}/watched?season=${cur}`, { method: 'POST', body: { watched: !allSeen } }); route(); });
   };

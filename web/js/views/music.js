@@ -1,6 +1,6 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, routeGen, store, toast, views } from '../core.js';
+import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, me, routeGen, store, toast, views } from '../core.js';
 import { M, playQueue, startRadio } from '../audio.js';
 import { route } from '../router.js';
 import { emptyState, noLib } from '../ui/states.js';
@@ -9,6 +9,7 @@ import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { tabsHtml } from '../ui/tabs.js';
 import { bindStars, fmtStars, saveRating, starsHtml } from '../ui/rating.js';
 import { similarArtists, stationsHtml, trackMenu } from '../sonic.js';
+import { downloadAlbum, stateOf, supported as offlineOk } from '../offline.js';
 import { KIND_LABEL, albumGroups, artistArt, artistCard, bindBio, bioHtml, facts, heroBg, isAdmin, linksHtml, matchArtist, relatedHtml } from '../musicinfo.js';
 
 export const cover = (albumId, has, cls = '') => {
@@ -124,7 +125,7 @@ views.album = async (id) => {
   const released = a.info?.released && /^\d{4}-\d{2}-\d{2}$/.test(a.info.released) ? a.info.released : null;
   main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">${esc((kind || 'Album').toUpperCase())}</div><h1>${esc(a.title)}</h1>
     <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
-    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button></div>
+    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button>${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="aoff" title="Spara i webbläsaren och lyssna utan nät">${stateOf('album', a.id) === 'done' ? '✓ Sparat offline' : '⤓ Spara offline'}</button>`}</div>
     <div class="myrating"><span class="muted small">Mitt betyg</span>${starsHtml(a.userRating, { id: 'albrate', label: 'Mitt betyg för albumet' })}</div></div></div>
     ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
@@ -135,6 +136,7 @@ views.album = async (id) => {
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
   $('#aa').onclick = act(() => addToPlaylist(a.trackList.map(t => t.id)));
   $('#ar').onclick = act(() => startRadio({ albumId: a.id }, a.title));
+  if ($('#aoff')) $('#aoff').onclick = () => downloadAlbum(a.id);
   bindStars($('#albrate'), async (v) => { a.userRating = await saveRating('album', a.id, v) ?? undefined; });
 };
 // Artistsidan som i Plexamp/Apple Music: stor bild, fakta, biografi som fälls ut, Populärt, album per typ,

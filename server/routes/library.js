@@ -290,7 +290,7 @@ route('GET', '/api/items/:id', user, (c) => {
   send(c.res, 200, out);
 });
 route('POST', '/api/items/:id/progress', user, async (c) => {
-  const { position, duration } = await readJson(c.req);
+  const { position, duration, at: atRaw } = await readJson(c.req);
   let it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
   // Framsteg gäller filmen oavsett vilken version som spelades
@@ -299,19 +299,24 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
   const dur = it.duration || +duration || 0;
   const rawPos = Math.max(0, +position || 0);
   let pos = rawPos;
-  const prev = get('SELECT watched, position FROM progress WHERE user_id=? AND item_id=?', c.user.id, it.id);
+  const prev = get('SELECT watched, position, updated FROM progress WHERE user_id=? AND item_id=?', c.user.id, it.id);
   const wasWatched = !!prev?.watched;
+  // at (tillägg, webbappens offline-läge): när positionen sparades (Unix-sekunder). Ett senare framsteg från en
+  // annan enhet vinner – den gamla positionen skrivs då inte över. Ingen "spelas nu" eller skärmtid för det.
+  const at = Number.isFinite(+atRaw) && +atRaw > 0 ? Math.min(Math.floor(+atRaw), now()) : null;
+  if (at && prev && prev.updated >= at) return send(c.res, 200, { watched: wasWatched, stale: true, stop: false });
   const watched = dur && (pos / dur > 0.92 || dur - pos < 120 && pos > 60) ? 1 : 0;
   // Omtittning av en sedd titel: sedd-markeringen behålls men positionen sparas (syns i "Fortsätt titta")
   // när man kommit en bit in – att bara öppna titeln en kort stund lägger inte till den.
   if (wasWatched && !watched && pos < 60) pos = 0;
   run(`INSERT INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(?,?,?,?,?,?)
     ON CONFLICT(user_id,item_id) DO UPDATE SET position=excluded.position, duration=excluded.duration,
-    watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, now());
+    watched=MAX(watched,excluded.watched), updated=excluded.updated`, c.user.id, it.id, watched ? 0 : pos, dur, watched, at || now());
   if (watched && !wasWatched) trakt.scrobble(c.user.id, get('SELECT * FROM items WHERE id=?', it.id), 'stop', 100).catch(() => {});
   if (watched && !wasWatched && it.kind === 'episode') follows.autoFollow(c.user.id, it.id);
   // Smakprofilen påverkas bara när titeln blir sedd eller passerar 5 minuter
   if ((watched && !wasWatched) || (pos > 300 && !((prev?.position || 0) > 300))) invalidateProfile(c.user.id);
+  if (at) return send(c.res, 200, { watched: !!watched, stop: false });
   act.touch(c.user.id, it.id, rawPos);
   const sc = screen.heartbeat(c.user.id, 'i:' + it.id, rawPos);
   send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) || (!!sc && !sc.allowed), ...(sc ? { screenTime: sc } : {}) });
