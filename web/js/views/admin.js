@@ -10,6 +10,7 @@ import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { matchItem } from './item.js';
 import { sonicAdmin } from '../sonic.js';
 import { musicMetaAdmin } from '../musicinfo.js';
+import { renderFamilyAdmin } from '../familyprefs.js';
 
 /**
  * Ändra ett bibliotek: namn, mappar (lägg till/ta bort), NFO och hemvideor. En borttagen mapp tar bort titlarna i den ur
@@ -236,6 +237,7 @@ views.admin = async (sec) => {
     ${AU.map(a => `<tr class="${/fail|denied|locked/.test(a.event) ? 'warnrow' : ''}"><td class="muted small">${fmtDate(a.ts)}</td><td>${esc(EVENTS[a.event] || a.event)}</td><td>${esc(a.user_name || '–')}</td><td class="muted small">${esc(a.ip || '')}</td><td class="muted small">${esc(a.detail || '')}</td></tr>`).join('')
       || '<tr><td colspan="5" class="muted">Inga händelser ännu.</td></tr>'}</table></div>
   </div>
+  <div class="panel" id="adm-family"></div>
   <div class="panel" id="adm-sonic" aria-live="polite"></div>
   <div class="panel" id="adm-mmeta"></div>
   <div class="panel"><h2>Inställningar</h2><form id="settings">
@@ -277,6 +279,7 @@ views.admin = async (sec) => {
 
   // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig
   unmatchedAdmin($('#adm-unmatched'));
+  renderFamilyAdmin($('#adm-family')).catch(e => { if (!e?.aborted && $('#adm-family')) $('#adm-family').hidden = true; });
   if (L.some(l => l.type === 'music')) { sonicAdmin($('#adm-sonic')); musicMetaAdmin($('#adm-mmeta')); } else { $('#adm-sonic').remove(); $('#adm-mmeta').remove(); }
   // Mappväljare
   const browse = async (p) => {

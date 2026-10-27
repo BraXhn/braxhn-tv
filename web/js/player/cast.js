@@ -43,6 +43,9 @@ function remote() {
   on(E.CURRENT_TIME_CHANGED, () => {
     if (!C.cur) return;
     C.lastPos = pos();
+    // Familjefiltret (Tysta + hoppa över): mottagaren hoppar över markerade scener. Ljudet är redan tystat av servern.
+    const k = C.cur.skip?.find(x => C.lastPos >= x[0] && C.lastPos < x[1] - 0.5);
+    if (k && !C.player.isPaused) { seekTo(k[1]); toast('Hoppade över en markerad scen'); }
     if (!C.player.isPaused && Date.now() - C.lastSent >= SEND_EVERY) report(C.cur, C.lastPos);
     paint();
   });
@@ -123,7 +126,9 @@ async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
   mi.customData = { bx: 1, kind: 'video', id: it.id, version: it.version || null, title, sub: it.kind !== 'episode' && it.year ? String(it.year) : '',
     duration: p.duration || it.duration || 0, nextId: it.nextId || null, audio: p.audioSelected != null ? String(p.audioSelected) : String(audio || ''),
     audios: (p.audio || []).map(a => ({ i: a.index, l: [a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ') })),
-    subs: p.subtitles.map((s, i) => ({ t: i + 1, l: s.label })) };
+    subs: p.subtitles.map((s, i) => ({ t: i + 1, l: s.label })),
+    // Familjefiltret: scener att hoppa över ([start, slut]) – ljudet tystas av servern (ingen ffc=1)
+    ...(p.filter?.skip?.length ? { skip: p.filter.skip.slice(0, 100).map(k => [k.start, k.end]) } : {}) };
   return { info: mi, active };
 }
 /** Casta en film eller ett avsnitt från position (s). opts.audio/opts.sub: spårval (annars webbspelarens). */

@@ -472,6 +472,14 @@ CREATE TABLE IF NOT EXISTS health_issues(id INTEGER PRIMARY KEY, item_id INTEGER
   ignored INTEGER NOT NULL DEFAULT 0, action TEXT, action_at INTEGER, UNIQUE(item_id, kind, key));
 CREATE TABLE IF NOT EXISTS lang_overrides(item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, track TEXT NOT NULL,
   lang TEXT NOT NULL, orig TEXT, sig TEXT, created INTEGER NOT NULL, PRIMARY KEY(item_id, track));`);
+// Familjefilter (server/familyfilter.js): users.family_filter = profilens läge ('off'/'mute'/'skip', NULL = standard).
+// skip_scenes: scener att hoppa över per fil (items.id för versionen), s/e i sekunder; scope 'me' (profilen), 'household'
+// (hushållet = huvudkontot household och dess profiler) eller 'all' (administratören). Försvinner med titeln/profilen.
+addCol('users', 'family_filter', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS skip_scenes(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, household INTEGER, scope TEXT NOT NULL DEFAULT 'me', s REAL NOT NULL, e REAL NOT NULL,
+  label TEXT, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS skip_scenes_item ON skip_scenes(item_id);`);
 /** Finns FTS5 i den här SQLite-versionen? (Nodes inbyggda SQLite har det; annars söker sublines.js med LIKE).
  *  SUBINDEX_FTS=0 provar reserven (tester). */
 export const FTS5 = (() => {

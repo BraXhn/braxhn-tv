@@ -13,6 +13,7 @@ import { loadQr } from './quickconnect.js';
 import { renderCinemaPrefs } from '../player/cinema.js';
 import { renderPlaybackPrefs } from '../player/playprefs.js';
 import { openHomeCustomizer } from './homecustom.js';
+import { familyProfileDialog, renderFamilyPrefs } from '../familyprefs.js';
 import { applySubStyle, audioFx, bindSubStyleFields, setAudioFx, subStyleFields, webAudioFx } from '../player/comfort.js';
 
 export const EVENTS = { login_ok: 'Inloggning', login_fail: 'Misslyckad inloggning', login_locked: 'Spärrad inloggning', login_denied: 'Nekad inloggning',
@@ -71,6 +72,7 @@ views.account = async () => {
     ${webAudioFx ? '' : '<p class="muted small">I Safari görs nattläge och tydligare dialog av servern: ljudet omkodas, bilden kopieras.</p>'}</div>
   <div class="panel" id="pbprefs"></div>
   <div class="panel" id="cinemaprefs"></div>
+  <div class="panel" id="familyprefs"></div>
   <div class="panel" id="themeprefs"></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
@@ -116,6 +118,7 @@ views.account = async () => {
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
   renderPlaybackPrefs($('#pbprefs')).catch(e => { if (!e?.aborted && $('#pbprefs')) $('#pbprefs').hidden = true; });
+  renderFamilyPrefs($('#familyprefs')).catch(e => { if (!e?.aborted && $('#familyprefs')) $('#familyprefs').hidden = true; });
   renderCinemaPrefs($('#cinemaprefs')).catch(e => { if (!e?.aborted && $('#cinemaprefs')) $('#cinemaprefs').hidden = true; });
   renderThemePrefs($('#themeprefs')).catch(e => { if (!e?.aborted && $('#themeprefs')) $('#themeprefs').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
@@ -148,14 +151,15 @@ views.account = async () => {
   if ($('#proflist')) {
     const P2 = await api('/profiles');
     $('#proflist').innerHTML = `<table>${P2.profiles.map(p => `<tr><td>${esc(p.name)}${p.owner ? ' <span class="muted small">(huvudkonto)</span>' : ''}</td>
-      <td class="muted small">${p.kid ? (p.maxAge === 0 ? 'Barntillåten' : 'max ' + p.maxAge + ' år') : 'Vuxen'}${p.hasPin ? ' · PIN' : ''}</td>
-      <td class="r">${p.owner ? '' : `<button class="ghost small" data-pst="${p.id}">Skärmtid</button>`}<button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
+      <td class="muted small">${p.kid ? (p.maxAge === 0 ? 'Barntillåten' : 'max ' + p.maxAge + ' år') : 'Vuxen'}${p.hasPin ? ' · PIN' : ''}${p.familyMode && p.familyMode !== 'off' ? ' · familjefilter' : ''}</td>
+      <td class="r">${p.owner ? '' : `<button class="ghost small" data-pst="${p.id}">Skärmtid</button>`}<button class="ghost small" data-pff="${p.id}">Familjefilter</button><button class="ghost small" data-ppin="${p.id}">${p.hasPin ? 'Byt/ta bort PIN' : 'Sätt PIN'}</button>
       ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">Ta bort</button>`}</td></tr>`).join('')}</table>`;
     $$('[data-ppin]').forEach(b => b.onclick = async () => {
       const pin = await promptDialog('Ny PIN (4–8 siffror)', { type: 'pin', hint: 'Lämna tomt för att ta bort PIN.', pattern: '[0-9]{4,8}', maxlength: 8, okLabel: 'Spara' }); if (pin === null) return;
       try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast('Sparat'); route(); } catch (e) { toastErr(e); }
     });
     $$('[data-pst]').forEach(b => b.onclick = act(() => screenDialog(P2.profiles.find(p => p.id === +b.dataset.pst))));
+    $$('[data-pff]').forEach(b => b.onclick = act(() => familyProfileDialog(P2.profiles.find(p => p.id === +b.dataset.pff), () => route())));
     $$('[data-pdel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort profilen och dess tittarhistorik?', { okLabel: 'Ta bort', danger: true })) { await api('/profiles/' + b.dataset.pdel, { method: 'DELETE' }); route(); } }));
     $('#addprof').onsubmit = async (e) => {
       e.preventDefault();

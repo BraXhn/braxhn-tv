@@ -29,6 +29,7 @@ import * as libfilter from './libfilter.js';
 import * as sublines from './sublines.js';
 import * as prestart from './prestart.js';
 import * as health from './health.js';
+import * as family from './familyfilter.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -41,6 +42,7 @@ import './routes/search.js';
 import './routes/music.js';
 import './routes/ratings.js';
 import './routes/playback.js';
+import './routes/familyfilter.js'; // familjefilter: profilens läge, scener att hoppa över, ordlistor (admin)
 import './routes/social.js';
 import './routes/books.js';
 import './routes/integrations.js';
@@ -118,6 +120,11 @@ sublines.setBusyCheck(() => st.activeTranscodes().length > 0);
 sublines.kick(90000);
 // Hälsokontrollen: rättad språkmärkning läggs på spåren; jobbet väntar medan något spelas eller kodas om
 st.setLangFix(health.langFixFor);
+// Familjefiltret: HLS-strömmar med ff=1 tystar svordomarna med ett volymfilter (apparna, Chromecast)
+st.setMuteHook((it, uid, audio, off) => {
+  const a = audio !== '' ? st.streamsOf(it).find(x => x.type === 'audio' && String(x.index) === String(audio)) : null;
+  return family.modeFor(uid) === 'off' ? [] : family.muteFilters(family.muteIntervals(it, a?.lang), off);
+});
 health.setBusyCheck(() => st.activeTranscodes().length > 0 || act.listActive().length > 0);
 health.kick(+(process.env.HEALTH_START_DELAY ?? 120000));
 

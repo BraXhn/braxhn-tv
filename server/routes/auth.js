@@ -13,6 +13,7 @@ import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
 import * as invites from '../invites.js';
 import { kidsHaveChannels } from '../iptv/channels.js';
 import { vodAllowed } from '../iptv/vod.js';
+import * as family from '../familyfilter.js';
 import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
 import { ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
@@ -368,7 +369,9 @@ route('GET', '/api/quickconnect/:secret', pub, (c) => {
 });
 
 // ---------- Profiler (hushåll) ----------
-const profileOut = (p, rootId) => ({ id: p.id, name: p.name, owner: p.id === rootId, kid: p.max_age != null, maxAge: p.max_age, hasPin: !!p.pin, color: p.color || null });
+// familyFilter = profilens val ('' = standard), familyMode = läget som gäller (familyfilter.js)
+const profileOut = (p, rootId) => ({ id: p.id, name: p.name, owner: p.id === rootId, kid: p.max_age != null, maxAge: p.max_age, hasPin: !!p.pin, color: p.color || null,
+  familyFilter: family.settingOf(p), familyMode: family.modeFor(p) });
 route('GET', '/api/profiles', user, (c) => {
   const me = get('SELECT * FROM users WHERE id=?', c.user.id), root = householdRoot(me);
   const list = all('SELECT * FROM users WHERE id=? OR parent_id=? ORDER BY parent_id IS NOT NULL, name', root, root);
@@ -396,7 +399,8 @@ route('PUT', '/api/profiles/:pid', user, async (c) => {
   const p = get('SELECT * FROM users WHERE id=?', +c.p.pid);
   if (!p || (p.id !== root && p.parent_id !== root)) return fail(c.res, 404, 'Finns inte');
   if (!canManage(c, root)) return fail(c.res, 403, 'Bara huvudkontot kan ändra profiler');
-  const { name, maxAge, pin, color } = await readJson(c.req);
+  const { name, maxAge, pin, color, familyFilter } = await readJson(c.req);
+  if (familyFilter !== undefined && familyFilter !== null && familyFilter !== '' && !family.MODES.includes(familyFilter)) return fail(c.res, 400, 'Ogiltigt läge för familjefiltret');
   if (name && p.id !== root) { try { run('UPDATE users SET name=? WHERE id=?', String(name).trim().slice(0, 40), p.id); } catch { return fail(c.res, 409, 'Namnet är upptaget'); } }
   if (maxAge !== undefined && p.id !== root) run('UPDATE users SET max_age=? WHERE id=?', maxAge === '' || maxAge == null ? null : Math.max(0, Math.min(18, parseInt(maxAge) || 0)), p.id);
   if (pin !== undefined) {
@@ -404,6 +408,7 @@ route('PUT', '/api/profiles/:pid', user, async (c) => {
     run('UPDATE users SET pin=? WHERE id=?', pin ? await hashPw(String(pin)) : null, p.id);
   }
   if (color !== undefined) run('UPDATE users SET color=? WHERE id=?', color ? String(color).slice(0, 20) : null, p.id);
+  if (familyFilter !== undefined) family.setMode(p.id, familyFilter || '');
   audit('profile_updated', { ...ctx(c), detail: p.name });
   send(c.res, 200, { ok: true });
 });

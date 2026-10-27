@@ -460,8 +460,9 @@ function shiftVtt(vtt, offset, ratio = 1) {
   return vtt.replace(/((?:\d+:)?\d{2}:\d{2}\.\d{3}) --> ((?:\d+:)?\d{2}:\d{2}\.\d{3})/g, (_, a, b) => `${fmt(parse(a) * ratio + offset)} --> ${fmt(parse(b) * ratio + offset)}`);
 }
 
-// syncFor(sub) = sparad justering för undertextfilen ({ offset, ratio } eller null, subsync.adjustment) – klientens offset= läggs till efteråt
-export async function serveSubtitle(req, res, it, sid, query, syncFor = null) {
+// syncFor(sub) = sparad justering för undertextfilen ({ offset, ratio } eller null, subsync.adjustment) – klientens offset= läggs till efteråt.
+// mask(vtt, sub) = familjefiltret (svordomar → ***, familyfilter.maskVtt) eller null
+export async function serveSubtitle(req, res, it, sid, query, syncFor = null, mask = null) {
   const sub = subtitlesOf(it).find(s => s.id === sid);
   if (!sub || sub.bitmap) return fail(res, 404, 'Undertext saknas');
   const sync = syncFor ? syncFor(sub) : null, ratio = sync?.ratio || 1;
@@ -475,9 +476,11 @@ export async function serveSubtitle(req, res, it, sid, query, syncFor = null) {
     // Vänta en kort stund tills läsningen nått tittaren (oftast under en sekund) så att första svaret har text
     for (let k = 0; k < 25 && !j.done && !j.reader.covers(pos + 15) && !req.destroyed; k++) await new Promise(r => setTimeout(r, 100));
     if (j.error && !j.cues.length) return fail(res, 500, 'Kunde inte läsa undertexten');
-    return send(res, 200, shiftVtt(cuesToVtt(j.cues), offset, ratio), { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'X-Undertext-Klar': j.done ? '1' : '0' });
+    const out = shiftVtt(cuesToVtt(j.cues), offset, ratio);
+    return send(res, 200, mask ? mask(out, sub) : out, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'X-Undertext-Klar': j.done ? '1' : '0' });
   }
   try { vtt = shiftVtt(await extractVtt(it, sub), offset, ratio); } catch (e) { return fail(res, 500, e.message); }
+  if (mask) vtt = mask(vtt, sub);
   // Apple kräver tidsmappning mot MPEG-TS för undertexter i HLS
   if (query.get('hls') === '1') vtt = vtt.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n');
   send(res, 200, vtt, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=600', 'X-Undertext-Klar': '1' });
@@ -679,8 +682,10 @@ export function decide(it, o) {
   // Nattläge/tydligare dialog: ljudet filtreras och blir AAC stereo, så filen kan inte skickas direkt –
   // bilden kopieras ändå när det går (remux)
   const comfort = !!(aSel && (o.night || o.dialog));
-  if (comfort) am = 'aac';
-  if (!comfort && !burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
+  // Familjefilter (o.mute = tysta intervall ur familyfilter.js): servern tystar ljudet med ett volymfilter – också omkodat ljud
+  const fam = !!(aSel && o.mute?.length);
+  if (comfort || fam) am = 'aac';
+  if (!comfort && !fam && !burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
@@ -706,12 +711,13 @@ export function decide(it, o) {
   }
   if ((mode === 'remux' || mode === 'transcode') && !o.assumeKf) computeKeyframes(it).catch(() => {});
   if (comfort) reasons.push(o.night && o.dialog ? 'nattläge och tydligare dialog' : o.night ? 'nattläge' : 'tydligare dialog');
+  if (fam) reasons.push('familjefiltret tystar svordomar');
   // Utanför hemmet vid omkodning: ljudet blir AAC stereo 128 kbit/s (surround och Dolby tar 0,4–0,6 Mbit/s
   // som behövs bättre till bilden på en mobil uppkoppling)
   let ab = null;
   if (o.remote && mode === 'transcode') { if (am !== 'aac') reasons.push('ljudet blir stereo för mobil uppkoppling'); am = 'aac'; ab = 128; }
   return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null,
-    night: comfort && !!o.night, dialog: comfort && !!o.dialog, vc, vcodec: mode === 'transcode' ? vc : v?.codec || null };
+    night: comfort && !!o.night, dialog: comfort && !!o.dialog, vc, vcodec: mode === 'transcode' ? vc : v?.codec || null, ff: fam };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
 // Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo
@@ -735,6 +741,7 @@ export function hlsParams(d, o, token) {
   if (d.mode === 'transcode' && d.vc && d.vc !== 'h264') p.set('vc', d.vc);
   if (d.night) p.set('night', '1');
   if (d.dialog) p.set('dialog', '1');
+  if (d.ff) p.set('ff', '1');
   // Uppmätt bandbredd (kbit/s): mastern listar steget som passar först (Apple-enheter börjar på första varianten)
   if (d.startBw) p.set('sbw', String(d.startBw));
   if (o.hlsSubs) p.set('hlssubs', '1');
@@ -752,7 +759,7 @@ function readParams(q) {
     pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1',
     ab: [96, 128, 160, 192].includes(+q.get('ab')) ? +q.get('ab') : null,
     startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null,
-    night: q.get('night') === '1', dialog: q.get('dialog') === '1',
+    night: q.get('night') === '1', dialog: q.get('dialog') === '1', ff: q.get('ff') === '1',
     vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264'
   };
 }
@@ -981,7 +988,7 @@ function videoArgs(it, d, fromStart) {
 // - Omkodat ljud: AAC-kodarens inledande ram (1024 prov) får negativ tid. Det fick TS-muxern för första segmentet
 //   att skjuta fram hela segmentet ~0,02 s, så att det överlappade nästa (vid 50 bilder/s en hel bild).
 //   Ljudet läggs i stället 1024 prov senare (ca 0,02 s, omärkbart) i alla körningar.
-const transcodeAudio = (d, it) => d.audio === '' ? [] : d.audioMode === 'copy' ? ['-copypriorss:a', '0'] : ['-af', [...comfortFilters(d, it), 'asetpts=PTS+1024/SR/TB'].join(',')];
+const transcodeAudio = (d, it, pre = []) => d.audio === '' ? [] : d.audioMode === 'copy' ? ['-copypriorss:a', '0'] : ['-af', [...pre, ...comfortFilters(d, it), 'asetpts=PTS+1024/SR/TB'].join(',')];
 
 // Nattläge och tydligare dialog. Filtren ändrar inte tidsstämplarna (limiterns 5 ms fördröjning gör ljudet
 // senare, aldrig tidigare än bilden). Surround (5.1/7.1 i standardordning FL FR FC LFE …) mixas ner med
@@ -1002,7 +1009,12 @@ export function comfortFilters(d, it) {
   f.push('alimiter=limit=0.95');
   return f;
 }
-const comfortArgs = (d, it) => { const f = d.audio !== '' && d.audioMode !== 'copy' ? comfortFilters(d, it) : []; return f.length ? ['-af', f.join(',')] : []; };
+const comfortArgs = (d, it, pre = []) => { const f = d.audio !== '' && d.audioMode !== 'copy' ? [...pre, ...comfortFilters(d, it)] : []; return f.length ? ['-af', f.join(',')] : []; };
+// Familjefiltret (ff=1): volymfilter för körningen som börjar på off s (kopplas av app.js – familyfilter.js muteFilters).
+// Filtrets t räknas från körningens start (-ss), därför flyttas intervallen med off.
+let muteHook = null;
+export function setMuteHook(fn) { muteHook = fn; }
+const familyAf = (s, it, off) => { if (!s.d.ff || !muteHook) return []; try { return muteHook(it, s.user, s.d.audio, off) || []; } catch (e) { console.warn('[familjefilter]', e.message); return []; } };
 
 function audioArgs(d) {
   const map = d.audio !== '' ? ['-map', `0:${parseInt(d.audio)}`] : ['-map', '0:a:0?'];
@@ -1057,7 +1069,7 @@ function startFfmpeg(s, it, n) {
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
-      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
+      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
       '-output_ts_offset', ss.toFixed(6),
       '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
       '-start_number', String(n), '-hls_flags', 'temp_file+independent_segments',
@@ -1072,7 +1084,7 @@ function startFfmpeg(s, it, n) {
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segTimes(segs, n, ss);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
-      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it), '-c:v', 'copy', '-sn', '-dn',
+      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
@@ -1085,7 +1097,7 @@ function startFfmpeg(s, it, n) {
     const times = segTimes(segs, n, t);
     const fm = d.fmt === 'fmp4';
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', src,
-      ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it), ...va.enc, '-sn', '-dn',
+      ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it, familyAf(s, it, n > 0 ? t : 0)), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
       // börjar aldrig före 0 (transcodeAudio), så inget behöver förskjutas.
@@ -1232,7 +1244,7 @@ function ensureCapacity(s, userId) {
 function sessionFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.pid ? '-' + d.pid : ''}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0,
