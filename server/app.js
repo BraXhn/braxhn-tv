@@ -26,6 +26,7 @@ import * as photos from './photos.js';
 import { metadataOf, itemMeta } from './activity.js';
 import * as libfilter from './libfilter.js';
 import * as sublines from './sublines.js';
+import * as prestart from './prestart.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/admin.js';
@@ -72,10 +73,16 @@ hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); 
 hooks.photos = (lib, status) => photos.scanPhotos(lib, status);
 photos.setBusyCheck(() => st.activeTranscodes().length > 0);
 photos.kickThumbs(30000);
+// Snabbstart: startcachen kopplas in i strömningen; nya titlar har just lästs av skanningen (disken är vaken)
+st.fastStart.direct = prestart.serveDirect;
+st.fastStart.input = prestart.inputFor;
+prestart.hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
+prestart.start();
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));
 // Webhooks för nya titlar: en händelse per film/avsnitt – många nya avsnitt av samma serie (säsongspaket) blir en händelse
 hooks.newItems = (ids) => {
   const rows = ids.map(itemMeta).filter(Boolean);
+  prestart.touchIds(ids);
   const byShow = new Map();
   for (const r of rows) {
     if (r.kind !== 'episode') { webhooks.emit('library.new', { metadata: metadataOf(r) }, { visibleTo: (uid) => allowedFor(uid, r) }); continue; }

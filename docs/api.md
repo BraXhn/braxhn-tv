@@ -122,6 +122,19 @@ rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null
 inte som en uppspelning: ingen förstart av omkodningen, ingen rad under Aktivitet och ingen Trakt-start. Webben köar
 nästa avsnitt så på Chromecasten; apparna kan använda det på samma sätt.
 
+## Snabbstart: väck disken i förväg (`POST /api/items/:id/wake`)
+
+Valfritt för apparna. `POST /api/items/:id/wake` (inloggad, samma behörighet som titeln – annars 404) läser några
+kilobyte av filen i bakgrunden så att en sovande arraydisk börjar snurra upp innan användaren trycker Spela. Serie =
+profilens nästa avsnitt. Svar `{ ok: true, woke }` (`woke: false` = nyss väckt, högst en gång per minut och titel,
+eller snabbstarten avstängd). `/api/items/:id` (titelsidan) och `/api/items/:id/playback` väcker redan disken på
+servern, så apparna behöver inte anropa den – den är till för fokus på en Spela-knapp i en lista.
+
+Startcachen (`server/prestart.js`) är osynlig för klienterna: `/api/stream/:id/direct` svarar med samma byte och
+samma rubriker (`Content-Length`, `Content-Range`, `Accept-Ranges`) oavsett om de kommer ur cachen eller filen, och
+HLS-adresserna är oförändrade. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
+`POST /api/ops/prestart/clear` och `POST /api/ops/prestart/fill`.
+
 ## Rättigheter per användare
 
 Administratören kan begränsa ett konto eller en profil (`server/perms.js`). Inga fält har ändrats – apparna märker det

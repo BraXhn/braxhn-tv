@@ -16,6 +16,7 @@ import * as offsite from '../offsite.js';
 import { checkManifest } from '../verify.js';
 import * as ver from '../versions.js';
 import * as diskmon from '../diskmon.js';
+import * as prestart from '../prestart.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import * as mediaImport from '../mediaimport.js';
@@ -412,6 +413,18 @@ route('PUT', '/api/ops', admin, async (c) => {
   send(c.res, 200, { ...opsInfo(), token });
 });
 route('POST', '/api/ops/disk/check', admin, async (c) => send(c.res, 200, await diskmon.check()));
+// Snabbstart (startcachen på cache-poolen): läge, användning, träffgrad; på/av och storlek. Mappen sätts i Docker-mallen.
+route('GET', '/api/ops/prestart', admin, (c) => send(c.res, 200, prestart.info()));
+route('PUT', '/api/ops/prestart', admin, async (c) => {
+  const b = await readJson(c.req);
+  try { prestart.setOptions({ on: b.on, maxGb: b.maxGb }); } catch (e) { return fail(c.res, 400, e.message); }
+  audit('settings_changed', { ...ctx(c), detail: 'snabbstart: ' + Object.keys(b).join(', ') });
+  send(c.res, 200, prestart.info());
+});
+route('POST', '/api/ops/prestart/clear', admin, (c) => { prestart.clear(); audit('settings_changed', { ...ctx(c), detail: 'snabbstart: cachen tömd' }); send(c.res, 200, prestart.info()); });
+// Fyll nu: kopierar planerade titlar direkt, även om diskarna sover (väcker dem)
+// (i bakgrunden – kopieringen kan ta minuter; vyn läser läget igen)
+route('POST', '/api/ops/prestart/fill', admin, (c) => { prestart.tick({ force: true }).catch(() => {}); send(c.res, 200, { ...prestart.info(), running: true }); });
 route('POST', '/api/import/users', admin, async (c) => {
   const b = await readJson(c.req);
   try { send(c.res, 200, await mediaImport.jellyfinUsers({ url: b.url, apiKey: b.apiKey })); } catch (e) { fail(c.res, e.status || 502, e.message); }

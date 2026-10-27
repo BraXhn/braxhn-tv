@@ -26,6 +26,7 @@ import * as playprefs from '../playprefs.js';
 import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
 import * as photos from '../photos.js';
+import * as prestart from '../prestart.js';
 import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
 import { forgetPhotoLibs, insideMedia, MEDIA_ROOT, ctx, listItems, itemsByIds, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
 
@@ -253,6 +254,8 @@ route('GET', '/api/items/:id', user, (c) => {
   const wanted = row.version_of ? row.id : +c.q.get('version') || it.id;
   const file = versions.find(v => v.id === wanted) || it;
   if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
+  // Snabbstart: titelsidan öppnas – väck filmens/avsnittets disk i förväg (serier: nästa avsnitt, nedan)
+  if (it.kind !== 'show') prestart.wake(file);
   // Nya fält (bara när de finns): tagline, logotyp (/api/image/:id/logo, PNG) och originaltitel
   if (it.tagline) out.tagline = it.tagline;
   if (it.logo) out.logo = true;
@@ -271,6 +274,7 @@ route('GET', '/api/items/:id', user, (c) => {
     const sp = seasonPosters(it);
     if (sp.length) out.seasonPosters = sp;
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
+    if (out.next) prestart.wake(get('SELECT * FROM items WHERE id=?', out.next.id));
   } else {
     Object.assign(out, {
       file: path.basename(file.path), size: file.size, container: file.container, vcodec: file.vcodec, acodec: file.acodec,

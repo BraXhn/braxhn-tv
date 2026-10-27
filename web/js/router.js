@@ -92,6 +92,16 @@ function prefetch(e) {
   const a = t.closest('a[href^="#/"]');
   if (a) prefetchView(a.getAttribute('href').slice(2).split('/')[0]);
   if (t.closest('.card, .feat, [data-play], #playfirst')) loadPlayer().catch(() => {});
+  // Snabbstart: pekaren på ett korts Spela-knapp väcker titelns disk i förväg (servern läser lite av filen)
+  const w = t.closest('[data-cplay]');
+  if (w) wakeDisk(+w.dataset.cplay);
+}
+const woken = new Map();
+function wakeDisk(id) {
+  if (!id || Date.now() - (woken.get(id) || 0) < 60e3) return;
+  woken.set(id, Date.now());
+  // Vanlig fetch (inte api()): en skrivning via api() gör startens förhämtade svar ogiltiga
+  fetch(`/api/items/${id}/wake`, { method: 'POST', keepalive: true }).catch(() => {});
 }
 document.addEventListener('pointerover', prefetch, { passive: true });
 document.addEventListener('focusin', prefetch);

@@ -23,5 +23,6 @@ services:
       - /tmp/braxhn-tv-transcode:/transcode
       - /mnt/user/media/Inspelningar:/recordings   # live-TV-inspelningar (valfritt)
       # - /mnt/disks/backup/braxhn-tv:/backup      # extern säkerhetskopia (valfritt)
+      # - /mnt/cache/appdata/braxhn-tv/prestart:/prestart  # snabbstart: början av filmer på SSD (valfritt)
     # devices:
     #   - /dev/dri:/dev/dri   # för HWACCEL=vaapi/qsv

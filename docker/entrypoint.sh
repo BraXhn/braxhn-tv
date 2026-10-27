@@ -4,8 +4,8 @@ PUID="${PUID:-99}"; PGID="${PGID:-100}"
 mkdir -p "$CONFIG_DIR" "$TRANSCODE_DIR"
 # Bara filer med fel ägare (chown -R på hela /config tar minuter med många bilder på /mnt/user)
 find "$CONFIG_DIR" "$TRANSCODE_DIR" \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown "$PUID:$PGID" {} + 2>/dev/null || true
-# Inspelningar och extern säkerhetskopia (bara översta mappen – kan innehålla mycket)
-for d in /recordings /backup; do [ -d "$d" ] && chown "$PUID:$PGID" "$d" 2>/dev/null || true; done
+# Inspelningar, extern säkerhetskopia och startcachen (bara översta mappen – kan innehålla mycket)
+for d in /recordings /backup /prestart; do [ -d "$d" ] && chown "$PUID:$PGID" "$d" 2>/dev/null || true; done
 
 # Ge åtkomst till GPU-enheter (/dev/dri) för hårdvaruomkodning
 GROUPS_ARG="--clear-groups"
