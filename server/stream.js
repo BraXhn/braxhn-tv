@@ -273,17 +273,22 @@ export function sweepLiveSubs(now = Date.now()) {
   for (const [k, j] of liveSubs) if (!j.done && now - j.last > 30 * 60e3) { j.reader.close(); j.done = true; liveSubs.delete(k); }
 }
 setInterval(sweepLiveSubs, 60e3).unref();
-function shiftVtt(vtt, offset) {
-  if (!offset) return vtt;
+/** Undertexten som WebVTT (extraheras och cachas en gång per fil) – används av den automatiska synken (subsync.js) */
+export const subtitleVtt = (it, sub) => extractVtt(it, sub);
+// t' = t · ratio + offset (ratio ≠ 1 när undertexten är gjord för en annan bildfrekvens, se subsync.js)
+function shiftVtt(vtt, offset, ratio = 1) {
+  if (!offset && ratio === 1) return vtt;
   const fmt = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`; };
   const parse = (x) => x.split(':').reduce((a, v) => a * 60 + parseFloat(v), 0);
-  return vtt.replace(/((?:\d+:)?\d{2}:\d{2}\.\d{3}) --> ((?:\d+:)?\d{2}:\d{2}\.\d{3})/g, (_, a, b) => `${fmt(parse(a) + offset)} --> ${fmt(parse(b) + offset)}`);
+  return vtt.replace(/((?:\d+:)?\d{2}:\d{2}\.\d{3}) --> ((?:\d+:)?\d{2}:\d{2}\.\d{3})/g, (_, a, b) => `${fmt(parse(a) * ratio + offset)} --> ${fmt(parse(b) * ratio + offset)}`);
 }
 
-export async function serveSubtitle(req, res, it, sid, query) {
+// syncFor(sub) = sparad justering för undertextfilen ({ offset, ratio } eller null, subsync.adjustment) – klientens offset= läggs till efteråt
+export async function serveSubtitle(req, res, it, sid, query, syncFor = null) {
   const sub = subtitlesOf(it).find(s => s.id === sid);
   if (!sub || sub.bitmap) return fail(res, 404, 'Undertext saknas');
-  const offset = Math.max(-600, Math.min(600, parseFloat(query.get('offset') || '0') || 0));
+  const sync = syncFor ? syncFor(sub) : null, ratio = sync?.ratio || 1;
+  const offset = Math.max(-600, Math.min(600, parseFloat(query.get('offset') || '0') || 0)) + (sync?.offset || 0);
   let vtt;
   // Webbspelaren (live=1): ett inbäddat spår som inte lästs än läses där tittaren är (pos) och skickas i
   // omgångar – annars syns inget förrän hela filen lästs, vilket tar minuter för en stor film
@@ -293,9 +298,9 @@ export async function serveSubtitle(req, res, it, sid, query) {
     // Vänta en kort stund tills läsningen nått tittaren (oftast under en sekund) så att första svaret har text
     for (let k = 0; k < 25 && !j.done && !j.reader.covers(pos + 15) && !req.destroyed; k++) await new Promise(r => setTimeout(r, 100));
     if (j.error && !j.cues.length) return fail(res, 500, 'Kunde inte läsa undertexten');
-    return send(res, 200, shiftVtt(cuesToVtt(j.cues), offset), { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'X-Undertext-Klar': j.done ? '1' : '0' });
+    return send(res, 200, shiftVtt(cuesToVtt(j.cues), offset, ratio), { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'X-Undertext-Klar': j.done ? '1' : '0' });
   }
-  try { vtt = shiftVtt(await extractVtt(it, sub), offset); } catch (e) { return fail(res, 500, e.message); }
+  try { vtt = shiftVtt(await extractVtt(it, sub), offset, ratio); } catch (e) { return fail(res, 500, e.message); }
   // Apple kräver tidsmappning mot MPEG-TS för undertexter i HLS
   if (query.get('hls') === '1') vtt = vtt.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n');
   send(res, 200, vtt, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'private, max-age=600', 'X-Undertext-Klar': '1' });

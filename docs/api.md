@@ -53,7 +53,7 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 ```json
 { "audioLangs": ["sv", "en", "orig"], "subMode": "foreign", "subLangs": ["sv"], "sdh": "avoid",
   "skipIntro": true, "skipRecap": false, "skipCredits": false, "autoNext": true, "nextCountdown": 8,
-  "qualityHome": "auto", "qualityRemote": "720", "saved": true, "remoteCap": "1080" }
+  "qualityHome": "auto", "qualityRemote": "720", "autoSync": true, "saved": true, "remoteCap": "1080" }
 ```
 
 - Språk är ISO 639-1 (`sv`, `en`); trebokstavskoder (`swe`) tas emot och skrivs om. `orig` i `audioLangs` = filens
@@ -74,6 +74,24 @@ en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna bör
 Android-appen (från 0.6.0) skickar `cinema=1` bara när `GET /api/me/cinema` visar att bio-läget är på (`trailers > 0`,
 eller `preroll` och `prerollAvailable`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
 om en trailer inte går att spela. Den skickar också `night=1`/`dialog=1` när nattläge eller tydligare dialog är påslaget.
+
+## Synkade undertexter: `/api/items/:id/subs/:sid/sync`
+
+Externa och nedladdade undertextfiler kan synkas mot ljudet (`server/subsync.js`). Servern lägger själv på sparad
+justering när undertexten hämtas (`/api/stream/:id/subs/:sid.vtt`, även HLS-spellistornas undertexter), så apparna
+behöver inte göra något. Svaret cachas upp till 10 min (`Cache-Control: private, max-age=600`).
+
+- Nya fält i `subtitles` i `/api/items/:id/playback`: `source` (`embedded`, `external`, `downloaded`), `syncable` (bool)
+  och `sync` (`{ offset, ratio }`, bara när en justering är sparad – redan inräknad i `url`). Nytt fält `subAutoSync`
+  (bool, kontots val `autoSync` i `/api/me/playback-prefs`, standard `true`).
+- `GET` ger läget: `{ syncable, offset, ratio, auto: { offset, ratio, score } | null, job: null | { state, progress,
+  error, result, previous } }`. Tiderna blir `t · ratio + offset` (sekunder). `state`: `queued`, `running`, `done`,
+  `unsure` (ingen säker förskjutning – inget ändrat) eller `error`. `result`: `{ offset, ratio, fps: { from, to } | null,
+  score, confident }`; `previous` = värdena före synken (för Ångra).
+- `POST` (`{ audio?: ljudspårets index, force?: bool }`) startar en synk (en åt gången på servern). Ett sparat
+  automatiskt resultat för samma fil och ljudspår används direkt (`result.cached`) om inte `force` anges.
+- `PUT` (`{ offset, ratio? }`) sparar en manuell justering (offset ±600 s, ratio 0,9–1,1, annars 1).
+- Bara undertextfiler kan synkas: inbäddade spår ger **400**. Gäller alla konton som får se titeln.
 
 ## Kö på Chromecast: `queue=1`
 

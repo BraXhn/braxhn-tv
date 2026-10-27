@@ -66,6 +66,8 @@ export async function renderPlaybackPrefs(box) {
       <div><label for="ppsdh">Undertexter för hörselskadade (SDH)</label>${sel('ppsdh', [['avoid', 'Undvik SDH'], ['prefer', 'Föredra SDH']], p.sdh)}</div></div>
     <fieldset class="pplangs"><legend>Undertextspråk, i ordning</legend><div class="row">${langRow('pps', N_SUB, p.subLangs, false)}</div></fieldset>
     <p class="muted small">Tvingade undertexter visar bara repliker på andra språk (t.ex. utomjordingar). "Mina språk" är både ljud- och undertextspråken ovan.</p>
+    <div class="ppchk"><label class="ccheck"><input type="checkbox" id="ppsync" ${p.autoSync !== false ? 'checked' : ''}> Synka nedladdade undertexter mot ljudet automatiskt</label></div>
+    <p class="muted small">Servern jämför replikerna med talet i filmen och flyttar undertexten (även fel bildfrekvens, t.ex. 25 mot 23,976). Det går också att synka eller finjustera under ⚙ i spelaren.</p>
     <h3 class="pph">Serier</h3>
     <div class="ppchk">
       <label class="ccheck"><input type="checkbox" id="ppintro" ${p.skipIntro ? 'checked' : ''}> Hoppa över intro automatiskt</label>
@@ -84,7 +86,8 @@ export async function renderPlaybackPrefs(box) {
     const body = {
       audioLangs: langs('ppa', N_AUDIO), subLangs: langs('pps', N_SUB), subMode: $('#ppmode', box).value, sdh: $('#ppsdh', box).value,
       skipIntro: $('#ppintro', box).checked, skipRecap: $('#pprecap', box).checked, skipCredits: $('#ppcred', box).checked,
-      autoNext: $('#ppnext', box).checked, nextCountdown: +$('#ppcd', box).value, qualityHome: $('#ppqh', box).value, qualityRemote: $('#ppqr', box).value
+      autoNext: $('#ppnext', box).checked, nextCountdown: +$('#ppcd', box).value, qualityHome: $('#ppqh', box).value, qualityRemote: $('#ppqr', box).value,
+      autoSync: $('#ppsync', box).checked
     };
     await api('/me/playback-prefs', { method: 'PUT', body, bg: true });
     toast('Sparat');

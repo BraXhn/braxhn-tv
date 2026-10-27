@@ -2,6 +2,7 @@
 import { $, $$, esc, toast } from '../core.js';
 import { P } from './video.js';
 import { subScale, subStyle } from './comfort.js';
+import { need } from '../lazy.js';
 
 export function setSubs() {
   if (!P) return;
@@ -26,6 +27,10 @@ export function setSubs() {
   pgsShow(img);
   const sub = P.pb?.subtitles.find(s => s.id === P.sub) || img;
   $('#poff', el).hidden = !sub;
+  // Undertextfiler kan synkas mot ljudet (player/subsync.js, laddas först när en sådan väljs)
+  const sy = $('#psync', el);
+  if (sy) { if (sub?.syncable && !img) need('player/subsync.js').then(m => m.showSync(P, sub)).catch(() => {});
+    else { sy.hidden = true; if (P.sync) { clearTimeout(P.sync.timer); P.sync = null; } } }
   if (!sub && !s2) return;
   $('#poffv', el).textContent = (P.offset > 0 ? '+' : '') + P.offset.toFixed(1).replace('.', ',') + ' s';
   if (!sub || img) return;
@@ -69,7 +74,8 @@ function textShow(sub) {
   };
   g.fs = () => { if (g.track) g.track.mode = native() ? 'showing' : 'hidden'; render(); };
   v.addEventListener('webkitbeginfullscreen', g.fs); v.addEventListener('webkitendfullscreen', g.fs);
-  const base = sub.url + (sub.url.includes('?') ? '&' : '?') + (cur.offset ? 'offset=' + cur.offset + '&' : '') + 'live=1';
+  // sv = ny synk sparad (servern lägger på den) – en annan adress än den webbläsaren cachat
+  const base = sub.url + (sub.url.includes('?') ? '&' : '?') + (cur.offset ? 'offset=' + cur.offset + '&' : '') + (sub.sv ? 'sv=' + sub.sv + '&' : '') + 'live=1';
   const load = async () => {
     clearTimeout(g.timer);
     let text, done;
