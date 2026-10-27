@@ -8,9 +8,10 @@ import * as books from '../audiobooks.js';
 import * as pods from '../podcasts.js';
 import * as live from '../livetv.js';
 import { parseQuery, searchItemIds } from '../search.js';
+import * as sublines from '../sublines.js';
 import { searchKey, rowScore } from '../searchkey.js';
 import { route, user } from '../http/router.js';
-import { ageFilter, itemsByIds, allowUnrated } from '../http/context.js';
+import { ageFilter, itemsByIds, allowUnrated, allowedFor } from '../http/context.js';
 
 const MAX = 60;
 const queryOf = (c) => String(c.q.get('q') || '').slice(0, 100);
@@ -37,6 +38,20 @@ route('GET', '/api/search/people', user, (c) => {
   const q = queryOf(c).trim();
   if (q.length < 2) return send(c.res, 200, []);
   send(c.res, 200, people.searchPeople(q, ageFilter(c.user.id), 20));
+});
+
+/**
+ * Repliksökning (server/sublines.js): ?q= och ?limit= (1–60, standard 30). Bara titlar som profilen får se (bibliotek och
+ * åldersgräns i SQL och allowedFor per träff). Tiden t är justerad med undertextsynken. status = indexets läge
+ * (antal titlar och repliker bara för administratören).
+ */
+route('GET', '/api/search/lines', user, (c) => {
+  const q = queryOf(c).trim(), uid = c.user.id;
+  const lim = Math.min(60, Math.max(1, parseInt(c.q.get('limit')) || 30));
+  const lines = q ? sublines.search(q, { age: ageFilter(uid), allowed: (r) => allowedFor(uid, r), limit: lim }) : [];
+  // Antalet indexerade titlar gäller hela servern – bara administratören får siffrorna
+  const st = sublines.status();
+  send(c.res, 200, { q, lines, status: c.user.is_admin ? st : { enabled: st.enabled, indexing: !!st.indexing } });
 });
 
 // Grupperna i svaret, i standardordning (order i svaret sorterar dem efter bästa träff)

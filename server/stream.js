@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
-import { send, fail, MIME, streamFile, writeAtomic } from './util.js';
+import { send, fail, MIME, streamFile, writeAtomic, lowPriority } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
 import * as jobs from './jobs.js';
@@ -208,12 +208,14 @@ async function subSlot(fn) {
 const subRunning = new Map();
 const subKey = (it, sub) => `${it.id}-${it.mtime}-${sub.id}${sub.file ? '-' + (fs.statSync(sub.file).mtimeMs | 0) : ''}`;
 const subCacheFile = (it, sub) => path.join(CACHE, 'subs', subKey(it, sub) + '.vtt');
-function extractVtt(it, sub) {
+// low: bakgrundsjobb (repliksökningen, sublines.js) – lägsta prioritet, tar ingen av de två platserna som
+// uppspelningen använder, längre tidsgräns och fel i stället för en avkortad undertext
+function extractVtt(it, sub, { low = false } = {}) {
   const key = subKey(it, sub);
   const file = subCacheFile(it, sub);
   if (fs.existsSync(file)) return fs.promises.readFile(file, 'utf8');
   if (subRunning.has(key)) return subRunning.get(key);
-  const pr = subSlot(() => new Promise((ok, no) => {
+  const work = () => new Promise((ok, no) => {
     const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN];
     if (sub.file) {
       const fmt = { '.srt': 'srt', '.ass': 'ass', '.ssa': 'ass', '.vtt': 'webvtt' }[path.extname(sub.file).toLowerCase()];
@@ -221,19 +223,21 @@ function extractVtt(it, sub) {
     } else args.push('-i', it.path, '-map', '0:' + sub.id.slice(1));
     args.push('-f', 'webvtt', 'pipe:1');
     const p = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    if (low) lowPriority(p);
     const chunks = []; let size = 0;
     p.stdout.on('data', c => { size += c.length; if (size > 20 << 20) p.kill('SIGKILL'); else chunks.push(c); });
-    const timer = setTimeout(() => p.kill('SIGKILL'), 10 * 60e3);
+    const timer = setTimeout(() => p.kill('SIGKILL'), (low ? 60 : 10) * 60e3);
     p.on('error', (e) => { clearTimeout(timer); no(new Error('Kunde inte starta ffmpeg: ' + e.message)); });
     p.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0 && !chunks.length) return no(new Error('Kunde inte läsa undertexten'));
+      if (code !== 0 && (low || !chunks.length)) return no(new Error('Kunde inte läsa undertexten'));
       const vtt = Buffer.concat(chunks).toString('utf8');
       // Avbruten eller misslyckad körning: skicka det som finns men cacha inte en avkortad fil
       if (code === 0) try { fs.mkdirSync(path.dirname(file), { recursive: true }); writeAtomic(file, vtt); } catch {}
       ok(vtt);
     });
-  })).finally(() => subRunning.delete(key));
+  });
+  const pr = (low ? work() : subSlot(work)).finally(() => subRunning.delete(key));
   subRunning.set(key, pr);
   return pr;
 }
@@ -275,8 +279,9 @@ export function sweepLiveSubs(now = Date.now()) {
   for (const [k, j] of liveSubs) if (!j.done && now - j.last > 30 * 60e3) { j.reader.close(); j.done = true; liveSubs.delete(k); }
 }
 setInterval(sweepLiveSubs, 60e3).unref();
-/** Undertexten som WebVTT (extraheras och cachas en gång per fil) – används av den automatiska synken (subsync.js) */
-export const subtitleVtt = (it, sub) => extractVtt(it, sub);
+/** Undertexten som WebVTT (extraheras och cachas en gång per fil) – används av den automatiska synken (subsync.js) och
+ *  repliksökningen (sublines.js, { low: true }) */
+export const subtitleVtt = (it, sub, opts) => extractVtt(it, sub, opts);
 // t' = t · ratio + offset (ratio ≠ 1 när undertexten är gjord för en annan bildfrekvens, se subsync.js)
 function shiftVtt(vtt, offset, ratio = 1) {
   if (!offset && ratio === 1) return vtt;

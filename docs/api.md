@@ -104,6 +104,18 @@ behöver inte göra något. Svaret cachas upp till 10 min (`Cache-Control: priva
 - `PUT` (`{ offset, ratio? }`) sparar en manuell justering (offset ±600 s, ratio 0,9–1,1, annars 1).
 - Bara undertextfiler kan synkas: inbäddade spår ger **400**. Gäller alla konton som får se titeln.
 
+## Repliksökning: `/api/search/lines`
+
+`GET /api/search/lines?q=<replik>&limit=<1–60, standard 30>` (inloggad, även apptoken) söker i titlarnas
+textundertexter (`server/sublines.js`). Orden måste stå i följd; sista ordet får vara början av ett ord; versaler och
+skiljetecken spelar ingen roll, å/ä/ö är egna bokstäver. Bara titlar som profilen får se (bibliotek och åldersgräns).
+Svar: `{ q, lines: [...], status: { enabled, indexing, fts?, titles?, lines? } }` (antalen bara för administratören).
+Varje replik: `id` (filmen eller avsnittet – spela med `/api/items/:id/playback?start=`), `version` (bara när repliken
+kommer från en annan filmversion), `kind`, `title` (filmen/serien), `year`, för avsnitt `episodeTitle`, `season`,
+`episode`, `show`; `t`/`end` (sekunder, med undertextsynken inräknad), `line`, `marks` (`[[start, slut]]`, teckenindex
+i `line`), `before`/`after` (repliken före/efter eller `null`), `lang`, `label` och `thumb` (`{ url, col, row, cols,
+rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null`). Apparna använder den inte än.
+
 ## Kö på Chromecast: `queue=1`
 
 `/api/items/:id/playback?cast=1&queue=1` ger samma svar som vanligt (med en egen mediatoken för titeln) men räknas

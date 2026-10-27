@@ -667,7 +667,7 @@ button[aria-pressed=true].iconbtn{color:var(--accent)}
 /* ---- Flikar (ui/tabs.js) ---- */
 .tabs button.tabbtn,.tabs a.tabbtn{background:transparent;display:inline-flex;align-items:center}
 .tabs .tabbtn.on,.tabs .tabbtn[aria-selected=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
-.tabs .tabbtn:hover{color:var(--text)}
+.tabs .tabbtn:not(.on):hover{color:var(--text)}
 
 /* ---- Kort med knappar (ui/cards.js, ui/cardmenu.js): ▶ i mitten, ✎ nere till vänster, ⋮ nere till höger ---- */
 .card{position:relative}
@@ -836,6 +836,18 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
 .srow:hover,.srow:focus-visible{background:var(--bg3)}
 .srow b{overflow-wrap:anywhere}
 .srow.chrow{flex-direction:row;align-items:center;gap:var(--sp-2);width:auto;background:var(--bg2)}
+/* Repliker i sökningen (views/searchlines.js): förhandsbild ur spolningsbilderna, sammanhang och markerad träff */
+.srow.lrow{flex-direction:row;align-items:flex-start;gap:var(--sp-3)}
+.lthumb{flex:0 0 auto;width:160px;aspect-ratio:16/9;border-radius:var(--r-sm);background:var(--bg3) no-repeat;overflow:hidden}
+.lthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.lbody{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.lhead{display:flex;gap:var(--sp-2);align-items:baseline;flex-wrap:wrap}
+.ltime{color:var(--accent);font-variant-numeric:tabular-nums}
+.lctx{color:var(--dim);font-size:.9em;overflow-wrap:anywhere}
+.lline{overflow-wrap:anywhere}
+.lline mark{background:none;color:var(--accent);font-weight:600}
+.lsrc{color:var(--dim);font-size:12px}
+@media (max-width:600px){.lthumb{width:96px}}
 /* Mitt konto: förhandsvisning av undertextens utseende */
 .subprev{position:relative;height:150px;border-radius:10px;overflow:hidden;margin:10px 0;background:linear-gradient(160deg,#5a7da8,#c9a26b 55%,#f2efe6)}
 .substyle>label{display:flex;flex-direction:column;gap:4px;font-size:13px;min-width:150px}

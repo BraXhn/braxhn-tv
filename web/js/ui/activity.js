@@ -7,7 +7,7 @@ import { openPopover } from './menu.js';
 import { emptyState } from './states.js';
 
 const KIND = { scan: 'Skanning', analysis: 'Analys', transcode: 'Omkodning', remux: 'Remux', keyframes: 'Nyckelbilder',
-  subtitle: 'Undertexter', record: 'Inspelning', download: 'Nedladdning' };
+  subtitle: 'Undertexter', subindex: 'Repliker', record: 'Inspelning', download: 'Nedladdning' };
 const S = { on: false, jobs: [], timer: null, busy: false, pop: null };
 const R = 11, C = 2 * Math.PI * R;
 
