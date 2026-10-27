@@ -257,6 +257,10 @@ t('bio-läge: inte vid Fortsätt titta eller för avsnitt', async () => {
   assert.ok(!(await page.$('.cinemabox')));
   await page.click('#cstop');
   await page.goto(B + '/#/item/' + S.e2);
+  // Bytet av adress är en navigering inom sidan: vänta tills avsnittets sida är ritad, så att klicket inte träffar
+  // filmens gamla knappar (gav ibland "Väntade förgäves på: avsnittets uppspelning" när datorn var hårt belastad).
+  // Filmens sida har "Fortsätt från 0:32" (data-play="32") – avsnittets sida har det inte
+  await page.waitForFunction(() => !document.querySelector('[data-play="32"]') && !!document.querySelector('[data-play="0"]'), null, { timeout: 60000 });
   await page.click('[data-play="0"]');
   await until(() => reqs.some(r => r.url.includes(`/api/items/${S.e2}/playback`)), 'avsnittets uppspelning');
   await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 });
