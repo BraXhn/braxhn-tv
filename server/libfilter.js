@@ -11,7 +11,7 @@
 // och undertextfilerna bredvid filen till kolumnerna items.f_* (f_v = NULL: räknas om; utlösaren i db.js nollställer
 // när streams/path ändras, efter varje skanning räknas allt om i bakgrunden).
 import { get, all, run, tx, now } from './db.js';
-import { ageFilter, PROG, FROM, MAIN_ONLY, listItems } from './http/context.js';
+import { ageFilter, PROG, FROM, MAIN_ONLY, MY_RATING, listItems } from './http/context.js';
 import { streamsOf, subtitlesOf } from './stream.js';
 import { langKey } from './playprefs.js';
 
@@ -84,7 +84,8 @@ const AUDIO = ['stereo', 'surround', 'atmos'];
 const WATCH = ['unwatched', 'watched', 'inprogress'];
 const STATUS = ['ongoing', 'ended'];
 const COLL = ['yes', 'no'];
-export const SORT_KEYS = ['title', 'year', 'rating', 'added', 'lastwatched', 'duration', 'random', 'date'];
+const RATED = ['yes', 'no']; // eget betyg finns/saknas
+export const SORT_KEYS = ['title', 'year', 'rating', 'added', 'lastwatched', 'duration', 'random', 'date', 'myrating'];
 const W = (x) => `COALESCE(${x}.width,0)`, H = (x) => `COALESCE(${x}.height,0)`;
 const is4k = (x) => `(${W(x)} >= 3200 OR ${H(x)} >= 1600)`, is1080 = (x) => `(${W(x)} >= 1800 OR ${H(x)} >= 900)`, is720 = (x) => `(${W(x)} >= 1200 OR ${H(x)} >= 650)`;
 const RES_SQL = {
@@ -125,6 +126,9 @@ export function parse(q, type = 'movie') {
   if (y1 != null) f.yearMax = y1;
   if (f.yearMin != null && f.yearMax != null && f.yearMin > f.yearMax) [f.yearMin, f.yearMax] = [f.yearMax, f.yearMin];
   const r = dec(g('ratingMin'), 0, 10); if (r) f.ratingMin = r;
+  // Eget betyg (stjärnor 1–5 i halva steg, ratings.js) och om titeln har ett eget betyg alls
+  const mr = dec(g('myRatingMin'), 1, 5); if (mr && Number.isInteger(mr * 2)) f.myRatingMin = mr;
+  if (RATED.includes(g('rated'))) f.rated = g('rated');
   const d0 = int(g('durMin'), 1, 1000), d1 = int(g('durMax'), 1, 1000);
   if (d0 != null) f.durMin = d0;
   if (d1 != null) f.durMax = d1;
@@ -149,7 +153,7 @@ export function parse(q, type = 'movie') {
   return f;
 }
 // Fast ordning i adressen (samma filter ger samma adress)
-const KEYS = ['genre', 'genreAll', 'yearMin', 'yearMax', 'ratingMin', 'durMin', 'durMax', 'res', 'hdr', 'audio', 'alang', 'slang', 'filter',
+const KEYS = ['genre', 'genreAll', 'yearMin', 'yearMax', 'ratingMin', 'myRatingMin', 'rated', 'durMin', 'durMax', 'res', 'hdr', 'audio', 'alang', 'slang', 'filter',
   'addedDays', 'ageMax', 'coll', 'status', 'seasonsMin', 'seasonsMax', 'sort', 'order', 'seed'];
 export function toQuery(f) {
   const p = new URLSearchParams();
@@ -191,6 +195,8 @@ export function build(f, type = 'movie') {
   if (f.yearMin != null) { where.push('i.year >= ?'); params.push(f.yearMin); }
   if (f.yearMax != null) { where.push('i.year <= ?'); params.push(f.yearMax); }
   if (f.ratingMin) { where.push('i.rating >= ?'); params.push(f.ratingMin); }
+  if (f.myRatingMin) { where.push(`${MY_RATING} >= ?`); params.push(f.myRatingMin * 2); }
+  if (f.rated) where.push(`${MY_RATING} IS ${f.rated === 'yes' ? 'NOT ' : ''}NULL`);
   if (f.durMin != null) { where.push(`${DUR[t]} >= ?`); params.push(f.durMin * 60); }
   if (f.durMax != null) { where.push(`${DUR[t]} <= ?`); params.push(f.durMax * 60); }
   if (f.addedDays) { where.push(`${ADDED[t]} >= ?`); params.push(now() - f.addedDays * DAY); }
@@ -242,7 +248,8 @@ const SORT_SQL = {
   added: { expr: (t) => ADDED[t], dir: 'desc' },
   lastwatched: { expr: (t) => LAST_WATCHED[t], dir: 'desc' },
   duration: { expr: (t) => DUR[t], dir: 'desc' },
-  date: { expr: () => 'i.taken', dir: 'desc' }
+  date: { expr: () => 'i.taken', dir: 'desc' },
+  myrating: { expr: () => MY_RATING, dir: 'desc' }
 };
 /** ORDER BY för filtrets sortering (fast SQL; slumpens frö är ett kontrollerat heltal) */
 export function orderBy(f, type = 'movie') {

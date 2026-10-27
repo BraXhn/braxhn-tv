@@ -10,7 +10,7 @@ import * as localMeta from './localmeta.js';
 import { AGE } from './nfo.js';
 import * as os from './opensubtitles.js';
 import * as people from './people.js';
-import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
+import { extraOf, isLegacy, syncExtras, syncThemes, THEME, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
 import { findMatch, similarity, GOOD } from './match.js';
 import { parseMovie, parseEpisode, discRoot, idsIn, clean } from './parse.js';
@@ -117,7 +117,8 @@ export async function probe(file) {
   }
 }
 
-const SKIP_DIR = /^(sample|extras|featurettes|@eaDir)$/i;
+// Extras/, Featurettes/ m.fl. läses in som extramaterial (trailers.js extraOf) – bara provklipp och Synologys mappar hoppas över
+const SKIP_DIR = /^(sample|@eaDir)$/i;
 const isVideo = (name) => VIDEO.has(path.extname(name).toLowerCase()) && !/\bsample\b/i.test(name);
 
 // Serien matchas på namnet från mappen/filen (src_name) – TMDB kan ha bytt titeln. Årtalet ingår i nyckeln
@@ -251,14 +252,23 @@ async function scanLibrary(lib) {
   const home = lib.type === 'movie' && !!lib.home_video;
   markGuessedEpisodes(lib);
   // Alla bibliotekets mappar; NFO-filer och bilder bredvid videofilerna samlas in samtidigt (lokal metadata)
-  const list = await listRoots(roots, (n) => isVideo(n) || localMeta.isSide(n), (n) => SKIP_DIR.test(n));
+  // Temamusik (theme.mp3/theme.m4a) i titelns mapp samlas också in
+  const list = await listRoots(roots, (n) => isVideo(n) || localMeta.isSide(n) || THEME.test(n), (n) => SKIP_DIR.test(n));
   const { failed } = list;
-  const found = [], sideFiles = [];
-  for (const f of list.files) (isVideo(path.basename(f)) ? found : sideFiles).push(f);
-  // Trailers ("Film (2020)-trailer.mkv", mappen trailers/) blir inte egna titlar – de kopplas till titeln efteråt
-  const trailerFiles = found.filter(isTrailerFile);
+  const found = [], sideFiles = [], themeFiles = [];
+  // Extramaterial (trailers, featurettes, borttagna scener …) blir inte egna titlar – de kopplas till titeln efteråt.
+  // Lokal metadata (NFO, bilder) i extramaterialets mappar hör inte till någon titel.
+  const legacy = isLegacy(lib), extraKind = (f) => extraOf(relOf(roots, f).split(path.sep), { legacy });
+  for (const f of list.files) {
+    const n = path.basename(f), x = extraKind(f);
+    if (THEME.test(n)) themeFiles.push(f);
+    else if (isVideo(n)) found.push(f);
+    else if (!x) sideFiles.push(f);
+  }
+  const extraFiles = [], titleFiles = [];
+  for (const f of found) { const x = extraKind(f); if (x === 'skip') continue; (x ? extraFiles : titleFiles).push(f); }
   // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
-  const files = await discMainOnly(found.filter(f => !isTrailerFile(f)));
+  const files = await discMainOnly(titleFiles);
   // Onumrerade avsnitt numreras i namnordning per mapp, efter mappens högsta riktiga avsnittsnummer.
   // Filer som redan finns behåller sitt nummer – annars får två avsnitt samma nummer (eller byter nummer)
   // när en ny fil läggs till mitt i namnordningen.
@@ -384,7 +394,10 @@ async function scanLibrary(lib) {
   await localMeta.syncLocal(lib, { roots, side: localMeta.sideIndex(sideFiles), dirs: list.dirs, touched, home, fileTitle, movieDir: (f) => discRoot(f) || path.dirname(f) })
     .catch(e => console.warn('[scan] lokal metadata:', e.message));
   // Efter grupperingen: en trailer i en mapp med flera versioner hör till filmen
-  await syncTrailers(lib, trailerFiles, failed, (folder) => showIdOfFolder(lib, folder)).catch(e => console.warn('[scan] trailers:', e.message));
+  const showIdFor = (folder) => showIdOfFolder(lib, folder);
+  await syncExtras(lib, extraFiles, { list, found, showIdFor, allowMass: getSetting('scan_allow_mass_delete', '0') === '1', warn: scanWarning })
+    .catch(e => console.warn('[scan] extramaterial:', e.message));
+  try { syncThemes(lib, themeFiles, { failed, showIdFor }); } catch (e) { console.warn('[scan] temamusik:', e.message); }
   await metadata(lib);
   // Nyss matchade filer kan vara samma TMDB-film som en annan fil (t.ex. svensk och engelsk titel) – slå ihop dem
   if (!home) groupVersions(lib, parseMovie);
@@ -415,7 +428,7 @@ async function analyzeLibrary(lib, st) {
   if (lib.type === 'show' && hooks.markers) { st.phase = 'Letar intro och eftertexter'; await hooks.markers(lib, st); }
   if (hooks.trickplay) await hooks.trickplay(lib, st);
 }
-/** Serien som en mapp i seriebiblioteket hör till (för trailers i seriens mapp) */
+/** Serien som en mapp i seriebiblioteket hör till (för extramaterial och temamusik i seriens mapp) */
 function showIdOfFolder(lib, folder) {
   const y = folder.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
   const key = y ? showKey(clean(y[1]), +y[2]) : showKey(clean(folder), null);

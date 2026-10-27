@@ -1,6 +1,6 @@
-// Vyer: film-, avsnitts- och seriesidor med trailers, metadataverktyg, undertextsökning och följ-knapp
+// Vyer: film-, avsnitts- och seriesidor med trailers, extramaterial, eget betyg, temamusik, metadataverktyg, undertextsökning och följ-knapp
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { curPlayer, liveOpen, loadPlayer, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
@@ -8,8 +8,10 @@ import { remoteButton } from '../ui/buttons.js';
 import { art, card, castShelf, fmtTaken, shelf } from '../ui/cards.js';
 import { addToCollection } from '../ui/collections.js';
 import { openDialog } from '../ui/dialog.js';
+import { bindStars, keyValue, saveRating, starsHtml } from '../ui/rating.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
+import { playTheme } from '../ui/thememusic.js';
 import { missingBox } from './calendar.js';
 
 // ---------- "Finns även på" (streamingtjänster för titeln) ----------
@@ -65,7 +67,7 @@ views.item = async (id, season) => {
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
     <select id="ver"><option value="">Automatiskt</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
-  main.innerHTML = heroHtml(it, back + actions + versions) + `<div class="tech">
+  main.innerHTML = heroHtml(it, back + actions + ratingHtml(it) + versions) + `<div class="tech">
     <span>Fil</span><b>${esc(it.file)}</b><span>Storlek</span><b>${fmtSize(it.size)}</b>
     <span>Video</span><b>${esc(it.vcodec || '–')} ${it.width ? it.width + '×' + it.height : ''}</b>
     <span>Ljud</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
@@ -92,7 +94,9 @@ views.item = async (id, season) => {
   bindWatchlist(it);
   bindCollections(it);
   bindTrailers(it);
-  main.insertAdjacentHTML('beforeend', castShelf(it));
+  bindRating(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it) + extrasShelf(it));
+  bindExtras(it);
   if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
   main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
@@ -104,6 +108,7 @@ views.item = async (id, season) => {
     if ($('#match')) $('#match').onclick = () => matchItem(it);
     $('#edit').onclick = () => editItem(it);
   }
+  playTheme(it);
 };
 
 // season = säsong från länken (#/item/:id/:säsong, t.ex. från "Nyligen tillagda"), annars den man sist valde
@@ -118,7 +123,7 @@ function showView(it, season) {
     <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
     <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
     ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
-  main.innerHTML = heroHtml(it, actions + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
+  main.innerHTML = heroHtml(it, actions + ratingHtml(it) + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
     items: seasons.map(s => ({ key: s, label: s === 0 ? 'Specialavsnitt' : 'Säsong ' + s })) }) + '<div id="eps" role="tabpanel"></div>';
   const renderEps = () => {
     const eps = it.children.filter(e => e.season === cur);
@@ -140,13 +145,16 @@ function showView(it, season) {
   bindWatchlist(it);
   bindCollections(it);
   bindTrailers(it);
-  main.insertAdjacentHTML('beforeend', castShelf(it));
+  bindRating(it);
+  main.insertAdjacentHTML('beforeend', castShelf(it) + extrasShelf(it));
+  bindExtras(it);
   bindFollow(it);
   main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
   bindTabs($('#tabs'), (key, tab) => { cur = +key; store.set('season.' + it.id, cur); $('#eps').setAttribute('aria-label', tab.textContent); renderEps(); });
   if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if (me.is_admin) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
+  playTheme(it);
 }
 
 // Egna samlingar: "+ Samling" och raden "Ingår i …" under knapparna (bara samlingar profilen ser)
@@ -181,13 +189,47 @@ function trailerBtns(it) {
 function bindTrailers(it) {
   $$('[data-trailer]').forEach(b => b.onclick = () => playTrailer(+b.dataset.trailer, it.title));
 }
-function playTrailer(id, title) {
-  let v;
-  const d = openDialog({ title: `${title} – trailer`, size: 'wide', className: 'trailer',
+/** Spelar en trailer eller ett extramaterial i en dialog. Klarar webbläsaren inte filen görs den om på servern (?mp4=1). */
+function playTrailer(id, title, what = 'trailer') {
+  let v, tried = false;
+  const d = openDialog({ title: `${title} – ${what}`, size: 'wide', className: 'trailer',
     body: `<video controls autoplay playsinline src="/api/trailers/${+id}/stream"></video>`,
     onClose: () => { v.onerror = null; v.pause(); v.removeAttribute('src'); v.load(); } });
   v = d.$('video');
-  v.onerror = () => toast('Trailern kan inte spelas i webbläsaren (filformatet stöds inte)', { error: true });
+  v.onerror = () => {
+    if (!tried) { tried = true; v.src = `/api/trailers/${+id}/stream?mp4=1`; v.play().catch(() => {}); return; }
+    toast('Filen kan inte spelas i webbläsaren (filformatet stöds inte)', { error: true });
+  };
+}
+
+// ---------- Extramaterial (featurettes, borttagna scener, intervjuer …) grupperat per typ ----------
+function extrasShelf(it) {
+  const list = it.extras || [];
+  if (!list.length) return '';
+  const groups = [];
+  for (const x of list) { let g = groups.find(y => y.type === x.type); if (!g) groups.push(g = { type: x.type, name: x.group, items: [] }); g.items.push(x); }
+  return `<section class="section extras" aria-labelledby="xh"><h2 id="xh">Extramaterial</h2><div class="xgroups">${groups.map(g => `<div class="xgroup"><h3>${esc(g.name)} <span class="muted small">${g.items.length}</span></h3>
+    <div class="xrow">${g.items.map(x => `<button type="button" class="xcard" data-extra="${+x.id}"><span class="xplay" aria-hidden="true">▶</span><span class="xname">${esc(x.name)}</span>${x.size >= 5e5 ? `<span class="muted small">${fmtSize(x.size)}</span>` : ''}</button>`).join('')}</div></div>`).join('')}</div></section>`;
+}
+function bindExtras(it) {
+  $$('[data-extra]').forEach(b => b.onclick = () => { const x = it.extras.find(y => y.id === +b.dataset.extra); if (x) playTrailer(x.id, it.title, x.name); });
+}
+
+// ---------- Mitt betyg (stjärnor, tangenterna 1–5 när titelsidan har fokus) ----------
+const ratingHtml = (it) => `<div class="myrating"><span class="muted small" id="myratel">Mitt betyg</span>${starsHtml(it.userRating, { id: 'myrate', label: 'Mitt betyg' })}</div>`;
+function bindRating(it) {
+  const el = $('#myrate'); if (!el) return;
+  const ctl = bindStars(el, async (v) => { const r = await saveRating('item', it.id, v); it.userRating = r ?? undefined; });
+  // 1–5 (och 0 för att ta bort) var som helst på sidan – utom i fält, dialoger och medan något spelas i helskärm
+  const onKey = (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented || !/^[0-5]$/.test(e.key)) return;
+    if (curPlayer() || liveOpen() || document.querySelector('dialog[open]') || e.target.closest?.('input,textarea,select,[contenteditable],.stars,.popover,[role=menu]')) return;
+    if (!el.isConnected) return;
+    e.preventDefault();
+    ctl.commit(keyValue(e.key, +el.dataset.v || 0));
+  };
+  document.addEventListener('keydown', onKey);
+  onLeave(() => document.removeEventListener('keydown', onKey));
 }
 
 export async function refreshMeta(it) {

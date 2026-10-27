@@ -1216,3 +1216,24 @@ body.pv-open{overflow:hidden}
   .meprev{flex-basis:auto;width:140px}
   .meprev.wide{width:100%}
 }
+/* Egna betyg (ui/rating.js): stjärnor med halva steg, fyllnaden i --f */
+.stars{display:inline-flex;gap:2px;font-size:22px;line-height:1;cursor:pointer;border-radius:var(--r-sm);padding:2px 4px;touch-action:manipulation;user-select:none}
+.stars.ro{cursor:default;font-size:14px;padding:0}
+.stars.big{font-size:40px;gap:6px}
+.stars .st{position:relative;display:inline-block;color:var(--line)}
+.stars .st::before{content:'★';position:absolute;inset:0 auto 0 0;width:var(--f,0%);overflow:hidden;color:var(--warn)}
+.stars:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.myrating{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.ratebig{display:flex;justify-content:center;padding:8px 0 4px}
+.trate{color:var(--warn);white-space:nowrap}
+/* Extramaterial på titelsidan, grupperat per typ */
+.extras .xgroups{display:flex;flex-wrap:wrap;column-gap:28px}
+.extras .xgroup{margin:6px 0 14px;min-width:0;max-width:100%}
+.extras h3{font-size:15px;margin:0 0 8px}
+.xrow{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.xcard{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:200px;min-height:72px;padding:10px 12px;text-align:left;
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);color:var(--text)}
+.xcard:hover,.xcard:focus-visible{background:var(--bg3);border-color:var(--accent)}
+.xcard .xplay{color:var(--accent)}
+.xcard .xname{font-weight:600;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+@media (max-width:700px){.xcard{width:160px}.stars{font-size:26px}}

@@ -569,3 +569,34 @@ t('okända metoder och .view-suffix', async () => {
   assert.equal(u.code, 0); assert.equal(u.http, 404);
   assert.match(u.body.error.message, /stöds inte/);
 });
+
+t('egna betyg: setRating för låtar och album, userRating i svaren, webben och smarta listor ser samma betyg', async () => {
+  assert.equal((await json('setRating', { id: `tr-${IDS.dq}`, rating: 4 })).ok, true);
+  assert.equal((await json('setRating', { id: `al-${IDS.arrival}`, rating: 5 })).ok, true);
+  assert.equal((await json('setRating', { id: `ar-${IDS.abba}`, rating: 3 })).ok, true, 'artister: ok men sparas inte');
+  assert.equal((await json('setRating', { id: `tr-${IDS.dq}`, rating: 7 })).code, 10);
+  assert.equal((await json('setRating', { id: 'tr-999999', rating: 3 })).code, 70);
+  assert.equal((await json('getSong', { id: `tr-${IDS.dq}` })).body.song.userRating, 4);
+  assert.equal((await json('getSong', { id: `tr-${IDS.km}` })).body.song.userRating, undefined);
+  const al = (await json('getAlbum', { id: `al-${IDS.arrival}` })).body.album;
+  assert.equal(al.userRating, 5);
+  assert.equal(al.song.find(s => s.id === `tr-${IDS.dq}`).userRating, 4);
+  // Webben: samma betyg (stjärnor); halva steg från webben avrundas till heltal i musikappen
+  const web = await api(ANNA, `/api/music/albums/${IDS.arrival}`);
+  assert.equal(web.data.userRating, 5);
+  assert.equal(web.data.trackList.find(x => x.id === IDS.dq).userRating, 4);
+  assert.equal((await api(ANNA, `/api/music/tracks/${IDS.km}/rating`, { method: 'PUT', body: { rating: 2.5 } })).data.rating, 2.5);
+  assert.equal((await api(ANNA, `/api/music/tracks/${IDS.km}/rating`)).data.rating, 2.5);
+  assert.equal((await api(ANNA, `/api/music/tracks/${IDS.km}/rating`, { method: 'PUT', body: { rating: 0.5 } })).status, 400);
+  assert.equal((await json('getSong', { id: `tr-${IDS.km}` })).body.song.userRating, 3);
+  // Smart lista med "Mitt betyg" – lyssnarens egna betyg
+  const prev = await api(ANNA, '/api/music/smartlists/preview', { method: 'POST', body: { rules: [{ field: 'rating', op: 'gt', value: 3 }], sort: 'rating' } });
+  assert.deepEqual(prev.data.trackList.map(x => x.id), [IDS.dq]);
+  const albumRule = await api(ANNA, '/api/music/smartlists/preview', { method: 'POST', body: { rules: [{ field: 'albumrating', op: 'is', value: 5 }] } });
+  assert.deepEqual(albumRule.data.trackList.map(x => x.id).sort(), [IDS.dq, IDS.km].sort());
+  const kid = await api(KID, '/api/music/smartlists/preview', { method: 'POST', body: { rules: [{ field: 'rating', op: 'gt', value: 0 }] } });
+  assert.equal(kid.data.trackList.length, 0, 'andra profilers betyg räknas inte');
+  // 0 tar bort
+  assert.equal((await json('setRating', { id: `tr-${IDS.dq}`, rating: 0 })).ok, true);
+  assert.equal((await json('getSong', { id: `tr-${IDS.dq}` })).body.song.userRating, undefined);
+});

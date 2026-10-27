@@ -175,9 +175,18 @@ gör det. Kortmenyn visar då t.ex. "Ta bort från Fortsätt titta" och tar bort
 
 Menyns val (`cardActions`) beror på sorten och rollen: spela/fortsätt/från början, sedd/osedd (film, avsnitt,
 serie, säsong), Min lista, lägg till i samling (`ui/collections.js`: `addToCollection(it)`, `collectionForm(col, item)`,
-`deleteCollection(col)`), ta bort från samlingen (kort i en egen samling man får ändra: `data-ucol` + `data-edit` på rutnätet), ta bort från Fortsätt titta, följ serien, titta tillsammans, ladda ner, visa
+`deleteCollection(col)`), ta bort från samlingen (kort i en egen samling man får ändra: `data-ucol` + `data-edit` på rutnätet), betygsätt (`ui/rating.js`), ta bort från Fortsätt titta, följ serien, titta tillsammans, ladda ner, visa
 information/gå till serien och för administratörer metadataverktygen. Läget som korten inte känner till hämtas
 från `GET /api/items/:id/state`. Kortet uppdateras direkt och ångringsbara val får "Ångra" i toasten.
+
+## Stjärnbetyg – `ui/rating.js`
+
+`starsHtml(värde, { label, id, cls, readonly })` ritar fem stjärnor som ett reglage (`role="slider"`,
+`aria-valuenow`/`aria-valuetext` "3,5 av 5 stjärnor"); fyllnaden per stjärna är `--f` (0/50/100 %). `bindStars(el,
+onChange)` gör det styrbart: klick (vänstra halvan = halv stjärna, samma värde igen tar bort), ←/→ halva steg, 1–5,
+0/Delete tar bort; misslyckas `onChange` visas det förra värdet. `rateDialog({ kind, id, title, value, onSaved })` är
+dialogen från kortmenyn och låtarnas ⋮ (`kind` = `item`/`album`/`track`), `saveRating(kind, id, värde)` sparar och visar
+en toast. Titelsidan tar dessutom emot 1–5 (0 tar bort) var som helst på sidan utom i fält, dialoger och spelaren.
 
 ## Aktivitet – `ui/activity.js`
 

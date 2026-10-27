@@ -4,9 +4,9 @@
 import { api, esc } from '../core.js';
 import { openPopover } from './menu.js';
 
-export const SORT_LABEL = { title: 'Titel', year: 'År', rating: 'Betyg', added: 'Tillagd', lastwatched: 'Senast sedd', duration: 'Längd', random: 'Blandat' };
+export const SORT_LABEL = { title: 'Titel', year: 'År', rating: 'Betyg', myrating: 'Mitt betyg', added: 'Tillagd', lastwatched: 'Senast sedd', duration: 'Längd', random: 'Blandat' };
 // Sorteringens naturliga riktning (samma som servern utan order=)
-export const SORT_DIR = { title: 'asc', year: 'desc', rating: 'desc', added: 'desc', lastwatched: 'desc', duration: 'desc' };
+export const SORT_DIR = { title: 'asc', year: 'desc', rating: 'desc', myrating: 'desc', added: 'desc', lastwatched: 'desc', duration: 'desc' };
 const WATCH = { unwatched: 'Osedda', inprogress: 'Påbörjade', watched: 'Sedda' };
 const RES = { '4k': '4K', '1080': '1080p', '720': '720p', sd: 'SD' };
 const HDR = { hdr: 'HDR (alla sorter)', hdr10: 'HDR10', dovi: 'Dolby Vision', hlg: 'HLG', sdr: 'SDR' };
@@ -14,6 +14,10 @@ const AUDIO = { atmos: 'Dolby Atmos / DTS:X', surround: 'Surround (5.1 eller fle
 const STATUS = { ongoing: 'Pågående', ended: 'Avslutade' };
 const ADDED = [7, 30, 90, 365];
 const RATINGS = [5, 6, 7, 8, 9];
+// Mitt betyg (stjärnor, ui/rating.js) och om titeln har ett eget betyg
+const MY_RATINGS = [1, 2, 3, 3.5, 4, 4.5, 5];
+const RATED = { yes: 'Betygsatta av mig', no: 'Inte betygsatta av mig' };
+const starTxt = (v) => String(v).replace('.', ',');
 // Längd: filmens längd, för serier avsnittens (minuter)
 const LENGTHS = {
   movie: { short: ['Kort (under 90 min)', null, 89], normal: ['Normal (90–130 min)', 90, 130], long: ['Lång (över 130 min)', 131, null] },
@@ -41,7 +45,7 @@ export function filterCount(qs) {
   const p = new URLSearchParams(qs || '');
   let n = 0;
   for (const k of LISTS) n += listOf(p, k).length;
-  for (const k of ['filter', 'ratingMin', 'addedDays', 'ageMax', 'coll', 'status']) if (p.get(k)) n++;
+  for (const k of ['filter', 'ratingMin', 'myRatingMin', 'rated', 'addedDays', 'ageMax', 'coll', 'status']) if (p.get(k)) n++;
   for (const [a, b] of [['yearMin', 'yearMax'], ['durMin', 'durMax'], ['seasonsMin', 'seasonsMax']]) if (p.get(a) || p.get(b)) n++;
   return n;
 }
@@ -62,6 +66,8 @@ export function chips(qs, type) {
   if (p.get('genreAll') === '1' && listOf(p, 'genre').length > 1) out.push({ label: 'Alla valda genrer', remove: without(c => c.delete('genreAll')) });
   if (p.get('yearMin') || p.get('yearMax')) out.push({ label: `År ${range(p.get('yearMin'), p.get('yearMax'))}`, remove: without(c => { c.delete('yearMin'); c.delete('yearMax'); }) });
   if (p.get('ratingMin')) out.push({ label: `Betyg ${p.get('ratingMin')}+`, remove: without(c => c.delete('ratingMin')) });
+  if (p.get('myRatingMin')) out.push({ label: `Mitt betyg ${starTxt(p.get('myRatingMin'))}★ eller mer`, remove: without(c => c.delete('myRatingMin')) });
+  if (RATED[p.get('rated')]) out.push({ label: RATED[p.get('rated')], remove: without(c => c.delete('rated')) });
   if (p.get('durMin') || p.get('durMax')) out.push({ label: `${type === 'show' ? 'Avsnitt ' : 'Längd '}${range(p.get('durMin'), p.get('durMax'), ' min')}`, remove: without(c => { c.delete('durMin'); c.delete('durMax'); }) });
   if (p.get('addedDays')) out.push({ label: `Tillagd senaste ${p.get('addedDays')} dagarna`, remove: without(c => c.delete('addedDays')) });
   if (p.get('ageMax')) out.push({ label: `Åldersgräns högst ${ageName(p.get('ageMax'))}`, remove: without(c => c.delete('ageMax')) });
@@ -106,6 +112,8 @@ export async function openFilterPanel(anchor, { lib, qs, onApply }) {
       <label class="fnum"><span>Från</span><input type="number" inputmode="numeric" name="yearMin" min="1800" max="2200" value="${esc(yMin)}" placeholder="${+y.min}"></label>
       <label class="fnum"><span>Till</span><input type="number" inputmode="numeric" name="yearMax" min="1800" max="2200" value="${esc(yMax)}" placeholder="${+y.max}"></label></div>`) : ''}
     ${sect('Betyg och längd', `<div class="frow"><label class="fsel"><span>Betyg</span><select name="ratingMin">${opt('', 'Alla', p.get('ratingMin'))}${RATINGS.map(r => opt(r, `${r} eller högre`, p.get('ratingMin'))).join('')}</select></label>
+      <label class="fsel"><span>Mitt betyg</span><select name="myRatingMin">${opt('', 'Alla', p.get('myRatingMin'))}${MY_RATINGS.map(r => opt(r, `${starTxt(r)} ★ eller mer`, p.get('myRatingMin'))).join('')}</select></label>
+      <label class="fsel"><span>Betygsatt av mig</span><select name="rated">${opt('', 'Alla', p.get('rated'))}${Object.entries(RATED).map(([k, l]) => opt(k, l, p.get('rated'))).join('')}</select></label>
       <label class="fsel"><span>${type === 'show' ? 'Avsnittens längd' : 'Längd'}</span><select name="len">${opt('', 'Alla', lenCur)}${Object.entries(len).map(([k, [l]]) => opt(k, l, lenCur)).join('')}${opt('custom', 'Eget intervall', lenCur)}</select></label>
       <label class="fnum"><span>Minst (min)</span><input type="number" inputmode="numeric" name="durMin" min="1" max="1000" value="${esc(dMin)}"></label>
       <label class="fnum"><span>Högst (min)</span><input type="number" inputmode="numeric" name="durMax" min="1" max="1000" value="${esc(dMax)}"></label></div>`)}
@@ -130,7 +138,7 @@ export async function openFilterPanel(anchor, { lib, qs, onApply }) {
     const f = fd.get('filter'); if (f) o.set('filter', f);
     for (const k of LISTS) { const l = fd.getAll(k); if (l.length) o.set(k, l.join(',')); }
     if (fd.get('genreAll') && fd.getAll('genre').length > 1) o.set('genreAll', '1');
-    for (const k of ['yearMin', 'yearMax', 'ratingMin', 'durMin', 'durMax', 'addedDays', 'ageMax', 'coll', 'status', 'seasonsMin', 'seasonsMax']) {
+    for (const k of ['yearMin', 'yearMax', 'ratingMin', 'myRatingMin', 'rated', 'durMin', 'durMax', 'addedDays', 'ageMax', 'coll', 'status', 'seasonsMin', 'seasonsMax']) {
       const v = String(fd.get(k) ?? '').trim(); if (v) o.set(k, v);
     }
     for (const k of ['sort', 'order', 'seed']) if (p.get(k)) o.set(k, p.get(k));

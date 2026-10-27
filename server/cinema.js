@@ -106,7 +106,7 @@ export function pickTrailers(uid, movie, n, { age = { sql: '', params: [] }, tas
   if (!(n > 0)) return [];
   const rows = all(`SELECT t.id AS tid, t.path, i.id AS item_id, i.title, i.genres, i.rating FROM trailers t JOIN items i ON i.id=t.item_id
     LEFT JOIN items s ON s.id=i.parent_id
-    WHERE i.kind='movie' AND i.version_of IS NULL AND i.id != ?${age.sql}
+    WHERE t.kind='trailer' AND i.kind='movie' AND i.version_of IS NULL AND i.id != ?${age.sql}
       AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id=? AND p.item_id=i.id AND (p.watched=1 OR p.position > 0))
     ORDER BY t.id LIMIT 3000`, movie.id, ...age.params, uid);
   const byItem = new Map();

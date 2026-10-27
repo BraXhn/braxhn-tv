@@ -169,3 +169,23 @@ test('card: medelfärg som platshållare och de första korten efter en navigeri
   assert.match(card({ id: 123, kind: 'episode', title: 'A', show: 5, showTitle: 'S', showPoster: true, ph: '#000000', showPh: '#abcdef', season: 1, episode: 1 }), /background:#abcdef/);
   assert.match(seasonCard({ show: 6, showTitle: 'S', showPoster: true, showPh: '#123456', season: 1, count: 1, unwatched: 1 }), /background:#123456/);
 });
+
+test('stjärnbetyg: reglage med aria-värden, halva stjärnor, escapad etikett och tangenterna', async () => {
+  const { starsHtml, keyValue, fmtStars } = await import('../web/js/ui/rating.js');
+  const h = starsHtml(3.5, { label: `Mitt betyg ${EVIL}`, id: 'r1' });
+  noRawTag(h);
+  assert.match(h, /role="slider" tabindex="0"/);
+  assert.match(h, /aria-valuemin="0" aria-valuemax="5"\s+aria-valuenow="3.5" aria-valuetext="3,5 av 5 stjärnor"/);
+  assert.deepEqual([...h.matchAll(/--f:(\d+)%/g)].map(m => +m[1]), [100, 100, 100, 50, 0]);
+  assert.match(starsHtml(null), /aria-valuetext="Inget betyg"/);
+  assert.match(starsHtml(4, { readonly: true }), /role="img" aria-label="Mitt betyg: 4 av 5 stjärnor"/);
+  assert.equal(keyValue('4', 2), 4); assert.equal(keyValue('0', 3), 0); assert.equal(keyValue('Delete', 3), 0);
+  assert.equal(keyValue('ArrowRight', 0), 1); assert.equal(keyValue('ArrowRight', 4.5), 5); assert.equal(keyValue('ArrowRight', 5), 5);
+  assert.equal(keyValue('ArrowLeft', 1), 0); assert.equal(keyValue('ArrowLeft', 3), 2.5); assert.equal(keyValue('x', 3), null);
+  assert.equal(fmtStars(4.5), '4,5');
+  // Kortmenyn: betygsätt / visar betyget
+  const el = { closest: () => null };
+  const lab = (it) => cardActions(it, { inWatchlist: false }, el).filter(x => typeof x === 'object' && !x.hidden).map(x => x.label);
+  assert.ok(lab({ id: 1, kind: 'movie', title: 'F', position: 0 }).includes('Betygsätt…'));
+  assert.ok(lab({ id: 1, kind: 'movie', title: 'F', position: 0, userRating: 4.5 }).includes('Mitt betyg: 4,5 – ändra…'));
+});

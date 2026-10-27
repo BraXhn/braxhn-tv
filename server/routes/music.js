@@ -7,6 +7,7 @@ import * as music from '../music.js';
 import * as listen from '../listening.js';
 import * as scrobble from '../scrobble.js';
 import * as smartl from '../smartlists.js';
+import * as ratings from '../ratings.js';
 import * as sonic from '../sonic.js';
 import * as mmeta from '../musicmeta.js';
 import { sized } from '../imgsize.js';
@@ -32,7 +33,9 @@ route('GET', '/api/music/albums/:aid', user, (c) => {
   if (!a) return fail(c.res, 404, 'Finns inte');
   // Tillägg: typ (album/single/ep/compilation/live …, gissad utan MusicBrainz) och beskrivning från Wikipedia
   const info = mmeta.albumInfoOf(a.id), k = mmeta.albumKind(a, info ? { kind: info.type } : null);
-  send(c.res, 200, { ...a, type: k.kind, typeGuessed: k.guessed, info });
+  // Tillägg: egna betyg (userRating i stjärnor) för albumet och låtarna – bara när de finns
+  ratings.annotate(c.user.id, 'track', a.trackList);
+  send(c.res, 200, { ...a, userRating: ratings.toStars(ratings.getOne(c.user.id, 'album', a.id)), type: k.kind, typeGuessed: k.guessed, info });
 });
 route('GET', '/api/music/artists/:arid', user, (c) => {
   const a = music.artist(+c.p.arid, c.user.id);
@@ -40,6 +43,7 @@ route('GET', '/api/music/artists/:arid', user, (c) => {
   // Tillägg: metadata från nätet (biografi, född/bildad, ursprung, genrer, länkar), artistbild, albumtyper och relaterade artister
   const kinds = new Map(all('SELECT m.album_id, m.kind FROM album_meta m JOIN albums al ON al.id=m.album_id WHERE al.artist_id=?', a.id).map(r => [r.album_id, r.kind]));
   const info = mmeta.artistInfo(a.id);
+  ratings.annotate(c.user.id, 'track', a.popular);
   send(c.res, 200, { ...a, albums: a.albums.map(x => { const k = mmeta.albumKind(x, { kind: kinds.get(x.id) || null }); return { ...x, type: k.kind, typeGuessed: k.guessed }; }),
     image: !!info?.image, backdrop: !!info?.backdrop, info, related: mmeta.relatedLocal(a.id) });
 });
@@ -138,7 +142,7 @@ route('POST', '/api/music/playlists', user, async (c) => {
   });
   send(c.res, 200, { id });
 });
-route('GET', '/api/music/playlists/:pid', user, (c) => { const p = music.playlist(+c.p.pid, c.user.id); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/music/playlists/:pid', user, (c) => { const p = music.playlist(+c.p.pid, c.user.id); if (p) ratings.annotate(c.user.id, 'track', p.trackList); p ? send(c.res, 200, p) : fail(c.res, 404, 'Finns inte'); });
 route('PUT', '/api/music/playlists/:pid', user, async (c) => {
   const p = get('SELECT * FROM playlists WHERE id=? AND user_id=?', +c.p.pid, c.user.id);
   if (!p) return fail(c.res, 404, 'Finns inte');
@@ -166,8 +170,9 @@ route('DELETE', '/api/music/playlists/:pid', user, (c) => { run('DELETE FROM pla
 route('GET', '/api/music/:lib/smart', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, listen.smartLists(l.id, c.user.id)); });
 route('GET', '/api/music/:lib/smart/:sid', user, (c) => {
   const l = musicLib(c); if (!l) return;
-  const trackList = listen.smartTracks(l.id, c.user.id, c.p.sid);
-  if (!trackList) return fail(c.res, 404, 'Listan finns inte');
+  const cached = listen.smartTracks(l.id, c.user.id, c.p.sid);
+  if (!cached) return fail(c.res, 404, 'Listan finns inte');
+  const trackList = ratings.annotate(c.user.id, 'track', cached.map(t => ({ ...t }))); // kopior: listan cachas
   // Egen/delad lista: samma fält som de fasta, plus vem som äger den (tillägg)
   const cl = /^u\d+$/.test(c.p.sid) ? smartl.getFor(+c.p.sid.slice(1), c.user.id) : null;
   send(c.res, 200, { id: c.p.sid, name: listen.smartName(c.p.sid, c.user.id), trackList,

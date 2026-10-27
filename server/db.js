@@ -409,6 +409,27 @@ CREATE INDEX IF NOT EXISTS photos_folder ON photos(library_id, folder);
 CREATE INDEX IF NOT EXISTS photos_thumb ON photos(thumb);
 CREATE INDEX IF NOT EXISTS photos_item ON photos(item_id);
 CREATE INDEX IF NOT EXISTS photo_fav_photo ON photo_favorites(photo_id);`);
+// Egna betyg (server/ratings.js) per profil: value = antal halva stjärnor (2–10 = 1–5 stjärnor i halva steg). Titlar
+// (film, serie, avsnitt – filmversioner på huvudraden), album och låtar i var sin tabell så att betyget försvinner med raden.
+db.exec(`CREATE TABLE IF NOT EXISTS item_ratings(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, value INTEGER NOT NULL CHECK(value BETWEEN 1 AND 10), updated INTEGER NOT NULL, PRIMARY KEY(user_id, item_id));
+CREATE TABLE IF NOT EXISTS album_ratings(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE, value INTEGER NOT NULL CHECK(value BETWEEN 1 AND 10), updated INTEGER NOT NULL, PRIMARY KEY(user_id, album_id));
+CREATE TABLE IF NOT EXISTS track_ratings(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, value INTEGER NOT NULL CHECK(value BETWEEN 1 AND 10), updated INTEGER NOT NULL, PRIMARY KEY(user_id, track_id));
+CREATE INDEX IF NOT EXISTS item_ratings_item ON item_ratings(item_id);
+CREATE INDEX IF NOT EXISTS album_ratings_album ON album_ratings(album_id);
+CREATE INDEX IF NOT EXISTS track_ratings_track ON track_ratings(track_id);
+CREATE TABLE IF NOT EXISTS trailers(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE, path TEXT NOT NULL UNIQUE, size INTEGER, mtime INTEGER, added INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS trailers_item ON trailers(item_id);`);
+// Extramaterial (server/trailers.js): tabellen trailers har även featurettes, borttagna scener, intervjuer …
+// kind = typen (EXTRA_TYPES), title = namnet ur filen (NULL = typens namn, numreras vid visning)
+addCol('trailers', 'kind', "TEXT NOT NULL DEFAULT 'trailer'");
+addCol('trailers', 'title', 'TEXT');
+// Temamusik: items.theme = theme.mp3/theme.m4a i filmens/seriens mapp (skannern), users.theme_music = val per profil (JSON)
+addCol('items', 'theme', 'TEXT');
+addCol('users', 'theme_music', 'TEXT');
 
 // Fotobibliotek (server/photos.js): libraries.type får även 'photo'. SQLite kan inte ändra en CHECK-begränsning, så
 // tabellen byggs om med samma kolumner (även de som addCol lagt till) och alla rader. Främmande nycklar stängs av under
