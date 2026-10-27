@@ -1,6 +1,6 @@
 // Vyer: startsidan, bibliotek (filter och sortering: ui/libfilter.js), Min lista och samlingar (sökningen: views/search.js).
 // Startsidans Utvalt-karusell: ui/featured.js, "Anpassa startsidan": views/homecustom.js.
-import { $, act, api, cardW, esc, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, act, api, cardW, esc, fmtDay, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, safeColor, store, sxe, toast, toastErr, views } from '../core.js';
 import { playSpoken } from '../audio.js';
 import { startPlay } from '../player/video.js';
 import { route } from '../router.js';
@@ -17,13 +17,20 @@ import { openHomeCustomizer } from './homecustom.js';
 // Startsidans hyllor i den ordning användaren valt (homeLayout från servern, "Anpassa startsidan"). Hyllor som
 // servern inte känner till ritas inte; en äldre server utan homeLayout ger standardordningen nedan.
 const DEFAULT_ORDER = ['foryou', 'continue', 'listening', 'watchlist', 'upcoming', 'because', 'recommended', 'custom', 'recent',
-  'short', 'toprated', 'onthisday', 'genre', 'gems', 'collections'];
+  'short', 'toprated', 'onthisday', 'memories', 'genre', 'gems', 'collections'];
 const cards = (list) => list.map(i => card(i)).join('');
 /** Kort i "Fortsätt lyssna": ljudböcker öppnar boken, poddavsnitt fortsätter spelas direkt */
 const listenCard = (x, i) => x.type === 'podcast'
   ? `<a class="card mcard" href="#/podcast/${+x.podcast}" data-lpod="${i}" aria-label="${esc(`Fortsätt lyssna: ${x.title}, ${x.podcastTitle || ''}`)}">${podCover({ id: x.podcast, image: x.image })}${x.duration && x.position ? `<div class="prog"><i style="width:${Math.min(100, x.position / x.duration * 100)}%"></i></div>` : ''}
     <div class="t">${esc(x.title || '')}</div><div class="s">${esc(x.podcastTitle || '')}${x.duration ? ` · ${esc(fmtDur(Math.max(0, x.duration - x.position)))} kvar` : ''}</div></a>`
   : bookCard(x);
+/** Minnen ur fotobiblioteken (photoMemories): ett liggande kort per år med en bild från dagens datum */
+const memoryCard = (g) => {
+  const t = g.yearsAgo === 1 ? 'För ett år sedan' : `För ${+g.yearsAgo} år sedan`, s = `${+g.count} ${g.count === 1 ? 'foto' : 'foton'} · ${fmtDay(g.day)}`;
+  return `<div class="card land phmem"><a class="clink" href="#/photos/${+g.library}/memories" aria-label="${esc(`${t}, ${s}`)}"><div class="art" style="background:${safeColor(g.cover?.c) || 'var(--bg3)'}">`
+    + (g.cover ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/photos/${+g.cover.id}/img`, cardW() * 1.9)} alt="" width="480" height="270" data-fb="1">` : '')
+    + `</div><div class="t">${esc(t)}</div><div class="s">${esc(s)}</div></a></div>`;
+};
 
 // Startsidan visas direkt från förra besöket (sparad per profil i webbläsaren) och byts tyst när servern svarat –
 // ingen väntan på servern vid återbesök. Nyckeln är profilens id, så en annan profil aldrig ser någon annans hyllor.
@@ -77,13 +84,14 @@ async function renderHome(d, cols, own, fromCache) {
     toprated: () => d.topRated?.length >= 4 ? shelfHtml('Topprankat i biblioteket', cards(d.topRated)) : '',
     // Den här dagen: anteckningen (premiär/sedd för N år sedan) ersätter årtalet under titeln
     onthisday: () => d.onThisDay?.length ? shelfHtml('Den här dagen', d.onThisDay.map(i => card({ ...i, note: i.onThisDay?.note })).join('')) : '',
+    memories: () => d.photoMemories?.length ? shelfHtml('Den här dagen i dina foton', d.photoMemories.map(memoryCard).join(''), { land: true }) : '',
     genre: () => d.genreOfDay?.items?.length ? shelfHtml(`Dagens genre: ${d.genreOfDay.genre}`, cards(d.genreOfDay.items)) : '',
     gems: () => d.hiddenGems?.length >= 4 ? shelfHtml('Glömda guldkorn', cards(d.hiddenGems), { extra: '<span class="muted small">högt betyg, aldrig sedda</span>' }) : '',
     // Egna samlingar först, sedan TMDB:s filmserier
     collections: () => cols.length || own.length ? shelfHtml('Samlingar', [...own, ...cols].map(colCard).join(''), { more: '<a href="#/collections">Visa alla</a>' }) : ''
   };
   for (const id of L.order || DEFAULT_ORDER) if (!off.has(id) && part[id]) html += part[id]();
-  if (libs.length && !d.rows.some(r => r.items.length) && !fromCache) {
+  if (libs.some(l => l.type === 'movie' || l.type === 'show') && !d.rows.some(r => r.items.length) && !fromCache) {
     const s = await api('/scan');
     html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? 'Skannar bibliotek…' : 'Inget innehåll hittades', text: s.running ? `${s.phase} ${s.done}/${s.total}` : 'Kontrollera sökvägarna under Administration.' });
     if (s.running) later(route, 3000);

@@ -28,5 +28,6 @@ export const RAIL_ICON = {
   audiobook: rail('<path d="M5 3h11a3 3 0 0 1 3 3v15H8a3 3 0 0 1-3-3zm2 2v13a1 1 0 0 0 1 1h9V6a1 1 0 0 0-1-1zm2 2h6v2H9z"/>'),
   podcast: rail('<path d="M12 2a7 7 0 0 1 4.5 12.4l-1.3-1.5a5 5 0 1 0-6.4 0l-1.3 1.5A7 7 0 0 1 12 2zm0 4a3 3 0 0 1 1.5 5.6V22h-3V11.6A3 3 0 0 1 12 6z"/>'),
   live: rail('<path d="M3 7h18v13H3zm2 2v9h14V9zM7.4 2.6 12 5.5l4.6-2.9 1 1.7L13.9 7h-3.8L6.4 4.3z"/><circle cx="12" cy="13.5" r="2.5"/>'),
+  photo: rail('<path d="M3 5h18v14H3zm2 2v8.6l4-4.1 3 3 4.5-5.5L19 12.5V7zm4.5 1a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z"/>'),
   streaming: rail('<path d="M3 5h18v11H3zm2 2v7h14V7zm5 1.5 4.5 2.5-4.5 2.5zM7 18h10v2H7z"/>'),
 };

@@ -253,6 +253,8 @@ export function watchRelevant(root, file) {
   if (MEDIA_EXT.has(path.extname(file).toLowerCase())) return true;
   try { return fs.statSync(path.join(root, file)).isDirectory(); } catch { return !path.extname(file); }
 }
+// Fotobibliotek (photos.js): även bilder startar en skanning
+const PHOTO_EXT = new Set(['.jpg', '.jpeg', '.jpe', '.png', '.webp', '.gif', '.heic', '.heif', '.hif']);
 const watchers = new Map();
 const pending = new Map(); // väntande skanning per bibliotek
 let watchGen = 0;
@@ -280,7 +282,7 @@ function watchOne(lib, root, onChange) {
   const key = `${lib.id}:${root}`;
   try {
     const w = fs.watch(root, { recursive: true, persistent: false }, (ev, file) => {
-      if (file && !watchRelevant(root, String(file))) return;
+      if (file && !watchRelevant(root, String(file)) && !(lib.type === 'photo' && PHOTO_EXT.has(path.extname(String(file)).toLowerCase()))) return;
       clearTimeout(pending.get(lib.id));
       // Vänta tills kopieringen är klar (inga nya händelser på 30 s)
       const t = setTimeout(() => { pending.delete(lib.id); onChange(lib.id); }, 30000);

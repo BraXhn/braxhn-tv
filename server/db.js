@@ -385,9 +385,59 @@ BEGIN UPDATE items SET f_v=NULL WHERE id=NEW.id; END;`);
 // (JSON { library, query } – bibliotekets filter som adressdel, libfilter.js); 'manual' = titlarna i custom_collection_items
 addCol('custom_collections', 'kind', "TEXT NOT NULL DEFAULT 'manual'");
 addCol('custom_collections', 'def', 'TEXT');
+// Fotobibliotek (server/photos.js). libraries.kids = 1: barnprofiler får se biblioteket (foton har ingen åldersgräns,
+// standard nej). photos: en rad per bild eller videoklipp. taken = när bilden togs som lokal väggklocka räknad som
+// UTC-sekunder (EXIF har ingen tidszon – 14:05 i Stockholm sparas som 14:05 UTC), day = 'YYYY-MM-DD' och md = 'MM-DD'
+// ur samma tid (tidslinjen och "Den här dagen"). folder = mappen relativt biblioteksmappen ('' = direkt i den).
+// width/height = så som bilden visas (efter orientation), orientation = EXIF 1–8 (tillämpas när miniatyrer görs).
+// item_id = videoklippets rad i items (spelas med den vanliga spelaren). thumb 0 = miniatyren inte gjord, 1 = klar,
+// 2 = gick inte; color = platshållarfärg ('#rrggbb'). Favoriter per profil i photo_favorites.
+addCol('libraries', 'kids', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`CREATE TABLE IF NOT EXISTS photos(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  path TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'image', format TEXT,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL, size INTEGER, mtime INTEGER, taken INTEGER NOT NULL, day TEXT NOT NULL, md TEXT NOT NULL,
+  width INTEGER, height INTEGER, orientation INTEGER NOT NULL DEFAULT 1, duration REAL, make TEXT, model TEXT, lens TEXT,
+  fnumber REAL, exposure REAL, iso INTEGER, focal REAL, focal35 INTEGER, lat REAL, lon REAL, alt REAL,
+  thumb INTEGER NOT NULL DEFAULT 0, color TEXT, added INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS photo_favorites(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE, created INTEGER NOT NULL, PRIMARY KEY(user_id, photo_id));
+CREATE UNIQUE INDEX IF NOT EXISTS photos_path ON photos(library_id, path);
+CREATE INDEX IF NOT EXISTS photos_taken ON photos(library_id, taken);
+CREATE INDEX IF NOT EXISTS photos_day ON photos(library_id, day);
+CREATE INDEX IF NOT EXISTS photos_md ON photos(md, library_id);
+CREATE INDEX IF NOT EXISTS photos_folder ON photos(library_id, folder);
+CREATE INDEX IF NOT EXISTS photos_thumb ON photos(thumb);
+CREATE INDEX IF NOT EXISTS photos_item ON photos(item_id);
+CREATE INDEX IF NOT EXISTS photo_fav_photo ON photo_favorites(photo_id);`);
+
+// Fotobibliotek (server/photos.js): libraries.type får även 'photo'. SQLite kan inte ändra en CHECK-begränsning, så
+// tabellen byggs om med samma kolumner (även de som addCol lagt till) och alla rader. Främmande nycklar stängs av under
+// ombyggnaden – annars skulle DROP TABLE ta bort alla titlar, låtar och böcker (ON DELETE CASCADE) – och kontrolleras
+// efteråt i samma transaktion. Körs en gång (user_version 6) och bara om CHECK-listan saknar 'photo'.
+function allowPhotoLibraries() {
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='libraries'").get().sql;
+  if (/'photo'/.test(sql)) return;
+  const check = /CHECK\s*\(\s*type\s+IN\s*\(([^)]*)\)\s*\)/i.exec(sql);
+  if (!check) throw new Error('[db] libraries: hittar inte typbegränsningen');
+  const newSql = sql.replace(check[0], `CHECK(type IN(${check[1].trim()},'photo'))`).replace(/^CREATE TABLE\s+("?)libraries\1/i, 'CREATE TABLE libraries_new');
+  const names = db.prepare('PRAGMA table_info(libraries)').all().map(c => `"${c.name.replace(/"/g, '""')}"`).join(',');
+  const before = db.prepare('SELECT COUNT(*) AS n FROM libraries').get().n;
+  db.exec('PRAGMA foreign_keys=OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`DROP TABLE IF EXISTS libraries_new; ${newSql}; INSERT INTO libraries_new(${names}) SELECT ${names} FROM libraries;
+        DROP TABLE libraries; ALTER TABLE libraries_new RENAME TO libraries;`);
+      if (db.prepare('SELECT COUNT(*) AS n FROM libraries').get().n !== before) throw new Error('antalet bibliotek stämmer inte');
+      const broken = db.prepare('PRAGMA foreign_key_check').all();
+      if (broken.length) throw new Error(`${broken.length} brutna främmande nycklar (${[...new Set(broken.map(b => b.table))].join(', ')})`);
+      db.exec('COMMIT');
+    } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  } finally { db.exec('PRAGMA foreign_keys=ON'); }
+}
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
-const LATEST = 5;
+const LATEST = 6;
 let ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver < 2) {
   // v0.2: analysera om alla filer (HDR-info, bildundertexter)
@@ -407,6 +457,11 @@ if (ver < 4) {
 if (ver < 5) {
   // v0.5: items.src_name (fylls i av skannern) och nya index – inget att göra här
   ver = 5;
+}
+if (ver < 6) {
+  // Fotobibliotek: libraries.type tillåter 'photo' (allowPhotoLibraries ovan)
+  allowPhotoLibraries();
+  ver = 6;
 }
 if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
 // Äldre programversion mot en nyare databas (t.ex. efter återgång till en gammal image): fungerar oftast,

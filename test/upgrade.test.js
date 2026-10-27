@@ -262,3 +262,65 @@ for (const start of [0, 3]) {
     });
   });
 }
+
+// v6: fotobibliotek – libraries.type får 'photo'. Tabellen byggs om (CHECK går inte att ändra) med ALLA kolumner, även de
+// som addCol lagt till senare (nfo, home_video), och alla rader; titlar, låtar, böcker, mappar och framsteg som pekar på
+// biblioteken (ON DELETE CASCADE) finns kvar och inga främmande nycklar bryts. En andra start bygger inte om igen.
+test('ombyggnaden av libraries för fotobibliotek (user_version 6) behåller rader, kolumner och främmande nycklar', () => {
+  const config = path.join(ROOT, 'photo6', 'config');
+  fs.mkdirSync(config, { recursive: true });
+  loadSql(dbFile(config), fs.readFileSync(path.join(FIXDIR, `${FIXTURES.at(-1)}.sql`), 'utf8'));
+  // Värden i kolumnerna som kom med addCol efter förra ombyggnaden och extra mappar i library_paths
+  {
+    const db = new DatabaseSync(dbFile(config));
+    try {
+      const cols = new Set(db.prepare('PRAGMA table_info(libraries)').all().map(c => c.name));
+      if (!cols.has('nfo')) db.exec('ALTER TABLE libraries ADD COLUMN nfo INTEGER NOT NULL DEFAULT 1');
+      if (!cols.has('home_video')) db.exec('ALTER TABLE libraries ADD COLUMN home_video INTEGER NOT NULL DEFAULT 0');
+      db.exec(`CREATE TABLE IF NOT EXISTS library_paths(library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE, path TEXT NOT NULL, pos INTEGER NOT NULL, PRIMARY KEY(library_id, path));
+        UPDATE libraries SET nfo=0, home_video=1 WHERE id=1; UPDATE libraries SET anime=1 WHERE id=2;
+        INSERT INTO library_paths(library_id, path, pos) VALUES(1, '/a', 0), (1, '/b', 1);
+        PRAGMA user_version=5;`);
+    } finally { db.close(); }
+  }
+  const before = inspect(config, db => ({ ...snapshot(db), libs: db.prepare('SELECT * FROM libraries ORDER BY id').all(),
+    paths: db.prepare('SELECT * FROM library_paths ORDER BY library_id, pos').all() }));
+  assert.ok(before.items.length >= 5 && before.counts.tracks > 0, 'fixturen har titlar och låtar');
+  openWithDbJs(config);
+  const after1 = inspect(config, db => {
+    const create = db.prepare("SELECT sql FROM sqlite_master WHERE name='libraries'").get().sql;
+    assert.match(create, /'photo'/);
+    assert.match(create, /'audiobook'/, 'de gamla typerna finns kvar');
+    assert.ok(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='libraries_new'").get(), 'ingen tillfällig tabell kvar');
+    assert.ok(refDb.version >= 6);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, refDb.version);
+    assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+    assertSchema(db, refDb, 'fotobibliotek');
+    const s = snapshot(db);
+    for (const k of ['users', 'progress', 'items', 'libraries']) assert.deepEqual(s[k], before[k], k);
+    for (const [t, n] of Object.entries(before.counts)) if (t !== 'settings') assert.equal(s.counts[t], n, `antal rader i ${t}`);
+    // Alla gamla kolumner med sina värden (kids är ny, standard 0 = barnprofiler ser inte fotobibliotek)
+    const libs = db.prepare('SELECT * FROM libraries ORDER BY id').all();
+    assert.deepEqual(libs.map(({ kids, ...l }) => l), before.libs.map(l => ({ ...l })));
+    assert.ok(libs.every(l => l.kids === 0));
+    assert.deepEqual(db.prepare('SELECT * FROM library_paths ORDER BY library_id, pos').all(), before.paths);
+    return dumpSql(db);
+  });
+  // Typen 'photo' går att spara, andra okända typer nekas fortfarande; fotona försvinner med biblioteket (kaskad)
+  {
+    const db = new DatabaseSync(dbFile(config));
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      const id = Number(db.prepare("INSERT INTO libraries(name,type,path) VALUES('Foton','photo','/foton')").run().lastInsertRowid);
+      assert.throws(() => db.prepare("INSERT INTO libraries(name,type,path) VALUES('X','bilder','/x')").run(), /CHECK/);
+      db.prepare("INSERT INTO photos(library_id,path,name,taken,day,md,added) VALUES(?,'/foton/a.jpg','a.jpg',0,'1970-01-01','01-01',0)").run(id);
+      db.prepare('DELETE FROM libraries WHERE id=?').run(id);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM photos').get().n, 0);
+    } finally { db.close(); }
+  }
+  // En andra start bygger inte om tabellen (schemat är detsamma; bara raden som lades till och togs bort ovan skiljer)
+  const sql1 = after1.split('\n').filter(l => /^CREATE/.test(l)).join('\n');
+  openWithDbJs(config);
+  assert.equal(inspect(config, db => dumpSql(db)).split('\n').filter(l => /^CREATE/.test(l)).join('\n'), sql1);
+});

@@ -75,7 +75,7 @@ function takenOf(info, st) {
 /** Hemvideons titel: filnamnet (punkter och understreck blir mellanslag) */
 const homeTitle = (f) => { const b = path.basename(f, path.extname(f)); return clean(b) || b; };
 
-async function probe(file) {
+export async function probe(file) {
   try {
     const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json',
       '-show_format', '-show_streams', file], { maxBuffer: 16 << 20, timeout: 60000 });
@@ -94,7 +94,9 @@ async function probe(file) {
       // Flätad bild (tt/bb/tb/bt) avflätas vid omkodning (stream.js)
       ...(s.codec_type === 'video' && s.field_order && s.field_order !== 'progressive' && s.field_order !== 'unknown' ? { field: s.field_order } : {}),
       dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || '')),
-      dvProfile: (s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))?.dv_profile ?? null
+      dvProfile: (s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))?.dv_profile ?? null,
+      // Rotation i behållaren (telefoner som filmar stående) – bara när den finns
+      ...(() => { const r = +((s.side_data_list || []).find(d => d.rotation != null)?.rotation ?? s.tags?.rotate ?? 0); return r ? { rotation: r } : {}; })()
     })).filter(s => ['video', 'audio', 'subtitle'].includes(s.type) && !(s.type === 'video' && ['mjpeg', 'png'].includes(s.codec)));
     const v = streams.find(s => s.type === 'video'), a = streams.find(s => s.type === 'audio');
     const hdr = !v ? null : v.transfer === 'smpte2084' ? (v.dovi ? 'dovi' : 'hdr10') : v.transfer === 'arib-std-b67' ? 'hlg' : v.dovi ? 'dovi' : null;
@@ -102,7 +104,9 @@ async function probe(file) {
     const ft = j.format?.tags || {};
     const created = createdAt(ft['com.apple.quicktime.creationdate'] || ft.creation_time || ft.date
       || (j.streams || []).map(s => s.tags?.creation_time).find(Boolean));
-    return { hdr, created,
+    // Fotobibliotek (photos.js): Apples datum med tidszon (lokal tid) och platsen enligt ISO 6709 ("+59.3293+018.0686+012.000/")
+    return { hdr, created, createdLocal: ft['com.apple.quicktime.creationdate'] || null,
+      location: ft['com.apple.quicktime.location.ISO6709'] || ft.location || ft['location-eng'] || null,
       duration: parseFloat(j.format?.duration) || null, container: j.format?.format_name || null,
       vcodec: v?.codec || null, acodec: a?.codec || null, width: v?.width || null, height: v?.height || null,
       streams: JSON.stringify(streams)
@@ -403,6 +407,8 @@ async function analyzeLibrary(lib, st) {
   const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL ORDER BY added DESC`, lib.id);
   st.done = 0; st.total = kf.length;
   for (const it of kf) { st.done++; await hooks.keyframes?.(it); if (st.done % 200 === 0) await new Promise(setImmediate); }
+  // Fotobibliotekens videoklipp: bara nyckelbilderna (miniatyrerna gör photos.js, inga kapitel/undertexter/förhandsbilder)
+  if (lib.type === 'photo') return;
   await thumbnails(lib, st);
   await chapters(lib, st);
   await autoSubtitles(lib, st);
@@ -448,7 +454,13 @@ export function forgetFolder(lib, root, keep = []) {
     for (const id of gone) removeImages(id);
     return gone.length;
   }
-  const [table, col] = lib.type === 'music' ? ['tracks', 'path'] : lib.type === 'audiobook' ? ['books', 'key'] : [null, null];
+  // Fotobibliotek: videoklippens rader i items (spelaren) och fotona
+  if (lib.type === 'photo') {
+    const gone = [];
+    tx(() => { for (const r of all('SELECT id, path FROM items WHERE library_id=? AND substr(path, 1, ?)=?', lib.id, pre.length, pre)) if (!kept(r.path)) { run('DELETE FROM items WHERE id=?', r.id); gone.push(r.id); } });
+    for (const id of gone) removeImages(id);
+  }
+  const [table, col] = lib.type === 'music' ? ['tracks', 'path'] : lib.type === 'audiobook' ? ['books', 'key'] : lib.type === 'photo' ? ['photos', 'path'] : [null, null];
   if (!table) return 0;
   let n = 0;
   tx(() => {
@@ -879,7 +891,7 @@ async function runAnalysis() {
       const [id, waiters] = pendingAnalysis.entries().next().value;
       pendingAnalysis.delete(id); analysis.queued = pendingAnalysis.size;
       const lib = get('SELECT * FROM libraries WHERE id=?', id);
-      if (lib && (lib.type === 'movie' || lib.type === 'show')) {
+      if (lib && (lib.type === 'movie' || lib.type === 'show' || lib.type === 'photo')) {
         analysis.library = lib.name;
         try { await analyzeLibrary(lib, analysis); }
         catch (e) { console.error(`[analys] fel i ${lib.name}:`, e); scanWarning(`${lib.name}: analysen avbröts (${e.message})`); }
@@ -911,6 +923,8 @@ export function scan(libId = null) {
         try {
           if (l.type === 'music') { status.library = l.name; await hooks.music?.(l, status); }
           else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); }
+          // Foton (photos.js); videoklippen i fotobiblioteket får nyckelbilder i bakgrundsanalysen som filmer
+          else if (l.type === 'photo') { status.library = l.name; await hooks.photos?.(l, status); analyses.push(requestAnalysis(l.id)); }
           else { await scanLibrary(l); analyses.push(requestAnalysis(l.id)); }
         } catch (e) { console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`); }
       }
