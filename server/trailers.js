@@ -176,10 +176,19 @@ const remuxJobs = new Set();
 export const MAX_REMUX = 2;
 const vcodecOf = (file) => new Promise(ok => execFile('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,pix_fmt',
   '-of', 'csv=p=0', file], { timeout: 8000 }, (e, out) => { const [c, pf] = String(out || '').trim().split(','); ok(e ? null : { codec: c || null, pix: pf || null }); }));
+/** Antal pågående omgörningar (tester) */
+export const remuxCount = () => remuxJobs.size;
 /** Skickar filen som fragmenterad MP4 (utan spolning). false = för många samtidigt. */
 export async function serveRemux(req, res, file) {
   if (remuxJobs.size >= MAX_REMUX) return false;
-  const v = await vcodecOf(file);
+  // HEAD: bara rubrikerna – ingen ffmpeg
+  if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'private, no-transform' }); res.end(); return true; }
+  // Platsen tas innan ffprobe körs: förut kontrollerades taket före väntan, och samtidiga förfrågningar kom alla förbi
+  const slot = {};
+  remuxJobs.add(slot);
+  let v;
+  try { v = await vcodecOf(file); } finally { remuxJobs.delete(slot); }
+  if (req.destroyed || res.destroyed) return true; // klienten gick under tiden
   const copy = v?.codec === 'h264' && (!v.pix || v.pix === 'yuv420p');
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, '-i', file, '-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn',
     ...(copy ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', "scale='min(1920,iw)':-2"]),
@@ -191,7 +200,6 @@ export async function serveRemux(req, res, file) {
   p.on('error', done);
   res.on('close', done);
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'private, no-transform' });
-  if (req.method === 'HEAD') { res.end(); done(); return true; }
   p.stdout.pipe(res);
   return true;
 }

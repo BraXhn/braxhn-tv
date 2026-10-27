@@ -136,6 +136,8 @@ export const QUALITIES = {
   orig: { h: null, br: null }, '2160': { h: 2160, br: 25000 }, '1080': { h: 1080, br: 8000 },
   '720': { h: 720, br: 4000 }, '480': { h: 480, br: 1500 }, '360': { h: 360, br: 800 }
 };
+/** Är q en kvalitet i QUALITIES? Bara egna nycklar – ?q=constructor eller __proto__ ska inte räknas som en kvalitet */
+export const isQuality = (q) => typeof q === 'string' && Object.hasOwn(QUALITIES, q);
 
 export const streamsOf = (it) => { try { return JSON.parse(it.streams || '[]'); } catch { return []; } };
 const videoOf = (it) => streamsOf(it).find(s => s.type === 'video');
@@ -447,7 +449,7 @@ export function parseCaps(q, ua = '') {
   const list = (k, def) => new Set((q.get(k) || def).split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   return {
     containers: list('c', 'mp4,webm'), vcodecs: list('v', 'h264,vp8,vp9'), acodecs: list('a', 'aac,mp3,opus,vorbis,flac'),
-    hdr: q.get('hdr') === '1', dv: q.get('dv') === '1', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
+    hdr: q.get('hdr') === '1', dv: q.get('dv') === '1', q: isQuality(q.get('q')) ? q.get('q') : 'orig',
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', sub: String(q.get('sub') || '').slice(0, 10),
     hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || '',
     // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
@@ -543,7 +545,7 @@ export function hlsParams(d, o, token) {
 }
 function readParams(q) {
   return {
-    mode: q.get('mode') === 'remux' ? 'remux' : 'transcode', q: QUALITIES[q.get('q')] ? q.get('q') : 'orig',
+    mode: q.get('mode') === 'remux' ? 'remux' : 'transcode', q: isQuality(q.get('q')) ? q.get('q') : 'orig',
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '',
     audioMode: ['copy', 'eac3', 'aac'].includes(q.get('am')) ? q.get('am') : 'aac',
     fmt: q.get('fmt') === 'fmp4' ? 'fmp4' : 'ts', tag: ['hvc1', 'dvh1'].includes(q.get('tag')) ? q.get('tag') : '',
@@ -560,7 +562,7 @@ function readParams(q) {
  * annars avgör adressens HLS-parametrar: remux skickar källans bild, omkodning höjden för q (orig = källans).
  */
 export function exceedsQuality(it, query, cap, direct = false) {
-  const C = QUALITIES[cap];
+  const C = isQuality(cap) ? QUALITIES[cap] : null;
   if (!C?.h) return false;
   const v = videoOf(it), srcKbps = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
   const srcOver = !!((v?.height && v.height > C.h) || (C.br && srcKbps > C.br * 1.3));

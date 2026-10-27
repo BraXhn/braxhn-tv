@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { parseImage, parseTiff, exifDate, sniff, heicFromVersion, iso6709 } from '../server/exif.js';
-import { tiff, phoneExif, jpegWithExif, pngWithExif, webpWithExif, heifWithExif } from './helpers/exif-builder.js';
+import { tiff, phoneExif, jpegWithExif, pngWithExif, webpWithExif, heifWithExif, heifIlocBomb } from './helpers/exif-builder.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-photo-'));
@@ -123,6 +123,15 @@ test('EXIF-läsaren tål trasiga och fientliga filer', () => {
   assert.equal(zero.lat, undefined, '0,0 är ingen position');
   // Slumpmässigt skräp
   for (let i = 0; i < 200; i++) { const b = Buffer.from(Array.from({ length: 64 + i }, () => Math.floor(Math.random() * 256))); b.write(i % 2 ? 'MM\0*' : 'II*\0', 0, 'latin1'); parseTiff(b); parseImage(Buffer.concat([Buffer.from([0xFF, 0xD8]), b])); }
+});
+
+test('EXIF-läsaren: fientlig HEIC med tomma iloc-utsträckningar tar linjär tid (blockerade servern)', () => {
+  const b = heifIlocBomb();
+  assert.ok(b.length < 70000);
+  const t0 = performance.now();
+  assert.equal(parseImage(b).format, 'heic');
+  const ms = performance.now() - t0;
+  assert.ok(ms < 500, `tog ${Math.round(ms)} ms`);
 });
 
 test('HEIC-stöd avgörs av ffmpeg-versionen och ISO 6709-platser tolkas', () => {

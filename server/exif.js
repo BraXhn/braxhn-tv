@@ -209,14 +209,18 @@ function heif(b) {
   const rd = (n) => { if (p + n > iloc.end) throw new RangeError('iloc'); let v = 0; for (let k = 0; k < n; k++) v = v * 256 + b[p + k]; p += n; return v; };
   try {
     const count = rd(ver < 2 ? 2 : 4);
+    // Storlekarna kan vara 0 byte (rd läser då inget): utan ett tak över alla utsträckningar gav 60 kB
+    // 655 miljoner varv och servern stod still. En riktig bild har ett fåtal utsträckningar per objekt.
+    let budget = 100000;
     for (let k = 0; k < count && k < 10000; k++) {
       const id = rd(ver < 2 ? 2 : 4);
       const method = ver >= 1 ? rd(2) & 15 : 0;
       rd(2); // data_reference_index
       const base = rd(baseSize), n = rd(2);
-      const ext = [];
-      for (let j = 0; j < n; j++) { if (idxSize) rd(idxSize); ext.push([base + rd(offSize), rd(lenSize)]); }
-      if (id === exifId) { if (method === 0 && ext.length) r.exifAt = { offset: ext[0][0], length: ext[0][1] }; break; }
+      if ((budget -= n + 1) < 0) break;
+      let first = null;
+      for (let j = 0; j < n; j++) { if (idxSize) rd(idxSize); const o = base + rd(offSize), l = rd(lenSize); if (!first) first = [o, l]; }
+      if (id === exifId) { if (method === 0 && first) r.exifAt = { offset: first[0], length: first[1] }; break; }
     }
   } catch {}
   return r;

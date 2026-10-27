@@ -169,12 +169,23 @@ export async function scanPhotos(lib, status = {}) {
 }
 
 // ---------- miniatyrer och platshållarfärg (bakgrunden) ----------
-/** Videoklippets stillbild (en sekund in) – i cachen, med sökväg, storlek och ändringstid i namnet */
-async function frameOf(r) {
-  const out = path.join(FRAMES, crypto.createHash('sha1').update(`${r.path}|${r.size}|${r.mtime}`).digest('hex').slice(0, 24) + '.jpg');
-  if (fs.existsSync(out)) return out;
+// Stillbilderna görs av /api/photos/:id/img (vilken inloggad tittare som helst) och miniatyrjobbet: högst två ffmpeg
+// samtidigt, samma stillbild bara en gång även om många frågar, och ett klipp som inte gick att läsa försöks inte
+// igen förrän om en timme (förut startade varje förfrågan en egen ffmpeg, utan tak).
+const FRAME_LIMIT = 2;
+let frameActive = 0;
+const frameWait = [], frameJobs = new Map(), frameFailed = new Map();
+/** Räknare (tester): antal ffmpeg-körningar och högsta antal samtidigt */
+export const frameStats = { runs: 0, max: 0 };
+async function frameSlot(fn) {
+  // Platsen lämnas över direkt till nästa väntande (som subSlot i stream.js)
+  if (frameActive >= FRAME_LIMIT) await new Promise(r => frameWait.push(r)); else frameActive++;
+  try { return await fn(); } finally { const next = frameWait.shift(); if (next) next(); else frameActive--; }
+}
+async function extractFrame(r, out) {
   for (const at of ['1', '0']) {
     try {
+      frameStats.runs++; frameStats.max = Math.max(frameStats.max, frameActive);
       await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file', '-ss', at, '-i', r.path,
         '-frames:v', '1', '-vf', "scale='min(2560,iw)':-2", '-q:v', '3', '-f', 'image2', '-update', '1', out + '.tmp'], { timeout: 60000 });
       fs.renameSync(out + '.tmp', out);
@@ -182,7 +193,19 @@ async function frameOf(r) {
     } catch {}
   }
   fs.rmSync(out + '.tmp', { force: true });
+  frameFailed.set(out, Date.now());
+  if (frameFailed.size > 5000) frameFailed.clear();
   return null;
+}
+/** Videoklippets stillbild (en sekund in) – i cachen, med sökväg, storlek och ändringstid i namnet */
+function frameOf(r) {
+  const out = path.join(FRAMES, crypto.createHash('sha1').update(`${r.path}|${r.size}|${r.mtime}`).digest('hex').slice(0, 24) + '.jpg');
+  if (fs.existsSync(out)) return Promise.resolve(out);
+  if ((frameFailed.get(out) || 0) > Date.now() - 3600e3) return Promise.resolve(null);
+  if (frameJobs.has(out)) return frameJobs.get(out);
+  const p = frameSlot(() => fs.existsSync(out) ? out : extractFrame(r, out)).finally(() => frameJobs.delete(out));
+  frameJobs.set(out, p);
+  return p;
 }
 /** Källan för bilder av fotot: filen (eller videons stillbild) och hur imgsize ska skala den */
 async function sourceOf(r) {

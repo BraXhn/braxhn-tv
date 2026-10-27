@@ -15,8 +15,61 @@ const st = await import('../server/stream.js');
 const music = await import('../server/music.js');
 const offline = await import('../server/offline.js');
 const { CACHE } = await import('../server/db.js');
+const trailers = await import('../server/trailers.js');
+const photos = await import('../server/photos.js');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-leakm-'));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+test('extramaterial ?mp4=1: högst MAX_REMUX ffmpeg även när förfrågningarna kommer samtidigt', async () => {
+  const f = path.join(dir, 'extra.avi');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-t', '60', '-c:v', 'mpeg4', f]);
+  const srv = http.createServer(async (req, res) => { if (!await trailers.serveRemux(req, res, f)) { res.writeHead(503); res.end(); } });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port, open = [];
+  const get = (method = 'GET') => new Promise((ok, no) => {
+    const rq = http.request({ port, host: '127.0.0.1', path: '/', method }, (res) => { res.pause(); open.push(rq); ok(res.statusCode); });
+    rq.on('error', no); rq.end();
+  });
+  try {
+    // Alla sex kommer innan någon hunnit fråga ffprobe – förut släpptes alla in (kontrollen gjordes före väntan)
+    const codes = await Promise.all(Array.from({ length: 6 }, () => get()));
+    assert.equal(codes.filter(c => c === 200).length, trailers.MAX_REMUX, `svar: ${codes}`);
+    assert.equal(codes.filter(c => c === 503).length, 6 - trailers.MAX_REMUX);
+  } finally {
+    for (const rq of open) rq.destroy();
+    srv.close();
+  }
+  for (let k = 0; k < 50 && trailers.remuxCount(); k++) await sleep(100);
+  assert.equal(trailers.remuxCount(), 0);
+});
+
+test('kvalitet ur adressen: bara egna nycklar i QUALITIES (inte constructor/__proto__)', () => {
+  for (const q of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    assert.equal(st.parseCaps(new URLSearchParams({ q })).q, 'orig', q);
+    assert.equal(st.exceedsQuality({ streams: JSON.stringify([{ type: 'video', height: 2160 }]) }, new URLSearchParams({ q }), '720'), true, `${q} räknas som original (över taket)`);
+  }
+  assert.equal(st.parseCaps(new URLSearchParams({ q: '720' })).q, '720');
+  assert.equal(st.exceedsQuality({ streams: '[]' }, new URLSearchParams({ q: '480' }), 'constructor'), false, 'okänt tak = inget tak, som förut');
+});
+
+test('fotobibliotekets videoklipp: stillbilden görs en gång per fil och högst två ffmpeg samtidigt', async () => {
+  const src = path.join(dir, 'klipp.mp4');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=10', '-t', '3', '-pix_fmt', 'yuv420p', src]);
+  const row = (n) => {
+    const f = path.join(dir, `klipp${n}.mp4`);
+    if (!fs.existsSync(f)) fs.copyFileSync(src, f);
+    const s = fs.statSync(f);
+    return { id: 9000 + n, kind: 'video', path: f, size: s.size, mtime: Math.floor(s.mtimeMs / 1000) };
+  };
+  const runs = photos.frameStats.runs;
+  const same = await Promise.all(Array.from({ length: 6 }, () => photos.imageFile(row(0), 320)));
+  assert.ok(same[0] && same.every(f => f === same[0]));
+  assert.equal(photos.frameStats.runs - runs, 1, 'samtidiga förfrågningar efter samma stillbild kör ffmpeg en gång');
+  photos.frameStats.max = 0;
+  const many = await Promise.all(Array.from({ length: 6 }, (_, k) => photos.imageFile(row(k + 1), 320)));
+  assert.ok(many.every(Boolean));
+  assert.ok(photos.frameStats.max <= 2, `högst två samtidigt (var ${photos.frameStats.max})`);
+});
 
 test('PGS: övergivet jobb städas efter 30 min (filhandtag, .part-fil, minne)', () => {
   const it = { id: 4711, mtime: 1, path: path.join(dir, 'finns-inte.mkv'), duration: 100, title: 'X' };
