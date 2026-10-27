@@ -224,6 +224,7 @@ export async function play(id, start = 0, opts = {}) {
   v.addEventListener('ended', () => P === cur && onEnded());
   v.addEventListener('error', () => {
     if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(true); }
+    else if (P === cur && h264Fallback(cur)) return;
     else if (P === cur && v.error) toast(`Kunde inte spela upp (${['', 'avbrutet', 'nätverksfel', 'avkodningsfel', 'formatet stöds inte'][v.error.code] || 'fel'}) – prova en lägre kvalitet under ⚙`);
   });
   // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
@@ -295,6 +296,7 @@ async function load(start, { play = true } = {}) {
   const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
   if (cur.forceHls) extra.force = 'hls';
+  if (cur.h264) extra.tc = ''; // HEVC/AV1 fungerade inte – omkodning till H.264
   if (cur.cinema) extra.cinema = '1';
   Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
@@ -329,7 +331,8 @@ async function load(start, { play = true } = {}) {
   cur.pb = pb;
   const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
   const pm = $('#pmode', el);
-  pm.textContent = `${label}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
+  const vcl = pb.mode === 'transcode' && pb.vcodec && pb.vcodec !== 'h264' ? ' · ' + pb.vcodec.toUpperCase() : '';
+  pm.textContent = `${label}${vcl}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
   pm.title = pb.reasons.join(', ');
   v.autoplay = play; // pausad vid bytet: den nya strömmen ska inte starta av sig själv
   if (pb.mode === 'direct' || v.canPlayType('application/vnd.apple.mpegurl')) {
@@ -353,7 +356,7 @@ async function load(start, { play = true } = {}) {
       fragLoadPolicy: { default: slow }, xhrSetup: (x) => { x.withCredentials = true; } });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
-      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
+      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label}${vcl} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
     });
     // Fatala fel: försök igen några gånger, men inte i all oändlighet (utgången inloggning, borttagen fil …)
     let netTries = 0, mediaTries = 0;
@@ -364,6 +367,7 @@ async function load(start, { play = true } = {}) {
       if (code === 401 || code === 403) { toast(code === 401 ? 'Inloggningen har gått ut – logga in igen' : 'Uppspelningen nekades'); return closePlayer(false); }
       if (d.type === 'networkError' && ++netTries <= 3) return void setTimeout(() => cur.hls === hls && hls.startLoad(), 1000 * netTries);
       if (d.type === 'mediaError' && ++mediaTries <= 2) return hls.recoverMediaError();
+      if (d.type === 'mediaError' && h264Fallback(cur)) return;
       toast(d.type === 'networkError' ? 'Ingen kontakt med servern – uppspelningen stoppades' : 'Uppspelningsfel: ' + d.details);
     });
     // Starta när spellistan är inläst – ett play() direkt efter attachMedia avbryts ofta av den nya laddningen
@@ -384,6 +388,14 @@ async function load(start, { play = true } = {}) {
   v.addEventListener('canplay', tryPlay, { once: true });
   tryPlay();
   applyAudioFx(v);
+}
+/** Omkodad HEVC/AV1 som inte gick att avkoda: ladda om med H.264 (en gång per uppspelning). true = laddar om. */
+function h264Fallback(cur) {
+  if (cur.h264 || cur.pb?.mode !== 'transcode' || !cur.pb.vcodec || cur.pb.vcodec === 'h264') return false;
+  cur.h264 = true;
+  toast(`Enheten kunde inte spela ${cur.pb.vcodec === 'av1' ? 'AV1' : 'HEVC'} – byter till H.264`);
+  reload(true);
+  return true;
 }
 function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
 

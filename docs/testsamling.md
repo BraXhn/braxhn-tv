@@ -64,6 +64,9 @@ med ffmpegs experimentella kodare. Riktig GPU-avkodning (NVDEC/VAAPI) kan inte k
 Profilerna är samma förmågor som respektive klient skickar till `/api/items/:id/playback`:
 Chrome (hls.js), Safari/iPhone med och utan HDR (`nhls=1`), iOS-appen, tvOS-appen (utan `nhls`),
 Android (ExoPlayer), utanför hemmet med 480p och utanför hemmet med automatisk kvalitet (ABR med `sbw`).
+Profilerna `tc-hevc`, `tc-av1`, `tc-safari` och `tc-remote` skickar `tc=` (omkodning till HEVC/AV1 i fMP4); servern
+startas med `TRANSCODE_VCODEC=cpu` så att x265/SVT-AV1 får användas. Finns ingen fungerande kodare (SVT-AV1 i ffmpeg
+5.1/6.1 struntar i tvingade nyckelbilder och väljs bort vid start) blir det H.264 med en varning.
 Hela matrisen kör alla profiler × automatiskt läge, `force=hls` (remux), tvingad omkodning 1080/720/360,
 ljudspårsval och inbränd PGS. Fall som ger exakt samma ström som ett tidigare fall kontrolleras bara mot
 den nya klientens förmågor.
@@ -83,7 +86,8 @@ uppspelning med `start=` mitt i filmen, segmentet där, nästa och föregående 
   öppen GOP vid remux), DTS ökar strikt, inga negativa eller omslagna tidsstämplar.
 - **Följande segment:** nästa segments DTS/PTS börjar efter föregående (inget överlapp – Chrome avbryter då),
   ingen lucka över 2,5 bilder; ljudet överlappar högst en ljudram (två efter en omstart) och har inga luckor.
-- **Omkodad bild:** H.264, yuv420p 8 bit, profil högst High, rimlig nivå för upplösning och bildfrekvens,
+- **Omkodad bild:** codec enligt beslutet (`vcodec`: H.264, eller HEVC/AV1 i fMP4 bara när klienten bett om det),
+  yuv420p 8 bit, H.264 med profil högst High och rimlig nivå för upplösning och bildfrekvens, HEVC i profilen Main,
   aldrig PQ/HLG/BT.2020-märkt, tonmappad HDR märkt BT.709, inga B-bilder, flätad källa avflätad, bildformat
   (SAR/DAR) bevarat, bithastighet under BANDWIDTH vid kvalitetsgräns.
 - **Remux:** samma codec och HDR-märkning som källan, HEVC i fMP4 med `hvc1`/`dvh1`.

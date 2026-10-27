@@ -156,7 +156,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
   if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   // Uppskattad bithastighet (kbit/s) för statistiken: omkodningens steg, annars filens genomsnitt
-  const kbps = d.mode === 'transcode' && st.QUALITIES[d.q]?.br ? st.QUALITIES[d.q].br : it.size && it.duration ? Math.round(it.size * 8 / it.duration / 1000) : null;
+  const kbps = d.mode === 'transcode' && st.QUALITIES[d.q]?.br ? st.videoKbps(d.q, d.vc) : it.size && it.duration ? Math.round(it.size * 8 / it.duration / 1000) : null;
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons,
     start: Math.max(0, +c.q.get('start') || 0), kbps });
   const allSubs = st.subtitlesOf(it);
@@ -173,6 +173,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const imageSubs = allSubs.filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
   send(c.res, 200, {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
+    // Videons codec i strömmen (tillägg): vid omkodning h264, hevc eller av1 (tc=), annars källans
+    vcodec: d.vcodec,
     duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,
     intro: it.intro_end ? { start: it.intro_start || 0, end: it.intro_end } : null, credits: it.credits_start || null,
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,

@@ -211,7 +211,7 @@ function frameOf(r) {
 async function sourceOf(r) {
   if (r.kind === 'video') { const f = await frameOf(r); return f ? { file: f, opts: { sizes: PHOTO_SIZES } } : null; }
   const heic = r.format === 'heic' || isHeic(r.path);
-  return { file: r.path, opts: { sizes: PHOTO_SIZES, orient: heic ? 0 : r.orientation || 1, force: heic } };
+  return { file: r.path, opts: { sizes: PHOTO_SIZES, orient: heic ? 0 : r.orientation || 1, force: heic, heif: heic } };
 }
 /** Webbläsaren kan visa originalet (JPEG, PNG, WebP, GIF) – HEIC och video får en JPEG */
 const browserNative = (r) => r.kind === 'image' && ['jpeg', 'png', 'webp', 'gif'].includes(r.format);

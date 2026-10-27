@@ -1,6 +1,13 @@
 // Vad klarar den här webbläsaren? Video- och ljudformat som skickas till servern
 // ---------- uppspelning: vad klarar den här webbläsaren? ----------
 let CAPS = null;
+// AV1 som omkodningsmål bara när webbläsaren avkodar det jämnt (ofta hårdvara) – mäts i bakgrunden när modulen
+// laddas; tills svaret kommit (eller utan Media Capabilities) blir det HEVC eller H.264
+let av1Smooth = false;
+try {
+  navigator.mediaCapabilities?.decodingInfo({ type: 'media-source', video: { contentType: 'video/mp4; codecs="av01.0.08M.08"', width: 1920, height: 1080, bitrate: 4e6, framerate: 30 } })
+    .then(r => { av1Smooth = !!(r.supported && r.smooth); }).catch(() => {});
+} catch {}
 export function capsQuery(extra = {}) {
   if (!CAPS) {
     const v = document.createElement('video');
@@ -18,7 +25,11 @@ export function capsQuery(extra = {}) {
     const hdr = !!(window.matchMedia && matchMedia('(dynamic-range: high)').matches) && vc.includes('hevc');
     CAPS = { c: cont.join(','), v: vc.join(','), a: ac.join(','), hdr: hdr ? '1' : '0' };
   }
-  return new URLSearchParams({ ...CAPS, ...extra }).toString();
+  // Omkodning till HEVC/AV1 i fMP4 (tc): det webbläsaren kan avkoda. Safaris egen HLS-spelare bara HEVC.
+  // extra.tc = '' (efter ett avkodningsfel) ger H.264.
+  const v = CAPS.v.split(',');
+  const tc = [v.includes('hevc') && 'hevc', v.includes('av1') && av1Smooth && extra.nhls !== '1' && 'av1'].filter(Boolean);
+  return new URLSearchParams({ ...CAPS, ...(tc.length ? { tc: tc.join(',') } : {}), ...extra }).toString();
 }
 export const canAirPlay = () => !!window.WebKitPlaybackTargetAvailabilityEvent;
 

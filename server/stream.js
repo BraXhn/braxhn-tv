@@ -10,6 +10,7 @@ import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
 import * as jobs from './jobs.js';
 import { SubReader, vttParser } from './subreader.js';
+import { ffcaps, ffReady, vulkanDevice } from './ffcaps.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
@@ -80,8 +81,22 @@ export function testEncode(mode, seconds = 4) {
 // Testas vid start med de filter ffmpeg i imagen faktiskt har; misslyckas en riktig körning används processorfiltren
 // (avkodning och kodning stannar på grafikkortet) resten av tiden.
 export const gpuPipe = { cuda: false, cudaTm: false, vaapi: false };
-const gpuProbe = (name, args) => new Promise(res => execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin',
-  ...args, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e) => { if (!e) gpuPipe[name] = true; res(); }));
+// HDR-tonmappning på grafikkortet (sonderas vid start, i föredragen ordning per kedja). En körning som misslyckas
+// stänger av just den vägen – nästa start tar nästa i ordningen och till sist processorn (zscale).
+//  cuda          tonemap_cuda (finns bara i jellyfin-ffmpeg) direkt efter scale_cuda – bilderna lämnar aldrig kortet
+//  placeboCuda   libplacebo (Vulkan) på den nedskalade bilden från scale_cuda – klarar Dolby Vision profil 5
+//  openclCuda    tonemap_opencl på den nedskalade bilden (NVIDIA:s OpenCL)
+//  placeboVaapi  libplacebo via hwmap från VA-API (Intel/AMD med Mesa-Vulkan) – klarar Dolby Vision profil 5
+//  placeboSw     libplacebo i kedjor med processorfilter (inbränning, avflätning, QSV) när det finns ett grafikkort med Vulkan
+//  openclSw      tonemap_opencl i samma kedjor
+// Vulkan-enheten måste vara ett riktigt grafikkort: lavapipe (programvara) klarade 3 bilder/s i 1080p.
+export const gpuTm = { cuda: false, placeboCuda: false, openclCuda: false, placeboVaapi: false, placeboSw: false, openclSw: false, vulkan: null };
+// Sonderingar avbryts med SIGKILL: ffmpeg som hänger i en kodartråd (sett med SVT-AV1 i Debian 12) struntar i SIGTERM,
+// och en kvarhängande process skulle hålla servern (och testerna) kvar
+const PROBE = { killSignal: 'SIGKILL' };
+const probeOk = (args, timeout = 20000) => new Promise(res => execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin',
+  ...args, '-f', 'null', '-'], { ...PROBE, timeout }, (e) => res(!e)));
+const gpuProbe = (name, args) => probeOk([...args, '-frames:v', '2']).then(ok => { if (ok) gpuPipe[name] = true; });
 function probeGpuPipe() {
   const src = ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=0.2:r=25'];
   if (HW === 'nvenc') return Promise.all([
@@ -92,17 +107,162 @@ function probeGpuPipe() {
   return Promise.resolve();
 }
 const VAAPI_DEV_PROBE = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
-// Snabbtest vid start: koda några bildrutor med den valda hårdvaran
-if (HW !== 'none') {
-  const enc = hwTestArgs(HW);
-  if (!enc) disableHw(`okänt värde HWACCEL=${HW}`);
-  else execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { timeout: 20000 }, (e, _o, stderr) => {
-    if (e) return disableHw(stderr || e.message);
-    if (process.env.GPU_FILTERS === '0') return console.log(`[hårdvara] ${HW} fungerar (filter på processorn: GPU_FILTERS=0)`);
-    probeGpuPipe().then(() => console.log(`[hårdvara] ${HW} fungerar – skalning på ${gpuPipe.cuda || gpuPipe.vaapi ? 'grafikkortet' : 'processorn'}`
-      + (HW === 'nvenc' ? `, HDR-tonmappning ${gpuPipe.cudaTm ? 'efter nedskalning på grafikkortet' : 'på processorn'}` : '')));
-  });
+// Tonmappningsfilter – samma strängar i sonderingen som i omkodningen
+const TONEMAP = process.env.TONEMAP || 'hable'; // hable | mobius | reinhard | bt2390
+const PL_TM = { hable: 'hable', mobius: 'mobius', reinhard: 'reinhard', bt2390: 'bt.2390' }[process.env.TONEMAP] || 'bt.2390';
+const plFilter = (fmt = 'yuv420p') => `libplacebo=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=${PL_TM}:format=${fmt}`;
+const oclFilter = () => `tonemap_opencl=tonemap=${TONEMAP === 'bt2390' ? 'hable' : TONEMAP}:desat=0:t=bt709:m=bt709:p=bt709:r=tv:format=nv12`;
+const cudaTmFilter = () => `tonemap_cuda=tonemap=${TONEMAP}:t=bt709:m=bt709:p=bt709:format=nv12`;
+const VK_DEV = ['-init_hw_device', 'vulkan=vk', '-filter_hw_device', 'vk'];
+const OCL_DEV = ['-init_hw_device', 'opencl=ocl', '-filter_hw_device', 'ocl'];
+const vaPlaceboDev = () => ['-init_hw_device', `vaapi=va:${VAAPI_DEV_PROBE}`, '-init_hw_device', 'vulkan=vk@va', '-filter_hw_device', 'va'];
+async function probeTonemap() {
+  if (HW === 'none' || process.env.GPU_TONEMAP === '0') return;
+  const caps = await ffReady;
+  const has = (f) => caps.filters.has(f);
+  const hdr = ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=0.2:r=25,format=yuv420p10le,setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc:range=tv'];
+  const vk = has('libplacebo') ? await vulkanDevice() : null;
+  gpuTm.vulkan = vk;
+  const realVk = !!vk && !['software', 'cpu'].includes(vk.type);
+  const t = (name, ok, args) => ok ? probeOk([...args, '-frames:v', '2']).then(r => { gpuTm[name] = r; }) : null;
+  const enc = HW === 'nvenc' ? ['-c:v', 'h264_nvenc'] : HW === 'qsv' ? ['-c:v', 'h264_qsv'] : ['-c:v', 'h264_vaapi'];
+  const post = HW === 'qsv' ? ',format=nv12' : '';
+  const cuSrc = 'format=p010le,hwupload_cuda,scale_cuda=320:180:format=p010le';
+  await Promise.all([
+    t('placeboSw', realVk && HW !== 'vaapi', [...VK_DEV, ...hdr, '-vf', `hwupload,${plFilter()},hwdownload,format=yuv420p${post}`, ...enc]),
+    t('openclSw', has('tonemap_opencl') && HW !== 'vaapi', [...OCL_DEV, ...hdr, '-vf', `format=p010le,hwupload,${oclFilter()},hwdownload,format=nv12`, ...enc]),
+    t('cuda', HW === 'nvenc' && gpuPipe.cuda && has('tonemap_cuda'), ['-init_hw_device', 'cuda=cu', '-filter_hw_device', 'cu', ...hdr, '-vf', `format=p010le,hwupload,scale_cuda=320:180:format=p010le,${cudaTmFilter()}`, ...enc]),
+    t('placeboCuda', HW === 'nvenc' && gpuPipe.cuda && realVk, [...VK_DEV, ...hdr, '-vf', `${cuSrc},hwdownload,format=p010le,hwupload,${plFilter()},hwdownload,format=yuv420p`, ...enc]),
+    t('openclCuda', HW === 'nvenc' && gpuPipe.cuda && has('tonemap_opencl'), [...OCL_DEV, ...hdr, '-vf', `${cuSrc},hwdownload,format=p010le,hwupload,${oclFilter()},hwdownload,format=nv12`, ...enc]),
+    t('placeboVaapi', HW === 'vaapi' && gpuPipe.vaapi && realVk && has('hwmap'), [...vaPlaceboDev(), ...hdr, '-vf',
+      `format=p010,hwupload,scale_vaapi=w=320:h=180:format=p010,hwmap=derive_device=vulkan,${plFilter('nv12')},hwmap=derive_device=vaapi:reverse=1,format=vaapi`, ...enc])
+  ]);
 }
+
+// ---------------- HEVC/AV1 vid omkodning ----------------
+// Omkodning ger H.264 i MPEG-TS om inte klienten anger att den kan avkoda HEVC/AV1 i fMP4 (tc=hevc,av1) och en
+// kodare finns: grafikkortets (hevc_nvenc/av1_nvenc/hevc_vaapi/av1_vaapi/hevc_qsv/av1_qsv) eller – bara om admin
+// valt det (inställningen transcode_vcodec = cpu) – processorns libx265/libsvtav1. Samma bildkvalitet med lägre
+// bithastighet (VC_FACTOR), vilket märks mest utanför hemmet. Varje kodare provkörs vid start med tvingade
+// nyckelbilder och samma fMP4-delning som i omkodningen (SVT-AV1 i ffmpeg 5.1 struntar t.ex. i tvingade nyckelbilder).
+export const VC_FACTOR = { h264: 1, hevc: 0.6, av1: 0.5 };
+const VC_LABEL = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1' };
+const CPU_ENC = { h264: 'libx264', hevc: 'libx265', av1: 'libsvtav1' };
+const ENC_PRE = { vaapi: () => ['-vaapi_device', VAAPI_DEV_PROBE], nvenc: () => [], qsv: () => [], none: () => [] };
+const ENC_VF = { vaapi: ['-vf', 'format=nv12,hwupload'], nvenc: ['-vf', 'format=yuv420p'], qsv: ['-vf', 'format=nv12'], none: ['-vf', 'format=yuv420p'] };
+/** Fungerande kodare per codec: hw = grafikkortets (HW-läget vid start), cpu = processorns. failed = misslyckades i en riktig körning. */
+export const vEnc = { hw: { hevc: null, av1: null }, cpu: { hevc: null, av1: null }, failed: new Set() };
+// fMP4 med segment-muxern: varje fil får ftyp+moov (identisk mellan körningar) och tfdt i absolut tid
+// (frag_discont + avoid_negative_ts=disabled i den inre muxern – annars börjar varje fil om på 0). delay_moov: moov
+// skrivs först när första paketen finns (kopierat E-AC-3 kräver det), use_editlist=0 håller moov lika i alla körningar. Servern skickar
+// moov en gång som initsegment och resten (moof+mdat) som segment. Delningen styrs av -segment_times precis som i TS,
+// så extra nyckelbilder från en kodare (scenbyten) aldrig ger extra segment.
+const FMP4_SEG = ['-f', 'segment', '-segment_format', 'mp4', '-segment_format_options',
+  'movflags=+frag_keyframe+empty_moov+delay_moov+default_base_moof+frag_discont+skip_trailer:use_editlist=0:avoid_negative_ts=disabled'];
+/** Kodarens argument. kind = nvenc/vaapi/qsv/none (processorn), br = bithastighetstak (kbit/s) eller null = kvalitetsstyrd. */
+export function encArgs(kind, vc, br, big) {
+  const cap = br ? ['-maxrate', br + 'k', '-bufsize', br * 2 + 'k'] : [];
+  const cbr = br ? ['-b:v', br + 'k', ...cap] : null;
+  const nv = (cq) => br ? ['-rc', 'vbr', '-cq', String(cq + 3), '-b:v', Math.round(br * 0.6) + 'k', ...cap] : ['-cq', String(cq)];
+  // HEVC/AV1: inga nyckelbilder utöver de tvingade (scenbyten) – och de tvingade blir IDR
+  const keys = ['-g', '1000'];
+  const tag = vc === 'hevc' ? ['-tag:v', 'hvc1'] : [];
+  if (kind === 'nvenc') {
+    if (vc === 'h264') return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...nv(22)];
+    return ['-c:v', `${vc}_nvenc`, '-preset', 'p4', '-forced-idr', '1', '-no-scenecut', '1', ...keys, ...nv(vc === 'av1' ? 30 : 24), ...tag];
+  }
+  if (kind === 'vaapi') {
+    if (vc === 'h264') return ['-c:v', 'h264_vaapi', ...(cbr || ['-qp', '22'])];
+    // av1_vaapi: qp är AV1:s qindex (0–255)
+    return ['-c:v', `${vc}_vaapi`, ...keys, ...(cbr || ['-qp', vc === 'av1' ? '120' : '24']), ...tag];
+  }
+  if (kind === 'qsv') {
+    if (vc === 'h264') return ['-c:v', 'h264_qsv', '-forced_idr', '1', ...(cbr || ['-global_quality', '22'])];
+    return ['-c:v', `${vc}_qsv`, ...(vc === 'hevc' ? ['-forced_idr', '1'] : []), ...keys, ...(cbr || ['-global_quality', vc === 'av1' ? '28' : '24']), ...tag];
+  }
+  // x265/SVT-AV1: bufferten lika stor som taket – med dubbel buffert låg första segmentet över BANDWIDTH
+  const tight = br ? ['-maxrate', br + 'k', '-bufsize', br + 'k'] : [];
+  if (vc === 'hevc') return ['-c:v', 'libx265', '-preset', process.env.X265_PRESET || (big ? 'superfast' : 'veryfast'), ...(br ? ['-crf', '26', ...tight] : ['-crf', '24']),
+    '-profile:v', 'main', '-forced-idr', '1', '-x265-params', 'log-level=error:scenecut=0:open-gop=0:keyint=1000', ...tag];
+  if (vc === 'av1') return ['-c:v', 'libsvtav1', '-preset', process.env.SVTAV1_PRESET || (big ? '12' : '10'), ...(br ? ['-crf', '35', ...tight] : ['-crf', '32']),
+    ...keys, '-svtav1-params', 'scd=0'];
+  return ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...(br ? ['-crf', '23', ...cap] : ['-crf', '21']), '-profile:v', 'high', '-sc_threshold', '0'];
+}
+/** Provkör en kodare: fMP4 med tvingade nyckelbilder vid 1 och 2 s ska bli exakt tre segment */
+function probeEncoder(kind, vc) {
+  const name = kind === 'none' ? CPU_ENC[vc] : `${vc}_${kind}`;
+  if (!ffcaps.encoders.has(name)) return Promise.resolve(null);
+  let dir;
+  try { dir = fs.mkdtempSync(path.join(TRANSCODE, `encprobe-${name}-`)); } catch { return Promise.resolve(null); }
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...ENC_PRE[kind](), '-f', 'lavfi', '-i', 'testsrc2=s=320x180:d=3:r=10',
+    '-map', '0:v', ...ENC_VF[kind], ...encArgs(kind, vc, null, false), '-force_key_frames', '1,2', '-bf', '0', ...FMP4_SEG, '-segment_times', '1,2',
+    '-segment_list', 'pipe:1', '-segment_list_type', 'csv', path.join(dir, 'p_%02d.m4s')];
+  return new Promise(res => execFile('ffmpeg', args, { ...PROBE, timeout: 20000, env: { ...process.env, SVT_LOG: '1' } }, (e, out) => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    res(!e && String(out).trim().split('\n').filter(Boolean).length === 3 ? name : null);
+  }));
+}
+async function probeEncoders() {
+  await ffReady;
+  if (process.env.TRANSCODE_PROBE === '0') return; // tester som inte behöver HEVC/AV1 (sparar processortid)
+  const all = [];
+  for (const vc of ['hevc', 'av1']) {
+    all.push(probeEncoder('none', vc).then(n => { vEnc.cpu[vc] = n; }));
+    if (HW !== 'none') all.push(probeEncoder(HW, vc).then(n => { vEnc.hw[vc] = n; }));
+  }
+  await Promise.all(all);
+}
+/** Admins val: auto = HEVC/AV1 med grafikkortet, cpu = även med processorn (x265/SVT-AV1), h264 = alltid H.264 */
+export const vcodecSetting = () => { const v = getSetting('transcode_vcodec', process.env.TRANSCODE_VCODEC || 'auto'); return ['auto', 'cpu', 'h264'].includes(v) ? v : 'auto'; };
+/** Kodaren som används för codec vc just nu: { kind, name } eller null (finns inte, har misslyckats eller är inte tillåten) */
+export function encoderFor(vc) {
+  if (vc === 'h264') return { kind: HW, name: HW === 'none' ? 'libx264' : `h264_${HW}` };
+  const set = vcodecSetting();
+  if (set === 'h264') return null;
+  const hw = HW !== 'none' && vEnc.hw[vc] && !vEnc.failed.has(vEnc.hw[vc]) ? vEnc.hw[vc] : null;
+  if (hw) return { kind: HW, name: hw };
+  const cpu = set === 'cpu' && vEnc.cpu[vc] && !vEnc.failed.has(vEnc.cpu[vc]) ? vEnc.cpu[vc] : null;
+  return cpu ? { kind: 'none', name: cpu } : null;
+}
+/** Bästa codec som både klienten (tc) och servern klarar: AV1 före HEVC, grafikkortet före processorn */
+export function pickVcodec(tc) {
+  if (!tc?.size) return 'h264';
+  const ok = ['av1', 'hevc'].filter(c => tc.has(c) && encoderFor(c));
+  return ok.find(c => encoderFor(c).kind !== 'none') || ok[0] || 'h264';
+}
+/** Kan Dolby Vision profil 5 få rätt färger? (libplacebo på ett riktigt grafikkort) */
+const dv5Ok = () => gpuTm.placeboCuda || gpuTm.placeboVaapi || gpuTm.placeboSw;
+/** Sammanfattning för adminsidan och loggen */
+export function transcodeInfo() {
+  const tm = HW === 'nvenc' ? (gpuTm.cuda ? 'tonemap_cuda' : gpuTm.placeboCuda ? 'libplacebo' : gpuTm.openclCuda ? 'tonemap_opencl' : null)
+    : HW === 'vaapi' ? (gpuTm.placeboVaapi ? 'libplacebo' : 'tonemap_vaapi') : (gpuTm.placeboSw ? 'libplacebo' : gpuTm.openclSw ? 'tonemap_opencl' : null);
+  return { ffmpeg: ffcaps.version || null, setting: vcodecSetting(), hevc: encoderFor('hevc')?.name || null, av1: encoderFor('av1')?.name || null,
+    hw: { ...vEnc.hw }, cpu: { ...vEnc.cpu }, failed: [...vEnc.failed], tonemap: tm || 'processor', dv5: !!dv5Ok(),
+    vulkan: gpuTm.vulkan ? `${gpuTm.vulkan.name} (${gpuTm.vulkan.type})` : null };
+}
+// Snabbtest vid start: koda några bildrutor med den valda hårdvaran, sedan GPU-kedjan, tonmappningen och HEVC/AV1
+const hwReady = new Promise(done => {
+  if (HW === 'none') return done();
+  const enc = hwTestArgs(HW);
+  if (!enc) { disableHw(`okänt värde HWACCEL=${HW}`); return done(); }
+  execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { ...PROBE, timeout: 20000 }, (e, _o, stderr) => {
+    if (e) { disableHw(stderr || e.message); return done(); }
+    if (process.env.GPU_FILTERS === '0') { console.log(`[hårdvara] ${HW} fungerar (filter på processorn: GPU_FILTERS=0)`); return done(); }
+    probeGpuPipe().then(probeTonemap).catch(() => {}).then(() => {
+      const tm = transcodeInfo().tonemap;
+      console.log(`[hårdvara] ${HW} fungerar – skalning på ${gpuPipe.cuda || gpuPipe.vaapi ? 'grafikkortet' : 'processorn'}, HDR-tonmappning `
+        + (tm !== 'processor' ? `på grafikkortet (${tm})` : HW === 'nvenc' && gpuPipe.cudaTm ? 'efter nedskalning på grafikkortet' : 'på processorn'));
+      done();
+    });
+  });
+});
+/** Klar när alla sonderingar vid start är gjorda (tester väntar på den) */
+export const transcodeReady = hwReady.then(probeEncoders).catch(() => {}).then(() => {
+  if (process.env.TRANSCODE_PROBE === '0') return;
+  const i = transcodeInfo();
+  const list = (o) => Object.values(o).filter(Boolean).join(', ') || 'inga';
+  console.log(`[omkodning] ffmpeg ${i.ffmpeg || '?'} – HEVC/AV1: grafikkortet ${HW === 'none' ? '–' : list(vEnc.hw)}, processorn ${list(vEnc.cpu)}${i.setting === 'cpu' ? ' (tillåten)' : ' (bara om admin väljer det)'}`);
+});
 // Segment-muxerns -segment_times jämförs med olika tider beroende på ffmpeg-version: 5.1 (Debian/Docker-imagen)
 // mot utdatans tid inklusive -output_ts_offset, 6.x mot tiden från körningens start. Fel tolkning efter spolning
 // ger ett segment per nyckelbild i stället för rutnätet. Testas en gång vid start: offset 10, delning vid 2.
@@ -126,7 +286,6 @@ const VAAPI_DEV = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
 // och format som kortet inte klarar avkodas med processorn. HW_DECODE=0 stänger av.
 const hwDecode = () => process.env.HW_DECODE === '0' ? []
   : HW === 'nvenc' ? ['-hwaccel', 'cuda'] : HW === 'vaapi' ? ['-hwaccel', 'vaapi', '-hwaccel_device', VAAPI_DEV] : [];
-const TONEMAP = process.env.TONEMAP || 'hable'; // hable | mobius | reinhard | bt2390
 
 const TEXT_SUBS = new Set(['subrip', 'ass', 'ssa', 'mov_text', 'webvtt', 'text']);
 const BITMAP_SUBS = new Set(['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub']);
@@ -480,7 +639,9 @@ export function parseCaps(q, ua = '') {
     // kräver då ingen remux, och ljudet (DTS, TrueHD, Atmos) går orört till förstärkaren
     localAudio: q.get('atrack') === '1',
     // HDR-typer som skärmen visar (hdr10,hlg,dovi,hdr10plus). Saknas = alla (hdr=1 räcker som förut)
-    hdrTypes: q.get('hdrt') ? list('hdrt', '') : null
+    hdrTypes: q.get('hdrt') ? list('hdrt', '') : null,
+    // Codecs som klienten kan avkoda i HLS med fMP4 vid omkodning (tillägg; utan = H.264 som förut)
+    tc: new Set([...list('tc', '')].filter(c => c === 'hevc' || c === 'av1'))
   };
 }
 // Kan skärmen visa källans HDR? Dolby Vision med HDR10-baslager räcker med HDR10 (profil 5 kräver dv=1, se decide)
@@ -524,9 +685,13 @@ export function decide(it, o) {
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
   } else mode = 'transcode';
-  // Omkodning blir alltid H.264 i 8 bitar, som inte kan bära HDR: HDR-källor tonmappas då även för en HDR-skärm.
-  // (Annars märks bilden som PQ/BT.2020 i 8 bitar – iPhone vägrar avkoda den och andra visar bleka färger.)
+  // Omkodning blir alltid 8 bitar (H.264, HEVC Main eller AV1), som inte ska bära HDR: HDR-källor tonmappas då även
+  // för en HDR-skärm. (Annars märks bilden som PQ/BT.2020 i 8 bitar – iPhone vägrar avkoda den och andra visar bleka färger.)
   if (mode === 'transcode' && it.hdr && !tonemap) { tonemap = true; reasons.push(`${it.hdr.toUpperCase()} tonmappas till SDR`); }
+  if (mode === 'transcode' && tonemap && dv5 && !dv5Ok()) reasons.push('Dolby Vision profil 5 utan grafikkort med Vulkan – färgerna kan avvika');
+  // HEVC/AV1 när klienten klarar det och en kodare finns (fMP4); annars H.264 i MPEG-TS
+  const vc = mode === 'transcode' ? pickVcodec(o.tc) : 'h264';
+  if (vc !== 'h264') { fmt = 'fmp4'; tag = vc === 'hevc' ? 'hvc1' : ''; reasons.push(`bilden kodas som ${VC_LABEL[vc]} (${encoderFor(vc).name})`); }
   // Safaris egen HLS-spelare (iPhone) klarar inte Dolby Digital i MPEG-TS-segment – filmen startar aldrig.
   // I fMP4 (HEVC-remux) fungerar det; i TS blir ljudet AAC.
   // Detsamma gäller surround som konverteras till E-AC-3 (DTS, TrueHD, FLAC 5.1) – i TS blir det AAC.
@@ -546,7 +711,7 @@ export function decide(it, o) {
   let ab = null;
   if (o.remote && mode === 'transcode') { if (am !== 'aac') reasons.push('ljudet blir stereo för mobil uppkoppling'); am = 'aac'; ab = 128; }
   return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null,
-    night: comfort && !!o.night, dialog: comfort && !!o.dialog };
+    night: comfort && !!o.night, dialog: comfort && !!o.dialog, vc, vcodec: mode === 'transcode' ? vc : v?.codec || null };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
 // Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo
@@ -567,6 +732,7 @@ export function hlsParams(d, o, token) {
   // Anpassningsbar kvalitet: mastern listar även lägre steg (bara vid omkodning med automatisk kvalitet)
   if (d.abr && d.mode === 'transcode') p.set('abr', '1');
   if (d.ab) p.set('ab', String(d.ab));
+  if (d.mode === 'transcode' && d.vc && d.vc !== 'h264') p.set('vc', d.vc);
   if (d.night) p.set('night', '1');
   if (d.dialog) p.set('dialog', '1');
   // Uppmätt bandbredd (kbit/s): mastern listar steget som passar först (Apple-enheter börjar på första varianten)
@@ -586,7 +752,8 @@ function readParams(q) {
     pid: /^[0-9a-f]{8}$/.test(q.get('pid') || '') ? q.get('pid') : '', abr: q.get('abr') === '1',
     ab: [96, 128, 160, 192].includes(+q.get('ab')) ? +q.get('ab') : null,
     startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null,
-    night: q.get('night') === '1', dialog: q.get('dialog') === '1'
+    night: q.get('night') === '1', dialog: q.get('dialog') === '1',
+    vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264'
   };
 }
 /**
@@ -604,7 +771,13 @@ export function exceedsQuality(it, query, cap, direct = false) {
   const Q = QUALITIES[d.q];
   return Q.h ? Q.h > C.h : !!(v?.height ? v.height > C.h : true);
 }
-const normParams = (d) => { if (d.mode !== 'remux') { d.fmt = 'ts'; d.tag = ''; } return d; };
+// Omkodning: H.264 i MPEG-TS, HEVC/AV1 i fMP4 (fmt och tag följer av vc). Remux behåller vc = h264 (används inte).
+const normParams = (d) => {
+  if (d.mode !== 'remux') { d.fmt = d.vc !== 'h264' ? 'fmp4' : 'ts'; d.tag = d.vc === 'hevc' ? 'hvc1' : ''; } else d.vc = 'h264';
+  return d;
+};
+/** Videons bithastighetstak (kbit/s) för kvalitetssteget och codec – HEVC/AV1 behöver mindre för samma kvalitet */
+export const videoKbps = (q, vc = 'h264') => QUALITIES[q]?.br ? Math.round(QUALITIES[q].br * (VC_FACTOR[vc] || 1)) : null;
 const withT = (p, q) => { const t = q.get('t'); if (t) p.set('t', t); return p; };
 
 // ---------------- anpassningsbar kvalitet (ABR) ----------------
@@ -621,7 +794,8 @@ export function abrVariants(it, d) {
     const Q = QUALITIES[q];
     const h = Q.h && (!srcH || srcH > Q.h) ? Q.h : srcH || Q.h || 720;
     const w = v?.width && v?.height ? Math.round(v.width * h / v.height / 2) * 2 : Math.round(h * 16 / 9 / 2) * 2;
-    const vk = Q.br || (h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000);
+    // Taket är lägre för HEVC/AV1 (samma kvalitet); utan tak är det en uppskattning som inte sänks
+    const vk = Q.br ? videoKbps(q, d.mode === 'transcode' ? d.vc : 'h264') : h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000;
     // BANDWIDTH är toppvärdet: maxrate + marginal för buffert och muxning + ljud
     return { q, h, w, bw: Math.round((vk * 1.1 + audioKbps(d)) * 1000) };
   };
@@ -724,71 +898,81 @@ const forcedKeys = (fromStart) => fromStart
   ? `expr:if(lt(n_forced,${HEAD.length}),gte(t,${HEAD[1] - HEAD[0]}*n_forced),gte(t,${SEG}*(n_forced-${HEAD.length - 1})))`
   : `expr:gte(t,n_forced*${SEG})`;
 
+// Källans färgegenskaper (före tonmappning med grafikkortet; Dolby Vision 5 får sina från RPU-metadatan i libplacebo)
+const hdrParams = (hdr, dv5) => `setparams=color_trc=${hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084'}:color_primaries=bt2020${dv5 ? '' : ':colorspace=bt2020nc'}:range=tv`;
+
 function videoArgs(it, d, fromStart) {
   const Q = QUALITIES[d.q] || QUALITIES.orig;
   const v = videoOf(it);
   const h = Q.h && v?.height && v.height > Q.h ? Q.h : null;
+  const vc = d.vc || 'h264';
+  // Vilken kodare: H.264 med HW-läget; HEVC/AV1 med grafikkortet eller processorn (encoderFor), K = dess slag
+  const K = vc === 'h264' ? HW : encoderFor(vc)?.kind || HW;
+  const br = Q.br ? Math.round(Q.br * (VC_FACTOR[vc] || 1)) : null;
+  const dv5 = !!(v?.dovi && v?.dvProfile === 5);
   // Inga B-bilder: med B-bilder börjar varje segments DTS före föregående segments sista DTS (ffmpegs TS-muxer
   // skjuter bara fram det första segmentet), och Chrome avbryter då uppspelningen ("formatet stöds inte").
   // Utan B-bilder är DTS = PTS och segmenten passar exakt ihop, oavsett kodare.
   const gop = ['-force_key_frames', forcedKeys(fromStart), '-bf', '0'];
-  // Med en kvalitetsgräns: kvalitetsstyrd kodning med tak (lugna scener tar mindre än taket – sparar bandbredd
-  // utanför hemmet), där kodaren stöder det; annars medelbithastighet med tak.
-  const cbr = Q.br ? ['-b:v', Q.br + 'k', '-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : null;
-  const rate = (hwFlag, capped) => Q.br ? (capped || cbr) : hwFlag;
-  const cap = Q.br ? ['-maxrate', Q.br + 'k', '-bufsize', Q.br * 2 + 'k'] : [];
+  // Tonmappad bild märks uttryckligen som SDR/BT.709 (annars kan källans HDR-märkning följa med)
+  const sdr = d.tonemap ? ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'] : [];
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
   const sw = [];
   // Flätad källa (DVB/DVD/Blu-ray 1080i, MPEG-2 i TS): avfläta först – annars kodas kammen in i H.264-bilden,
   // som märks progressiv. deint=interlaced rör bara bilder som är märkta som flätade.
   if (/^(tt|bb|tb|bt)$/.test(v?.field || '')) sw.push('yadif=mode=0:deint=interlaced');
-  // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare x264-läge nedan
-  const big = HW === 'none' && (v?.height || 0) > 1100;
+  // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare kodarläge
+  const big = K === 'none' && (v?.height || 0) > 1100;
   if (h) sw.push(big ? `scale=-2:${h}:flags=bilinear` : `scale=-2:${h}`);
-  const useVaapiTm = d.tonemap && HW === 'vaapi';
-  if (d.tonemap && !useVaapiTm) sw.push(TM_CPU(it.hdr));
-  const chain = (extra) => [...sw, ...extra].join(',') || 'null';
+  const enc = [...encArgs(K, vc, br, big), ...sdr, ...gop];
   // Hela kedjan på grafikkortet: inte vid inbränning eller avflätning (görs med processorn), bara för format som
   // grafikkortet avkodar (H.264/HEVC i 4:2:0, 8 eller 10 bitar). Bredden räknas ut här (jämn, samma bildformat).
-  const gpuOk = !d.burn && !sw.some(f => f.startsWith('yadif')) && ['h264', 'hevc'].includes(v?.codec)
+  const gpuOk = K === HW && !d.burn && !sw.some(f => f.startsWith('yadif')) && ['h264', 'hevc'].includes(v?.codec)
     && /^(yuvj?420p|yuv420p10le)$/.test(v?.pix || '') && v?.width > 0 && v?.height > 0;
   const oh = h || v?.height, ow = Math.max(2, Math.round(v?.width * oh / v?.height / 2) * 2);
-  if (gpuOk && HW === 'nvenc' && (d.tonemap ? gpuPipe.cudaTm : gpuPipe.cuda)) {
-    const vf = d.tonemap ? `scale_cuda=${ow}:${oh}:format=p010le,hwdownload,format=p010le,${TM_CPU(it.hdr)}` : `scale_cuda=${ow}:${oh}:format=nv12`;
-    const enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'], ['-rc', 'vbr', '-cq', '25', '-b:v', Math.round((Q.br || 0) * 0.6) + 'k', ...cap])];
-    if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
-    return { pre: [], dec: ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'], gpu: 'cuda', filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
+  const sp = d.tonemap ? hdrParams(it.hdr, dv5) + ',' : '';
+  if (gpuOk && HW === 'nvenc' && gpuPipe.cuda) {
+    // Tonmappning: tonemap_cuda › libplacebo › tonemap_opencl › processorn efter nedskalning. Dolby Vision 5 bara libplacebo.
+    const tm = !d.tonemap ? null : dv5 ? (gpuTm.placeboCuda ? 'placeboCuda' : 'cpu')
+      : gpuTm.cuda ? 'cuda' : gpuTm.placeboCuda ? 'placeboCuda' : gpuTm.openclCuda ? 'openclCuda' : 'cpu';
+    if (tm !== 'cpu' || gpuPipe.cudaTm) {
+      const sc = `scale_cuda=${ow}:${oh}:format=${d.tonemap ? 'p010le' : 'nv12'}`;
+      const vf = !tm ? sc
+        : tm === 'cuda' ? `${sp}${sc},${cudaTmFilter()}`
+        : tm === 'placeboCuda' ? `${sp}${sc},hwdownload,format=p010le,hwupload,${plFilter()},hwdownload,format=yuv420p`
+        : tm === 'openclCuda' ? `${sp}${sc},hwdownload,format=p010le,hwupload,${oclFilter()},hwdownload,format=nv12`
+        : `${sc},hwdownload,format=p010le,${TM_CPU(it.hdr)}`;
+      const pre = tm === 'placeboCuda' ? VK_DEV : tm === 'openclCuda' ? OCL_DEV : [];
+      return { pre, dec: ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'], gpu: 'cuda', tm: tm === 'cpu' ? null : tm,
+        filter: ['-vf', vf], map: ['-map', '0:v:0'], enc };
+    }
   }
   if (gpuOk && HW === 'vaapi' && gpuPipe.vaapi) {
-    const vf = (d.tonemap ? 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,' : '') + `scale_vaapi=w=${ow}:h=${oh}:format=nv12`;
-    const enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '22'])];
-    if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
-    return { pre: ['-vaapi_device', VAAPI_DEV], dec: ['-hwaccel', 'vaapi', '-hwaccel_device', VAAPI_DEV, '-hwaccel_output_format', 'vaapi'], gpu: 'vaapi',
-      filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
+    const pl = d.tonemap && gpuTm.placeboVaapi;
+    const vf = pl ? `${sp}scale_vaapi=w=${ow}:h=${oh}:format=p010,hwmap=derive_device=vulkan,${plFilter('nv12')},hwmap=derive_device=vaapi:reverse=1,format=vaapi`
+      : (d.tonemap ? 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,' : '') + `scale_vaapi=w=${ow}:h=${oh}:format=nv12`;
+    return { pre: pl ? vaPlaceboDev() : ['-vaapi_device', VAAPI_DEV], dec: ['-hwaccel', 'vaapi', '-hwaccel_device', pl ? 'va' : VAAPI_DEV, '-hwaccel_output_format', 'vaapi'],
+      gpu: 'vaapi', tm: pl ? 'placeboVaapi' : null, filter: ['-vf', vf], map: ['-map', '0:v:0'], enc };
   }
-  let enc, post;
-  if (HW === 'vaapi') {
-    post = useVaapiTm ? ['format=p010', 'hwupload', 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709'] : ['format=nv12', 'hwupload'];
-    enc = ['-c:v', 'h264_vaapi', ...rate(['-qp', '22'])];
-  } else if (HW === 'nvenc') {
-    post = ['format=yuv420p'];
-    enc = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...rate(['-cq', '22'], ['-rc', 'vbr', '-cq', '25', '-b:v', Math.round((Q.br || 0) * 0.6) + 'k', ...cap])];
-  } else if (HW === 'qsv') {
-    post = ['format=nv12'];
-    enc = ['-c:v', 'h264_qsv', '-forced_idr', '1', ...rate(['-global_quality', '22'])];
-  } else {
-    post = ['format=yuv420p'];
-    enc = ['-c:v', 'libx264', '-preset', process.env.X264_PRESET || (big ? 'superfast' : 'veryfast'), ...rate(['-crf', '21'], ['-crf', '23', ...cap]), '-profile:v', 'high', '-sc_threshold', '0'];
+  // Processorfilter. Tonmappningen kan ändå göras på grafikkortet (libplacebo/OpenCL, programvarubilder in och ut)
+  // när det finns ett – utom med VA-API, där hwupload redan använder filterenheten (tonemap_vaapi som förut).
+  const useVaapiTm = d.tonemap && K === 'vaapi';
+  let tm = null, tmPre = [];
+  if (d.tonemap && !useVaapiTm) {
+    tm = dv5 ? (gpuTm.placeboSw ? 'placeboSw' : null) : gpuTm.placeboSw ? 'placeboSw' : gpuTm.openclSw ? 'openclSw' : null;
+    if (tm === 'placeboSw') { sw.push(`${sp}hwupload,${plFilter()},hwdownload,format=yuv420p`); tmPre = VK_DEV; }
+    else if (tm === 'openclSw') { sw.push(`${sp}format=p010le,hwupload,${oclFilter()},hwdownload,format=nv12`); tmPre = OCL_DEV; }
+    else sw.push(TM_CPU(it.hdr));
   }
-  // Tonmappad bild märks uttryckligen som SDR/BT.709 (annars kan källans HDR-märkning följa med)
-  if (d.tonemap) enc.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
-  const vf = chain(post);
-  const pre = HW === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : [];
+  const post = K === 'vaapi' ? (useVaapiTm ? ['format=p010', 'hwupload', 'tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709'] : ['format=nv12', 'hwupload'])
+    : K === 'qsv' ? ['format=nv12'] : ['format=yuv420p'];
+  const vf = [...sw, ...post].join(',') || 'null';
+  const pre = [...(K === 'vaapi' ? ['-vaapi_device', VAAPI_DEV] : []), ...tmPre];
   if (d.burn) {
     // Bildundertext läggs över videon innan övriga filter
-    return { pre, filter: ['-filter_complex', `[0:v:0][0:${d.burn.slice(1)}]overlay=eof_action=pass:repeatlast=0,${vf}[vout]`], map: ['-map', '[vout]'], enc: [...enc, ...gop] };
+    return { pre, tm, filter: ['-filter_complex', `[0:v:0][0:${d.burn.slice(1)}]overlay=eof_action=pass:repeatlast=0,${vf}[vout]`], map: ['-map', '[vout]'], enc };
   }
-  return { pre, filter: ['-vf', vf], map: ['-map', '0:v:0'], enc: [...enc, ...gop] };
+  return { pre, tm, filter: ['-vf', vf], map: ['-map', '0:v:0'], enc };
 }
 
 // Omkodning: ljudet får aldrig börja före bilden (tidsstämplarna sätts inte om, se avoid_negative_ts nedan).
@@ -832,6 +1016,23 @@ const sessions = new Map();
 const segExt = (s) => s.d.fmt === 'fmp4' ? 'm4s' : 'ts';
 const segFile = (s, n) => path.join(s.dir, `seg_${String(n).padStart(5, '0')}.${segExt(s)}`);
 const initFile = (s) => { try { const f = fs.readdirSync(s.dir).find(x => /^init_\d+\.mp4$/.test(x)); return f ? path.join(s.dir, f) : null; } catch { return null; } };
+// Segment-muxern skriver direkt till slutligt filnamn (TS, och fMP4 vid omkodning); HLS-muxern (fMP4-remux) via temporärt namn
+const directSegs = (d) => d.fmt === 'ts' || d.mode === 'transcode';
+/** Omkodad fMP4: var moof börjar i segmentfilen (efter ftyp+moov), eller -1 om huvudet inte är färdigskrivet än */
+export function fragStart(file) {
+  let fd; try { fd = fs.openSync(file, 'r'); } catch { return -1; }
+  try {
+    const size = fs.fstatSync(fd).size, h = Buffer.alloc(8);
+    for (let o = 0; o + 8 <= size;) {
+      fs.readSync(fd, h, 0, 8, o);
+      const len = h.readUInt32BE(0), type = h.toString('latin1', 4, 8);
+      if (type !== 'ftyp' && type !== 'moov' && type !== 'free') return type === 'moof' || type === 'styp' || type === 'sidx' ? o : -1;
+      if (len < 8 || o + len > size) return -1;
+      o += len;
+    }
+    return -1;
+  } finally { fs.closeSync(fd); }
+}
 
 // Remux efter spolning: bilden kopieras från nyckelbilden före -ss, men konverterat ljud (AC-3/DTS → AAC) klipptes
 // exakt vid -ss – de första ~0,25 s av segmentet blev tysta och ljudet glappade mot föregående segment.
@@ -845,10 +1046,12 @@ function startFfmpeg(s, it, n) {
   // Nyckelbildsmönstret för de korta startsegmenten gäller bara när omkodningen börjar från början
   if (d.mode === 'transcode' && n > 0 && n < HEAD.length) n = 0;
   const t = segs[n].start;
+  // HEVC/AV1-kodaren har slutat fungera (eller admin har valt bort den): H.264 i samma fMP4-session
+  if (d.mode === 'transcode' && d.vc !== 'h264' && !encoderFor(d.vc)) fallbackH264(s, `${VC_LABEL[d.vc]} går inte att koda just nu`);
   // Från början utan inbränning: början av filen kan komma ur startcachen (ffmpeg läser då från stdin)
   const pipeIn = n === 0 && !d.burn && fastStart.input ? fastStart.input(it) : null;
   const src = pipeIn ? 'pipe:0' : it.path;
-  let args, gpuRun = null;
+  let args, gpuRun = null, tmRun = null, encName = null;
   if (d.mode === 'remux' && d.fmt === 'fmp4') {
     // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
     const next = segs[n + 1]?.start ?? it.duration;
@@ -877,22 +1080,24 @@ function startFfmpeg(s, it, n) {
     // Omkodning: segment-muxern delar exakt på de tvingade nyckelbilderna (extra nyckelbilder från kodaren,
     // t.ex. vid scenbyten i hårdvarukodare, ger inga extra segment – listan förblir deterministisk)
     const va = videoArgs(it, d, n === 0);
-    gpuRun = va.gpu || null;
+    gpuRun = va.gpu || null; tmRun = va.tm || null;
+    encName = d.vc !== 'h264' ? encoderFor(d.vc)?.name || null : null;
     const times = segTimes(segs, n, t);
+    const fm = d.fmt === 'fmp4';
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', src,
       ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
       // börjar aldrig före 0 (transcodeAudio), så inget behöver förskjutas.
       '-output_ts_offset', String(t), '-muxdelay', '0', '-muxpreload', '0', '-avoid_negative_ts', 'disabled',
-      '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
-      '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];
+      ...(fm ? FMP4_SEG : ['-f', 'segment', '-segment_format', 'mpegts']), ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
+      '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, `seg_%05d.${fm ? 'm4s' : 'ts'}`)];
   }
-  if (d.fmt === 'ts') {
+  if (directSegs(d)) {
     // gamla filer framåt kan komma från en annan körning – skapa om dem för entydig klarsignal
-    for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.ts$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
+    for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.(ts|m4s)$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
   }
-  const p = spawn('ffmpeg', args, { stdio: [pipeIn ? 'pipe' : 'ignore', 'ignore', 'pipe'] });
+  const p = spawn('ffmpeg', args, { stdio: [pipeIn ? 'pipe' : 'ignore', 'ignore', 'pipe'], env: { ...process.env, SVT_LOG: '1' } });
   if (pipeIn) {
     // Originalfilen ändrades eller gick inte att läsa: avbryt (nästa segment startar om från filen)
     pipeIn.on('error', (e) => { console.warn('[hls] startcachen:', e.message); p.kill('SIGKILL'); });
@@ -909,10 +1114,24 @@ function startFfmpeg(s, it, n) {
   p.stderr?.on('data', c => { err = (err + c).slice(-3000); });
   p.on('exit', (code, sig) => {
     if (s.proc === p) {
-      if (code !== 0 && d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
+      if (code !== 0 && directSegs(d)) { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
       s.proc = null; s.done = code === 0;
     }
     if (code && !sig) console.warn(`[hls:${d.mode}] ffmpeg avslutades`, code, err.trim());
+    // Felen klassas efter orsak: kodarens egna meddelanden ("[hevc_nvenc @ …]") eller att den inte gick att öppna
+    // stänger av HEVC/AV1-kodaren (H.264 i samma session) – inte hårdvaran eller GPU-kedjan
+    if (code && !sig && encName && (err.includes(`[${encName} @`) || /Error while opening encoder|Error initializing output stream/.test(err))) {
+      vEnc.failed.add(encName);
+      console.warn(`[omkodning] ${encName} misslyckades – använder H.264 i stället. ${err.trim().split('\n').slice(-2).join(' ')}`);
+      if (!s.proc) fallbackH264(s, `${encName} misslyckades`);
+      return;
+    }
+    // Tonmappningen på grafikkortet fungerade inte: nästa start tar nästa väg (till sist processorn)
+    if (code && !sig && tmRun) {
+      gpuTm[tmRun] = false;
+      console.warn(`[hårdvara] tonmappning på grafikkortet (${tmRun}) misslyckades – provar nästa väg. ${err.trim().split('\n').slice(-2).join(' ')}`);
+      return;
+    }
     // GPU-kedjan (skalning på grafikkortet) fungerade inte för den här filen/drivrutinen: nästa start använder
     // processorfiltren men behåller hårdvarukodningen – stäng inte av hårdvaran för det
     if (code && !sig && gpuRun) {
@@ -954,7 +1173,17 @@ function stopProc(s) {
   if (!s.proc) return;
   s.proc.kill('SIGKILL'); s.proc = null;
   // segment-muxern skriver direkt till slutligt filnamn – radera det senaste (ev. halvfärdiga) segmentet
-  if (s.d.fmt === 'ts') { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
+  if (directSegs(s.d)) { const hi = highestFile(s); if (hi >= 0) fs.rmSync(segFile(s, hi), { force: true }); }
+}
+/**
+ * HEVC/AV1 fungerade inte: sessionen fortsätter med H.264 (fortfarande fMP4, samma spellista). Har spelaren redan
+ * hämtat HEVC/AV1-initsegmentet passar de nya segmenten inte – webbspelaren laddar då om med H.264 (se video.js).
+ */
+function fallbackH264(s, why) {
+  if (s.d.vc === 'h264') return;
+  console.warn(`[omkodning] ${s.title || ''}: ${why} – byter till H.264${s.initServed ? ' (spelaren har redan initsegmentet och måste ladda om)' : ''}`);
+  s.d.vc = 'h264'; s.d.tag = ''; s.init = null;
+  try { for (const f of fs.readdirSync(s.dir)) if (/^seg_\d+\.m4s$/.test(f)) fs.rmSync(path.join(s.dir, f), { force: true }); } catch {}
 }
 // Högsta sammanhängande segmentet från s.start. Senaste kända värdet sparas så att varje anrop
 // bara behöver kontrollera några få filer i stället för alla segment sedan start.
@@ -972,7 +1201,7 @@ function highestFile(s) {
 function complete(s, n) {
   if (!fs.existsSync(segFile(s, n))) return false;
   // HLS-muxern (fMP4) skriver till temporärt namn och byter namn när segmentet är klart; segment-muxern (TS) skriver direkt
-  return s.d.fmt === 'fmp4' || !s.proc || n < s.start || fs.existsSync(segFile(s, n + 1));
+  return !directSegs(s.d) || !s.proc || n < s.start || fs.existsSync(segFile(s, n + 1));
 }
 
 // Gränser för samtidiga omkodningar (skydd mot överbelastning)
@@ -1003,7 +1232,7 @@ function ensureCapacity(s, userId) {
 function sessionFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.pid ? '-' + d.pid : ''}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0,
@@ -1033,8 +1262,11 @@ export async function serveInit(req, res, it, query, userId) {
   const s = sessionFor(it, query, userId);
   if (s.d.fmt !== 'fmp4') return fail(res, 404, 'Inget initsegment');
   const t0 = Date.now();
-  // Initfilen är färdigskriven när första mediasegmentet finns
-  const ready = () => { const f = initFile(s); return f && fs.statSync(f).size > 0 && fs.readdirSync(s.dir).some(x => /^seg_\d+\.m4s$/.test(x)); };
+  // Remux (HLS-muxern): initfilen är färdigskriven när första mediasegmentet finns.
+  // Omkodning (segment-muxern): ftyp+moov i början av vilket segment som helst – samma i alla körningar.
+  const tc = s.d.mode === 'transcode';
+  const ready = tc ? () => !!(s.init ||= transcodeInit(s))
+    : () => { const f = initFile(s); return f && fs.statSync(f).size > 0 && fs.readdirSync(s.dir).some(x => /^seg_\d+\.m4s$/.test(x)); };
   let starts = 0;
   resume(s);
   while (!ready()) {
@@ -1044,14 +1276,31 @@ export async function serveInit(req, res, it, query, userId) {
       if (!ensureCapacity(s, userId)) return fail(res, 503, 'För många samtidiga strömmar');
       startFfmpeg(s, it, 0);
     }
-    if (Date.now() - t0 > 30000 || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
+    if (Date.now() - t0 > (tc ? 90000 : 30000) || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
     s.last = Date.now();
     await new Promise(r => setTimeout(r, 100));
   }
-  let buf; try { buf = fs.readFileSync(initFile(s)); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
-  buf = hevcTag(buf, s.d.tag || 'hvc1');
+  let buf;
+  if (tc) { buf = Buffer.from(s.init); s.initServed = true; }
+  else try { buf = fs.readFileSync(initFile(s)); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
+  if (!tc || s.d.tag) buf = hevcTag(buf, s.d.tag || 'hvc1');
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
   res.end(req.method === 'HEAD' ? undefined : buf);
+}
+
+/** Initsegmentet (ftyp+moov) ur första färdiga segmentfilen i en omkodningssession, eller null */
+function transcodeInit(s) {
+  let files; try { files = fs.readdirSync(s.dir).filter(x => /^seg_\d+\.m4s$/.test(x)).sort(); } catch { return null; }
+  for (const f of files) {
+    const file = path.join(s.dir, f), end = fragStart(file);
+    if (end <= 0) continue;
+    try {
+      const fd = fs.openSync(file, 'r'), b = Buffer.alloc(end);
+      try { fs.readSync(fd, b, 0, end, 0); } finally { fs.closeSync(fd); }
+      return b;
+    } catch {}
+  }
+  return null;
 }
 
 // ffmpeg 5.1:s mov-muxer känner inte till dvh1 och skriver då hev1, som Apple inte spelar. Sätt provpostens
@@ -1103,7 +1352,15 @@ export async function serveSegment(req, res, it, n, query, userId) {
     console.log(`[hls] ${s.title}: första segmentet klart ${((Date.now() - s.created) / 1000).toFixed(1)} s efter start (${d.mode}${d.mode === 'transcode' ? ', ' + (HW === 'none' ? 'processor' : HW) : ''})`);
   }
   throttle(s, n);
-  sendSegment(req, res, segFile(s, n), d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
+  const file = segFile(s, n);
+  if (d.mode === 'transcode' && d.fmt === 'fmp4') {
+    // Bara moof+mdat – ftyp+moov skickas en gång som initsegment
+    s.init ||= transcodeInit(s);
+    const at = fragStart(file);
+    if (at < 0) return fail(res, 404, 'Segmentet försvann – försök igen');
+    return sendSegment(req, res, file, 'video/iso.segment', at);
+  }
+  sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
 }
 /** Väntar tills segment n är klart (startar ffmpeg vid behov). Allt annat än true = ett felsvar har skickats. */
 async function awaitSegment(req, res, it, s, n, userId) {
@@ -1131,11 +1388,12 @@ async function awaitSegment(req, res, it, s, n, userId) {
   }
   return true;
 }
-function sendSegment(req, res, file, type) {
+function sendSegment(req, res, file, type, from = 0) {
   let st; try { st = fs.statSync(file); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Cache-Control': 'no-store' });
-  if (req.method === 'HEAD' || !st.size) return res.end();
-  pipeline(fs.createReadStream(file), res, () => {});
+  const size = Math.max(0, st.size - from);
+  res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Cache-Control': 'no-store' });
+  if (req.method === 'HEAD' || !size) return res.end();
+  pipeline(fs.createReadStream(file, { start: from }), res, () => {});
 }
 
 // Städa: döda inaktiva ffmpeg efter 60 s, radera cache efter 15 min
@@ -1156,7 +1414,7 @@ export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc)
 jobs.addSource(() => [...sessions.values()].filter(s => s.proc && !s.paused).map(s => ({
   id: 'hls-' + s.key, kind: s.d.mode === 'transcode' ? 'transcode' : 'remux',
   title: `${s.d.mode === 'transcode' ? 'Omkodar' : 'Remuxar'} ${s.title || ''}`.trim(),
-  detail: s.d.mode === 'transcode' ? `${s.d.q && s.d.q !== 'orig' ? s.d.q + 'p · ' : ''}${HW === 'none' ? 'processor' : HW}${s.d.tonemap ? ' · HDR→SDR' : ''}` : 'utan omkodning',
+  detail: s.d.mode === 'transcode' ? `${s.d.q && s.d.q !== 'orig' ? s.d.q + 'p · ' : ''}${s.d.vc !== 'h264' ? VC_LABEL[s.d.vc] + ' · ' + (encoderFor(s.d.vc)?.name || '') : HW === 'none' ? 'processor' : HW}${s.d.tonemap ? ' · HDR→SDR' : ''}` : 'utan omkodning',
   done: Math.max(0, highestFile(s) + 1), total: s.total || null })));
 // Diskövervakning: antal HLS-sessioner och rensning av inaktiva när omkodningsdisken är nästan full
 export const sessionCount = () => sessions.size;
@@ -1185,5 +1443,5 @@ export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = nu
 }
 
 // För tester
-export const _segs = { trimBehind, highestFile, videoArgs };
+export const _segs = { trimBehind, highestFile, videoArgs, transcodeInit, fallbackH264 };
 export const _slots = { subSlot, kfAcquire, kfRelease, kf: () => ({ active: kfActive, waiting: kfWait.length }), listDir, liveSubs, sessions };

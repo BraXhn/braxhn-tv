@@ -129,6 +129,21 @@ där, 429 vid upprepning inom 5 min) och `PUT /lang` (`{ item, track, lang }`, `
 inbäddad undertext, `<källa>:<filnamn>` undertextfil; `lang` = tre bokstäver, tomt = ta bort). **För apparna:** en
 rättad märkning syns som vanligt `lang` i `/api/items/:id/playback` (`audio`, `subtitles`) och `/api/items/:id` – inga
 nya fält; filen ändras aldrig och rättelsen gäller bara så länge filen är oförändrad (mtime/storlek).
+## Omkodning till HEVC/AV1: `tc=` och `vcodec`
+
+Bara tillägg – en klient utan `tc` får H.264 i MPEG-TS vid omkodning precis som förut.
+
+- `GET /api/items/:id/playback?…&tc=hevc,av1`: codecs som klienten kan avkoda i **HLS med fMP4** vid omkodning.
+  Servern väljer AV1 före HEVC, grafikkortets kodare före processorns (x265/SVT-AV1 bara när administratören valt det),
+  och faller tillbaka till H.264 när ingen kodare finns. Direktuppspelning och remux påverkas inte.
+- Nytt fält `vcodec` (String) i svaret: videons codec i strömmen – vid omkodning `h264`, `hevc` eller `av1`, annars källans.
+- HEVC/AV1-strömmen är fMP4 (`#EXT-X-MAP:URI="init.mp4…"`, segment `seg-N.m4s`), HEVC med `hvc1`, 8 bitar (Main), BT.709,
+  inga B-bilder, samma segmentrutnät och tidsstämplar som H.264. Taket för en kvalitetsnivå är lägre (HEVC 60 %, AV1 50 %
+  av H.264:s), även i ABR-masterns `BANDWIDTH`.
+- Slutar kodaren fungera byter servern sessionen till H.264 (fortfarande fMP4). Har spelaren redan hämtat initsegmentet
+  passar de nya segmenten inte: hämta `/playback` igen med `tc=` tomt (webbspelaren gör det vid ett avkodningsfel).
+- Administratören väljer i `PUT /api/settings` med `transcodeVcodec`: `auto` (grafikkortet, standard), `cpu` (även processorn)
+  eller `h264` (alltid H.264). `GET /api/settings` har `transcodeVcodec` och `transcode` (ffmpeg-version, kodare, tonmappning).
 
 ## Kö på Chromecast: `queue=1`
 
