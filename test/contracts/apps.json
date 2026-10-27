@@ -347,28 +347,29 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:320", "query": { "q": "$sök" }, "svar": ["@MediaItem.android"] } },
     "GET /api/items/:id": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:70, Player.swift:142, :162", "svar": "@MediaItem.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:424, PlayerScreen.kt:96, :102", "svar": "@MediaItem.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:424, PlayerScreen.kt:110, :116", "svar": "@MediaItem.android" } },
     "GET /api/items/:id/playback": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:176 (förmågor: AppModel.swift:154-172, nattläge/dialog: AppModel.swift:291-296, cinema=1 bara när GET /api/me/cinema säger på: Player.swift:237-241; tvOS skickar inte nhls)",
         "query": [{ "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "night": "1", "dialog": "1", "cinema": "1" }],
         "svar": "@Playback.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:98, :109 (förmågor: Api.kt:259-273, nattläge/dialog: Api.kt:338, bio-läge cinema=1: :107; utan Dolby-avkodare blir a/v kortare; :98 skickar info=1)",
-        "query": [{ "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "hdr": "0" },
-                  { "c": "mp4,mkv,webm", "v": "h264", "a": "aac,mp3,opus,flac,vorbis", "hdr": "0" },
-                  { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "hdr": "0", "info": "1" },
-                  { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "hdr": "0", "night": "1", "dialog": "1", "cinema": "1" }],
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:112, :123 (förmågor: Api.kt:259-273 och TvOutput.kt (bitström, HDR), nattläge/dialog: Api.kt:338, bio-läge cinema=1: :121; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: sista varianten; :112 skickar info=1)",
+        "query": [{ "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0" },
+                  { "c": "mp4,mkv,webm", "v": "h264", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0" },
+                  { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0", "info": "1" },
+                  { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0", "night": "1", "dialog": "1", "cinema": "1" },
+                  { "c": "mp4,mkv,webm", "v": "h264,hevc,vp9,av1", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3,dts,truehd", "atrack": "1", "audio": "2", "hdr": "1", "hdrt": "hdr10,hlg,dovi", "dv": "1" }],
         "svar": "@Playback.android" } },
     "GET /api/stream/:id/direct": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge direct)", "svar": { "media": "^video/" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:124 (Playback.url, läge direct)", "svar": { "media": "^video/" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:138 (Playback.url, läge direct)", "svar": { "media": "^video/" } } },
     "GET /api/stream/:id/hls/master.m3u8": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:124 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:138 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } } },
     "GET /api/stream/:id/subs/:sid": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:409 (PlaybackSubtitle.url), :412 (Bearer, för nedladdade filer)", "svar": { "media": "^text/vtt" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:117 (PlaybackSubtitle.url)", "svar": { "media": "^text/vtt" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:131 (PlaybackSubtitle.url)", "svar": { "media": "^text/vtt" } } },
     "GET /api/image/:id/:type": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:50-61 (bildtoken i ?t=)", "svar": { "media": "^image/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:178-183 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
@@ -506,11 +507,11 @@
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:254-268 (401 med needPin/needPassword loggar inte ut: AppModel.swift:76, :80)", "body": { "id": "$profil" }, "svar": "@ProfileSwitch.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:315-324 (vy: Extras.kt:246)", "body": { "id": "$profil" }, "svar": "@LoginResponse.android" } },
     "GET /api/me/cinema": {
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:106", "svar": "@CinemaPrefs.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:120", "svar": "@CinemaPrefs.android" } },
 
     "POST /api/stream/:id/stop": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:179, :481", "svar": null },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:85", "svar": null } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:99", "svar": null } },
     "POST /api/logout": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:140-143", "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:247", "svar": null } }

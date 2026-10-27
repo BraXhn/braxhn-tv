@@ -75,6 +75,17 @@ Android-appen (från 0.6.0) skickar `cinema=1` bara när `GET /api/me/cinema` vi
 eller `preroll` och `prerollAvailable`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
 om en trailer inte går att spela. Den skickar också `night=1`/`dialog=1` när nattläge eller tydligare dialog är påslaget.
 
+## Google TV: ljudspår i appen och skärmens HDR-typer (`atrack=1`, `hdrt=`)
+
+Två nya, valfria parametrar till `/api/items/:id/playback` (utan dem är beslutet som förut):
+
+- `atrack=1`: klienten väljer ljudspår själv i en direktuppspelad fil. Ett annat spår än filens standardspår (`audio=`
+  eller kontots föredragna språk) ger då `mode: "direct"` i stället för remux, så länge spårets kodek finns i `a=`.
+  Klienten väljer spåret `audioSelected` i spelaren. Android-appen skickar det och listar i `a=` också `dts`/`truehd`
+  när förstärkaren tar emot bitström eller enheten själv avkodar formatet.
+- `hdrt=hdr10,hlg,dovi,hdr10plus`: HDR-typer som skärmen visar (gäller bara med `hdr=1`). En källa vars typ saknas
+  tonmappas; Dolby Vision räcker med `hdr10` (baslagret) utom profil 5, som fortfarande kräver `dv=1`.
+
 ## Synkade undertexter: `/api/items/:id/subs/:sid/sync`
 
 Externa och nedladdade undertextfiler kan synkas mot ljudet (`server/subsync.js`). Servern lägger själv på sparad

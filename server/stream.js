@@ -455,8 +455,20 @@ export function parseCaps(q, ua = '') {
     // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
     nativeHls: q.get('nhls') === '1',
     // Tittarkomfort: nattläge (jämnare ljudnivå) och tydligare dialog – ljudet omkodas med filter
-    night: q.get('night') === '1', dialog: q.get('dialog') === '1'
+    night: q.get('night') === '1', dialog: q.get('dialog') === '1',
+    // Klienten väljer ljudspår själv i direktuppspelad fil (Google TV-appen) – ett annat spår än standardspåret
+    // kräver då ingen remux, och ljudet (DTS, TrueHD, Atmos) går orört till förstärkaren
+    localAudio: q.get('atrack') === '1',
+    // HDR-typer som skärmen visar (hdr10,hlg,dovi,hdr10plus). Saknas = alla (hdr=1 räcker som förut)
+    hdrTypes: q.get('hdrt') ? list('hdrt', '') : null
   };
+}
+// Kan skärmen visa källans HDR? Dolby Vision med HDR10-baslager räcker med HDR10 (profil 5 kräver dv=1, se decide)
+function hdrShown(hdr, o) {
+  if (!o.hdr) return false;
+  if (!o.hdrTypes) return true;
+  if (hdr === 'dovi') return o.hdrTypes.has('dovi') || o.hdrTypes.has('hdr10');
+  return o.hdrTypes.has(hdr);
 }
 
 export function decide(it, o) {
@@ -470,7 +482,7 @@ export function decide(it, o) {
   const srcKbps = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
   // Sänk även om bithastigheten är för hög för vald kvalitet (t.ex. 4K-remux utanför hemmet)
   const scale = !!(Q.h && ((v?.height && v.height > Q.h) || (Q.br && srcKbps > Q.br * 1.3)));
-  let tonemap = !!(it.hdr && !o.hdr);
+  let tonemap = !!(it.hdr && !hdrShown(it.hdr, o));
   const ext = CONTAINER[path.extname(it.path).toLowerCase()];
   const reasons = [];
   if (burn) reasons.push('bildundertext bränns in');
@@ -480,7 +492,7 @@ export function decide(it, o) {
   const dv5 = v?.dovi && v?.dvProfile === 5;
   const vOk = v && o.vcodecs.has(v.codec) && !(v.codec === 'h264' && is10bit(v)) && !(dv5 && !o.dv);
   const aOk = !aSel || o.acodecs.has(aSel.codec);
-  const audioDefault = !aSel || aSel === defAudio;
+  const audioDefault = !aSel || aSel === defAudio || o.localAudio;
   let mode, fmt = 'ts', tag = '';
   let am = audioPlan(aSel, o);
   // Nattläge/tydligare dialog: ljudet filtreras och blir AAC stereo, så filen kan inte skickas direkt –

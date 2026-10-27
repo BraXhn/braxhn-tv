@@ -339,6 +339,11 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     var listenError by remember { mutableStateOf<String?>(null) }
     var night by remember { mutableStateOf(Api.nightMode) }
     var dialog by remember { mutableStateOf(Api.dialogBoost) }
+    // Google TV: bildfrekvensväxling och vad TV:n/förstärkaren klarar (läses när sidan öppnas)
+    val ctx = LocalContext.current
+    val tv = remember { isTv(ctx) }
+    var frameRate by remember { mutableStateOf(TvOutput.frameRateMode(ctx)) }
+    val output = remember { if (tv) TvOutput.describe(ctx) else null }
     LaunchedEffect(Unit) {
         Api.refreshListenPrefs()
         skipBack = Api.skipBack; skipForward = Api.skipForward; skipSilence = Api.skipSilence; normalize = Api.normalize
@@ -369,6 +374,27 @@ fun SettingsScreen(push: (Screen) -> Unit) {
         item { FlowRowCompat(listOf("on" to "Nattläge (jämnare ljud)", "off" to "Nattläge av"), if (night) "on" else "off") { v -> night = v == "on"; Api.nightMode = night } }
         item { FlowRowCompat(listOf("on" to "Tydligare dialog", "off" to "Originalljud"), if (dialog) "on" else "off") { v -> dialog = v == "on"; Api.dialogBoost = dialog } }
         item { Text("Kan också slås på i spelaren. Ljudet bearbetas av servern, så filmen omkodas då. Bio-läge (trailers före filmen) ställer du in i webben.", color = Color.Gray, fontSize = 13.sp) }
+        if (tv) {
+            item { Text("Bild och ljud på TV:n", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+            item { Text("Anpassa skärmen efter filmen (bildfrekvens)", color = Color.Gray) }
+            item {
+                FlowRowCompat(listOf("off" to "Av", "rate" to "Bara bildfrekvens", "res" to "Bildfrekvens och upplösning"), frameRate) { v ->
+                    frameRate = v; TvOutput.setFrameRateMode(ctx, v)
+                }
+            }
+            item {
+                Text("TV:n byter till filmens bildfrekvens (t.ex. 23,976 Hz) så att panoreringar inte hackar, och tillbaka när du slutar titta. " +
+                    "Bytet ger några svarta sekunder. Med upplösning skalar TV:n upp bilden i stället för boxen.", color = Color.Gray, fontSize = 13.sp)
+            }
+            output?.let { (screen, audio) ->
+                item { Text(screen, fontSize = 15.sp) }
+                item { Text(audio, fontSize = 15.sp) }
+                item {
+                    Text("HDR, Dolby Vision och ljud som förstärkaren tar emot (Dolby Digital, Atmos, DTS, TrueHD) spelas orört direkt från filen. " +
+                        "Annat konverterar servern. Ändrar du ljudutgång eller förstärkare – öppna sidan igen.", color = Color.Gray, fontSize = 13.sp)
+                }
+            }
+        }
         item { Text("Lyssning", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item { Text("Hopp bakåt (ljudböcker och poddar)", color = Color.Gray) }
         item {
