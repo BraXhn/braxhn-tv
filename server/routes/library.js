@@ -5,8 +5,8 @@ import path from 'node:path';
 import { all, run, get, now, tx, getSetting, IMAGES } from '../db.js';
 import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
 import { audit, createSession } from '../auth.js';
-import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie } from '../scanner.js';
-import { rootsOf, setRoots, nested, MAX_ROOTS } from '../libpaths.js';
+import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie, matchQuery } from '../scanner.js';
+import { rootsOf, setRoots, nested, MAX_ROOTS, relOf } from '../libpaths.js';
 import { imageFile, seasonPosters } from '../localmeta.js';
 import * as st from '../stream.js';
 import * as act from '../activity.js';
@@ -323,6 +323,32 @@ route('POST', '/api/items/:id/match', admin, async (c) => {
     audit('item_matched', { ...ctx(c), detail: `${it.title} → tmdb ${+tmdbId}` });
     send(c.res, 200, oneItem(c.user.id, it.id));
   } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
+});
+// Omatchade titlar (Administration): filnamnet och det som tolkades, så att admin kan matcha för hand ("Fel titel?")
+const UNMATCHED = `FROM items i JOIN libraries l ON l.id=i.library_id WHERE i.kind IN ('movie','show') AND i.meta_done=2 AND i.version_of IS NULL
+  AND i.match_locked=0 AND NOT (l.type='movie' AND l.home_video=1)`;
+route('GET', '/api/unmatched', admin, (c) => {
+  const total = get(`SELECT COUNT(*) AS n ${UNMATCHED}`).n;
+  const rows = all(`SELECT i.*, l.name AS library ${UNMATCHED} ORDER BY l.name, i.sort_title LIMIT 500`);
+  const roots = new Map();
+  const items = rows.map(it => {
+    const lib = get('SELECT * FROM libraries WHERE id=?', it.library_id);
+    if (!roots.has(lib.id)) roots.set(lib.id, rootsOf(lib));
+    const file = it.kind === 'movie' ? it.path : get('SELECT path FROM items WHERE parent_id=? AND path IS NOT NULL ORDER BY season, episode LIMIT 1', it.id)?.path;
+    const q = matchQuery(it);
+    return { id: it.id, kind: it.kind, title: it.title, year: it.year, library: it.library, libraryId: it.library_id,
+      file: file ? relOf(roots.get(lib.id), file) : null, parsed: { title: q.titles.find(Boolean) || it.title, year: q.year || null } };
+  });
+  send(c.res, 200, { total, items, tmdb: hasTmdb() });
+});
+// "Försök matcha omatchade igen": alla omatchade (inte låsta) titlar söks på nytt vid en skanning
+route('POST', '/api/unmatched/retry', admin, (c) => {
+  if (!hasTmdb()) return fail(c.res, 400, 'Ange en TMDB-nyckel under Administration först');
+  const libsTodo = all(`SELECT DISTINCT i.library_id AS id ${UNMATCHED}`).map(r => r.id);
+  const n = run(`UPDATE items SET meta_done=0 WHERE id IN (SELECT i.id ${UNMATCHED})`).changes;
+  for (const id of libsTodo) scan(id);
+  audit('unmatched_retry', { ...ctx(c), detail: `${n} titlar` });
+  send(c.res, 200, { count: Number(n) });
 });
 // Ändra ett bibliotek: { name, anime, paths (alla mappar) eller addPath (en till), nfo, homeVideo }. En borttagen mapp tar bort
 // titlarna i den ur biblioteket (filerna på disken rörs inte).

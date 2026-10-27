@@ -12,14 +12,14 @@ import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { isTrailerFile, syncTrailers, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
-import { findBest, stripTrailingQuality, similarity, GOOD } from './match.js';
+import { findMatch, similarity, GOOD } from './match.js';
+import { parseMovie, parseEpisode, discRoot, idsIn, clean } from './parse.js';
 import { dropVariants } from './imgsize.js';
 import * as colors from './imgcolor.js';
 
 const pexec = promisify(execFile);
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
   '.wmv', '.mpg', '.mpeg', '.flv', '.ogv']);
-const JUNK = /\b(2160p|1080p|720p|576p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|webrip|web-dl|webdl|web|hdtv|dvdrip|dvd|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|eac3|dts|remux|proper|repack|extended|unrated|hdr|10bit|multi|swesub|nordic)\b.*$/i;
 
 export const status = { running: false, library: null, phase: '', done: 0, total: 0, last: null, warnings: [] };
 // Aktivitetsindikatorn: skanning och bakgrundsanalys
@@ -35,27 +35,13 @@ jobs.addSource(() => {
 export function scanWarning(msg) { console.warn('[scan]', msg); status.warnings.push(msg); if (status.warnings.length > 20) status.warnings.shift(); }
 
 // NFC: filnamn från macOS (SMB) har ofta å/ä/ö som två tecken (NFD) – annars går de inte att söka på eller slå ihop
-const clean = (s) => s.normalize('NFC').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').replace(/[\s\-–\[(]+$/, '').trim();
 const sortTitle = (t) => t.toLowerCase().replace(/^(the|a|an|en|ett|den|det)\s+/, '');
 /** Filens sökväg relativt den av bibliotekets mappar den ligger i (lib.roots sätts i början av skanningen) */
 const rel = (lib, f) => relOf(lib.roots || rootsOf(lib), f);
 
-// ---- Blu-ray-mappar (BDMV/STREAM/00000.m2ts …) ----
-// En kopierad skiva innehåller varningstexter, loggor, menyer och trailers som egna klipp. Bara huvudfilmen
-// (största filen) ska bli en titel, och den får namnet från mappen ovanför BDMV.
-const DISC_DIR = /^(disc|disk|dvd|bd|cd|del|skiva)[\s._-]*\d+$/i;
-/** Mappen som innehåller BDMV (skivans rot), eller null om filen inte ligger på en kopierad Blu-ray */
-export function discRoot(file) {
-  const parts = file.split(path.sep);
-  const i = parts.findLastIndex(x => x.toUpperCase() === 'BDMV');
-  return i > 0 ? parts.slice(0, i).join(path.sep) || path.sep : null;
-}
-/** Namnet på en skiva: mappen ovanför BDMV, utan "Disc 1"/"_D1" (en mapp som bara heter "Disc 1" ger föräldern) */
-function discName(root) {
-  let name = path.basename(root);
-  if (DISC_DIR.test(name)) name = path.basename(path.dirname(root));
-  return name.replace(/[\s._-]+(disc|disk|d|cd)[\s._-]*\d+$/i, '');
-}
+// Tolkning av filnamn (filmer, avsnitt, Blu-ray-mappar): server/parse.js
+export { parseMovie, parseEpisode, discRoot } from './parse.js';
+
 /** Behåll bara huvudfilmen (största .m2ts i BDMV/STREAM) per skiva; övriga klipp och BACKUP-kopior hoppas över */
 export async function discMainOnly(files) {
   const best = new Map(), out = [];
@@ -70,85 +56,6 @@ export async function discMainOnly(files) {
   }
   for (const { f } of best.values()) out.push(f);
   return out;
-}
-
-export function parseMovie(file) {
-  const tryName = (name) => {
-    const m = name.match(/^(.*)[\s._(\[-]+((?:19|20)\d\d)(?=[\s._)\]-]|$)/); // sista årtalet (t.ex. Blade Runner 2049 (2017))
-    // Upplösning/kodek före årtalet ("Film.1080p.2010") hör inte till titeln
-    const t = m && (clean(stripTrailingQuality(m[1])) || clean(m[1]));
-    return t ? { title: t, year: +m[2] } : null;
-  };
-  const root = discRoot(file);
-  if (root) { const n = discName(root); return tryName(n) || { title: clean(n.replace(JUNK, '')) || n, year: null }; }
-  const base = path.basename(file, path.extname(file));
-  const folder = path.basename(path.dirname(file));
-  // Film delad på flera filer ("Film (2020) cd1.avi", "cd2.avi"): delarna är inte versioner av varandra
-  const part = base.match(/[\s._-](?:cd|part|pt)[\s._-]*(\d)$/i);
-  if (part) {
-    const p = parseMovie(path.join(path.dirname(file), base.slice(0, part.index) + path.extname(file)));
-    return { ...p, title: +part[1] > 1 ? `${p.title} (del ${part[1]})` : p.title, part: +part[1] };
-  }
-  // Utan årtal: ta bort kvalitetsord, och utgåvetillägg ("Extended", "Proper") bara om något av titeln blir kvar
-  const t1 = clean(stripTrailingQuality(base));
-  return tryName(base) || tryName(folder) || { title: clean(t1.replace(JUNK, '')) || t1 || base, year: null };
-}
-
-/** Avsnitt utan SxxEyy: "Byggare Bob 026 - Jul hos Byggare Bob", "Lille Luj Disc3", "Kaspar2", "Trolltider.2",
- *  "Sunes.Jul.Volym.2-8", "jul.i.kapernaum.1995.disc1". Numret i slutet blir avsnittet. Ligger filen i en mapp med
- *  ett annat namn (t.ex. "julkalender/Kaspar2.mp4") blir filnamnet serien. */
-function looseEpisode(parts, base, sf) {
-  const t = base.match(/^(.*?[^\d\s._-])[\s._-]*(?:disc|disk|dvd|del|part|volym|vol|d)?[\s._-]*0*(\d{1,3})(?:-\d{1,3})?(?:[\s._]+-[\s._]+(.+))?$/i);
-  if (!t) return null;
-  // "jul.i.kapernaum.1995.disc1": skivordet och året hör inte till namnet
-  const name = clean(t[1].replace(/[\s._-]*(?:disc|disk|dvd|volym|vol)$/i, ''));
-  if (!name) return null;
-  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9åäö]+/g, '');
-  const folder = parts.length > 1 ? parts[0] : null;
-  const sameShow = folder && (norm(name).startsWith(norm(folder).slice(0, 6)) || norm(folder).startsWith(norm(name)));
-  const show = sameShow ? folder : name;
-  const y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
-  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season: sf ? +sf.match(/\d+/)[0] : 1, episode: +t[2],
-    epTitle: t[3] ? clean(t[3]) : null, absolute: !sf };
-}
-
-// Avsnitt helt utan nummer ("Chuggington/Hjälpsamma Hodge.avi"): serien är mappen, numret sätts vid skanningen
-function unnumbered(parts, base, sf) {
-  if (parts.length < 2) return null;
-  const show = parts[0].replace(/[\s._-]+(?:-[\s._]+)?(?:the\s+)?(?:complete\s+)?(?:collection|samling|samlingen|box)$/i, '') || parts[0], y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
-  const n = clean(y ? y[1] : show).toLowerCase(), t = clean(base);
-  const title = t.toLowerCase().startsWith(n) ? clean(t.slice(n.length).replace(/^[\s._-]+/, '')) || t : t;
-  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season: sf ? +sf.match(/\d+/)[0] : 1, episode: null,
-    epTitle: title, absolute: false };
-}
-
-export function parseEpisode(rel) {
-  const parts = rel.split(path.sep);
-  // Fansub-grupper och hash-taggar i hakparenteser, t.ex. "[SubsPlease] Show - 12 (1080p) [ABCD1234]"
-  const base = path.basename(rel, path.extname(rel)).replace(/^\s*\[[^\]]*\]\s*/, '').replace(/\s*\[[0-9A-F]{8}\]\s*$/i, '');
-  const sf = parts.slice(0, -1).find(p => /^(season|säsong|s)[\s._-]*\d+$/i.test(p));
-  // Dubbelavsnitt "S01E01E02" / "S01E01-E02": det andra numret hör inte till titeln
-  let m = base.match(/[sS](\d{1,2})[ ._-]*[eE](\d{1,4})(?:[-_ ]?[eE]\d{1,4})*/) || base.match(/\b(\d{1,2})x(\d{2,3})\b/);
-  let season, episode, before = base, absolute = false;
-  if (m) { season = +m[1]; episode = +m[2]; before = base.slice(0, m.index); }
-  else {
-    // Anime: "Show - 1071" eller "Show - 12v2" (absolut numrering om ingen säsongsmapp finns)
-    const a = base.match(/^(.*?)[\s._]+-[\s._]+(\d{1,4})(?:v\d)?(?=$|[\s._\[(])/);
-    const e = a ? null : base.match(/(?:^|[\s._-])(?:e|ep|episode|avsnitt|del)[\s._-]*(\d{1,4})/i);
-    if (!a && !e) return looseEpisode(parts, base, sf) || unnumbered(parts, base, sf);
-    if (a) { episode = +a[2]; before = a[1]; m = { index: a[1].length, 0: base.slice(a[1].length, a.index + a[0].length) }; }
-    else { episode = +e[1]; before = base.slice(0, e.index); }
-    season = sf ? +sf.match(/\d+/)[0] : 1;
-    absolute = !sf;
-    // "The 100 - 101 - Pilot" i mappen "Season 1": 101 = säsong 1, avsnitt 01
-    const sn = sf ? String(season) : '';
-    if (a && sf && a[2].length >= 3 && a[2].startsWith(sn) && a[2].length - sn.length === 2) episode = +a[2].slice(sn.length);
-  }
-  const show = parts.length > 1 ? parts[0] : clean(before);
-  if (!show) return null;
-  const y = show.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
-  const after = m ? clean(base.slice(m.index + m[0].length).replace(JUNK, '')).replace(/^[-–\s]+/, '') : '';
-  return { show: y ? clean(y[1]) : clean(show), year: y ? +y[2] : null, season, episode, epTitle: after || null, absolute };
 }
 
 /** Tidpunkt ur en tagg ("2023-06-24T14:03:11.000000Z", "2023-06-24 14:03:11") i sekunder, null om den saknas/är orimlig
@@ -211,7 +118,7 @@ const isVideo = (name) => VIDEO.has(path.extname(name).toLowerCase()) && !/\bsam
 // så att "Doctor Who (1963)" och "Doctor Who (2005)" blir två serier.
 // Äldre rader utan src_name matchas på titeln och får src_name ifyllt.
 export const showKey = (name, year) => year ? `${name} (${year})` : name;
-function showFor(lib, name, year) {
+function showFor(lib, name, year, yearHint = null) {
   const key = showKey(name, year);
   const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, key);
   if (r) return r.id;
@@ -220,8 +127,9 @@ function showFor(lib, name, year) {
   if (old) { run('UPDATE items SET src_name=? WHERE id=?', key, old.id); return old.id; }
   const t = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IS NULL AND title=? COLLATE NOCASE`, lib.id, name);
   if (t) { run('UPDATE items SET src_name=? WHERE id=?', key, t.id); return t.id; }
+  // yearHint: årtalet i filnamnet ("Doctor.Who.2005.S01E01") – hjälper matchningen men ingår inte i nyckeln
   return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,src_name,added) VALUES(?,?,?,?,?,?,?)`,
-    lib.id, 'show', name, sortTitle(name), year, key, now()).lastInsertRowid);
+    lib.id, 'show', name, sortTitle(name), year ?? yearHint, key, now()).lastInsertRowid);
 }
 /** Flytta avsnitt som ligger under fel serie (t.ex. två serier med samma namn men olika år som slogs ihop
  *  av tidigare versioner). Bara strängjämförelser – inga filer läses. */
@@ -229,7 +137,26 @@ function regroupShows(lib) {
   const keyOf = new Map(all(`SELECT id, src_name FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, String(r.src_name || '').toLowerCase()]));
   const eps = all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL`, lib.id);
   const touched = new Set(), years = new Map();
+  // Ny tolkning av mappnamnen (t.ex. "Barn/Bluey" → "Bluey", "Paw Patrol (Svenskt tal)" → "Paw Patrol"): flyttar alla en
+  // series avsnitt till samma nya nyckel som ingen annan serie har byter serien bara namn – raden behåller metadata,
+  // låsning ("Fel titel?") och Min lista
+  const moves = new Map();
+  for (const e of eps) {
+    const p = parseEpisode(rel(lib, e.path));
+    const k = p ? showKey(p.show, p.year) : null;
+    if (!moves.has(e.parent_id)) moves.set(e.parent_id, new Set());
+    moves.get(e.parent_id).add(k && k.toLowerCase() !== keyOf.get(e.parent_id) ? k : '');
+  }
+  const taken = new Set(keyOf.values());
   tx(() => {
+    for (const [sid, ks] of moves) {
+      const [k] = ks;
+      if (ks.size !== 1 || !k || taken.has(k.toLowerCase())) continue;
+      const name = k.replace(/\s\((?:19|20)\d\d\)$/, '');
+      run(`UPDATE items SET src_name=?, title=CASE WHEN tmdb_id IS NULL THEN ? ELSE title END, sort_title=CASE WHEN tmdb_id IS NULL THEN ? ELSE sort_title END,
+        meta_done=CASE WHEN meta_done=2 AND match_locked=0 THEN 0 ELSE meta_done END WHERE id=?`, k, name, sortTitle(name), sid);
+      keyOf.set(sid, k.toLowerCase()); taken.add(k.toLowerCase());
+    }
     for (const e of eps) {
       const p = parseEpisode(rel(lib, e.path));
       if (!p) continue;
@@ -402,7 +329,7 @@ async function scanLibrary(lib) {
         if (!p) { console.warn('[scan] kunde inte tolka avsnitt:', f); continue; }
         const guess = p.episode == null ? 1 : 0;
         if (guess) p.episode = unnumberedIndex(f);
-        const showId = showFor(lib, p.show, p.year);
+        const showId = showFor(lib, p.show, p.year, p.yearHint);
         const title = p.epTitle || `Avsnitt ${p.episode}`;
         pending.push(() => {
           // Ett gissat nummer som redan matchats mot TMDB på titel (annan säsong) behålls
@@ -417,6 +344,8 @@ async function scanLibrary(lib) {
           // Även serier som inte hittades förut får ett nytt försök när avsnitt tillkommer.
           run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 OR (meta_done=2 AND match_locked=0) THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
           run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
+          // Datumavsnitt (nyheter, talkshower): sändningsdatumet matchas mot TMDB:s avsnitt (matchEpisodes)
+          if (p.date) run('UPDATE items SET released=? WHERE path=?', p.date, f);
         });
       }
     }
@@ -619,10 +548,10 @@ export async function tmdbSearch(kind, query, year) {
 const originalOf = (orig, title) => orig && String(orig).trim() && String(orig).trim() !== String(title).trim() ? String(orig).trim().slice(0, 300) : null;
 // Premiärdatum ('YYYY-MM-DD') – bara ett giltigt datum sparas
 const dateOf = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
-/** TMDB-id ur titelns NFO: uniqueid tmdb direkt, annars IMDb-/TVDB-id via TMDB:s /find */
-async function nfoTmdb(item) {
-  const ids = localMeta.nfoIds(item);
-  if (!ids) return null;
+/** TMDB-id ur titelns NFO eller filnamnet ({tmdb-123}, [imdbid-tt…], [tvdbid-…]): tmdb direkt, annars IMDb-/TVDB-id via TMDB:s /find */
+async function knownTmdb(item, fileIds) {
+  const nfo = localMeta.nfoIds(item) || {};
+  const ids = { tmdb: nfo.tmdb || fileIds?.tmdb || null, imdb: nfo.imdb || fileIds?.imdb || null, tvdb: nfo.tvdb || fileIds?.tvdb || null };
   if (ids.tmdb) return ids.tmdb;
   const tv = item.kind === 'show';
   for (const [v, src] of [[ids.imdb, 'imdb_id'], [ids.tvdb, 'tvdb_id']]) {
@@ -635,11 +564,64 @@ async function nfoTmdb(item) {
   }
   return null;
 }
+
+// ---- Automatisk matchning (match.js findMatch) ----
+// Svar från TMDB under en metadatakörning: samma sökning görs ofta för flera filer (versioner, säsonger). Töms vid varje körning.
+const tmdbCache = new Map();
+export function clearMatchCache() { tmdbCache.clear(); }
+async function cachedTmdb(p, params) {
+  const k = p + '?' + new URLSearchParams(params);
+  if (tmdbCache.has(k)) return tmdbCache.get(k);
+  const v = await tmdb(p, params);
+  if (tmdbCache.size > 2000) tmdbCache.clear();
+  tmdbCache.set(k, v);
+  return v;
+}
+const matchApi = {
+  search: (kind, query, year, lang) => cachedTmdb(kind === 'show' ? '/search/tv' : '/search/movie',
+    { query, ...(year ? (kind === 'show' ? { first_air_date_year: year } : { year }) : {}), ...(lang === 'en' ? { language: 'en-US' } : {}) }).then(s => s.results || []),
+  alternatives: (kind, id) => cachedTmdb(`/${kind === 'show' ? 'tv' : 'movie'}/${+id}/alternative_titles`, {}).then(r => (r.titles || r.results || []).map(x => x.title)),
+  details: (kind, id) => cachedTmdb(`/${kind === 'show' ? 'tv' : 'movie'}/${+id}`, {}),
+};
+/** Bästa TMDB-träffen (match.js findMatch) via TMDB:s API med cache */
+export const matchTmdb = (q) => findMatch(matchApi, q);
+// Barnbibliotek och tecknat (bibliotekets namn eller mapparna): animerat/familj går före spelfilm med samma titel
+const KIDS_RE = /(?:^|[^\p{L}])(barn\p{L}*|kids?|children|familj\p{L}*|family|disney|pixar|dreamworks|ghibli)(?![\p{L}])/iu;
+const ANIM_RE = /(?:^|[^\p{L}])(anime|tecknat|tecknade?|animerat|animerade?|animation|animated|cartoons?)(?![\p{L}])/iu;
+/** Vad filen/mappen säger om en film eller serie: tolkade titlar, år, längd, id:n, barn/tecknat och säsonger */
+export function matchQuery(item) {
+  const lib = get('SELECT * FROM libraries WHERE id=?', item.library_id) || { name: '' };
+  const roots = rootsOf(lib);
+  let file = item.path, parsed = null;
+  if (item.kind === 'movie') parsed = file ? parseMovie(file) : null;
+  else {
+    file = get('SELECT path FROM items WHERE parent_id=? AND path IS NOT NULL ORDER BY season, episode LIMIT 1', item.id)?.path || null;
+    parsed = file ? parseEpisode(relOf(roots, file)) : null;
+  }
+  const relPath = file ? relOf(roots, file) : '';
+  const where = `${lib.name || ''}/${relPath}`;
+  const q = { kind: item.kind, kids: KIDS_RE.test(where), anim: !!lib.anime || ANIM_RE.test(where), ids: parsed?.ids || null };
+  if (item.kind === 'movie') {
+    q.titles = [parsed?.title, item.title];
+    q.year = item.year || parsed?.year || null;
+    q.duration = item.duration || null;
+  } else {
+    q.titles = [parsed?.show, item.title, item.src_name ? item.src_name.replace(/\s\((?:19|20)\d\d\)$/, '') : null];
+    q.year = item.year || parsed?.year || parsed?.yearHint || null;
+    // Säsonger och avsnitt i filerna (inte absolut numrerade, specialavsnitt eller datumavsnitt)
+    const eps = all('SELECT season, MAX(episode) AS ep FROM items WHERE parent_id=? AND ep_guess=0 AND abs_episode IS NULL AND season BETWEEN 1 AND 1000 GROUP BY season', item.id);
+    q.seasons = eps.length ? { max: Math.max(...eps.map(e => e.season)), eps: lib.anime ? {} : Object.fromEntries(eps.map(e => [e.season, e.ep])) } : null;
+  }
+  return q;
+}
 export async function refreshItem(item, tmdbId = null) {
-  if (!tmdbId && !item.match_locked) tmdbId = await nfoTmdb(item);
+  // Låst matchning ("Fel titel?"): alltid den valda titeln, aldrig en ny sökning
+  if (!tmdbId && item.match_locked && item.tmdb_id) tmdbId = item.tmdb_id;
+  const mq = !tmdbId && (item.kind === 'movie' || item.kind === 'show') ? matchQuery(item) : null;
+  if (!tmdbId && !item.match_locked) tmdbId = await knownTmdb(item, mq?.ids);
   if (item.kind === 'movie') {
     let id = tmdbId;
-    if (!id) id = (await findBest((q, y) => tmdb('/search/movie', { query: q, ...(y ? { year: y } : {}) }).then(s => s.results || []), item.title, item.year))?.id;
+    if (!id) id = (await matchTmdb(mq))?.id;
     if (!id) return false;
     const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos', ...people.videoLangs() });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
@@ -658,7 +640,7 @@ export async function refreshItem(item, tmdbId = null) {
   }
   if (item.kind === 'show') {
     let id = tmdbId;
-    if (!id) id = (await findBest((q, y) => tmdb('/search/tv', { query: q, ...(y ? { first_air_date_year: y } : {}) }).then(s => s.results || []), item.title, item.year, true))?.id;
+    if (!id) id = (await matchTmdb(mq))?.id;
     if (!id) return false;
     const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos', ...people.videoLangs() });
     const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
@@ -682,7 +664,7 @@ const placeholder = (name) => !name || /^(avsnitt|episode|afsnit|episodi|folge|�
 /** Avsnitt → TMDB: först på säsong/avsnittsnummer, sedan på titel för avsnitt utan nummer i filnamnet
  *  (eller med ett nummer som TMDB inte har). Titeln jämförs mot alla säsonger, även specialavsnitt. */
 async function matchEpisodes(item, id, tmdbSeasons) {
-  const local = all('SELECT id, season, episode, title, thumb, ep_guess FROM items WHERE parent_id=?', item.id);
+  const local = all('SELECT id, season, episode, title, thumb, ep_guess, released FROM items WHERE parent_id=?', item.id);
   const cache = new Map();
   const season = async (sn) => {
     if (!cache.has(sn)) { let sd = null; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch {} cache.set(sn, sd?.episodes || []); }
@@ -700,6 +682,23 @@ async function matchEpisodes(item, id, tmdbSeasons) {
     for (const ep of await season(sn)) {
       const e = local.find(x => !x.ep_guess && x.season === sn && x.episode === ep.episode_number);
       if (e) { await apply(e, ep); done.add(e.id); }
+    }
+  }
+  // Datumavsnitt utan nummer: TMDB-avsnittet med samma sändningsdatum (säsongerna som sändes det året)
+  const dated = local.filter(e => !done.has(e.id) && e.ep_guess && e.released);
+  if (dated.length) {
+    const byDate = new Map(), taken0 = new Set(local.filter(e => !e.ep_guess).map(e => e.season + ':' + e.episode));
+    const years = new Set(dated.map(e => e.released.slice(0, 4)));
+    for (const s of tmdbSeasons) {
+      const y = String(s.air_date || '').slice(0, 4);
+      if (s.season_number > 0 && (!y || [...years].some(x => Math.abs(+x - +y) <= 1))) for (const ep of await season(s.season_number)) if (ep.air_date) byDate.set(ep.air_date, { ...ep, season: s.season_number });
+    }
+    for (const e of dated) {
+      const ep = byDate.get(e.released), k = ep && ep.season + ':' + ep.episode_number;
+      if (!ep || taken0.has(k)) continue;
+      taken0.add(k); done.add(e.id);
+      run('UPDATE items SET season=?, episode=?, abs_episode=NULL, ep_guess=2 WHERE id=?', ep.season, ep.episode_number, e.id);
+      await apply(e, ep);
     }
   }
   const rest = local.filter(e => !done.has(e.id) && e.title && !/^Avsnitt \d+$/.test(e.title));
@@ -813,10 +812,12 @@ async function metadata(lib) {
   // Hemvideor söks aldrig i TMDB
   if (!tmdbKey() || (lib.type === 'movie' && lib.home_video)) return;
   // Bättre matchning (match.js): titlar som tidigare inte hittades får ett nytt försök en gång
-  if (getSetting('match_v2', '0') !== '1') {
+  // Matchning v3 (parse.js, findMatch: svenska/engelska/alternativa titlar, barn/tecknat, längd, säsonger): samma sak en gång till
+  for (const v of ['match_v2', 'match_v3']) if (getSetting(v, '0') !== '1') {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
-    setSetting('match_v2', '1');
+    setSetting(v, '1');
   }
+  clearMatchCache();
   // Titlar som inte hittades försöker igen en gång i veckan (TMDB fylls på, och tolkningen av filnamn förbättras)
   if (Date.now() - +getSetting('meta_retry_at', '0') > 7 * 86400e3) {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');

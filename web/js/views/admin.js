@@ -6,7 +6,8 @@ import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { adminInvites, editPerms, permsSummary } from './admin-users.js';
-import { emptyState, errorState } from '../ui/states.js';
+import { emptyState, errorState, loadingState } from '../ui/states.js';
+import { matchItem } from './item.js';
 import { sonicAdmin } from '../sonic.js';
 import { musicMetaAdmin } from '../musicinfo.js';
 
@@ -67,6 +68,28 @@ function editLibrary(l, mediaRoot) {
   browse(mediaRoot);
 }
 
+/** Omatchade filmer och serier: filnamnet, vad som tolkades och "Matcha" (samma dialog som "Fel titel?") */
+async function unmatchedAdmin(panel) {
+  const box = $('#unm', panel);
+  let r;
+  try { r = await api('/unmatched'); } catch (e) { if (box.isConnected) box.innerHTML = errorState(e, { compact: true }); return; }
+  if (!box.isConnected) return;
+  const head = `<p class="muted small">Titlar som inte hittades i TMDB. Matcha dem för hand, eller döp om filen/mappen till "Titel (år)" – eller lägg till <code>{tmdb-12345}</code> i namnet.</p>`;
+  if (!r.items.length) { box.innerHTML = emptyState({ compact: true, icon: '✓', title: 'Allt är matchat', text: r.tmdb ? 'Alla filmer och serier har hittats i TMDB.' : 'Ange en TMDB-nyckel under Inställningar för att hämta metadata.' }); return; }
+  box.innerHTML = `${head}<div class="row" style="margin:8px 0 12px"><button class="ghost" id="unm-retry"${r.tmdb ? '' : ' disabled'}>Försök matcha omatchade igen</button>
+    <span class="muted small">${r.total > r.items.length ? `Visar ${r.items.length} av ${r.total}` : `${r.total} ${r.total === 1 ? 'titel' : 'titlar'}`}</span></div>
+    <ul class="unm-list" style="list-style:none;margin:0;padding:0">${r.items.map((x, i) => `<li class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:12px;padding:10px 0;border-top:1px solid var(--line)">
+      <div style="min-width:0"><b>${esc(x.parsed.title)}</b>${x.parsed.year ? ` <span class="muted">(${+x.parsed.year})</span>` : ''}
+        <div class="muted small">${esc(x.library)} · ${x.kind === 'show' ? 'Serie' : 'Film'}</div>
+        <div class="muted small" style="overflow-wrap:anywhere">${esc(x.file || x.title)}</div></div>
+      <button class="primary small" data-um="${i}"${r.tmdb ? '' : ' disabled'} aria-label="Matcha ${esc(x.parsed.title)}">Matcha</button></li>`).join('')}</ul>`;
+  $$('[data-um]', box).forEach(b => b.onclick = () => { const x = r.items[+b.dataset.um]; matchItem({ id: x.id, kind: x.kind, title: x.parsed.title, year: x.parsed.year }); });
+  $('#unm-retry', box).onclick = act(async () => {
+    const res = await api('/unmatched/retry', { method: 'POST' });
+    toast(`${res.count} ${res.count === 1 ? 'titel' : 'titlar'} matchas på nytt – skanningen har startat`);
+  });
+}
+
 views.admin = async (sec) => {
   if (!me.is_admin) { location.hash = '#/'; return; }
   if (!me.adminHere) { main.innerHTML = emptyState({ icon: '🔒', title: 'Administration är spärrad härifrån', text: 'Av säkerhetsskäl kan servern bara administreras från hemnätverket eller via VPN (t.ex. NetBird).' }); return; }
@@ -93,6 +116,7 @@ views.admin = async (sec) => {
       <div class="fsb" id="fsb"></div>
       <div class="row" style="margin-top:14px"><button class="primary">Lägg till och skanna</button><button type="button" class="ghost" id="scanall">Skanna alla nu</button></div></form>
   </div>
+  <div class="panel" id="adm-unmatched"><h2>Omatchade titlar</h2><div id="unm">${loadingState({ kind: 'inline', label: 'Läser…' })}</div></div>
   <div class="panel"><h2>Användare</h2>
     <p class="muted small">Rättigheter styr vilka bibliotek var och en ser (som delning i Plex), nedladdning, högsta kvalitet utanför hemmet och hur många strömmar som får spelas samtidigt. Profiler ärver kontots rättigheter.</p>
     <table><tr><th>Namn</th><th>Roll</th><th>2FA</th><th>Utanför hemmet</th><th>Rättigheter</th><th>Senast aktiv</th><th></th></tr>
@@ -239,6 +263,7 @@ views.admin = async (sec) => {
     <div class="row" style="margin-top:16px"><button class="primary">Spara</button><button type="button" class="ghost" id="remeta">Hämta om all metadata</button><button type="button" class="ghost" id="remark">Leta intro igen</button></div></form></div>`;
 
   // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig
+  unmatchedAdmin($('#adm-unmatched'));
   if (L.some(l => l.type === 'music')) { sonicAdmin($('#adm-sonic')); musicMetaAdmin($('#adm-mmeta')); } else { $('#adm-sonic').remove(); $('#adm-mmeta').remove(); }
   // Mappväljare
   const browse = async (p) => {
