@@ -11,6 +11,9 @@ import { promptDialog } from '../ui/dialog.js';
 import { iconButton, setIconButton } from '../ui/buttons.js';
 import { ICON } from '../ui/icons.js';
 import { openMenu } from '../ui/menu.js';
+import { provide } from '../lazy.js';
+import * as self from './remote.js';
+provide('remote', self); // fasaderna i lazy.js når modulen härifrån
 
 const R = { es: null, uid: null, id: null, name: '', hidden: false, timer: null, last: null, force: false, sentAt: 0, sending: false, watched: false,
   replaced: false, retry: null, tap: null, ctlName: '', ctlAt: 0, ctl: null, ptimer: null };
@@ -339,4 +342,3 @@ async function moveHere() {
   setSelect('#ps', sub || '');
 }
 /** Knapp för "Spela på…" (titelsidan, spelaren) */
-export const remoteButton = (id, cls = 'ghost') => `<button type="button" class="${cls} playon" id="${id}" aria-haspopup="menu" title="Spela på en annan enhet" aria-label="Spela på en annan enhet">${ICON.remote}<span>Spela på…</span></button>`;

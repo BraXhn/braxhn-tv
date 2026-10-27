@@ -7,7 +7,8 @@ import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
 import { closeOverlays, overlayClose, overlayOpen, setMini, stopVideo } from './overlay.js';
 import { joinParty } from './party.js';
-import { openRemotePicker, remoteButton } from './remote.js';
+import { openRemotePicker } from './remote.js';
+import { remoteButton } from '../ui/buttons.js';
 import { pgsStop, restyleSubs, setSubs, subBurns, textStop } from './subs.js';
 import { SKIP_DELAY, nextPlan, skipPlan } from './autoskip.js';
 import { migrateLocalPrefs } from './playprefs.js';
@@ -15,6 +16,9 @@ import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, s
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { ICON } from '../ui/icons.js';
+import { provide } from '../lazy.js';
+import * as self from './video.js';
+provide('video', self); // fasaderna i lazy.js når modulen härifrån
 
 // Som ovan, men avbryter även en uppspelning som håller på att starta
 export function closeAllPlayers() { playSeq++; closeOverlays(); }

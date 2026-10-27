@@ -1,4 +1,5 @@
 // Vy: personsida (skådespelare, regissörer)
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, api, esc, fmtDay, main, views } from '../core.js';
 import { ROLE_NAME, card, personArt } from '../ui/cards.js';
 

@@ -1,11 +1,11 @@
 // Vy: universell sökning (/api/search/all) – grupperna som hyllor och listor i relevansordning, resultat medan man
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // skriver, piltangenter från sökrutan till träffarna, senaste sökningar (bara i den här webbläsaren) och förslag
 // när rutan är tom. Sökrutan i menyraden (#q) kopplas här.
 import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views } from '../core.js';
-import { card, chLogo, personArt, personCard, shelfHtml } from '../ui/cards.js';
+import { bookCard, card, chLogo, personArt, personCard, podCover, shelfHtml } from '../ui/cards.js';
 import { bindRetry, emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTracks, cover, trackRows } from './music.js';
-import { bookCard, podCover } from './books.js';
 import { playLive } from '../player/live.js';
 
 const LIMIT = 12, RECENT = 'search.recent', DEBOUNCE = 200;
@@ -155,3 +155,5 @@ main.addEventListener('keydown', (e) => {
 });
 // Escape i rutan: töm och visa förslagen
 box.addEventListener('search', () => { if (!box.value && onSearchPage()) go(); });
+// Modulen laddas när rutan får fokus (router.js): det som hann skrivas innan dess söks nu
+if (box.value.trim() && !onSearchPage()) timer = setTimeout(go, DEBOUNCE);

@@ -1,5 +1,5 @@
 // Upplevd snabbhet: platshållarfärger för bilder, asynkron komprimering av stora svar, ep_watched-frågans plan
-// och att sällan använda vyer laddas vid behov (förladdas inte). Kräver ffmpeg.
+// och att startsidan bara laddar sina egna moduler (spelaren och övriga vyer vid behov). Kräver ffmpeg.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -118,31 +118,62 @@ test('stora svar komprimeras asynkront (brotli/gzip), små som förut, ETag ofö
   } finally { srv.close(); }
 });
 
-test('webben: sällan använda vyer laddas vid behov och förladdas inte', async () => {
+test('webben: startsidan laddar bara sina egna moduler – spelaren och övriga vyer laddas vid behov', async () => {
   const web = path.join(import.meta.dirname, '..', 'web');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const relOf = (f) => path.relative(web, f).split(path.sep).join('/');
   const files = walk(path.join(web, 'js')).filter(f => f.endsWith('.js'));
-  const { isLazy, PRELOAD_FILES } = await import('../server/http/static.js');
-  const lazy = new Set(files.filter(f => isLazy(fs.readFileSync(f, 'utf8'))).map(f => path.relative(web, f).split(path.sep).join('/')));
-  for (const m of ['admin', 'admin-ops', 'stats', 'wrapped', 'requests', 'streaming', 'live']) assert.ok(lazy.has(`js/views/${m}.js`), m);
-  for (const f of lazy) assert.ok(!PRELOAD_FILES.includes(f), `${f} förladdas`);
-  assert.ok(PRELOAD_FILES.includes('js/core.js') && PRELOAD_FILES.includes('js/views/home.js'));
-  // Ingen modul som laddas vid start får importera en @lazy-modul statiskt (då laddas den ändå direkt)
+  const { PRELOAD_FILES, LAZY_DEPS, serveStatic } = await import('../server/http/static.js');
+  const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
+  const lazy = new Set(files.filter(f => isLazy(fs.readFileSync(f, 'utf8'))).map(relOf));
+  const start = new Set(PRELOAD_FILES);
+  // Startens moduler = det app.js importerar statiskt. Varje modul är en förfrågan och HTTP/1.1 tar sex åt gången –
+  // håll mängden liten. Spelaren, ljudspelaren och musikens moduler hör aldrig dit (fasaderna i js/lazy.js).
+  assert.ok(PRELOAD_FILES.length <= 16, `${PRELOAD_FILES.length} moduler vid start: ${PRELOAD_FILES.join(' ')}`);
+  for (const f of ['js/core.js', 'js/router.js', 'js/lazy.js', 'js/views/home.js', 'js/ui/cards.js']) assert.ok(start.has(f), f);
+  for (const f of PRELOAD_FILES) assert.ok(!/^js\/(player\/|audio|sonic|musicinfo|views\/(?!home\.js))/.test(f), `${f} laddas vid start`);
+  for (const m of ['admin', 'admin-ops', 'stats', 'wrapped', 'requests', 'streaming', 'live', 'item', 'music', 'books', 'search', 'account', 'login'])
+    assert.ok(lazy.has(`js/views/${m}.js`), m);
+  // En @lazy-modul får inte nås statiskt från app.js (då laddas den ändå direkt) – kedjan anges i felet
+  for (const f of lazy) assert.ok(!start.has(f), `${f} är märkt @lazy men laddas vid start`);
   for (const f of [path.join(web, 'app.js'), ...files]) {
-    const name = path.relative(web, f).split(path.sep).join('/');
-    if (lazy.has(name)) continue;
-    const src = fs.readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/^import (?:[^'"]* from )?'([^']+)';$/gm)) {
-      const target = path.relative(web, path.join(path.dirname(f), m[1])).split(path.sep).join('/');
-      assert.ok(!lazy.has(target), `${name} importerar ${target} statiskt`);
+    const name = relOf(f);
+    if (name !== 'app.js' && !start.has(name)) continue;
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/^import (?:[^'"]* from )?'([^']+)';$/gm)) {
+      const target = relOf(path.join(path.dirname(f), m[1]));
+      assert.ok(!lazy.has(target) && !/^js\/player\//.test(target), `${name} importerar ${target} statiskt`);
     }
   }
+  // Fasaderna: lazy.js importerar bara core.js (startmodulerna och spelaren importerar den)
+  const lz = fs.readFileSync(path.join(web, 'js', 'lazy.js'), 'utf8');
+  assert.deepEqual([...lz.matchAll(/^import .* from '([^']+)';$/gm)].map(m => m[1]), ['./core.js']);
+  // Spelarmodulerna som fasaderna svarar för anmäler sig
+  for (const [f, n] of [['player/video.js', 'video'], ['audio.js', 'audio'], ['player/live.js', 'live'], ['player/remote.js', 'remote']])
+    assert.match(fs.readFileSync(path.join(web, 'js', f), 'utf8'), new RegExp(`^provide\\('${n}', self\\);`, 'm'), f);
   // Varje vy i router.js LAZY finns och registreras av sin modul
   const router = fs.readFileSync(path.join(web, 'js', 'router.js'), 'utf8');
   const table = Object.entries(JSON.parse(router.match(/const LAZY = new Map\(Object\.entries\((\{[^}]*\})\)\)/)[1].replace(/(\w+):/g, '"$1":').replace(/'/g, '"')));
-  assert.ok(table.length >= 7);
+  assert.ok(table.length >= 30);
   for (const [view, mod] of table) {
-    assert.ok(lazy.has(`js/views/${mod}.js`), mod);
-    assert.match(fs.readFileSync(path.join(web, 'js', 'views', mod + '.js'), 'utf8'), new RegExp(`^views\\.${view} = `, 'm'), `${mod}.js registrerar ${view}`);
+    assert.ok(lazy.has(`js/${mod}.js`), mod);
+    assert.match(fs.readFileSync(path.join(web, 'js', mod + '.js'), 'utf8'), new RegExp(`^views\\.${view} = `, 'm'), `${mod}.js registrerar ${view}`);
   }
+  // Beroendena för need(): varje modul utanför starten med alla sina importer utanför starten, och samma lista i index.html
+  for (const f of files.map(relOf).filter(f => !start.has(f))) {
+    const src = fs.readFileSync(path.join(web, f), 'utf8');
+    const want = [...src.matchAll(/^import (?:[^'"]* from )?'([^']+)';$/gm)].map(m => relOf(path.join(web, path.dirname(f), m[1]))).filter(t => !start.has(t)).map(t => t.slice(3));
+    assert.deepEqual(LAZY_DEPS[f.slice(3)] || [], want, f);
+  }
+  assert.ok(LAZY_DEPS['views/music.js'].includes('audio.js'));
+  const html = await new Promise((resolve) => {
+    const res = { writeHead() {}, end: (b) => resolve(String(b)) };
+    serveStatic({ method: 'GET', headers: {} }, res, '/');
+  });
+  assert.deepEqual(JSON.parse(/<script type="application\/json" id="moddeps">([^<]*)<\/script>/.exec(html)[1]), LAZY_DEPS);
+  // Förladdningen pekar på adresserna med innehållshash – samma som import map ger import()
+  const preloads = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m => m[1]);
+  const imap = JSON.parse(/<script type="importmap">([^<]*)<\/script>/.exec(html)[1]).imports;
+  for (const f of PRELOAD_FILES) assert.ok(preloads.includes(imap['/m/' + f]), `${f} förladdas inte med sin hash`);
+  assert.ok(imap['/m/js/player/video.js'], 'spelaren saknas i import map (need() slår upp adressen där)');
+  assert.ok(!preloads.some(u => u.includes('/player/')), 'spelaren förladdas vid start');
 });

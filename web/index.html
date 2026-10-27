@@ -14,10 +14,11 @@
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2">
 <link rel="manifest" href="/manifest.webmanifest">
 {{importmap}}
+<script src="/v/{{b}}/start.js" async fetchpriority="high"></script>
 <link rel="stylesheet" href="/v/{{b}}/style.css">
-<script src="/v/{{b}}/start.js" async></script>
 <link rel="modulepreload" href="/v/{{b}}/app.js">
 {{preload}}
+<script type="application/json" id="moddeps">{{deps}}</script>
 </head>
 <body>
 <header id="top" hidden>

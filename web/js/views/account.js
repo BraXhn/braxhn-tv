@@ -1,4 +1,5 @@
 // Vy: Mitt konto – lösenord, uppspelningsval, tvåstegsverifiering, passkeys, profiler, Trakt, scrobbling, enheter, följda serier och nedladdning i appen
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';

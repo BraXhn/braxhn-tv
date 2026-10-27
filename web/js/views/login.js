@@ -1,7 +1,7 @@
 // Vyer: inloggning, första kontot och profilval ("Vem tittar?")
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, store, toast, views } from '../core.js';
-import { closeAllPlayers } from '../player/video.js';
-import { stopAudio } from '../audio.js';
+import { closeAllPlayers, stopAudio } from '../lazy.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
 import { boot } from '../router.js';
 import { promptDialog } from '../ui/dialog.js';

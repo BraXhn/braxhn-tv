@@ -3,7 +3,7 @@
 // och står still medan muspekaren är över eller fokus är inuti, eller när användaren pausat (WCAG 2.2.2).
 // Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit, data-nav-up).
 import { api, esc, fmtDur, heroUrl, later, toast } from '../core.js';
-import { startPlay } from '../player/video.js';
+import { startPlay } from '../lazy.js';
 
 const INTERVAL = 9000;
 const HEX = /^#[0-9a-f]{6}$/i;

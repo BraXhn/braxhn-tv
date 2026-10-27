@@ -1,4 +1,5 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, routeGen, store, toast, views } from '../core.js';
 import { M, playQueue, startRadio } from '../audio.js';
 import { route } from '../router.js';

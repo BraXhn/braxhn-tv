@@ -1,18 +1,16 @@
 // Routing och appens skal: inloggning vid start (boot), route() med navigeringsgeneration, bibliotekslänkar,
 // användarmenyn, sökfältet, flikmenyn och installation som app
 import { $, $$, api, esc, leaveFns, store, libs, main, me, nextRoute, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views } from './core.js';
-import { stopAudio } from './audio.js';
-import { measureBandwidth } from './player/caps.js';
-import { closeLive, closeRec } from './player/live.js';
-import { P, closeAllPlayers } from './player/video.js';
+import { closeAllPlayers, closeLiveAndRec, curPlayer, idle, loadPlayer, need, startRemote, stopAudio, stopRemote } from './lazy.js';
 import { refreshScreen, screenBadge } from './screentime.js';
-import { fillWatch } from './views/item.js';
-import { openDialog } from './ui/dialog.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
-import { startActivity, stopActivity } from './ui/activity.js';
-import { startRemote, stopRemote } from './player/remote.js';
 import { RAIL_ICON } from './ui/icons.js';
 import { openMenu } from './ui/menu.js';
+// Laddas när de behövs (lazy.js): dialoger, administratörens aktivitetsruta, bandbreddsmätningen
+const openDialog = (o) => need('ui/dialog.js').then(m => m.openDialog(o));
+let activityOn = false;
+const startActivity = () => { activityOn = true; need('ui/activity.js').then(m => { if (activityOn) m.startActivity(); }).catch(() => {}); };
+const stopActivity = () => { if (!activityOn) return; activityOn = false; need('ui/activity.js').then(m => m.stopActivity()).catch(() => {}); };
 
 // ---------- routing ----------
 const LIB_PATH = { music: 'music', audiobook: 'books', photo: 'photos' };
@@ -62,10 +60,10 @@ export async function boot() {
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
-  if (st.remote) setTimeout(() => measureBandwidth(), 3000);
-  // Aktivitetsindikatorn (pågående jobb) strax efter att sidan visats – den är inte nödvändig för första bilden
-  if (me.adminHere) setTimeout(() => { if (me?.adminHere) startActivity(); }, 1500); else stopActivity();
-  startRemote(); // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra
+  if (st.remote) setTimeout(() => need('player/caps.js').then(m => m.measureBandwidth()).catch(() => {}), 3000);
+  if (me.adminHere) idle(startActivity); else stopActivity();
+  // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra. Laddar spelaren – när sidan är ritad.
+  idle(startRemote);
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(`Version ${me.update} av BraXhn TV finns – se Administration`); }
   await loadLibs();
   return true;
@@ -74,10 +72,30 @@ export async function boot() {
 const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
   admin: 'panels', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels' };
-// Sällan använda vyer laddas först när de öppnas: vy -> modul i views/ (märkt @lazy, förladdas inte).
-// Relativ dynamisk import → samma bygge (/v/<bygge>/js/views/…). Modulen registrerar sina vyer i views när den laddats.
-const LAZY = new Map(Object.entries({ admin: 'admin', stats: 'stats', wrapped: 'wrapped', requests: 'requests', streaming: 'streaming', live: 'live', guide: 'live', dvr: 'live',
-  history: 'history', playstats: 'history', webhooks: 'webhooks', photos: 'photos' }));
+// Vyerna utom startsidan laddas först när de öppnas (eller när pekaren/fokus når en länk dit): vy -> modul i js/
+// (märkt @lazy). need() i lazy.js hämtar modulen och hela dess kedja av beroenden på en gång (samma bygge,
+// /v/<bygge>/js/…). Modulen registrerar sina vyer i views när den laddats.
+const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person', account: 'views/account', search: 'views/search',
+  books: 'views/books', book: 'views/books', podcasts: 'views/books', podcast: 'views/books', calendar: 'views/calendar',
+  collections: 'views/collections', ucollection: 'views/collections', setup: 'views/setup', quickconnect: 'views/quickconnect',
+  music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
+  login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
+  admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/live',
+  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos' }));
+/** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
+export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
+// Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för
+// kort och Spela-knappar – innan klicket, så att det inte märks att de laddas först nu
+function prefetch(e) {
+  const t = e.target; if (!me || !t?.closest) return;
+  const a = t.closest('a[href^="#/"]');
+  if (a) prefetchView(a.getAttribute('href').slice(2).split('/')[0]);
+  if (t.closest('.card, .feat, [data-play], #playfirst')) loadPlayer().catch(() => {});
+}
+document.addEventListener('pointerover', prefetch, { passive: true });
+document.addEventListener('focusin', prefetch);
+// Sökrutan i menyraden sköts av views/search.js – den laddas när rutan får fokus
+$('#q').addEventListener('focus', () => need('views/search.js').catch(() => {}));
 export async function route() {
   const gen = nextRoute();
   // Stoppa timers/slingor från föregående vy
@@ -91,7 +109,7 @@ export async function route() {
   // En film i litet fönster fortsätter spela medan man bläddrar – men aldrig efter utloggning eller vid profilval
   // (då skulle framsteget sparas på fel profil, och en barnprofil kunna titta vidare)
   if (name === 'login' || name === 'profiles') { closeAllPlayers(); stopAudio(); }
-  else if (P?.mini) { closeLive(); closeRec(); } else closeAllPlayers();
+  else if (curPlayer()?.mini) closeLiveAndRec(); else closeAllPlayers();
   markNav();
   let v = views[name || 'home'];
   const lazy = v ? null : LAZY.get(name);
@@ -106,12 +124,14 @@ export async function route() {
   if (me && name !== 'timeup') refreshScreen();
   try {
     if (lazy) {
-      await import(`./views/${lazy}.js`);
+      await need(lazy + '.js');
       if (gen !== routeGen) return;
       v = views[name];
       if (!v) { location.hash = '#/'; return; }
     }
-    await v(arg, arg2); if (gen !== routeGen) return; main.removeAttribute('aria-busy'); window.scrollTo(0, 0); fillWatch(); }
+    await v(arg, arg2); if (gen !== routeGen) return; main.removeAttribute('aria-busy'); window.scrollTo(0, 0);
+    // "Finns även på" på titelsidan (views/item.js är laddad när rutan finns)
+    if ($('[data-wid]')) need('views/item.js').then(m => m.fillWatch()).catch(() => {}); }
   catch (e) {
     if (gen !== routeGen || e?.aborted) return;
     main.removeAttribute('aria-busy');
@@ -157,7 +177,7 @@ document.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented || document.querySelector('dialog[open]')) return;
   if (e.target.closest?.('input,textarea,select,[contenteditable]')) return;
   if (e.key === '?') { e.preventDefault(); showShortcuts(); }
-  else if (e.key === '/' && me && !P) { e.preventDefault(); const q = $('#q'); if (q?.offsetParent) q.focus(); else location.hash = '#/search'; }
+  else if (e.key === '/' && me && !curPlayer()) { e.preventDefault(); const q = $('#q'); if (q?.offsetParent) q.focus(); else location.hash = '#/search'; }
 });
 // ---------- installera som app ----------
 // Service workern kräver HTTPS (eller localhost); utan den går appen ändå att lägga på hemskärmen

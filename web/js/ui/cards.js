@@ -1,5 +1,5 @@
 // Återanvändbara kort och hyllor: titlar, säsonger, samlingar och personer
-import { esc, hue, me, sxe, imgSrc, cardW, routeGen } from '../core.js';
+import { coverImg, esc, hue, me, sxe, imgSrc, cardW, routeGen } from '../core.js';
 
 // ---------- kort ----------
 // Titlarna bakom korten som visas just nu – kortens meny (⋮) behöver hela titeln, inte bara id:t
@@ -169,3 +169,34 @@ export function castShelf(it) {
 
 /** Kanallogga (live-TV) med kanalnummer som reserv – används av live-vyerna och sökningen */
 export const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `<img src="/api/live/logo/${c.id}" alt="" loading="lazy" data-fb="1">` : ''}<i>${esc(c.number || c.name.slice(0, 3))}</i></span>`;
+
+// ---------- ljudböcker, poddar och "Kommer snart" (startsidan, sökningen och vyerna i views/books.js och calendar.js) ----------
+export const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:hsl(${hue(String(b.id))} 35% 30%);--h2:hsl(${(hue(String(b.id)) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/audiobooks/cover/${+b.id}`, cls) : `<span>${esc((b.title || '').slice(0, 40))}</span>`}</div>`;
+export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
+  <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
+export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
+const ymd = (d) => d.toLocaleDateString('sv-SE');
+const parseDay = (s) => new Date(s + 'T12:00:00');
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+/** Idag, I morgon, veckodag inom en vecka, sedan datum */
+export function dayLabel(s, today = ymd(new Date())) {
+  const diff = Math.round((parseDay(s) - parseDay(today)) / 864e5);
+  if (diff === 0) return 'Idag';
+  if (diff === 1) return 'I morgon';
+  if (diff === -1) return 'I går';
+  const d = parseDay(s);
+  if (diff > 1 && diff < 7) return cap(d.toLocaleDateString('sv-SE', { weekday: 'long' }));
+  return cap(d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', ...(d.getFullYear() !== parseDay(today).getFullYear() ? { year: 'numeric' } : {}) }));
+}
+export const timeOf = (e) => e.time ? new Date(e.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
+export const hrefOf = (e) => e.itemId ? `#/item/${+e.itemId}` : e.showId ? `#/item/${+e.showId}` : '';
+/** Kort till hyllan "Kommer snart" (fältet upcoming i /api/home) */
+export function upcomingCard(e) {
+  const h = hrefOf(e) || '#/calendar';
+  const when = [dayLabel(e.date), timeOf(e)].filter(Boolean).join(' ');
+  const art = `<div class="art">${(() => { const x = hue(e.show || ''); return `<div class="ph" aria-hidden="true" style="--h1:hsl(${x} 30% 30%);--h2:hsl(${(x + 50) % 360} 30% 16%)">${esc(e.show)}</div>`; })()}
+    ${e.poster && e.showId ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+e.showId}/poster`, 200)} alt="" width="300" height="450" data-fb="1">` : ''}
+    <span class="badge calwhen" aria-hidden="true">${esc(when)}</span></div>`;
+  return `<div class="card"><a class="clink" href="${h}" aria-label="${esc(`${e.show} ${sxe(e)}${e.name ? ', ' + e.name : ''}, ${when}`)}">${art}
+    <div class="t">${esc(e.show)}</div><div class="s">${sxe(e)} · ${esc(when)}</div>${e.name ? `<div class="s s2">${esc(e.name)}</div>` : ''}</a></div>`;
+}

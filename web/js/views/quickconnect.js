@@ -1,4 +1,5 @@
 // Snabbinloggning med kod (för TV-webbläsare och TV-appar): visa en sexsiffrig kod som godkänns från en inloggad
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // telefon/dator, och vyn #/quickconnect(/<kod>) där den inloggade godkänner. Servern: /api/quickconnect i server/routes/auth.js.
 import { $, act, api, esc, later, main, me, onLeave, pageAfterLogin, toast, views } from '../core.js';
 import { boot } from '../router.js';

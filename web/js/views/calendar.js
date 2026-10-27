@@ -1,29 +1,21 @@
 // Vy: Kommande (#/calendar) – avsnitt per dag från TMDB (och Sonarr), saknade avsnitt på seriesidan,
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // hyllan "Kommer snart" på startsidan och kalenderprenumerationen (iCal) under Mitt konto.
 import { $, $$, act, api, esc, hue, imgSrc, main, me, store, sxe, toast, toastErr, views } from '../core.js';
 import { route } from '../router.js';
 import { confirmDialog, openDialog } from '../ui/dialog.js';
+import { dayLabel, hrefOf, timeOf } from '../ui/cards.js';
 import { emptyState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
 
 // ---------- datum ----------
+// dayLabel, timeOf och hrefOf ligger i ui/cards.js (hyllan "Kommer snart" på startsidan behöver dem)
 const ymd = (d) => d.toLocaleDateString('sv-SE');
 const parse = (s) => new Date(s + 'T12:00:00');
 const plus = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return ymd(d); };
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-/** Idag, I morgon, veckodag inom en vecka, sedan datum */
-export function dayLabel(s, today = ymd(new Date())) {
-  const diff = Math.round((parse(s) - parse(today)) / 864e5);
-  if (diff === 0) return 'Idag';
-  if (diff === 1) return 'I morgon';
-  if (diff === -1) return 'I går';
-  const d = parse(s);
-  if (diff > 1 && diff < 7) return cap(d.toLocaleDateString('sv-SE', { weekday: 'long' }));
-  return cap(d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', ...(d.getFullYear() !== parse(today).getFullYear() ? { year: 'numeric' } : {}) }));
-}
 /** Veckovyn: Idag/I morgon/I går, annars veckodagen (datumet står bredvid) */
 const weekLabel = (s, today) => { const l = dayLabel(s, today); return /^(Idag|I morgon|I går)$/.test(l) ? l : cap(parse(s).toLocaleDateString('sv-SE', { weekday: 'long' })); };
-const timeOf = (e) => e.time ? new Date(e.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
 const monday = (s) => { const d = parse(s); return plus(s, -((d.getDay() + 6) % 7)); };
 
 // ---------- en rad ----------
@@ -34,7 +26,6 @@ const poster = (e, css = 46) => {
 };
 const badges = (e) => [e.inLibrary ? '<span class="ok-badge">I biblioteket</span>' : e.missing ? '<span class="warn-badge">Saknas</span>' : '',
   e.following ? '<span class="cal-follow">Följer</span>' : ''].filter(Boolean).join(' ');
-const hrefOf = (e) => e.itemId ? `#/item/${+e.itemId}` : e.showId ? `#/item/${+e.showId}` : '';
 function row(e) {
   const meta = [timeOf(e), e.network].filter(Boolean).map(esc).join(' · ');
   const inner = `${poster(e)}<div class="calb"><div class="calt"><b>${esc(e.show)}</b> <span class="muted">${sxe(e)}</span></div>
@@ -91,18 +82,6 @@ views.calendar = async () => {
     $('#calnow').onclick = () => { store.set('cal.week', 0); route(); };
   }
 };
-
-// ---------- startsidan: Kommer snart ----------
-/** Kort till hyllan "Kommer snart" (fältet upcoming i /api/home) */
-export function upcomingCard(e) {
-  const h = hrefOf(e) || '#/calendar';
-  const when = [dayLabel(e.date), timeOf(e)].filter(Boolean).join(' ');
-  const art = `<div class="art">${(() => { const x = hue(e.show || ''); return `<div class="ph" aria-hidden="true" style="--h1:hsl(${x} 30% 30%);--h2:hsl(${(x + 50) % 360} 30% 16%)">${esc(e.show)}</div>`; })()}
-    ${e.poster && e.showId ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+e.showId}/poster`, 200)} alt="" width="300" height="450" data-fb="1">` : ''}
-    <span class="badge calwhen" aria-hidden="true">${esc(when)}</span></div>`;
-  return `<div class="card"><a class="clink" href="${h}" aria-label="${esc(`${e.show} ${sxe(e)}${e.name ? ', ' + e.name : ''}, ${when}`)}">${art}
-    <div class="t">${esc(e.show)}</div><div class="s">${sxe(e)} · ${esc(when)}</div>${e.name ? `<div class="s s2">${esc(e.name)}</div>` : ''}</a></div>`;
-}
 
 // ---------- seriesidan: saknade avsnitt ----------
 /** Fyller el med "Saknas: S02E04–E06" och ev. knappen Sök i Sonarr */

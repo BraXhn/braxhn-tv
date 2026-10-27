@@ -1,17 +1,15 @@
 // Vyer: ljudböcker och poddar
+// @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, me, store, toast, views, toastErr } from '../core.js';
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
 import { loadLibs, route } from '../router.js';
 import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
-import { shelfHtml } from '../ui/cards.js';
+import { bookCard, bookCover, podCover, shelfHtml } from '../ui/cards.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 
 // ---------- ljudböcker ----------
-const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:hsl(${hue(String(b.id))} 35% 30%);--h2:hsl(${(hue(String(b.id)) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/audiobooks/cover/${+b.id}`, cls) : `<span>${esc((b.title || '').slice(0, 40))}</span>`}</div>`;
-export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
-  <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
 const seriesLabel = (b) => b.series ? `${b.series}${b.seriesNo ? ` #${b.seriesNo}` : ''}` : '';
 const withNo = (b) => b.seriesNo ? { ...b, author: `#${b.seriesNo} · ${b.author || ''}` } : b;
 // Filter i adressen: #/books/<bibliotek>/serie:<namn> eller /forfattare:<namn> (kodat med encodeURIComponent)
@@ -143,7 +141,6 @@ function editBook(b) {
 }
 
 // ---------- poddar ----------
-export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
 const epRows = (eps, showPod) => `<table class="tracks">${eps.map((e, i) => `<tr data-ep="${i}"><td style="width:100%"><b>${esc(e.title)}</b>${e.played ? ' <span class="muted">✓</span>' : ''}
   <div class="muted small">${showPod ? esc(e.podcastTitle || '') + ' · ' : ''}${fmtDate(e.published)}${e.duration ? ' · ' + fmtDur(e.duration) : ''}${e.position > 0 && !e.played ? ` · ${fmtDur((e.duration || 0) - e.position)} kvar` : ''}${e.downloaded ? ' · nedladdat' : e.downloading ? ' · laddas ner…' : ''}</div></td>
   <td class="r" style="white-space:nowrap">${iconButton({ icon: '▶', label: `Spela ${e.title}`, data: { epplay: i } })} ${iconButton({ icon: e.played ? '↺' : '✓', label: `${e.played ? 'Markera som ej lyssnad' : 'Markera som lyssnad'}: ${e.title}`, data: { epdone: i } })}</td></tr>`).join('')}</table>`;

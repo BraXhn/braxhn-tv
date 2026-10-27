@@ -2,12 +2,16 @@
 // ta bort från Fortsätt titta, följ, titta tillsammans och – för administratörer – metadataverktygen.
 // Kortet uppdateras direkt (optimistiskt) och ändringar som går att ångra får "Ångra" i toasten.
 import { $$, act, api, fmtTime, me, sxe, toast, toastErr } from '../core.js';
-import { play, startPlay } from '../player/video.js';
+import { need, play, startPlay } from '../lazy.js';
 import { route } from '../router.js';
-import { editItem, matchItem, refreshMeta } from '../views/item.js';
 import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
-import { addToCollection } from './collections.js';
 import { closeMenu, contextMenu, openMenu } from './menu.js';
+
+// Metadataverktygen (views/item.js) och samlingsdialogen laddas när de väljs
+const editItem = (it) => need('views/item.js').then(m => m.editItem(it));
+const matchItem = (it) => need('views/item.js').then(m => m.matchItem(it));
+const refreshMeta = (it) => need('views/item.js').then(m => m.refreshMeta(it));
+const addToCollection = (it) => need('ui/collections.js').then(m => m.addToCollection(it));
 
 /** Ritar om alla kort för titeln (samma titel kan finnas i flera rader) och behåller fokus */
 function redraw(it) {

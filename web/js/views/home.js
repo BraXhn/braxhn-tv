@@ -1,18 +1,13 @@
 // Vyer: startsidan, bibliotek (filter och sortering: ui/libfilter.js), Min lista och samlingar (sökningen: views/search.js).
 // Startsidans Utvalt-karusell: ui/featured.js, "Anpassa startsidan": views/homecustom.js.
 import { $, act, api, cardW, esc, fmtDay, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, safeColor, store, sxe, toast, toastErr, views } from '../core.js';
-import { playSpoken } from '../audio.js';
-import { startPlay } from '../player/video.js';
+import { need, playSpoken, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
-import { card, colCard, seasonCard, shelf, shelfHtml } from '../ui/cards.js';
-import { collectionForm } from '../ui/collections.js';
+import { bookCard, card, colCard, podCover, seasonCard, shelf, shelfHtml, upcomingCard } from '../ui/cards.js';
 import { bindFeatured, featuredHtml } from '../ui/featured.js';
 import { SORT_DIR, SORT_LABEL, chips, chipsHtml, filterCount, hasFilter, hashQuery, openFilterPanel } from '../ui/libfilter.js';
 import { emptyState } from '../ui/states.js';
-import { bookCard, podCover } from './books.js';
-import { upcomingCard } from './calendar.js';
-import { openHomeCustomizer } from './homecustom.js';
 
 // Startsidans hyllor i den ordning användaren valt (homeLayout från servern, "Anpassa startsidan"). Hyllor som
 // servern inte känner till ritas inte; en äldre server utan homeLayout ger standardordningen nedan.
@@ -102,7 +97,7 @@ async function renderHome(d, cols, own, fromCache) {
   if (fromCache) main.removeAttribute('aria-busy');
   if (hero) bindFeatured(main.querySelector('.feat'), d.featured);
   if ($('#fyclear')) $('#fyclear').onclick = act(async (e) => { e.preventDefault(); await api('/foryou/seen', { method: 'POST', body: {} }); route(); });
-  if ($('#homecustom')) $('#homecustom').onclick = () => openHomeCustomizer({ onChange: route });
+  if ($('#homecustom')) $('#homecustom').onclick = () => need('views/homecustom.js').then(m => m.openHomeCustomizer({ onChange: route }));
   main.querySelectorAll('[data-lpod]').forEach(a => a.onclick = (e) => {
     const x = d.listening[+a.dataset.lpod];
     e.preventDefault();
@@ -218,7 +213,7 @@ views.lib = async (id, folder) => {
     startPlay(b, r.play.id, r.play.watched ? 0 : r.play.position || 0);
   });
   if ($('#smartsave')) $('#smartsave').onclick = act(async () => {
-    const cid = await collectionForm(null, null, { library: lib.id, query: qs });
+    const cid = await (await need('ui/collections.js')).collectionForm(null, null, { library: lib.id, query: qs }); // dialogen laddas när den behövs
     if (cid) toast('Den smarta samlingen är sparad', { action: { label: 'Visa', onClick: () => { location.hash = `#/ucollection/${cid}`; } } });
   });
   if ($('#smartupd')) $('#smartupd').onclick = act(async () => {
