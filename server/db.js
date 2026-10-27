@@ -478,6 +478,36 @@ BEGIN UPDATE items SET ${set} WHERE id=NEW.id; END`;
   if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='items_locked_upd'").get()?.sql !== sql) db.exec(`DROP TRIGGER IF EXISTS items_locked_upd; ${sql};`);
 }
 
+// Inspelning (server/dvr.js). Tabellerna skapades tidigare i dvr.js – CREATE IF NOT EXISTS här rör inte befintliga.
+// Serieregler: priority (högre vinner när tunrarna inte räcker), pad_before/pad_after (s, NULL = serverns inställning),
+// days (bitmask sön=1 … lör=64, NULL = alla dagar), time_from/time_to (minuter efter midnatt, lokal tid; time_to <
+// time_from = över midnatt), skip_library (hoppa över avsnitt som redan finns i ett seriebibliotek), format
+// (mp4|mkv|ts, NULL = inställningen), transcode (auto|always|never, NULL = inställningen), enabled (pausad = 0).
+// Inspelningar: samma priority/padding/format/transcode (från regeln eller valda vid bokningen), is_new (guidens
+// "nytt"-flagga), keep_forever (rensas aldrig av "behåll senaste N").
+db.exec(`CREATE TABLE IF NOT EXISTS dvr_rules(id INTEGER PRIMARY KEY, title TEXT NOT NULL, channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+  new_only INTEGER NOT NULL DEFAULT 1, keep INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS recordings(id INTEGER PRIMARY KEY, channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL, channel_name TEXT,
+  program_id INTEGER, rule_id INTEGER REFERENCES dvr_rules(id) ON DELETE SET NULL, title TEXT NOT NULL, subtitle TEXT, description TEXT,
+  season INTEGER, episode INTEGER, start INTEGER NOT NULL, stop INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled',
+  file TEXT, size INTEGER, duration REAL, error TEXT, created_by INTEGER, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS rec_start ON recordings(status, start);`);
+for (const t of ['dvr_rules', 'recordings']) {
+  addCol(t, 'priority', 'INTEGER NOT NULL DEFAULT 0');
+  addCol(t, 'pad_before', 'INTEGER');
+  addCol(t, 'pad_after', 'INTEGER');
+  addCol(t, 'format', 'TEXT');
+  addCol(t, 'transcode', 'TEXT');
+}
+addCol('dvr_rules', 'days', 'INTEGER');
+addCol('dvr_rules', 'time_from', 'INTEGER');
+addCol('dvr_rules', 'time_to', 'INTEGER');
+addCol('dvr_rules', 'skip_library', 'INTEGER NOT NULL DEFAULT 1');
+addCol('dvr_rules', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
+addCol('recordings', 'is_new', 'INTEGER');
+addCol('recordings', 'keep_forever', 'INTEGER NOT NULL DEFAULT 0');
+db.exec('CREATE INDEX IF NOT EXISTS rec_rule ON recordings(rule_id, status)');
+
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 6;
 let ver = db.prepare('PRAGMA user_version').get().user_version;

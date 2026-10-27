@@ -80,7 +80,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   collections: 'views/collections', ucollection: 'views/collections', setup: 'views/setup', quickconnect: 'views/quickconnect',
   music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
-  admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/live',
+  admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr',
   history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }

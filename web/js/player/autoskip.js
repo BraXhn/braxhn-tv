@@ -33,3 +33,29 @@ export function nextPlan(pb, hasNext) {
   const s = Math.max(0, Math.min(60, parseInt(n.countdown)));
   return { auto: !!n.enabled, seconds: Number.isFinite(s) ? s : 8 };
 }
+
+/**
+ * Reklamavbrott i inspelningar (samma mönster som skipPlan): avbrottet som spelas just nu { i, to, auto } eller null.
+ * ads = [{ start, end }] från /api/dvr; auto = hoppa automatiskt (valet på och avbrottet inte redan överhoppat – done,
+ * så att man kan spola tillbaka in i reklamen och titta).
+ */
+export function adPlan(ads, t, { auto = false, done = null } = {}) {
+  if (!Array.isArray(ads) || !Number.isFinite(t)) return null;
+  const i = ads.findIndex(a => t >= a.start && t < a.end - 1);
+  if (i < 0) return null;
+  return { i, to: ads[i].end, auto: !!auto && !(done && done.has(i)) };
+}
+
+/** Kapitel ur reklamavbrotten: [{ start, end, ad, label }] – "Del 1", "Reklam", "Del 2" … (duration kan saknas) */
+export function adChapters(ads, duration = null) {
+  const list = (Array.isArray(ads) ? ads : []).filter(a => a.end > a.start).sort((a, b) => a.start - b.start);
+  const out = [];
+  let t = 0, n = 0;
+  for (const a of list) {
+    if (a.start - t >= 5) out.push({ start: t, end: a.start, ad: false, label: `Del ${++n}` });
+    out.push({ start: a.start, end: a.end, ad: true, label: 'Reklam' });
+    t = a.end;
+  }
+  if (duration == null || duration - t >= 5) out.push({ start: t, end: duration ?? null, ad: false, label: `Del ${++n}` });
+  return out;
+}

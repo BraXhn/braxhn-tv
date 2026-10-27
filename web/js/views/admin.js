@@ -178,6 +178,9 @@ views.admin = async (sec) => {
       <div><label>Live-omkodning</label><select id="lst"><option value="auto" ${LT.settings.liveTranscode === 'auto' ? 'selected' : ''}>Bara vid behov</option><option value="always" ${LT.settings.liveTranscode === 'always' ? 'selected' : ''}>Alltid</option></select></div>
       <div><label title="Hur långt bakåt man kan pausa och spola i live-TV (0 = av)">Timeshift (min)</label><input id="lsts" type="number" min="0" max="720" value="${LT.settings.timeshiftMinutes ?? 120}" style="width:90px"></div>
       <div><label title="Högsta diskanvändning för timeshift, alla kanaler tillsammans">Timeshift max (GB)</label><input id="lstg" type="number" min="0.5" step="0.5" value="${LT.settings.timeshiftMaxGb ?? 20}" style="width:90px"></div>
+      <div><label title="Vad inspelningarna blir efteråt">Inspelningsformat</label><select id="lsfm">${[['mp4', 'MP4 (spelas överallt)'], ['mkv', 'MKV (alla ljudspår och undertexter)'], ['ts', 'TS (orörd)']].map(([v, l]) => `<option value="${v}" ${LT.settings.format === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label title="Koda om videon till H.264 efter inspelningen">Omkodning</label><select id="lstc">${[['auto', 'Bara vid behov'], ['always', 'Alltid (mindre filer)'], ['never', 'Aldrig']].map(([v, l]) => `<option value="${v}" ${LT.settings.transcode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <label class="small"><input type="checkbox" id="lsnfo" ${LT.settings.nfo !== false ? 'checked' : ''}> NFO bredvid inspelningen (för seriebiblioteket)</label>
       <label class="small"><input type="checkbox" id="lscs" ${LT.settings.comskip ? 'checked' : ''}> Leta reklamavbrott i inspelningar</label>
       <label class="small"><input type="checkbox" id="lsca" ${LT.settings.comskipAutoSkip ? 'checked' : ''}> Hoppa över reklam automatiskt (standard)</label>
       <button class="ghost">Spara</button></form>
@@ -337,7 +340,7 @@ views.admin = async (sec) => {
   $$('[data-chhide]').forEach(b => b.onchange = act(() => api('/live/channels/' + b.dataset.chhide, { method: 'PUT', body: { hidden: b.checked } })));
   $$('[data-chepg]').forEach(b => b.onclick = act(async () => { const v = await promptDialog('Kanalens id i XMLTV-guiden', { title: 'Guide-id', placeholder: 'svt1.svt.se', value: b.dataset.epgid, okLabel: 'Spara' }); if (v === null) return; await api('/live/channels/' + b.dataset.chepg, { method: 'PUT', body: { epgId: v } }); toast('Sparat – uppdatera guiden'); }));
   $('#ltset').onsubmit = async (e) => { e.preventDefault(); try { await api('/live/settings', { method: 'PUT', body: { dvrDir: $('#lsd').value, padBefore: $('#lsb').value, padAfter: $('#lsa').value, liveTranscode: $('#lst').value,
-    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked } }); toast('Sparat'); } catch (er) { toastErr(er); } };
+    timeshiftMinutes: $('#lsts').value, timeshiftMaxGb: $('#lstg').value, comskip: $('#lscs').checked, comskipAutoSkip: $('#lsca').checked, format: $('#lsfm').value, transcode: $('#lstc').value, nfo: $('#lsnfo').checked } }); toast('Sparat'); } catch (er) { toastErr(er); } };
   $('#whcopy').onclick = () => navigator.clipboard?.writeText($('#whurl').value).then(() => toast('Kopierat'));
   $('#whnew').onclick = act(async () => { if (!await confirmDialog('Skapa ny nyckel? Webhooks i Sonarr/Radarr måste uppdateras.', { okLabel: 'Skapa ny nyckel', danger: true })) return; await api('/integrations', { method: 'PUT', body: { newWebhookKey: true } }); route(); });
   for (const k of ['radarr', 'sonarr']) {

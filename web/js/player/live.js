@@ -5,6 +5,8 @@ import { overlayClose, overlayOpen, stopVideo } from './overlay.js';
 import { closeAllPlayers, loadHls } from './video.js';
 import { screenPing, screenSt, timeUp } from '../screentime.js';
 import { provide } from '../lazy.js';
+import { adChapters, adPlan } from './autoskip.js';
+import { openMenu } from '../ui/menu.js';
 import * as self from './live.js';
 provide('live', self); // fasaderna i lazy.js når modulen härifrån
 
@@ -98,35 +100,64 @@ export async function playRec(r, cs = {}) {
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
   const ads = Array.isArray(r.commercials) ? r.commercials : [];
-  el.innerHTML = `<video id="rvid" controls autoplay playsinline src="${esc(u.url)}"></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
-    ${ads.length ? `<label class="small"><input type="checkbox" id="rauto"> Hoppa över reklam automatiskt</label>` : ''}</div>
+  el.innerHTML = `<video id="rvid" controls autoplay playsinline${u.live ? '' : ` src="${esc(u.url)}"`}></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
+    ${u.live ? '<span class="small liveind on">⏺ Spelas in</span><span class="muted small" id="rstat">Startar…</span>' : ''}
+    ${ads.length ? `<button class="ghost small" id="rchap" aria-haspopup="menu">Kapitel</button><label class="small"><input type="checkbox" id="rauto"> Hoppa över reklam automatiskt</label>` : ''}</div>
     <button class="skip" id="rskip" hidden>Hoppa över reklam ⏭</button>`;
   overlayOpen(el);
-  const rp = RP = { el, v: $('#rvid', el) };
+  const rp = RP = { el, v: $('#rvid', el), hls: null };
   videoSession(rp.v);
   screenPing(rp.v, 'r:' + r.id, () => RP === rp, () => closeRec(rp));
   $('#rclose', el).onclick = () => closeRec(rp);
+  if (u.live) await growingSource(rp, u.url);
   if (ads.length) recCommercials(rp, ads, cs.autoSkip);
 }
-// Reklamavbrott i inspelningar: knappen visas inne i ett avbrott, eller hoppas över automatiskt (val per användare i webbläsaren)
+// Titta medan den spelas in: HLS-lista (EVENT) som växer – hela det inspelade går att spola i
+async function growingSource(rp, url) {
+  const { v, el } = rp, stat = $('#rstat', el);
+  const setStat = (t) => { if (RP === rp && stat) stat.textContent = t; };
+  v.addEventListener('playing', () => setStat(''), { once: true });
+  if (v.canPlayType('application/vnd.apple.mpegurl') && !window.MediaSource) { v.src = url; return; }
+  try {
+    const Hls = await loadHls();
+    if (RP !== rp) return;
+    const hls = rp.hls = new Hls({ backBufferLength: 90, xhrSetup: (x) => { x.withCredentials = true; } });
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || RP !== rp || rp.hls !== hls) return;
+      if (d.type === 'networkError' && d.response?.code !== 404) setTimeout(() => { if (RP === rp && rp.hls === hls) hls.startLoad(); }, 1500);
+      else if (d.type === 'mediaError') hls.recoverMediaError();
+      else setStat(d.response?.code === 404 ? 'Inspelningen är klar – öppna den från listan' : 'Kunde inte visa inspelningen');
+    });
+    hls.loadSource(url); hls.attachMedia(v);
+    v.play().catch(() => {});
+  } catch (e) { setStat(e.message); }
+}
+// Reklamavbrott i inspelningar: knappen visas inne i ett avbrott, eller hoppas över automatiskt (val per användare i
+// webbläsaren). Kapitelmenyn hoppar mellan delarna. Logiken (adPlan/adChapters) delas med autoskip.js.
 function recCommercials(rp, ads, autoDefault) {
-  const { v, el } = rp, b = $('#rskip', el), auto = $('#rauto', el);
+  const { v, el } = rp, b = $('#rskip', el), auto = $('#rauto', el), chap = $('#rchap', el);
   const key = 'comskipAuto.' + (me?.id ?? '');
   auto.checked = !!store.get(key, !!autoDefault);
   auto.onchange = () => store.set(key, auto.checked);
   const skipped = new Set(); // ett avbrott hoppas bara över automatiskt en gång (spolar man tillbaka in i det får man titta)
   v.addEventListener('timeupdate', () => {
     if (RP !== rp) return;
-    const t = v.currentTime, i = ads.findIndex(a => t >= a.start && t < a.end - 1);
-    if (i < 0) { b.hidden = true; return; }
-    if (auto.checked && !skipped.has(i)) { skipped.add(i); v.currentTime = ads[i].end; toast('Reklam överhoppad'); b.hidden = true; return; }
+    const pl = adPlan(ads, v.currentTime, { auto: auto.checked, done: skipped });
+    if (!pl) { b.hidden = true; return; }
+    if (pl.auto) { skipped.add(pl.i); v.currentTime = pl.to; toast('Reklam överhoppad'); b.hidden = true; return; }
     b.hidden = false;
-    b.onclick = () => { v.currentTime = ads[i].end; b.hidden = true; };
+    b.onclick = () => { skipped.add(pl.i); v.currentTime = pl.to; b.hidden = true; };
   });
+  if (chap) chap.onclick = () => {
+    const list = adChapters(ads, Number.isFinite(v.duration) ? v.duration : null);
+    openMenu(chap, list.map(c => ({ label: c.label, icon: c.ad ? '📺' : '▶', hint: fmtTime(c.start), onSelect: () => { v.currentTime = c.start + (c.ad ? 0 : 0.1); v.play().catch(() => {}); } })),
+      { title: 'Kapitel', label: 'Kapitel i inspelningen' });
+  };
 }
 export function closeRec(rp = RP) {
   if (!rp || RP !== rp) return;
   RP = null;
+  if (rp.hls) { rp.hls.destroy(); rp.hls = null; }
   stopVideo(rp.v);
   overlayClose(rp.el);
   musicSession();

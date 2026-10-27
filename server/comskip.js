@@ -1,4 +1,4 @@
-// Reklamavbrott i inspelningar. När en inspelning är klar analyseras MP4-filen med ffmpeg (blackdetect + silencedetect)
+// Reklamavbrott i inspelningar. När en inspelning är klar analyseras filen (MP4, MKV eller TS) med ffmpeg (blackdetect + silencedetect)
 // i en lågprioriterad bakgrundsprocess med tidsgräns. Reklamfilmer avgränsas av korta svarta och tysta ögonblick:
 // flera sådana brytpunkter tätt efter varandra (minst två "filmer" mellan dem) bildar ett troligt reklamavbrott.
 // Segmenten sparas per inspelning och exponeras i inspelnings-API:t (/api/dvr) så att webben och apparna kan hoppa över dem.
@@ -132,7 +132,7 @@ function pump() {
   }
   const id = queue.shift();
   const r = get('SELECT file, status, start, stop FROM recordings WHERE id=?', id);
-  if (!r || r.status !== 'done' || !r.file?.endsWith('.mp4') || !fs.existsSync(r.file)) {
+  if (!r || r.status !== 'done' || !/\.(mp4|mkv|ts)$/.test(r.file || '') || !fs.existsSync(r.file)) {
     run('DELETE FROM rec_commercials WHERE recording_id=?', id);
     return pump();
   }
@@ -164,7 +164,7 @@ export function resume() {
   stopped = false;
   if (!enabled()) return;
   for (const r of all("SELECT recording_id AS id FROM rec_commercials WHERE status IN ('pending','running') ORDER BY recording_id")) enqueue(r.id);
-  for (const r of all("SELECT id FROM recordings WHERE status='done' AND file LIKE '%.mp4' AND id NOT IN (SELECT recording_id FROM rec_commercials) ORDER BY id DESC LIMIT 200")) enqueue(r.id);
+  for (const r of all("SELECT id FROM recordings WHERE status='done' AND (file LIKE '%.mp4' OR file LIKE '%.mkv' OR file LIKE '%.ts') AND id NOT IN (SELECT recording_id FROM rec_commercials) ORDER BY id DESC LIMIT 200")) enqueue(r.id);
 }
 export function stop() {
   stopped = true;
