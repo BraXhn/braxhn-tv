@@ -7,6 +7,7 @@ import { emptyState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { tabsHtml } from '../ui/tabs.js';
+import { bindStars, fmtStars, saveRating, starsHtml } from '../ui/rating.js';
 import { similarArtists, stationsHtml, trackMenu } from '../sonic.js';
 import { KIND_LABEL, albumGroups, artistArt, artistCard, bindBio, bioHtml, facts, heroBg, isAdmin, linksHtml, matchArtist, relatedHtml } from '../musicinfo.js';
 
@@ -18,7 +19,7 @@ const albumCard = (a) => `<a class="card mcard" href="#/album/${a.id}">${cover(a
 export function trackRows(tracks, opts = {}) {
   return `<table class="tracks">${tracks.map((t, i) => `<tr data-ti="${i}" data-tid="${t.id}" class="${M.cur && M.cur.id === t.id ? 'playing' : ''}">
     <td class="muted num">${opts.showCover ? cover(t.albumId, t.cover, 'tiny') : (t.track || i + 1)}</td>
-    <td><b>${esc(t.title)}</b>${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
+    <td><b>${esc(t.title)}</b>${t.userRating ? ` <span class="muted small trate" title="Mitt betyg" aria-label="Mitt betyg ${fmtStars(t.userRating)} av 5">★${fmtStars(t.userRating)}</span>` : ''}${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
     <td class="r muted">${fmtTime(t.duration)}</td>
     <td class="r">${iconButton({ icon: t.favorite ? '♥' : '♡', label: `Favorit: ${t.title}`, cls: 'ghost small fav', data: { fav: t.id }, pressed: !!t.favorite })}
     ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}
@@ -123,7 +124,8 @@ views.album = async (id) => {
   const released = a.info?.released && /^\d{4}-\d{2}-\d{2}$/.test(a.info.released) ? a.info.released : null;
   main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">${esc((kind || 'Album').toUpperCase())}</div><h1>${esc(a.title)}</h1>
     <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
-    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button></div></div></div>
+    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button></div>
+    <div class="myrating"><span class="muted small">Mitt betyg</span>${starsHtml(a.userRating, { id: 'albrate', label: 'Mitt betyg för albumet' })}</div></div></div>
     ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
     ${released || a.info?.mbid ? `<p class="muted small" style="margin-top:14px">${released ? `Utgivet ${esc(released)}` : ''}${a.info?.mbid ? `${released ? ' · ' : ''}<a href="https://musicbrainz.org/release-group/${esc(a.info.mbid)}" target="_blank" rel="noopener noreferrer">MusicBrainz ↗</a>` : ''}</p>` : ''}`;
@@ -133,6 +135,7 @@ views.album = async (id) => {
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
   $('#aa').onclick = act(() => addToPlaylist(a.trackList.map(t => t.id)));
   $('#ar').onclick = act(() => startRadio({ albumId: a.id }, a.title));
+  bindStars($('#albrate'), async (v) => { a.userRating = await saveRating('album', a.id, v) ?? undefined; });
 };
 // Artistsidan som i Plexamp/Apple Music: stor bild, fakta, biografi som fälls ut, Populärt, album per typ,
 // liknande (ljudanalysen) och relaterade (MusicBrainz/Last.fm) artister, länkar

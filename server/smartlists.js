@@ -27,7 +27,10 @@ export const FIELDS = {
   bitrate: { label: 'Bithastighet (kbit/s)', type: 'number', expr: '(t.bitrate / 1000.0)' },
   // Från ljudanalysen (server/sonic.js) – NULL för spår som inte analyserats än
   bpm: { label: 'Tempo (BPM)', type: 'number', expr: 'ts.bpm' },
-  energy: { label: 'Energi (0–100)', type: 'number', expr: 'ts.energy' }
+  energy: { label: 'Energi (0–100)', type: 'number', expr: 'ts.energy' },
+  // Egna betyg (server/ratings.js) i stjärnor 1–5 – NULL för låtar/album utan betyg
+  rating: { label: 'Mitt betyg', type: 'number', expr: '(tr.value / 2.0)' },
+  albumrating: { label: 'Mitt albumbetyg', type: 'number', expr: '(ra.value / 2.0)' }
 };
 export const OPS = {
   is: 'är', isNot: 'är inte', contains: 'innehåller', notContains: 'innehåller inte', startsWith: 'börjar med',
@@ -54,6 +57,7 @@ export const SORTS = {
   bitrate: { label: 'Bithastighet', expr: 't.bitrate' },
   bpm: { label: 'Tempo', expr: 'ts.bpm' },
   energy: { label: 'Energi', expr: 'ts.energy' },
+  rating: { label: 'Mitt betyg', expr: 'COALESCE(tr.value, 0)' },
   random: { label: 'Slumpad', expr: null }
 };
 
@@ -193,14 +197,16 @@ const SELECT_FROM = `SELECT t.id, t.title, t.track_no, t.disc_no, t.duration, t.
   LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id LEFT JOIN artists aar ON aar.id=al.artist_id
   LEFT JOIN (SELECT track_id, COUNT(*) AS n, MAX(ts) AS last FROM track_plays WHERE user_id=? GROUP BY track_id) pc ON pc.track_id=t.id
   LEFT JOIN favorites f ON f.track_id=t.id AND f.user_id=?
-  LEFT JOIN track_sonic ts ON ts.track_id=t.id AND ts.ok=1`;
+  LEFT JOIN track_sonic ts ON ts.track_id=t.id AND ts.ok=1
+  LEFT JOIN track_ratings tr ON tr.track_id=t.id AND tr.user_id=?
+  LEFT JOIN album_ratings ra ON ra.album_id=t.album_id AND ra.user_id=?`;
 
 /**
  * Bygger frågan för en (redan normaliserad) definition. Exporteras för tester.
- * uid = den som lyssnar (spelningar och favoriter räknas för den användaren, även i en delad lista).
+ * uid = den som lyssnar (spelningar, favoriter och egna betyg räknas för den användaren, även i en delad lista).
  */
 export function compile(def, uid, { at = Math.floor(Date.now() / 1000), seed = 0 } = {}) {
-  const P = [uid, uid];
+  const P = [uid, uid, uid, uid];
   const where = `(${groupSql(def.match, def.rules, at, P)})`;
   // Bara spår i bibliotek som lyssnaren får se (rättigheter per användare) – även i listor som andra delat
   const lf = libFilter(uid, 't.library_id');

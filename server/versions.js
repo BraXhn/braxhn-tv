@@ -34,6 +34,11 @@ export function mergeInto(fromId, toId) {
   // Rollista och trailers följer med filmen (people.js/trailers.js)
   try { run('UPDATE OR IGNORE item_people SET item_id=? WHERE item_id=?', toId, fromId); run('DELETE FROM item_people WHERE item_id=?', fromId); } catch {}
   try { run('UPDATE trailers SET item_id=? WHERE item_id=?', toId, fromId); } catch {}
+  // Egna betyg (ratings.js): filmens betyg vinner om profilen betygsatt båda
+  run('INSERT OR IGNORE INTO item_ratings(user_id,item_id,value,updated) SELECT user_id, ?, value, updated FROM item_ratings WHERE item_id=?', toId, fromId);
+  run('DELETE FROM item_ratings WHERE item_id=?', fromId);
+  // Temamusiken följer med om filmen saknar egen
+  run('UPDATE items SET theme=(SELECT theme FROM items WHERE id=?) WHERE id=? AND theme IS NULL', fromId, toId);
 }
 
 /**

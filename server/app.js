@@ -34,6 +34,7 @@ import './routes/metadata.js'; // Redigera: fält med lås och bilder
 import './routes/collections.js';
 import './routes/search.js';
 import './routes/music.js';
+import './routes/ratings.js';
 import './routes/playback.js';
 import './routes/social.js';
 import './routes/books.js';

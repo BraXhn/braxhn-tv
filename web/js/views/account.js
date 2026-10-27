@@ -2,6 +2,7 @@
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
+import { renderThemePrefs } from '../ui/thememusic.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';
 import { route } from '../router.js';
 import { screenDialog } from '../screentime.js';
@@ -70,6 +71,7 @@ views.account = async () => {
     ${webAudioFx ? '' : '<p class="muted small">I Safari görs nattläge och tydligare dialog av servern: ljudet omkodas, bilden kopieras.</p>'}</div>
   <div class="panel" id="pbprefs"></div>
   <div class="panel" id="cinemaprefs"></div>
+  <div class="panel" id="themeprefs"></div>
   <div class="panel"><h2>Tvåstegsverifiering ${tfa.enabled ? '<span class="ok-badge">På</span>' : '<span class="warn-badge">Av</span>'}</h2>
     ${tfa.enabled ? `<p class="muted">Inloggning kräver en kod från din autentiseringsapp. Reservkoder kvar: <b>${tfa.recoveryLeft}</b>.</p>
       <div class="row"><button class="ghost" id="newrc">Skapa nya reservkoder</button><button class="danger" id="off">Stäng av</button></div>`
@@ -90,7 +92,7 @@ views.account = async () => {
       <div><label>PIN (valfri)</label><input id="pp" inputmode="numeric" maxlength="8" style="width:110px"></div>
       <button class="primary">Lägg till profil</button></form></div>` : ''}
   ${TR.enabled ? `<div class="panel"><h2>Trakt ${TR.connected ? '<span class="ok-badge">Kopplat</span>' : ''}</h2>
-    ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
+    ${TR.connected ? `<p class="muted small">Kopplat till <b>${esc(TR.username || '')}</b>. Det du ser markeras på Trakt och det du sett på andra ställen markeras här. Dina betyg (stjärnor) skickas till Trakt. Synkas var 6:e timme${TR.last_sync ? ', senast ' + fmtDate(TR.last_sync) : ''}.${TR.sync_error ? ' <span class="err">' + esc(TR.sync_error) + '</span>' : ''}</p>
       <div class="row"><button class="ghost" id="trsync">Synka nu</button><button class="danger" id="troff">Koppla från</button></div>`
     : `<p class="muted small">Synka vad du sett med Trakt.tv – åt båda hållen.</p><div id="trbox"><button class="primary" id="tron">Koppla Trakt</button></div>`}</div>` : ''}
   <div class="panel" id="scrobble" hidden></div>
@@ -115,6 +117,7 @@ views.account = async () => {
   calendarFeedPanel($('#calfeed')).catch(() => {});
   renderPlaybackPrefs($('#pbprefs')).catch(e => { if (!e?.aborted && $('#pbprefs')) $('#pbprefs').hidden = true; });
   renderCinemaPrefs($('#cinemaprefs')).catch(e => { if (!e?.aborted && $('#cinemaprefs')) $('#cinemaprefs').hidden = true; });
+  renderThemePrefs($('#themeprefs')).catch(e => { if (!e?.aborted && $('#themeprefs')) $('#themeprefs').hidden = true; });
   if ($('#tron')) $('#tron').onclick = async () => {
     try {
       const r = await api('/me/trakt/connect', { method: 'POST' });
@@ -128,7 +131,7 @@ views.account = async () => {
       later(tick, (r.interval || 5) * 1000);
     } catch (e) { toastErr(e); }
   };
-  if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt`); route(); } catch (e) { toastErr(e); } };
+  if ($('#trsync')) $('#trsync').onclick = async () => { try { const r = await api('/me/trakt/sync', { method: 'POST' }); toast(`Synkat: ${r.imported} markerade här, ${r.exported} skickade till Trakt${r.ratings ? `, ${r.ratings} betyg` : ''}`); route(); } catch (e) { toastErr(e); } };
   if ($('#troff')) $('#troff').onclick = act(async () => { if (await confirmDialog('Koppla från Trakt?', { okLabel: 'Koppla från', danger: true })) { await api('/me/trakt', { method: 'DELETE' }); route(); } });
   $$('[data-pkdel]').forEach(b => b.onclick = act(async () => { if (await confirmDialog('Ta bort passkeyn?', { okLabel: 'Ta bort', danger: true })) { await api('/me/passkeys/' + encodeURIComponent(b.dataset.pkdel), { method: 'DELETE' }); route(); } }));
   if ($('#pkadd')) $('#pkadd').onclick = async () => {

@@ -23,6 +23,8 @@ import { send, fail, clientIp, readJson, streamFile, isHttps, isPrivate } from '
 import { audit, checkPw, ipBlocked, noteFail, verifyTotp } from '../auth.js';
 import { ctx, householdRoot, libOk, libFilter, canDownload } from '../http/context.js';
 import * as S from '../subsonic.js';
+import * as ratings from '../ratings.js';
+const { toSubsonic } = ratings;
 import * as music from '../music.js';
 import * as listen from '../listening.js';
 import * as mmeta from '../musicmeta.js';
@@ -114,7 +116,8 @@ const SONG_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.
   aa.name AS album_artist, al.artist_id AS album_artist_id,
   (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id AND p.user_id=me.uid) AS plays,
   (SELECT MAX(ts) FROM track_plays p WHERE p.track_id=t.id AND p.user_id=me.uid) AS played,
-  f.track_id AS fav, COALESCE(f.created, t.added) AS fav_at`;
+  f.track_id AS fav, COALESCE(f.created, t.added) AS fav_at,
+  (SELECT r.value FROM track_ratings r WHERE r.track_id=t.id AND r.user_id=me.uid) AS urating`;
 const SONG_FROM = `FROM me, tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id
   LEFT JOIN artists aa ON aa.id=al.artist_id LEFT JOIN favorites f ON f.track_id=t.id AND f.user_id=me.uid`;
 // Alla listor över spår, album och artister filtreras på användarens bibliotek (libFilter)
@@ -144,6 +147,7 @@ function song(t) {
     // Sökvägen är påhittad (relativ): serverns riktiga mappar lämnas inte ut
     path: `${safeName(t.album_artist || t.artist)}/${safeName(t.album)}/${t.track_no ? String(t.track_no).padStart(2, '0') + ' - ' : ''}${safeName(t.title)}${ext ? '.' + ext : ''}`,
     playCount: t.plays || 0, played: iso(t.played), discNumber: t.disc_no ?? undefined, created: iso(t.added), starred: t.fav ? iso(t.fav_at) : undefined,
+    userRating: toSubsonic(t.urating),
     albumId: t.album_id ? 'al-' + t.album_id : undefined, artistId: t.artist_id ? 'ar-' + t.artist_id : undefined, type: 'music', isVideo: false,
     // OpenSubsonic
     mediaType: 'song', samplingRate: t.sample_rate ?? undefined, channelCount: t.channels ?? undefined,
@@ -159,7 +163,7 @@ const ALBUM_COLS = `al.id, al.title, al.sort_title, al.year, al.genre, al.cover,
   (SELECT COUNT(*) FROM tracks t WHERE t.album_id=al.id) AS songs, (SELECT SUM(duration) FROM tracks t WHERE t.album_id=al.id) AS duration,
   (SELECT COUNT(*) FROM track_plays p JOIN tracks t ON t.id=p.track_id WHERE t.album_id=al.id AND p.user_id=me.uid) AS plays,
   (SELECT MAX(p.ts) FROM track_plays p JOIN tracks t ON t.id=p.track_id WHERE t.album_id=al.id AND p.user_id=me.uid) AS played,
-  s.created AS starred`;
+  s.created AS starred, (SELECT r.value FROM album_ratings r WHERE r.album_id=al.id AND r.user_id=me.uid) AS urating`;
 const ALBUM_FROM = `FROM me, albums al LEFT JOIN artists ar ON ar.id=al.artist_id LEFT JOIN album_stars s ON s.album_id=al.id AND s.user_id=me.uid`;
 /** Album: where/order gäller den inre frågan (alias al, ar, s) eller, med outer, de beräknade kolumnerna (plays, played, starred …) */
 const albumRows = (uid, { where = '1', params = [], outer = '1', order = 'sort_title', limit = 500, offset = 0 } = {}) => {
@@ -170,7 +174,7 @@ function album(a) {
   return {
     id: 'al-' + a.id, name: a.title, title: a.title, album: a.title, artist: a.artist ?? undefined, artistId: a.artist_id ? 'ar-' + a.artist_id : undefined,
     coverArt: a.cover ? 'al-' + a.id : undefined, songCount: a.songs || 0, duration: Math.round(a.duration || 0), playCount: a.plays || 0, played: iso(a.played),
-    created: iso(a.added), starred: iso(a.starred), year: a.year ?? undefined, genre: a.genre || undefined,
+    created: iso(a.added), starred: iso(a.starred), year: a.year ?? undefined, genre: a.genre || undefined, userRating: toSubsonic(a.urating),
     // getAlbumList (utan ID3) och getMusicDirectory visar album som mappar
     parent: a.artist_id ? 'ar-' + a.artist_id : undefined, isDir: true,
     // OpenSubsonic
@@ -488,6 +492,18 @@ api('unstar', (c, P) => {
     for (const id of t.al) run('DELETE FROM album_stars WHERE user_id=? AND album_id=?', uid, id);
     for (const id of t.ar) run('DELETE FROM artist_stars WHERE user_id=? AND artist_id=?', uid, id);
   });
+  return {};
+});
+// Egna betyg (server/ratings.js): Subsonic använder heltal 1–5, 0 tar bort. Artister har inga betyg (svaret är ändå ok).
+api('setRating', (c, P) => {
+  const r = idOf(need(P, 'id')), v = String(need(P, 'rating')).trim(), uid = c.user.id;
+  if (!r || r.kind === 'pl') throw NOT_FOUND(String(P.get('id')).slice(0, 30));
+  if (!/^[0-5]$/.test(v)) throw E(10, 'Betyget ska vara 0–5');
+  if (r.kind === 'ar') { if (!rowOk(uid, 'artists', r.id)) throw NOT_FOUND('Artisten'); return {}; }
+  const kind = r.kind === 'al' ? 'album' : 'track';
+  if (!rowOk(uid, r.kind === 'al' ? 'albums' : 'tracks', r.id)) throw NOT_FOUND(r.kind === 'al' ? 'Albumet' : 'Låten');
+  ratings.set(uid, kind, r.id, +v * 2);
+  listen.clearSmartCache(); // smarta listor med "Mitt betyg"
   return {};
 });
 function starred(c, P) {

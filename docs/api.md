@@ -122,7 +122,8 @@ Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` =
   `hdr=hdr,hdr10,dovi,hlg,sdr`, `audio=stereo,surround,atmos`, `alang=sv,en` och `slang=…` (två eller tre bokstäver),
   `filter=inprogress`, `addedDays`, `ageMax`, `coll=yes|no` (filmer), `status=ongoing|ended` och
   `seasonsMin`/`seasonsMax` (serier). Fil-egenskaperna gäller filmens fil eller en version, för serier något avsnitt.
-- Sortering: `sort` = `title`, `year`, `rating`, `added`, `lastwatched`, `duration`, `random` (+ `seed` = heltal för
+- Eget betyg: `myRatingMin` (stjärnor 1–5 i halva steg) och `rated=yes|no` (profilen har betygsatt titeln eller inte).
+- Sortering: `sort` = `title`, `year`, `rating`, `myrating` (eget betyg, titlar utan betyg sist), `added`, `lastwatched`, `duration`, `random` (+ `seed` = heltal för
   stabil ordning mellan sidor), `order=asc|desc`. Utan `order` är ordningen densamma som förut.
 - Okända nycklar och ogiltiga värden ignoreras. Nya fält: `query` (filtret normaliserat som adressdel) och `total`
   (när filter eller sidindelning används; med `collections=1` räknas kort).
@@ -139,6 +140,26 @@ Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` =
 administratören låst under *Redigera* har samma typ som förut (`genres` är en lista, `year`/`age` heltal, `rating` tal).
 Redigeringen sker via admin-endpoints (`GET/PUT /api/items/:id/metadata`, `GET/POST/PUT/DELETE /api/items/:id/images/:type`)
 som apparna inte behöver.
+## Egna betyg, extramaterial och temamusik
+
+Tillägg (apparna behöver inte läsa dem):
+
+- **Egna betyg** per profil, i stjärnor 1–5 med halva steg (`server/ratings.js`, lagras som halva stjärnor 2–10).
+  `PUT /api/items/:id/rating`, `PUT /api/music/albums/:id/rating` och `PUT/GET /api/music/tracks/:id/rating` med
+  `{ rating }` (0/null tar bort) → `{ rating }`. Titlar i alla listor och `/api/items/:id` har `userRating` när profilen
+  satt ett betyg; musikens album, albumets/artistens/spellistans/smarta listans låtar likaså. Filmversioner betygsätts
+  på huvudraden. Barnprofiler betygsätter bara det de får se (annars 404). Titelbetyg skickas till Trakt
+  (`/sync/ratings`, Trakts 1–10 = halva stjärnor) när kontot är kopplat, och synken skickar alla. Smarta spellistor har
+  fälten `rating` (*Mitt betyg*) och `albumrating` och sorteringen `rating`. Subsonic: `setRating` (heltal 0–5) och
+  `userRating` på låtar och album.
+- **Extramaterial**: `/api/items/:id` har `extras: [{ id, type, group, name, size }]` (film och serie, i hyllans
+  ordning). `type` = `trailer`, `featurette`, `behindthescenes`, `deleted`, `interview`, `scene`, `short`, `other`.
+  Spelas som trailers: `GET /api/trailers/:id/stream` (Range; `?mp4=1` gör om filen till fragmenterad MP4 för
+  webbläsare som inte klarar formatet, högst två samtidigt) och `GET /api/trailers/:id/play` → `{ url, mime }` med en
+  token som bara gäller den filen. Åldersgränsen är huvudtitelns. `trailers` innehåller som förut bara trailers.
+- **Temamusik**: `/api/items/:id` (film och serie) har `theme: { play }` när `theme.mp3`/`theme.m4a` finns i titelns
+  mapp; `play` = profilens val (`GET/PUT /api/me/theme-music` → `{ shows, movies }`, standard på för serier, av för
+  filmer). Filen: `GET /api/items/:id/theme`.
 
 ## Kontraktstestet
 

@@ -1,4 +1,4 @@
-// Ljudanalysen i webben: låtens ⋮-meny (låtradio, liknande låtar, ljudresa), stationerna på musikhemmet,
+// Ljudanalysen i webben: låtens ⋮-meny (låtradio, liknande låtar, ljudresa, eget betyg), stationerna på musikhemmet,
 // liknande artister och förloppet i administrationen. Servern: server/sonic.js.
 // Körs inget när modulen laddas utom definitioner (cirkulär import med views/music.js och audio.js).
 import { $, $$, act, api, esc, fmtDur, libs, routeGen, toast } from './core.js';
@@ -7,6 +7,7 @@ import { addToPlaylist, bindTracks, trackRows } from './views/music.js';
 import { artistCard } from './musicinfo.js';
 import { confirmDialog, openDialog } from './ui/dialog.js';
 import { openMenu } from './ui/menu.js';
+import { fmtStars, rateDialog } from './ui/rating.js';
 import { emptyState, errorState, loadingState } from './ui/states.js';
 
 /** Låtens ⋮-meny (från låtlistorna). t = spåret i musik-API:ts format. */
@@ -17,9 +18,22 @@ export function trackMenu(anchor, t, point = null) {
     { icon: '↝', label: 'Ljudresa härifrån…', onSelect: () => journeyDialog(t) },
     'separator',
     { icon: '+', label: 'Lägg till i spellista', onSelect: act(() => addToPlaylist([t.id])) },
+    { icon: '★', label: t.userRating ? `Mitt betyg: ${fmtStars(t.userRating)} – ändra…` : 'Betygsätt…', onSelect: act(() => rateTrack(t)) },
     { label: 'Gå till albumet', href: `#/album/${+t.albumId}`, hidden: !t.albumId },
     { label: 'Gå till artisten', href: `#/artist/${+t.artistId}`, hidden: !t.artistId }
   ], { title: t.title, point });
+}
+
+/** Betyg för en låt (listor utan userRating frågar servern först) – raderna i låtlistorna visar det direkt */
+async function rateTrack(t) {
+  const value = t.userRating ?? (await api(`/music/tracks/${+t.id}/rating`, { bg: true })).rating;
+  rateDialog({ kind: 'track', id: t.id, title: t.title, value, onSaved: (v) => {
+    t.userRating = v ?? undefined;
+    for (const b of $$(`tr[data-tid="${+t.id}"] td:nth-child(2) > b`)) {
+      b.parentNode.querySelector('.trate')?.remove();
+      if (v) b.insertAdjacentHTML('afterend', ` <span class="muted small trate" title="Mitt betyg" aria-label="Mitt betyg ${fmtStars(v)} av 5">★${fmtStars(v)}</span>`);
+    }
+  } });
 }
 
 const profileText = (p) => p ? [p.bpm ? `${Math.round(p.bpm)} BPM` : '', p.energy != null ? `energi ${Math.round(p.energy)} %` : '', p.key ? `tonart ${p.key}` : '',

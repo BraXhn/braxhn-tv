@@ -27,6 +27,8 @@ const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop,
   i.genres, i.cert, i.age, i.collection_id, i.season, i.episode, i.parent_id, i.height,
   i.intro_start, i.intro_end, i.credits_start, i.recap_start, i.recap_end, i.trickplay, i.poster_color, i.backdrop_color, i.thumb_color, i.taken, i.studio`;
 export const FROM = `FROM items i JOIN (SELECT ? AS uid) p_uid LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=p_uid.uid`;
+/** Profilens eget betyg för titeln i (halva stjärnor 2–10, NULL = inget) – kräver p_uid från FROM */
+export const MY_RATING = '(SELECT ur.value FROM item_ratings ur WHERE ur.user_id=p_uid.uid AND ur.item_id=i.id)';
 export const chaptersOf = (it) => { try { return JSON.parse(it.chapters || '[]'); } catch { return []; } };
 function shape(r) {
   const o = {
@@ -38,7 +40,9 @@ function shape(r) {
     // Platshållarfärg medan bilden laddas ('#rrggbb', server/imgcolor.js) – bara när den är känd
     ph: r.poster_color || undefined, phBackdrop: r.backdrop_color || undefined, phThumb: r.thumb_color || undefined,
     // Hemvideor: inspelningsdatum (unix-sekunder); studio ur NFO – nya fält, bara när de finns
-    taken: r.taken ?? undefined, studio: r.studio || undefined
+    taken: r.taken ?? undefined, studio: r.studio || undefined,
+    // Eget betyg (1–5 stjärnor i halva steg, server/ratings.js) – bara när profilen betygsatt titeln
+    userRating: r.u_rating ? r.u_rating / 2 : undefined
   };
   if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb,
     showPh: r.show_poster_color || undefined });
@@ -103,7 +107,7 @@ export const MAIN_ONLY = ' AND i.version_of IS NULL';
 /** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
 export const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
   const age = ageFilter(uid, { photos: versions });
-  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
+  return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${MY_RATING} AS u_rating, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };
 /**

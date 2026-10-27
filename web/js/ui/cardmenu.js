@@ -1,5 +1,5 @@
 // Snabbåtgärder på affischkorten (⋮, högerklick, långtryck, Menu-tangenten): spela, sedd/osedd, Min lista,
-// ta bort från Fortsätt titta, följ, titta tillsammans och – för administratörer – metadataverktygen.
+// ta bort från Fortsätt titta, följ, eget betyg, titta tillsammans och – för administratörer – metadataverktygen.
 // Kortet uppdateras direkt (optimistiskt) och ändringar som går att ångra får "Ångra" i toasten.
 import { $$, act, api, fmtTime, me, sxe, toast, toastErr } from '../core.js';
 import { need, play, startPlay } from '../lazy.js';
@@ -11,6 +11,9 @@ import { closeMenu, contextMenu, openMenu } from './menu.js';
 const editItem = (it) => need('views/item.js').then(m => m.editItem(it));
 const matchItem = (it) => need('views/item.js').then(m => m.matchItem(it));
 const refreshMeta = (it) => need('views/item.js').then(m => m.refreshMeta(it));
+// Betygsdialogen (ui/rating.js) laddas först när den öppnas – kortmenyn finns redan vid start
+const rateDialog = (o) => need('ui/rating.js').then(m => m.rateDialog(o));
+const fmtStars = (v) => String(v).replace('.', ',');
 const addToCollection = (it) => need('ui/collections.js').then(m => m.addToCollection(it));
 
 /** Ritar om alla kort för titeln (samma titel kan finnas i flera rader) och behåller fokus */
@@ -115,6 +118,8 @@ export function cardActions(it, st, el) {
     { icon: st.inWatchlist ? '−' : '+', label: st.inWatchlist ? 'Ta bort från Min lista' : (ep ? 'Lägg serien i Min lista' : 'Lägg till i Min lista'),
       onSelect: () => setWatchlist(it, el, !st.inWatchlist) },
     { icon: '▤', label: ep ? 'Lägg serien i en samling…' : 'Lägg till i samling…', onSelect: () => addToCollection(it) },
+    { icon: '★', label: it.userRating ? `Mitt betyg: ${fmtStars(it.userRating)} – ändra…` : 'Betygsätt…',
+      onSelect: () => rateDialog({ kind: 'item', id: it.id, title: it.title, value: it.userRating, onSaved: (v) => redraw(Object.assign(it, { userRating: v ?? undefined })) }) },
     { icon: '−', label: 'Ta bort från samlingen', hidden: !ucolOf(el), onSelect: () => removeFromCollection(it, el) },
     { icon: '✕', label: 'Ta bort från Fortsätt titta', hidden: rowOf(el) !== 'continue' || !media, onSelect: () => hideContinue(it, el) },
     { icon: st.following ? '🔕' : '🔔', label: st.following ? 'Sluta följa serien' : 'Följ serien', hidden: st.following == null,

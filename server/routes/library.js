@@ -591,11 +591,17 @@ route('GET', '/api/image/:id/:type', img, async (c) => {
 
 // ---------- Skådespelare, trailers och årssammanfattning ----------
 const { TRAILER_SCOPE } = trailers;
-/** Rollista (avsnitt visar seriens), lokala trailers och YouTube-trailer (inte för barnprofiler – länken leder ut från appen) */
+/**
+ * Rollista (avsnitt visar seriens), lokala trailers, YouTube-trailer (inte för barnprofiler – länken leder ut från appen),
+ * extramaterial (tillägg: alla typer, grupperade i webben) och temamusik (tillägg: theme.play = profilens val, trailers.js).
+ */
 function titleExtras(u, it) {
   const ep = it.kind === 'episode';
-  return { cast: people.castOf(ep ? it.parent_id : it.id), trailers: ep ? [] : trailers.trailersOf(it.id),
+  const out = { cast: people.castOf(ep ? it.parent_id : it.id), trailers: ep ? [] : trailers.trailersOf(it.id),
     youtube: !ep && u.max_age == null && trailers.youtubeOk(it.trailer_yt) ? it.trailer_yt : null };
+  if (!ep) { const x = trailers.extrasOf(it.id); if (x.length) out.extras = x; }
+  if (!ep && it.theme) out.theme = { play: trailers.themePrefs(u.id)[it.kind === 'show' ? 'shows' : 'movies'] };
+  return out;
 }
 route('GET', '/api/people/:pid', user, async (c) => {
   const pid = +c.p.pid;
@@ -615,7 +621,8 @@ route('GET', '/api/people/:pid/image', img, async (c) => {
   if (!f) return fail(c.res, 404, 'Ingen bild');
   fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=604800' }));
 });
-// Lokala trailers spelas direkt (som filen är). Mediatoken gäller bara den trailern.
+// Lokala trailers och extramaterial spelas direkt (som filen är), ?mp4=1 som fragmenterad MP4 för webbläsare som inte
+// klarar formatet (trailers.serveRemux). Mediatoken gäller bara den filen, åldersgränsen är huvudtitelns.
 const trailerStream = { auth: true, media: true, scope: (p) => TRAILER_SCOPE + (+p.tid) };
 const trailerFor = (c) => {
   const t = trailers.trailerRow(+c.p.tid);
@@ -627,6 +634,12 @@ const trailerFor = (c) => {
 const serveTrailer = (c) => {
   const t = trailerFor(c); if (!t) return;
   if (c.user && screenBlock(c)) return; // webben spelar direkt från strömmen
+  if (c.q.get('mp4') === '1') {
+    return fs.stat(t.path, async (e, s) => {
+      if (e || !s.isFile()) return fail(c.res, 404, 'Filen finns inte längre');
+      if (!await trailers.serveRemux(c.req, c.res, t.path)) fail(c.res, 503, 'Servern gör redan om andra filer – försök igen om en stund');
+    });
+  }
   fs.stat(t.path, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Filen finns inte längre')
     : streamFile(c.req, c.res, t.path, s.size, { 'Content-Type': MIME[path.extname(t.path).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' }));
 };
@@ -639,6 +652,16 @@ route('GET', '/api/trailers/:tid/play', user, (c) => {
   const token = c.user.via !== 'cookie' ? createSession(c.user.id, 'media', { item: TRAILER_SCOPE + t.id, ip: clientIp(c.req) }) : null;
   send(c.res, 200, { url: `/api/trailers/${t.id}/stream${token ? '?t=' + token : ''}`, mime: MIME[path.extname(t.path).toLowerCase()] || 'video/mp4' });
 });
+// Temamusik: theme.mp3/theme.m4a i titelns mapp (bara titlar profilen får se). Webben spelar den svagt på titelsidan.
+route('GET', '/api/items/:id/theme', user, (c) => {
+  const it = get('SELECT id, kind, library_id, age, parent_id, version_of, theme FROM items WHERE id=?', +c.p.id);
+  if (!it || !it.theme || !allowedFor(c.user.id, it)) return fail(c.res, 404, 'Ingen temamusik');
+  fs.stat(it.theme, (e, s) => e || !s.isFile() ? fail(c.res, 404, 'Ingen temamusik')
+    : streamFile(c.req, c.res, it.theme, s.size, { 'Content-Type': /\.m4a$/i.test(it.theme) ? 'audio/mp4' : 'audio/mpeg', 'Cache-Control': 'private, max-age=3600' }));
+});
+// Profilens val för temamusik: { shows: true (standard), movies: false (standard) }
+route('GET', '/api/me/theme-music', user, (c) => send(c.res, 200, trailers.themePrefs(c.user.id)));
+route('PUT', '/api/me/theme-music', user, async (c) => send(c.res, 200, trailers.setThemePrefs(c.user.id, await readJson(c.req))));
 // Årssammanfattning: den egna, eller (administratör på betrott nät) någon annans
 route('GET', '/api/wrapped/:year', user, (c) => {
   const year = parseInt(c.p.year);

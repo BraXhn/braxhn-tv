@@ -1,6 +1,7 @@
-// Trakt.tv: koppla konto (enhetskod), synka sett-status åt båda hållen och visa "tittar nu".
+// Trakt.tv: koppla konto (enhetskod), synka sett-status åt båda hållen, skicka egna betyg och visa "tittar nu".
 // Kräver en egen (gratis) Trakt-app: trakt.tv/oauth/applications → Client ID + Client Secret.
 import { db, get, all, run, now, getSetting } from './db.js';
+import { itemRatingsFor } from './ratings.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS trakt(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, access TEXT NOT NULL, refresh TEXT,
   expires INTEGER, username TEXT, last_sync INTEGER, sync_error TEXT)`);
@@ -122,6 +123,43 @@ export async function scrobble(userId, it, action, progress) {
   await call(`/scrobble/${action}`, { method: 'POST', body: { ...o, progress: Math.max(0, Math.min(100, +progress || 0)) }, token: tok });
 }
 
+// ---------- egna betyg (sync/ratings) ----------
+// Trakts skala 1–10 är samma som våra halva stjärnor (ratings.js). Filmer och serier med TMDB-id, avsnitt via seriens.
+function ratingPayload(items, withRating) {
+  const movies = [], shows = new Map();
+  const showEntry = (tmdb) => { if (!shows.has(tmdb)) shows.set(tmdb, { ids: { tmdb }, seasons: new Map() }); return shows.get(tmdb); };
+  for (const it of items) {
+    const r = withRating ? { rating: it.value, rated_at: iso(it.updated) } : {};
+    if (it.kind === 'movie' && it.tmdb_id) movies.push({ ids: { tmdb: it.tmdb_id }, ...r });
+    else if (it.kind === 'show' && it.tmdb_id) Object.assign(showEntry(it.tmdb_id), r);
+    else if (it.kind === 'episode') {
+      const show = showOf(it); if (!show?.tmdb_id || it.season == null || it.episode == null) continue;
+      const ss = showEntry(show.tmdb_id).seasons;
+      if (!ss.has(it.season)) ss.set(it.season, []);
+      ss.get(it.season).push({ number: it.episode, ...r });
+    }
+  }
+  const sh = [...shows.values()].map(({ seasons, ...x }) => seasons.size ? { ...x, seasons: [...seasons].map(([number, episodes]) => ({ number, episodes })) } : x);
+  return movies.length || sh.length ? { movies, shows: sh } : null;
+}
+/** Betyg som ändrats lokalt → Trakt. items: rader ur items (+ value = halva stjärnor 2–10, 0 = ta bort, updated). */
+export async function pushRatings(userId, items) {
+  const add = ratingPayload(items.filter(x => x.value), true), del = ratingPayload(items.filter(x => !x.value), false);
+  if (!add && !del) return 0;
+  const tok = get('SELECT 1 FROM trakt WHERE user_id=?', userId) ? await tokenFor(userId) : null; if (!tok) return 0;
+  let n = 0;
+  if (add) {
+    const r = await call('/sync/ratings', { method: 'POST', body: add, token: tok });
+    if (!r.ok) throw new Error(`Trakt svarade ${r.status}`);
+    const a = r.body?.added || {}; n += (+a.movies || 0) + (+a.shows || 0) + (+a.episodes || 0);
+  }
+  if (del) {
+    const r = await call('/sync/ratings/remove', { method: 'POST', body: del, token: tok });
+    if (!r.ok) throw new Error(`Trakt svarade ${r.status}`);
+  }
+  return n;
+}
+
 /** Tvåvägssynk: hämta sett från Trakt och markera lokalt, skicka lokalt sett som saknas på Trakt */
 export async function sync(userId) {
   const tok = await tokenFor(userId); if (!tok) return { imported: 0, exported: 0 };
@@ -153,8 +191,13 @@ export async function sync(userId) {
     }
     let exported = 0;
     for (let i = 0; i < toExport.length; i += 200) exported += await markWatched(userId, toExport.slice(i, i + 200));
-    run('UPDATE trakt SET last_sync=?, sync_error=NULL WHERE user_id=?', now(), userId);
-    return { imported, exported };
+    // Egna betyg: alla lokala skickas (Trakt skriver över med samma värde) – även de som sattes innan kontot kopplades
+    let ratings = 0, ratingErr = null;
+    const rated = itemRatingsFor(userId);
+    try { for (let i = 0; i < rated.length; i += 200) ratings += await pushRatings(userId, rated.slice(i, i + 200)); }
+    catch (e) { ratingErr = 'Betygen kunde inte skickas: ' + e.message; }
+    run('UPDATE trakt SET last_sync=?, sync_error=? WHERE user_id=?', now(), ratingErr, userId);
+    return { imported, exported, ratings };
   } catch (e) {
     run('UPDATE trakt SET sync_error=? WHERE user_id=?', e.message, userId);
     throw e;
