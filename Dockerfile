@@ -1,10 +1,19 @@
-FROM node:24-bookworm-slim
+# Debian 13 (trixie): Debians ffmpeg 7.1 för både amd64 och arm64. Valt framför jellyfin-ffmpeg 7 eftersom paketen
+# kommer från Debians signerade arkiv (apt kontrollerar InRelease mot debian-archive-keyring i basimagen och varje
+# paket mot SHA-256 i Release) och får säkerhetsuppdateringar med imagen – inget eget paketförråd, ingen egen
+# nyckel och ingen nedladdning utanför apt. Bygget innehåller HEVC/AV1-kodarna (NVENC, VA-API, QSV, x265, SVT-AV1),
+# HEIF-avkodning, libplacebo (Vulkan) och tonemap_opencl. Det jellyfin-ffmpeg har utöver det (tonemap_cuda) sonderas
+# vid start och används om någon kör en egen ffmpeg med det. Se BRAIN.md (ffmpeg-version) och README.
+FROM node:24-trixie-slim
 
-# ffmpeg för analys/omkodning, VAAPI-drivrutiner för Intel/AMD-GPU, tini som init
+# ffmpeg för analys/omkodning, VA-API-drivrutiner för Intel/AMD, Vulkan (Mesa) för tonmappning med libplacebo,
+# tini som init. amd64: Intels mediadrivrutin och oneVPL-körmiljön för Quick Sync (QSV).
 ARG TARGETARCH
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates mesa-va-drivers vainfo \
-    && if [ "$TARGETARCH" = "amd64" ]; then apt-get install -y --no-install-recommends intel-media-va-driver; fi \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates mesa-va-drivers mesa-vulkan-drivers vainfo \
+    && if [ "$TARGETARCH" = "amd64" ]; then apt-get install -y --no-install-recommends intel-media-va-driver libmfx-gen1.2; fi \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -hide_banner -version | head -1 | grep -q '^ffmpeg version 7\.' \
+    && ffmpeg -hide_banner -encoders | grep -Eq ' libx265 ' && ffmpeg -hide_banner -filters | grep -Eq ' libplacebo '
 
 WORKDIR /app
 COPY package.json ./

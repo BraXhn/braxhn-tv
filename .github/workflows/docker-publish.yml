@@ -79,6 +79,9 @@ jobs:
           docker logs rok
           docker logs rok 2>&1 | grep -q 'programfiler stämmer' || { echo 'Integritetskontrollen misslyckades'; exit 1; }
           docker exec rok ffmpeg -hide_banner -f lavfi -i testsrc2=d=1 -c:v libx264 -f null - >/dev/null 2>&1
+          # ffmpeg 7.1 med HEVC/AV1-kodarna som omkodningen provar vid start
+          docker exec rok ffmpeg -hide_banner -version | head -1 | grep -q '^ffmpeg version 7\.'
+          docker logs rok 2>&1 | grep -q 'processorn libx265, libsvtav1' || { echo 'x265/SVT-AV1 hittades inte vid start'; exit 1; }
           docker rm -f rok
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0

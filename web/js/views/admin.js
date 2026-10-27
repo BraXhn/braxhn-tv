@@ -267,6 +267,11 @@ views.admin = async (sec) => {
       ${[['orig', 'Original (ingen gräns)'], ['1080', '1080p – 8 Mbit/s'], ['720', '720p – 4 Mbit/s'], ['480', '480p – 1,5 Mbit/s'], ['360', '360p – 0,8 Mbit/s']].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
     </select></div><div style="flex:1"><label>Publik adress (används för Chromecast och appar)</label><input id="pu" placeholder="https://tv.dindomän.se" value="${esc(S.publicUrl || '')}"></div></div>
     <p class="muted" style="font-size:13px;margin:8px 0 0">Du är just nu ansluten ${S.youAreLocal ? '<b>från hemnätverket</b>' : '<b>utifrån</b>'} via ${S.https ? 'HTTPS ✓' : 'HTTP (okrypterat)'}${S.tlsBuiltin ? ' · inbyggd HTTPS aktiv på port 8443' : ''}. Se README → <i>Titta utanför hemmet</i>.</p>
+    <h3 style="margin:22px 0 0;font-size:15px">Omkodning</h3>
+    <label>Videoformat när något måste omkodas</label><select id="tvc">
+      ${[['auto', 'HEVC/AV1 med grafikkortet, annars H.264'], ['cpu', 'HEVC/AV1 även med processorn (tungt)'], ['h264', 'Alltid H.264']].map(([v, n]) => `<option value="${v}" ${S.transcodeVcodec === v ? 'selected' : ''}>${n}</option>`).join('')}
+    </select>
+    ${S.transcode ? `<p class="muted small" style="margin:4px 0 0">HEVC och AV1 ger samma bild med 40–50 % lägre bithastighet – mest märkbart utanför hemmet – när enheten kan spela det; annars blir det H.264. Med processorn (x265/SVT-AV1) krävs en snabb processor. ffmpeg ${esc(S.transcode.ffmpeg || '?')} · HEVC: ${esc(S.transcode.hevc || 'ingen kodare')} · AV1: ${esc(S.transcode.av1 || 'ingen kodare')}${S.transcode.cpu && (S.transcode.cpu.hevc || S.transcode.cpu.av1) && S.transcodeVcodec !== 'cpu' ? ` (processorn klarar ${esc([S.transcode.cpu.hevc, S.transcode.cpu.av1].filter(Boolean).join(', '))})` : ''} · HDR-tonmappning: ${esc(S.transcode.tonemap === 'processor' ? 'processorn' : S.transcode.tonemap)}${S.transcode.dv5 ? ' (även Dolby Vision profil 5)' : ''}.${S.transcode.failed?.length ? ` <span class="err">Avstängd efter fel: ${esc(S.transcode.failed.join(', '))}.</span>` : ''}</p>` : ''}
     <p class="muted" style="font-size:13px;margin:14px 0 0">Hårdvaruomkodning: <b>${esc(S.hwaccel)}</b> (sätts med miljövariabeln HWACCEL) · Pågående omkodningar: ${S.activeTranscodes} · Version ${esc(S.version)}</p>
     <div class="row" style="margin-top:16px"><button class="primary">Spara</button><button type="button" class="ghost" id="remeta">Hämta om all metadata</button><button type="button" class="ghost" id="remark">Leta intro igen</button></div></form></div>`;
 
@@ -390,7 +395,7 @@ views.admin = async (sec) => {
   $('#settings').onsubmit = act(async (e) => {
     e.preventDefault();
     const body = { language: $('#lang').value, scanInterval: $('#si').value, osUser: $('#osu').value, subLangs: $('#osl').value,
-      remoteQuality: $('#rq').value, publicUrl: $('#pu').value,
+      remoteQuality: $('#rq').value, publicUrl: $('#pu').value, transcodeVcodec: $('#tvc').value,
       subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked, bookMeta: $('#bmeta').checked,
       cinemaPreroll: $('#cpre').value };
     if ($('#tk').value.trim()) body.tmdbKey = $('#tk').value.trim();

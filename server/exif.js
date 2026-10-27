@@ -265,13 +265,14 @@ export function parseImage(b, readAt = null) {
   }
   let exif = {};
   try { exif = parseTiff(tiff); } catch { exif = {}; }
-  // HEIF: rotationen står i behållaren (irot) och ffmpeg tillämpar den själv – EXIF-orienteringen gäller inte
+  // HEIF: rotationen står i behållaren (irot) – EXIF-orienteringen gäller inte. ffmpeg tillämpar irot på en ensam
+  // bild; ett rutnät sätts ihop av imgsize.js, som då vrider efter rotation (irot: kvarts varv moturs)
   const orientation = format === 'heic' ? 1 : exif.orientation || 1;
   let width = c.width || exif.width, height = c.height || exif.height;
   if (format === 'heic' && (c.irot === 1 || c.irot === 3)) [width, height] = [height, width];
   // Orientering 5–8 vrider bilden en kvarts varv: visningens bredd är filens höjd
   if (orientation >= 5 && width && height) [width, height] = [height, width];
-  return { format, width: width || null, height: height || null, orientation, exif };
+  return { format, width: width || null, height: height || null, orientation, ...(format === 'heic' ? { rotation: c.irot || 0 } : {}), exif };
 }
 
 /** Läser bildinformationen ur en fil (början + ev. HEIC:s EXIF-objekt). Kastar vid läsfel. */

@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { CACHE, CONFIG } from './db.js';
+import { readImageInfo } from './exif.js';
 
 export const SIZES = [160, 240, 320, 480, 720, 1280];
 // Foton (server/photos.js) visas även i helskärm: två större bredder, bara för fotobibliotekens bilder
@@ -15,6 +16,29 @@ export const PHOTO_SIZES = [...SIZES, 1920, 2560];
 // EXIF-orienteringen (1–8) som ffmpeg-filter. Bilden läses med -noautorotate så att resultatet är detsamma oavsett
 // om ffmpeg-versionen själv vrider JPEG efter EXIF (6.x gör det, 5.1 inte).
 export const ORIENT_FILTER = { 2: 'hflip', 3: 'hflip,vflip', 4: 'vflip', 5: 'transpose=0', 6: 'transpose=1', 7: 'transpose=3', 8: 'transpose=2' };
+// HEIC från telefoner är ett rutnät av HEVC-rutor (iPhone: 512×512). ffmpeg 7.1 läser rutorna som var sin ström i en
+// strömgrupp (Tile Grid) men sätter inte ihop dem själv – utan detta blev miniatyren bildens övre vänstra ruta.
+// Rutorna läggs på sina platser med xstack och beskärs till bildens storlek; rotationen (irot, kvarts varv moturs)
+// tillämpas efteråt med -noautorotate, så att rutorna inte vrids var för sig.
+export const IROT_FILTER = { 1: 'transpose=2', 2: 'hflip,vflip', 3: 'transpose=1' };
+/** Filterkedja som sätter ihop rutnätet (ffprobes stream_groups-post av typen Tile Grid), eller null */
+export function heifGridGraph(group) {
+  const c = group?.type === 'Tile Grid' ? group.components?.[0] : null;
+  const subs = (c?.subcomponents || []).filter(x => Number.isInteger(x.stream_index));
+  if (!subs.length || !(c.width > 0 && c.height > 0)) return null;
+  const crop = `crop=${c.width}:${c.height}:${c.horizontal_offset || 0}:${c.vertical_offset || 0}`;
+  if (subs.length === 1) return `[0:${subs[0].stream_index}]${crop}`;
+  return subs.map(x => `[0:${x.stream_index}]`).join('') +
+    `xstack=inputs=${subs.length}:layout=${subs.map(x => `${x.tile_horizontal_offset | 0}_${x.tile_vertical_offset | 0}`).join('|')},${crop}`;
+}
+/** Rutnätet i en HEIF-fil (ffprobe 7.1+; äldre känner inte till -show_stream_groups → null, som en ensam bild) */
+function heifGrid(src) {
+  return new Promise(res => execFile('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file', '-show_stream_groups', '-of', 'json', src],
+    { timeout: 15000, maxBuffer: 4 << 20 }, (e, out) => {
+      if (e) return res(null);
+      try { res(heifGridGraph((JSON.parse(out).stream_groups || []).find(g => g.type === 'Tile Grid'))); } catch { res(null); }
+    }));
+}
 const DIR = path.join(CACHE, 'img');
 // Samtidiga skalningar: halva processorn, minst 2 och högst 4 (strömningen får aldrig svältas ut)
 const LIMIT = Math.min(4, Math.max(2, os.cpus().length >> 1)), MAX_WAITING = 300;
@@ -79,16 +103,22 @@ export function dropVariants(src) { fs.rm(path.join(DIR, keyOf(src)), { recursiv
 let active = 0;
 const waiting = [], inflight = new Map(), failedAt = new Map();
 const release = () => { const next = waiting.shift(); next ? next() : active--; };
-function resize(src, out, w, stamp, orient = 0) {
+function resize(src, out, w, stamp, orient = 0, heif = false) {
   return new Promise((resolve) => {
-    const run = () => {
+    const run = async () => {
       const tmp = out + '.tmp';
+      // HEIF-rutnät: sätts ihop först, rotationen ur behållaren (se heifGridGraph)
+      const grid = heif ? await heifGrid(src) : null;
+      let irot = 0;
+      if (grid) try { irot = (await readImageInfo(src)).rotation || 0; } catch {}
       // orient: EXIF-orienteringen tillämpas efter skalningen; 0 = ffmpeg bestämmer själv (som tidigare)
-      // Kvarts varv (5–8): bredden w gäller bilden som den visas, alltså filens höjd
-      const rot = ORIENT_FILTER[orient] ? ',' + ORIENT_FILTER[orient] : '';
-      const scale = orient >= 5 ? `scale=-2:'min(${w},ih)':flags=lanczos` : `scale='min(${w},iw)':-2:flags=lanczos`;
-      execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file', ...(orient ? ['-noautorotate'] : []), '-i', src,
-        '-frames:v', '1', '-vf', `${scale}${rot}`, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', '-update', '1', tmp],
+      // Kvarts varv (5–8, irot 1/3): bredden w gäller bilden som den visas, alltså filens höjd
+      const rf = grid ? IROT_FILTER[irot] : ORIENT_FILTER[orient];
+      const rot = rf ? ',' + rf : '';
+      const scale = (grid ? irot === 1 || irot === 3 : orient >= 5) ? `scale=-2:'min(${w},ih)':flags=lanczos` : `scale='min(${w},iw)':-2:flags=lanczos`;
+      const vf = grid ? ['-filter_complex', `${grid},${scale}${rot}[o]`, '-map', '[o]'] : ['-vf', `${scale}${rot}`];
+      execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file', ...(orient || grid ? ['-noautorotate'] : []), '-i', src,
+        '-frames:v', '1', ...vf, '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', '-update', '1', tmp],
       { timeout: 30000 }, (e) => {
         let ok = !e;
         if (ok) { try { fs.renameSync(tmp, out); stats.resized++; } catch { ok = false; } }
@@ -113,11 +143,12 @@ const waitFor = (p, src, ms) => ms === Infinity ? p : Promise.race([p, new Promi
  * @param {string} src  källbilden
  * @param {string|null} wq  värdet på ?w=
  * @param {number} [wait]  längsta väntan på en ny variant (ms) innan originalet används; Infinity = vänta tills den är klar
- * @param {{ sizes?: number[], orient?: number, force?: boolean }} [opts]  foton: bredderna (PHOTO_SIZES), EXIF-orienteringen
- *   (1–8, tillämpas på varianten) och force = gör alltid en JPEG-variant (format som webbläsaren inte kan visa, t.ex. HEIC)
+ * @param {{ sizes?: number[], orient?: number, force?: boolean, heif?: boolean }} [opts]  foton: bredderna (PHOTO_SIZES), EXIF-orienteringen
+ *   (1–8, tillämpas på varianten), force = gör alltid en JPEG-variant (format som webbläsaren inte kan visa, t.ex. HEIC)
+ *   och heif = HEIF-fil (rutnätet sätts ihop)
  * @returns {Promise<string>}
  */
-export async function sized(src, wq, wait = WAIT_MS, { sizes = SIZES, orient = 0, force = false } = {}) {
+export async function sized(src, wq, wait = WAIT_MS, { sizes = SIZES, orient = 0, force = false, heif = false } = {}) {
   const w = snapWidth(wq, sizes);
   if (!w || !src) return src;
   let st; try { st = await fs.promises.stat(src); } catch { return src; }
@@ -131,7 +162,7 @@ export async function sized(src, wq, wait = WAIT_MS, { sizes = SIZES, orient = 0
   if (inflight.has(out)) return waitFor(inflight.get(out), src, wait);
   if (waiting.length >= MAX_WAITING) return src;
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch { return src; }
-  const p = resize(src, out, w, stamp, orient).finally(() => inflight.delete(out));
+  const p = resize(src, out, w, stamp, orient, heif).finally(() => inflight.delete(out));
   inflight.set(out, p);
   return waitFor(p, src, wait);
 }

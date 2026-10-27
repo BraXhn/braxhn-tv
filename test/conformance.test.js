@@ -39,7 +39,13 @@ const PROFILES = {
   // Android-appen (ExoPlayer), se apps/automotive/…/Api.kt
   android: { q: 'c=mp4,mkv,webm&v=h264,hevc,vp9&a=aac,mp3,opus,flac,vorbis,ac3,eac3&hdr=0', label: 'Android (ExoPlayer)' },
   'remote-480': { q: CHROME + '&q=480&bw=2500', remote: true, label: 'Utanför hemmet, 480p' },
-  'remote-abr': { q: SAFARI + '&hdr=0&bw=2500', native: true, remote: true, label: 'Utanför hemmet, automatisk kvalitet (ABR)' }
+  'remote-abr': { q: SAFARI + '&hdr=0&bw=2500', native: true, remote: true, label: 'Utanför hemmet, automatisk kvalitet (ABR)' },
+  // Omkodning till HEVC/AV1 i fMP4 (webbspelaren skickar tc= när webbläsaren kan avkoda det). Servern startas med
+  // TRANSCODE_VCODEC=cpu så att x265/SVT-AV1 får användas; finns ingen fungerande kodare blir det H.264.
+  'tc-hevc': { q: 'c=mp4,webm&v=h264,hevc,vp9&a=aac,mp3,opus,flac&tc=hevc', tc: ['hevc'], label: 'Chrome med HEVC (omkodning till HEVC)' },
+  'tc-av1': { q: CHROME + '&tc=av1', tc: ['av1'], label: 'Chrome med AV1 (omkodning till AV1)' },
+  'tc-safari': { q: SAFARI + '&hdr=0&tc=hevc', native: true, tc: ['hevc'], label: 'Safari, omkodning till HEVC' },
+  'tc-remote': { q: CHROME.replace('v=h264,', 'v=h264,hevc,') + '&tc=hevc&bw=2500', tc: ['hevc'], remote: true, label: 'Utanför hemmet, HEVC (ABR)' }
 };
 const capsOf = (p) => { const u = new URLSearchParams(PROFILES[p].q); const l = (k) => new Set((u.get(k) || '').split(',')); return { c: l('c'), v: l('v'), a: l('a'), hdr: u.get('hdr') === '1' }; };
 
@@ -63,11 +69,11 @@ const EXPECT_MODE = {
 function casesFor(src) {
   const c = (profile, query = '', name = '') => ({ profile, query, name: name || `${profile}${query ? ' ' + query : ''}` });
   const fast = {
-    'h264-mp4': [c('chrome'), c('safari-sdr', 'force=hls'), c('chrome', 'force=transcode&q=720'), c('remote-abr')],
+    'h264-mp4': [c('chrome'), c('safari-sdr', 'force=hls'), c('chrome', 'force=transcode&q=720'), c('remote-abr'), c('tc-hevc', 'force=transcode&q=720'), c('tc-av1', 'force=transcode&q=480'), c('tc-remote')],
     'h264-mkv-opengop': [c('chrome'), c('apple-app'), c('apple-tv'), c('android'), c('apple-app', 'sub=e4', 'apple-app PGS inbränd')],
     'h264-hi10': [c('chrome')],
     'hevc-8': [c('safari-hdr'), c('chrome')],
-    'hevc-hdr10': [c('safari-hdr'), c('safari-sdr')],
+    'hevc-hdr10': [c('safari-hdr'), c('safari-sdr'), c('tc-safari')],
     'hevc-novui': [c('chrome')],
     'vp9-webm': [c('chrome'), c('safari-sdr')],
     'scope-dts': [c('safari-sdr'), c('android')],
@@ -78,6 +84,7 @@ function casesFor(src) {
   out.push(c('chrome', 'force=hls'), c('safari-hdr', 'force=hls'), c('android', 'force=hls'));
   for (const q of ['1080', '720', '360']) out.push(c('chrome', `force=transcode&q=${q}`));
   out.push(c('safari-hdr', 'force=transcode&q=720'), c('remote-480', 'force=transcode'));
+  out.push(c('tc-hevc', 'force=transcode'), c('tc-av1', 'force=transcode&q=720'), c('tc-safari', 'force=transcode&q=1080'));
   if (src.id === 'multi-audio') out.push(c('safari-sdr', 'audio=2'), c('apple-app', 'audio=2'), c('chrome', 'audio=3'), c('android', 'audio=4'), c('safari-hdr', 'audio=4'));
   if (src.id === 'h264-mkv-opengop') out.push(c('apple-app', 'sub=e4', 'apple-app PGS inbränd'), c('chrome', 'sub=e4', 'chrome PGS inbränd'));
   if (src.id === 'dv5') out.push(c('apple-app', 'dv=1', 'apple-app med Dolby Vision'), c('apple-app', 'dv=1&force=hls', 'apple-app med Dolby Vision, remux'));
@@ -99,7 +106,7 @@ describe('testsamling', { concurrency: JOBS }, () => {
     linkLibrary(sources, path.join(ROOT, 'media', 'Filmer'));
     console.log(`[testsamling] ${sources.filter(s => s.file).length} källor klara på ${((Date.now() - t0) / 1000).toFixed(0)} s` +
       sources.filter(s => s.skip).map(s => `\n[testsamling] hoppar över ${s.id}: ${s.skip}`).join(''));
-    srv = await startServer({ root: ROOT, media: path.join(ROOT, 'media') });
+    srv = await startServer({ root: ROOT, media: path.join(ROOT, 'media'), env: { TRANSCODE_VCODEC: 'cpu' } });
     const list = await srv.setup();
     for (const s of sources) {
       const it = list.find(i => i.title === s.title);
@@ -197,7 +204,7 @@ async function playback(it, c, extra = '') {
 const decisionKey = (pb) => {
   if (pb.mode === 'direct') return 'direct';
   const u = new URLSearchParams(pb.url.split('?')[1]);
-  return ['mode', 'q', 'audio', 'am', 'burn', 'tm', 'fmt', 'tag', 'vr', 'abr', 'ab', 'sbw'].map(k => `${k}=${u.get(k) ?? ''}`).join('&');
+  return ['mode', 'q', 'audio', 'am', 'burn', 'tm', 'fmt', 'tag', 'vr', 'abr', 'ab', 'sbw', 'vc'].map(k => `${k}=${u.get(k) ?? ''}`).join('&');
 };
 const fpsOf = (s) => { const [a, b] = String(s?.avg_frame_rate || s?.r_frame_rate || '0/1').split('/').map(Number); return b ? a / b : 0; };
 
@@ -286,7 +293,7 @@ async function runCase(src, it, c, seen) {
       save('init.json', ip.streams);
       const tag = ip.video?.codec_tag_string;
       if (ip.video?.codec_name === 'hevc') check(['hvc1', 'dvh1'].includes(tag), `HEVC i fMP4 med taggen ${tag} (Apple kräver hvc1/dvh1)`);
-      if (src.id === 'dv5') check(tag === (q.get('dv') === '1' ? 'dvh1' : 'hvc1'), `Dolby Vision 5: tagg ${tag}`);
+      if (src.id === 'dv5' && pb.mode === 'remux') check(tag === (q.get('dv') === '1' ? 'dvh1' : 'hvc1'), `Dolby Vision 5: tagg ${tag}`);
     }
 
     // ---- segment: 0, 1, 2 och efter spolning mitt i ----
@@ -304,7 +311,7 @@ async function runCase(src, it, c, seen) {
         p.ap = tr.find(x => x.handler === 'soun')?.samples || [];
       }
       save(`${label}-${n}.json`, { streams: p.streams, format: p.format, video: p.vp.slice(0, 400), audio: p.ap.slice(0, 400) });
-      const au = p.video ? await firstAccessUnit(pf, p.video.codec_name).catch(() => null) : null;
+      const au = ['h264', 'hevc'].includes(p.video?.codec_name) ? await firstAccessUnit(pf, p.video.codec_name).catch(() => null) : null;
       return { n, label, start: list.segments[n].start, dur: list.segments[n].dur, bytes: data.length, p, au };
     };
     for (const n of [0, 1, 2]) if (n < pl.segments.length) segs[`a${n}`] = await fetchSeg(vUrl, pl, n, 'seg');
@@ -402,13 +409,20 @@ async function runCase(src, it, c, seen) {
     checkAllowed(out, P, caps, pb, fail);
     if (variant.res && master.variants.length) check(vs.width === variant.res[0] && vs.height === variant.res[1], `bilden är ${vs.width}x${vs.height}, mastern säger ${variant.attrs.RESOLUTION}`);
     if (pb.mode === 'transcode') {
-      check(vs.codec_name === 'h264', `omkodad video är ${vs.codec_name}`);
+      // Utdatans codec: H.264, eller HEVC/AV1 när klienten angett tc= och servern har en kodare (alltid i fMP4)
+      const want = pb.vcodec || 'h264';
+      check(vs.codec_name === want, `omkodad video är ${vs.codec_name}, beslutet säger ${want}`);
+      check(want === 'h264' || (P.tc || []).includes(want), `omkodning till ${want} som klienten inte bett om`);
+      if (want !== 'h264') check(fm, `${want} ska omkodas till fMP4`);
+      if (P.tc && want === 'h264') warn(`ingen ${P.tc.join('/')}-kodare – omkodades till H.264`);
       check(vs.pix_fmt === 'yuv420p', `omkodad video har ${vs.pix_fmt} (ska vara 8-bitars yuv420p)`);
-      check(['High', 'Main', 'Constrained Baseline', 'Baseline'].includes(vs.profile), `H.264-profil ${vs.profile}`);
-      const maxL = Math.max(41, minLevel(vs.width, vs.height, fps));
-      check(vs.level > 0 && vs.level <= maxL, `H.264-nivå ${vs.level / 10} för ${vs.width}x${vs.height}@${fps.toFixed(2)} (högst ${maxL / 10})`);
-      check(!['smpte2084', 'arib-std-b67'].includes(vs.color_transfer), `8-bitars H.264 märkt ${vs.color_transfer}`);
-      check(vs.color_primaries !== 'bt2020', '8-bitars H.264 märkt BT.2020');
+      if (want === 'h264') {
+        check(['High', 'Main', 'Constrained Baseline', 'Baseline'].includes(vs.profile), `H.264-profil ${vs.profile}`);
+        const maxL = Math.max(41, minLevel(vs.width, vs.height, fps));
+        check(vs.level > 0 && vs.level <= maxL, `H.264-nivå ${vs.level / 10} för ${vs.width}x${vs.height}@${fps.toFixed(2)} (högst ${maxL / 10})`);
+      } else if (want === 'hevc') check(vs.profile === 'Main', `HEVC-profil ${vs.profile} (ska vara Main, 8 bitar)`);
+      check(!['smpte2084', 'arib-std-b67'].includes(vs.color_transfer), `8-bitarsvideo märkt ${vs.color_transfer}`);
+      check(vs.color_primaries !== 'bt2020', '8-bitarsvideo märkt BT.2020');
       if (src.expect.hdr) check(vs.color_transfer === 'bt709' && vs.color_primaries === 'bt709', `tonmappad bild märkt ${vs.color_transfer}/${vs.color_primaries}, ska vara bt709`);
       check(+vs.has_b_frames === 0 && s0.vp.every(x => Math.abs(x.pts - x.dts) < 1e-6), 'omkodad video har B-bilder (DTS ≠ PTS)');
       if (src.interlaced) {

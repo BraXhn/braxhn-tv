@@ -177,6 +177,7 @@ route('GET', '/api/settings', admin, (c) => {
     adminAnywhere: adminAnywhere(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), subsonic: subsonic.enabled(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
+    transcodeVcodec: st.vcodecSetting(), transcode: st.transcodeInfo(),
     watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
     trickplay: getSetting('trickplay', process.env.TRICKPLAY || '1') === '1', detectRecap: getSetting('detect_recap', '1') === '1',
     bookMeta: bookmeta.enabled(), bookMetaStatus: bookmeta.status,
@@ -195,6 +196,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   if (typeof b.osPass === 'string' && b.osPass) setSetting('os_pass', b.osPass);
   if (typeof b.subLangs === 'string') setSetting('sub_langs', b.subLangs.replace(/[^a-z,-]/gi, ''));
   if (b.remoteQuality && st.isQuality(b.remoteQuality)) setSetting('remote_quality', b.remoteQuality);
+  if (['auto', 'cpu', 'h264'].includes(b.transcodeVcodec)) setSetting('transcode_vcodec', b.transcodeVcodec);
   if (typeof b.publicUrl === 'string') {
     const u = b.publicUrl.trim().replace(/\/+$/, '');
     if (u && !/^https?:\/\/[^\s/]+$/i.test(u)) return fail(c.res, 400, 'Publik adress ska vara t.ex. https://tv.dindomän.se');
@@ -456,7 +458,7 @@ route('GET', '/api/logs/diagnostics', admin, async (c) => {
   const info = {
     BraXhnTV: VERSION, node: process.version, ffmpeg: ff, os: `${os.type()} ${os.release()} ${os.arch()}`, cpus: `${os.cpus().length} × ${os.cpus()[0]?.model || '?'}`,
     minne: `${Math.round(os.totalmem() / 2 ** 30)} GB totalt, ${Math.round(os.freemem() / 2 ** 30)} GB ledigt`, upptid: `${Math.round(process.uptime() / 60)} min`,
-    hårdvarukodning: st.hwStatus, omkodningar: st.activeTranscodes().length, gränser: st.limits(),
+    hårdvarukodning: st.hwStatus, omkodningsformat: st.transcodeInfo(), omkodningar: st.activeTranscodes().length, gränser: st.limits(),
     bibliotek: all('SELECT id,name,type FROM libraries'), titlar: ver('items'), användare: ver('users'),
     miljö: Object.fromEntries(['HWACCEL', 'HW_DECODE', 'VAAPI_DEVICE', 'TONEMAP', 'X264_PRESET', 'REMOTE_QUALITY', 'TRANSCODE_DIR', 'MEDIA_ROOT', 'TZ', 'PUID', 'PGID', 'NVIDIA_VISIBLE_DEVICES']
       .filter(k => process.env[k] != null).map(k => [k, process.env[k]])),
