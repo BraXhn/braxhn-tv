@@ -4,7 +4,7 @@
 // rader som syns ritas; fotona hämtas per månad när de kommer i bild. Helskärmsvisningen har svep/piltangenter, zoom
 // (hjul, nyp, dubbelklick), information (EXIF, koordinater som text – inga kartor) och bildspel med övertoning och
 // valfri musik ur musikbiblioteket. Videoklipp spelas i den vanliga spelaren.
-import { $, act, api, esc, libs, main, me, onLeave, routeGen, safeColor, store, toast, toastErr, views } from '../core.js';
+import { $, act, api, esc, libs, main, me, onLeave, routeGen, safeColor, store, toast, toastErr, views, t, locale } from '../core.js';
 import { tabsHtml } from '../ui/tabs.js';
 import { emptyState, errorState, bindRetry } from '../ui/states.js';
 import { iconButton, setIconButton } from '../ui/buttons.js';
@@ -13,17 +13,17 @@ import { M, playQueue } from '../audio.js';
 import { P, play as playVideo } from '../player/video.js';
 
 const GAP = 3, DAY_GAP = 14, H_MONTH = 56, H_DAY = 30, H_HEAD = 60;
-const MONTHS = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
+const MONTHS = [t('januari'), t('februari'), t('mars'), t('april'), t('maj'), t('juni'), t('juli'), t('augusti'), t('september'), t('oktober'), t('november'), t('december')];
 // Tiden är bildens lokala väggklocka räknad som UTC (server/photos.js) – visas därför alltid med timeZone UTC
 const UTC = { timeZone: 'UTC' };
 const fmtMonth = (ym) => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
-const fmtDayHead = (d, withYear = false) => new Date(d + 'T12:00:00Z').toLocaleDateString('sv-SE', { ...UTC, weekday: 'long', day: 'numeric', month: 'long', ...(withYear ? { year: 'numeric' } : {}) });
-const fmtDayShort = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('sv-SE', { ...UTC, weekday: 'short', day: 'numeric', month: 'short' });
-const fmtWhen = (t) => new Date(t * 1000).toLocaleString('sv-SE', { ...UTC, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const fmtShort = (t) => new Date(t * 1000).toLocaleString('sv-SE', { ...UTC, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const fmtDate = (t) => new Date(t * 1000).toLocaleDateString('sv-SE', { ...UTC, day: 'numeric', month: 'long', year: 'numeric' });
+const fmtDayHead = (d, withYear = false) => new Date(d + 'T12:00:00Z').toLocaleDateString(locale, { ...UTC, weekday: 'long', day: 'numeric', month: 'long', ...(withYear ? { year: 'numeric' } : {}) });
+const fmtDayShort = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString(locale, { ...UTC, weekday: 'short', day: 'numeric', month: 'short' });
+const fmtWhen = (t) => new Date(t * 1000).toLocaleString(locale, { ...UTC, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtShort = (t) => new Date(t * 1000).toLocaleString(locale, { ...UTC, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (t) => new Date(t * 1000).toLocaleDateString(locale, { ...UTC, day: 'numeric', month: 'long', year: 'numeric' });
 const dur = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const nFoton = (n) => `${n.toLocaleString('sv-SE')} ${n === 1 ? 'foto' : 'foton'}`;
+const nFoton = (n) => `${n.toLocaleString(locale)} ${n === 1 ? t('foto') : t('foton')}`;
 const imgUrl = (id, w) => `/api/photos/${+id}/img?w=${w}`;
 const PHOTO_W = [160, 240, 320, 480, 720, 1280, 1920, 2560];
 const snapW = (px) => PHOTO_W.find(w => w >= px) || PHOTO_W.at(-1);
@@ -33,31 +33,31 @@ const enc = (f) => encodeURIComponent(f);
 views.photos = async (libArg, tabArg = '') => {
   const lid = +libArg;
   const lib = libs.find(l => l.id === lid && l.type === 'photo');
-  if (!lib) { main.innerHTML = emptyState({ icon: '🖼', title: 'Fotobiblioteket finns inte', text: 'Det kan ha tagits bort, eller så får din profil inte se det.', action: { label: 'Till startsidan', href: '#/' } }); return; }
+  if (!lib) { main.innerHTML = emptyState({ icon: '🖼', title: t('Fotobiblioteket finns inte'), text: t('Det kan ha tagits bort, eller så får din profil inte se det.'), action: { label: t('Till startsidan'), href: '#/' } }); return; }
   const [tab, arg] = String(tabArg).split(':');
   const cur = ['albums', 'album', 'favorites', 'memories'].includes(tab) ? tab : 'timeline';
   const head = (extra = '') => `<div class="toolbar ph-head"><h1>${esc(lib.name)}</h1><span class="ph-note" id="phcount"></span>${extra}
-    <button type="button" class="ghost small" id="phshow" hidden><span aria-hidden="true">▶</span> Bildspel</button></div>
-    ${tabsHtml({ label: 'Foton', current: cur === 'album' ? 'albums' : cur, items: [
-      { key: 'timeline', label: 'Tidslinje', href: `#/photos/${lid}` }, { key: 'albums', label: 'Album', href: `#/photos/${lid}/albums` },
-      { key: 'favorites', label: 'Favoriter', href: `#/photos/${lid}/favorites` }, { key: 'memories', label: 'Den här dagen', href: `#/photos/${lid}/memories` }] })}`;
+    <button type="button" class="ghost small" id="phshow" hidden><span aria-hidden="true">▶</span> ${t('Bildspel')}</button></div>
+    ${tabsHtml({ label: t('Foton'), current: cur === 'album' ? 'albums' : cur, items: [
+      { key: 'timeline', label: t('Tidslinje'), href: `#/photos/${lid}` }, { key: 'albums', label: 'Album', href: `#/photos/${lid}/albums` },
+      { key: 'favorites', label: t('Favoriter'), href: `#/photos/${lid}/favorites` }, { key: 'memories', label: t('Den här dagen'), href: `#/photos/${lid}/memories` }] })}`;
   if (cur === 'albums' || cur === 'album') return albumPage(lid, lib, arg ? decodeURIComponent(arg) : '', head);
   if (cur === 'memories') return memoriesPage(head);
   return timelinePage(lid, head, cur === 'favorites');
 };
 
 async function timelinePage(lid, head, fav) {
-  const t = await api(`/photos/lib/${lid}/timeline${fav ? '?fav=1' : ''}`);
+  const tm = await api(`/photos/lib/${lid}/timeline${fav ? '?fav=1' : ''}`);
   main.innerHTML = head() + '<div id="phgrid" class="ph-grid"></div>';
-  $('#phcount').textContent = t.total ? nFoton(t.total) : '';
-  if (!t.total) {
-    $('#phgrid').outerHTML = fav ? emptyState({ icon: '♡', title: 'Inga favoriter än', text: 'Öppna ett foto och tryck på hjärtat för att spara det här.' })
-      : emptyState({ icon: '🖼', title: 'Inga foton ännu', text: me?.is_admin ? 'Skanningen hittar JPEG, PNG, WebP, GIF, HEIC och videoklipp (MOV/MP4) i bibliotekets mappar. Det kan ta en stund första gången.' : 'Inga foton har lagts in i biblioteket än.' });
+  $('#phcount').textContent = tm.total ? nFoton(tm.total) : '';
+  if (!tm.total) {
+    $('#phgrid').outerHTML = fav ? emptyState({ icon: '♡', title: t('Inga favoriter än'), text: t('Öppna ett foto och tryck på hjärtat för att spara det här.') })
+      : emptyState({ icon: '🖼', title: t('Inga foton ännu'), text: me?.is_admin ? t('Skanningen hittar JPEG, PNG, WebP, GIF, HEIC och videoklipp (MOV/MP4) i bibliotekets mappar. Det kan ta en stund första gången.') : t('Inga foton har lagts in i biblioteket än.') });
     return;
   }
   // Månader med dagar: [{ ym, n, days: [{ d, n, off }] }]
   const months = [];
-  for (const [d, n] of t.days) {
+  for (const [d, n] of tm.days) {
     const ym = d.slice(0, 7);
     let m = months.at(-1);
     if (!m || m.ym !== ym) months.push(m = { ym, n: 0, days: [] });
@@ -77,22 +77,22 @@ async function timelinePage(lid, head, fav) {
 async function albumPage(lid, lib, folder, head) {
   const r = await api(`/photos/lib/${lid}/albums?folder=${enc(folder)}`);
   const parts = folder ? folder.split('/') : [];
-  const crumbs = `<nav class="ph-crumbs" aria-label="Mappar"><a href="#/photos/${lid}/albums">Album</a>${parts.map((p, i) => i === parts.length - 1
+  const crumbs = `<nav class="ph-crumbs" aria-label="${t('Mappar')}"><a href="#/photos/${lid}/albums">Album</a>${parts.map((p, i) => i === parts.length - 1
     ? ` <span aria-hidden="true">›</span> <span aria-current="page">${esc(p)}</span>`
     : ` <span aria-hidden="true">›</span> <a href="#/photos/${lid}/album:${enc(parts.slice(0, i + 1).join('/'))}">${esc(p)}</a>`).join('')}</nav>`;
   const range = (f) => {
     if (!f.first || !f.latest) return '';
     const a = new Date(f.first * 1000), b = new Date(f.latest * 1000), dm = { ...UTC, day: 'numeric', month: 'short' };
     if (fmtDate(f.first) === fmtDate(f.latest)) return fmtDate(f.first);
-    return a.getUTCFullYear() === b.getUTCFullYear() ? `${a.toLocaleDateString('sv-SE', dm)} – ${b.toLocaleDateString('sv-SE', dm)} ${b.getUTCFullYear()}` : `${a.getUTCFullYear()}–${b.getUTCFullYear()}`;
+    return a.getUTCFullYear() === b.getUTCFullYear() ? `${a.toLocaleDateString(locale, dm)} – ${b.toLocaleDateString(locale, dm)} ${b.getUTCFullYear()}` : `${a.getUTCFullYear()}–${b.getUTCFullYear()}`;
   };
   const albums = r.folders.length ? `<div class="ph-albums">${r.folders.map(f => `<a class="ph-alb" href="#/photos/${lid}/album:${enc(f.path)}" aria-label="${esc(`${f.name}, ${nFoton(f.count)}`)}">
     <span class="ph-alb-c" style="background:${safeColor(f.cover?.c) || 'var(--bg3)'}">${f.cover ? `<img loading="lazy" decoding="async" src="${imgUrl(f.cover.id, 480)}" alt="" data-fb="1">` : ''}</span>
     <b>${esc(f.name)}</b><span class="ph-note">${esc(nFoton(f.count))}${range(f) ? ' · ' + esc(range(f)) : ''}</span></a>`).join('')}</div>` : '';
-  main.innerHTML = head() + crumbs + albums + (r.photos.length ? `${r.folders.length ? '<h2 class="ph-sub">Foton i mappen</h2>' : ''}<div id="phgrid" class="ph-grid"></div>` : '');
-  $('#phcount').textContent = r.photos.length ? nFoton(r.photos.length) + (r.folders.length ? ' i mappen' : '') : '';
+  main.innerHTML = head() + crumbs + albums + (r.photos.length ? `${r.folders.length ? t('<h2 class="ph-sub">Foton i mappen</h2>') : ''}<div id="phgrid" class="ph-grid"></div>` : '');
+  $('#phcount').textContent = r.photos.length ? nFoton(r.photos.length) + (r.folders.length ? t(' i mappen') : '') : '';
   if (!r.folders.length && !r.photos.length) {
-    main.insertAdjacentHTML('beforeend', emptyState({ icon: '📁', title: folder ? 'Mappen är tom' : 'Inga album ännu', text: 'Album är mapparna i fotobiblioteket – lägg foton i undermappar så visas de här.' }));
+    main.insertAdjacentHTML('beforeend', emptyState({ icon: '📁', title: folder ? t('Mappen är tom') : t('Inga album ännu'), text: t('Album är mapparna i fotobiblioteket – lägg foton i undermappar så visas de här.') }));
     return;
   }
   if (!r.photos.length) return;
@@ -104,13 +104,13 @@ async function memoriesPage(head) {
   const r = await api('/photos/memories');
   main.innerHTML = head() + '<div id="phgrid" class="ph-grid"></div>';
   if (!r.groups.length) {
-    $('#phgrid').outerHTML = emptyState({ icon: '📅', title: 'Inga minnen i dag', text: `Inga foton är tagna ${fmtDayHead(r.date).replace(/^\S+\s/, '')} tidigare år. Titta in en annan dag!` });
+    $('#phgrid').outerHTML = emptyState({ icon: '📅', title: t('Inga minnen i dag'), text: t('Inga foton är tagna {v} tidigare år. Titta in en annan dag!', { v: fmtDayHead(r.date).replace(/^\S+\s/, '') }) });
     return;
   }
   const total = r.groups.reduce((a, g) => a + g.photos.length, 0);
   $('#phcount').textContent = nFoton(total);
   const sources = r.groups.map(g => ({ n: g.photos.length, items: g.photos }));
-  const blocks = r.groups.flatMap((g, si) => [{ kind: 'h1', text: g.yearsAgo === 1 ? 'För ett år sedan' : `För ${g.yearsAgo} år sedan`, sub: `${fmtDayHead(g.day, true)} · ${nFoton(g.count)}` },
+  const blocks = r.groups.flatMap((g, si) => [{ kind: 'h1', text: g.yearsAgo === 1 ? t('För ett år sedan') : t('För {yearsAgo} år sedan', { yearsAgo: g.yearsAgo }), sub: `${fmtDayHead(g.day, true)} · ${nFoton(g.count)}` },
     { kind: 'tiles', src: si, off: 0, n: g.photos.length }]);
   const grid = virtualGrid($('#phgrid'), { sources, blocks });
   bindShow(grid);
@@ -136,7 +136,7 @@ function virtualGrid(host, { sources, blocks, years = false }) {
   const shown = new Map(); // radindex → element
   const gen = routeGen;
   host.setAttribute('role', 'grid');
-  host.setAttribute('aria-label', 'Foton');
+  host.setAttribute('aria-label', t('Foton'));
   host.setAttribute('aria-rowcount', '-1');
   function layout() {
     width = host.clientWidth || main.clientWidth || 360;
@@ -194,7 +194,7 @@ function virtualGrid(host, { sources, blocks, years = false }) {
   function tileHtml(it, gi) {
     if (!it) return `<span class="ph-t ph-ph" style="width:${size}px;height:${size}px" aria-hidden="true"></span>`;
     const w = snapW(size * Math.min(devicePixelRatio || 1, 2));
-    const label = `${it.v ? 'Video' : 'Foto'}, ${fmtShort(it.t)}${it.fav ? ', favorit' : ''}`;
+    const label = `${it.v ? 'Video' : t('Foto')}, ${fmtShort(it.t)}${it.fav ? t(', favorit') : ''}`;
     return `<button type="button" class="ph-t" role="gridcell" data-i="${gi}" tabindex="-1" style="width:${size}px;height:${size}px;background:${safeColor(it.c) || 'var(--bg3)'}" aria-label="${esc(label)}">`
       + `<img src="${imgUrl(it.id, Math.min(w, 480))}" alt="" decoding="async" draggable="false" data-fb="1">`
       + (it.v ? `<span class="ph-badge" aria-hidden="true">▶ ${dur(it.d || 0)}</span>` : '') + (it.fav ? '<span class="ph-fav" aria-hidden="true">♥</span>' : '') + '</button>';
@@ -276,7 +276,7 @@ function virtualGrid(host, { sources, blocks, years = false }) {
     const list = [...new Set(blocks.filter(b => b.kind === 'h1').map(b => b.year))];
     if (list.length < 2) return;
     yearRail = document.createElement('nav');
-    yearRail.className = 'ph-years'; yearRail.setAttribute('aria-label', 'Hoppa till år');
+    yearRail.className = 'ph-years'; yearRail.setAttribute('aria-label', t('Hoppa till år'));
     yearRail.innerHTML = list.map(y => `<button type="button" data-y="${esc(y)}">${esc(y)}</button>`).join('');
     yearRail.onclick = (e) => {
       const y = e.target.closest('[data-y]')?.dataset.y; if (!y) return;
@@ -380,19 +380,19 @@ function openViewer(seq, i) {
   closeViewer(false);
   const el = document.createElement('div');
   el.className = 'pv';
-  el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Foto');
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', t('Foto'));
   el.tabIndex = -1;
   el.innerHTML = `<div class="pv-stage"><img class="pv-img" alt="" draggable="false"><img class="pv-img" alt="" draggable="false">
-      <button type="button" class="pv-play" hidden aria-label="Spela videoklippet"><span aria-hidden="true">▶</span></button></div>
-    <div class="pv-bar">${iconButton({ icon: '←', label: 'Stäng (Esc)', id: 'pvclose', cls: 'pvb' })}
+      <button type="button" class="pv-play" hidden aria-label="${t('Spela videoklippet')}"><span aria-hidden="true">▶</span></button></div>
+    <div class="pv-bar">${iconButton({ icon: '←', label: t('Stäng (Esc)'), id: 'pvclose', cls: 'pvb' })}
       <div class="pv-title"><b id="pvwhen"></b><span class="ph-note" id="pvpos"></span></div>
-      ${iconButton({ icon: '♡', label: 'Favorit (f)', id: 'pvfav', cls: 'pvb', pressed: false })}
+      ${iconButton({ icon: '♡', label: t('Favorit (f)'), id: 'pvfav', cls: 'pvb', pressed: false })}
       ${iconButton({ icon: 'ⓘ', label: 'Information (i)', id: 'pvinfo', cls: 'pvb', pressed: false })}
-      ${iconButton({ icon: '⤓', label: 'Ladda ner originalet', id: 'pvdl', cls: 'pvb', hidden: true })}
-      ${iconButton({ icon: '▶', label: 'Bildspel', id: 'pvshow', cls: 'pvb', haspopup: 'dialog' })}</div>
-    ${iconButton({ icon: '‹', label: 'Föregående (←)', id: 'pvprev', cls: 'pv-nav prev' })}${iconButton({ icon: '›', label: 'Nästa (→)', id: 'pvnext', cls: 'pv-nav next' })}
-    <aside class="pv-info" id="pvpanel" hidden aria-label="Information om fotot"></aside>
-    <div class="pv-ssbar" hidden>${iconButton({ icon: '⏸', label: 'Pausa bildspelet (mellanslag)', id: 'pvsspause', cls: 'ghost' })}${iconButton({ icon: '✕', label: 'Avsluta bildspelet (Esc)', id: 'pvssstop', cls: 'ghost' })}</div>`;
+      ${iconButton({ icon: '⤓', label: t('Ladda ner originalet'), id: 'pvdl', cls: 'pvb', hidden: true })}
+      ${iconButton({ icon: '▶', label: t('Bildspel'), id: 'pvshow', cls: 'pvb', haspopup: 'dialog' })}</div>
+    ${iconButton({ icon: '‹', label: t('Föregående (←)'), id: 'pvprev', cls: 'pv-nav prev' })}${iconButton({ icon: '›', label: t('Nästa (→)'), id: 'pvnext', cls: 'pv-nav next' })}
+    <aside class="pv-info" id="pvpanel" hidden aria-label="${t('Information om fotot')}"></aside>
+    <div class="pv-ssbar" hidden>${iconButton({ icon: '⏸', label: t('Pausa bildspelet (mellanslag)'), id: 'pvsspause', cls: 'ghost' })}${iconButton({ icon: '✕', label: t('Avsluta bildspelet (Esc)'), id: 'pvssstop', cls: 'ghost' })}</div>`;
   document.body.append(el);
   const imgs = [...el.querySelectorAll('.pv-img')];
   const v = V = { el, seq, i, it: null, imgs, front: 0, z: { s: 1, x: 0, y: 0 }, hi: false, show: null, returnTo: document.activeElement, tok: 0, history: false };
@@ -444,9 +444,9 @@ async function showAt(v, i, { fade = false } = {}) {
   setFront(v, back);
   // Rubriken: datum och tid, plats i listan
   $('#pvwhen', v.el).textContent = innerWidth < 600 ? fmtShort(it.t) : fmtWhen(it.t);
-  $('#pvpos', v.el).textContent = `${(i + 1).toLocaleString('sv-SE')} av ${v.seq.total.toLocaleString('sv-SE')}${it.v ? ' · video ' + dur(it.d || 0) : ''}`;
+  $('#pvpos', v.el).textContent = `${(i + 1).toLocaleString(locale)} av ${v.seq.total.toLocaleString(locale)}${it.v ? ' · video ' + dur(it.d || 0) : ''}`;
   const fb = $('#pvfav', v.el);
-  setIconButton(fb, it.fav ? '♥' : '♡', it.fav ? 'Ta bort från favoriter (f)' : 'Lägg till i favoriter (f)'); fb.setAttribute('aria-pressed', String(!!it.fav));
+  setIconButton(fb, it.fav ? '♥' : '♡', it.fav ? t('Ta bort från favoriter (f)') : t('Lägg till i favoriter (f)')); fb.setAttribute('aria-pressed', String(!!it.fav));
   $('.pv-play', v.el).hidden = !it.v || !it.item;
   $('#pvprev', v.el).disabled = i <= 0; $('#pvnext', v.el).disabled = i >= v.seq.total - 1;
   if (!$('#pvpanel', v.el).hidden) fillInfo(v);
@@ -589,9 +589,9 @@ async function toggleFav(v) {
   v.seq.update?.(v.i, { fav: it.fav });
   if (V === v && v.it === it) {
     const fb = $('#pvfav', v.el);
-    setIconButton(fb, it.fav ? '♥' : '♡', it.fav ? 'Ta bort från favoriter (f)' : 'Lägg till i favoriter (f)'); fb.setAttribute('aria-pressed', String(!!it.fav));
+    setIconButton(fb, it.fav ? '♥' : '♡', it.fav ? t('Ta bort från favoriter (f)') : t('Lägg till i favoriter (f)')); fb.setAttribute('aria-pressed', String(!!it.fav));
   }
-  toast(it.fav ? 'Sparad bland favoriterna' : 'Borttagen från favoriterna');
+  toast(it.fav ? t('Sparad bland favoriterna') : t('Borttagen från favoriterna'));
 }
 function toggleInfo(v) {
   const p = $('#pvpanel', v.el), b = $('#pvinfo', v.el);
@@ -601,47 +601,47 @@ function toggleInfo(v) {
   store.set('photoinfo', !p.hidden);
   if (!p.hidden) fillInfo(v);
 }
-const num = (x, d = 1) => Number(x).toLocaleString('sv-SE', { maximumFractionDigits: d });
+const num = (x, d = 1) => Number(x).toLocaleString(locale, { maximumFractionDigits: d });
 const coordTxt = (lat, lon) => `${num(Math.abs(lat), 6)}° ${lat < 0 ? 'S' : 'N'}, ${num(Math.abs(lon), 6)}° ${lon < 0 ? 'V' : 'Ö'}`;
 const exposureTxt = (s) => s >= 1 ? `${num(s, 1)} s` : `1/${Math.round(1 / s)} s`;
 const sizeTxt = (b) => b >= 1e6 ? `${num(b / 1e6, 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} kB`;
 async function fillInfo(v) {
   const p = $('#pvpanel', v.el), it = v.it;
   if (!it) return;
-  p.innerHTML = '<p class="muted small">Laddar…</p>';
+  p.innerHTML = t('<p class="muted small">Laddar…</p>');
   let x;
   try { x = await infoOf(it.id); } catch (e) { if (V === v) p.innerHTML = errorState(e, { compact: true }); return; }
   if (V !== v || v.it !== it) return;
   const cam = x.camera ? (x.camera.model && x.camera.make && x.camera.model.toLowerCase().startsWith(x.camera.make.toLowerCase().split(' ')[0]) ? x.camera.model : [x.camera.make, x.camera.model].filter(Boolean).join(' ')) : '';
-  const expo = [x.fnumber ? `f/${num(x.fnumber)}` : '', x.exposure ? exposureTxt(x.exposure) : '', x.iso ? `ISO ${x.iso}` : '', x.focal ? `${num(x.focal)} mm${x.focal35 ? ` (${x.focal35} mm motsv.)` : ''}` : ''].filter(Boolean).join(' · ');
+  const expo = [x.fnumber ? `f/${num(x.fnumber)}` : '', x.exposure ? exposureTxt(x.exposure) : '', x.iso ? `ISO ${x.iso}` : '', x.focal ? `${num(x.focal)} mm${x.focal35 ? ` ${t('({focal35} mm motsv.)', { focal35: x.focal35 })}` : ''}` : ''].filter(Boolean).join(' · ');
   const mp = x.w && x.h ? `${x.w} × ${x.h} (${num(x.w * x.h / 1e6, 1)} MP)` : '';
   const rows = [
-    ['När', fmtWhen(x.t)],
-    ['Fil', x.name + (x.size ? ` · ${sizeTxt(x.size)}` : '') + (x.format ? ` · ${x.format.toUpperCase()}` : '')],
-    ['Storlek', mp + (x.kind === 'video' && x.duration ? ` · ${dur(x.duration)}` : '')],
-    ['Kamera', cam], ['Objektiv', x.lens || ''], ['Exponering', expo],
+    [t('När'), fmtWhen(x.t)],
+    [t('Fil'), x.name + (x.size ? ` · ${sizeTxt(x.size)}` : '') + (x.format ? ` · ${x.format.toUpperCase()}` : '')],
+    [t('Storlek'), mp + (x.kind === 'video' && x.duration ? ` · ${dur(x.duration)}` : '')],
+    [t('Kamera'), cam], [t('Objektiv'), x.lens || ''], ['Exponering', expo],
     ['Position', x.gps ? coordTxt(x.gps.lat, x.gps.lon) + (x.gps.alt != null ? ` · ${num(x.gps.alt, 0)} m ö.h.` : '') : ''],
   ].filter(([, t]) => t);
   const lib = x.library;
   p.innerHTML = `<h2>Information</h2><dl>${rows.map(([k, t]) => `<dt>${esc(k)}</dt><dd>${esc(t)}</dd>`).join('')}
-    <dt>Album</dt><dd><a href="#/photos/${+lib}/album:${enc(x.folder || '')}" id="pvalb">${esc(x.folder || 'Biblioteksmappen')}</a></dd></dl>
-    ${x.gps ? `<button type="button" class="ghost small" id="pvcopy">Kopiera koordinaterna</button>` : ''}`;
+    <dt>Album</dt><dd><a href="#/photos/${+lib}/album:${enc(x.folder || '')}" id="pvalb">${esc(x.folder || t('Biblioteksmappen'))}</a></dd></dl>
+    ${x.gps ? `<button type="button" class="ghost small" id="pvcopy">${t('Kopiera koordinaterna')}</button>` : ''}`;
   const a = $('#pvalb', p); if (a) a.onclick = () => closeViewer(false);
   const c = $('#pvcopy', p);
-  if (c) c.onclick = act(async () => { await navigator.clipboard.writeText(`${x.gps.lat}, ${x.gps.lon}`); toast('Koordinaterna kopierade'); });
+  if (c) c.onclick = act(async () => { await navigator.clipboard.writeText(`${x.gps.lat}, ${x.gps.lon}`); toast(t('Koordinaterna kopierade')); });
 }
 
 // ---------- bildspel ----------
 async function slideshowDialog(seq, from) {
   const musicLibs = libs.filter(l => l.type === 'music');
   const saved = store.get('slideshow', {}) || {};
-  const d = openDialog({ title: 'Bildspel', form: true, body: `<div class="field"><label for="ssint">Byt bild efter</label>
-      <select id="ssint">${[3, 5, 8, 12, 20].map(s => `<option value="${s}" ${+saved.interval === s || (!saved.interval && s === 5) ? 'selected' : ''}>${s} sekunder</option>`).join('')}</select></div>
-    <div class="field"><label for="ssmusic">Musik</label><select id="ssmusic"><option value="">Ingen musik</option></select>
-      <p class="muted small" id="ssmhint">${musicLibs.length ? 'Laddar spellistor…' : 'Det finns inget musikbibliotek.'}</p></div>
-    <label class="switch"><input type="checkbox" id="ssshuf" ${saved.shuffle ? 'checked' : ''}> Blanda ordningen</label>
-    <p class="muted small">Videoklipp hoppas över. Mellanslag pausar, Esc avslutar.</p>`,
-  actions: [{ label: 'Avbryt' }, { label: 'Starta bildspelet', kind: 'primary', submit: true, onClick: async (h) => {
+  const d = openDialog({ title: t('Bildspel'), form: true, body: `<div class="field"><label for="ssint">${t('Byt bild efter')}</label>
+      <select id="ssint">${[3, 5, 8, 12, 20].map(s => `<option value="${s}" ${+saved.interval === s || (!saved.interval && s === 5) ? 'selected' : ''}>${t('{s} sekunder', { s })}</option>`).join('')}</select></div>
+    <div class="field"><label for="ssmusic">${t('Musik')}</label><select id="ssmusic"><option value="">${t('Ingen musik')}</option></select>
+      <p class="muted small" id="ssmhint">${musicLibs.length ? t('Laddar spellistor…') : t('Det finns inget musikbibliotek.')}</p></div>
+    <label class="switch"><input type="checkbox" id="ssshuf" ${saved.shuffle ? 'checked' : ''}> ${t('Blanda ordningen')}</label>
+    <p class="muted small">${t('Videoklipp hoppas över. Mellanslag pausar, Esc avslutar.')}</p>`,
+  actions: [{ label: t('Avbryt') }, { label: t('Starta bildspelet'), kind: 'primary', submit: true, onClick: async (h) => {
     const o = { interval: +h.$('#ssint').value || 5, music: h.$('#ssmusic').value, shuffle: h.$('#ssshuf').checked };
     store.set('slideshow', o);
     let tracks = [];
@@ -649,7 +649,7 @@ async function slideshowDialog(seq, from) {
       const [kind, a, b] = o.music.split(':');
       const r = kind === 'pl' ? await api(`/music/playlists/${+a}`) : await api(`/music/${+a}/smart/${enc(b)}`);
       tracks = r.trackList || [];
-      if (!tracks.length) toast('Spellistan är tom – bildspelet visas utan musik');
+      if (!tracks.length) toast(t('Spellistan är tom – bildspelet visas utan musik'));
     }
     if (!V || V.seq !== seq) openViewer(seq, from);
     startSlideshow(V, o, tracks);
@@ -664,10 +664,10 @@ async function slideshowDialog(seq, from) {
       const l = musicLibs[k], items = lists(s).filter(x => x.count !== 0);
       if (items.length) opts += `<optgroup label="${esc(l.name)}">${items.map(x => `<option value="smart:${l.id}:${esc(x.id)}">${esc(x.name)}</option>`).join('')}</optgroup>`;
     });
-    if (lists(pls).length) opts += `<optgroup label="Dina spellistor">${lists(pls).map(p => `<option value="pl:${+p.id}">${esc(p.name)}</option>`).join('')}</optgroup>`;
+    if (lists(pls).length) opts += `<optgroup label="${t('Dina spellistor')}">${lists(pls).map(p => `<option value="pl:${+p.id}">${esc(p.name)}</option>`).join('')}</optgroup>`;
     d.$('#ssmusic').insertAdjacentHTML('beforeend', opts);
     if (saved.music && d.$(`#ssmusic option[value="${CSS.escape(saved.music)}"]`)) d.$('#ssmusic').value = saved.music;
-    d.$('#ssmhint').textContent = opts ? 'Musiken spelas i ljudspelaren och stannar när bildspelet avslutas.' : 'Inga spellistor hittades.';
+    d.$('#ssmhint').textContent = opts ? t('Musiken spelas i ljudspelaren och stannar när bildspelet avslutas.') : t('Inga spellistor hittades.');
   } catch (e) { if (d.el.isConnected) d.$('#ssmhint').textContent = e.message; }
 }
 function startSlideshow(v, o, tracks) {
@@ -684,7 +684,7 @@ function startSlideshow(v, o, tracks) {
   restartTimer(v);
   // Dialogen lämnar fokus på knappen som öppnade den – flytta in i visningen
   setTimeout(() => { if (V === v) v.el.focus(); }, 0);
-  toast('Bildspelet har startat – Esc avslutar');
+  toast(t('Bildspelet har startat – Esc avslutar'));
 }
 function restartTimer(v) {
   const s = v.show; if (!s) return;
@@ -710,7 +710,7 @@ async function nextSlide(v) {
 function pauseSlideshow(v) {
   const s = v.show; if (!s) return;
   s.paused = !s.paused;
-  setIconButton($('#pvsspause', v.el), s.paused ? '▶' : '⏸', s.paused ? 'Fortsätt bildspelet (mellanslag)' : 'Pausa bildspelet (mellanslag)');
+  setIconButton($('#pvsspause', v.el), s.paused ? '▶' : '⏸', s.paused ? t('Fortsätt bildspelet (mellanslag)') : t('Pausa bildspelet (mellanslag)'));
   if (s.music && M.audio) { if (s.paused) M.audio.pause(); else M.audio.play().catch(() => {}); }
   restartTimer(v);
 }

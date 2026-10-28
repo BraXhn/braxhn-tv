@@ -114,13 +114,17 @@ export async function check() {
   return last;
 }
 
-/** Rader till säkerhetskontrollen */
-export function checkItems() {
+/** Rader till säkerhetskontrollen (lang 'en' = engelska för webben på engelska, annars svenska) */
+export function checkItems(lang = 'sv') {
   const s = last;
   if (!s.at) return [];
+  const en = lang === 'en';
+  const lbl = (l) => !en ? l : /^Bibliotek: /.test(l) ? 'Library: ' + l.slice(11) : ({ Konfiguration: 'Configuration', Omkodning: 'Transcoding', Inspelningar: 'Recordings', Poddar: 'Podcasts' }[l] || l);
+  const labels = (g) => g.labels.map(lbl).join(', ');
+  const desc = (g) => en ? `${fmtGb(g.free)} free of ${fmtGb(g.total)} (${Math.round(g.free / g.total * 100)} %)` : describe(g);
   const bad = s.groups.filter(g => g.level === 'low' || g.level === 'critical');
-  if (!bad.length) return [{ level: 'ok', title: 'Gott om diskutrymme', detail: s.groups.map(g => `${g.labels.join(', ')}: ${describe(g)}`).join(' · ') }];
-  return bad.map(g => ({ level: g.level === 'critical' ? 'bad' : 'warn', title: `${g.level === 'critical' ? 'Nästan fullt' : 'Lite ledigt utrymme'}: ${g.labels.join(', ')}`, detail: describe(g) + '.' }));
+  if (!bad.length) return [{ level: 'ok', title: en ? 'Plenty of disk space' : 'Gott om diskutrymme', detail: s.groups.map(g => `${labels(g)}: ${desc(g)}`).join(' · ') }];
+  return bad.map(g => ({ level: g.level === 'critical' ? 'bad' : 'warn', title: `${g.level === 'critical' ? (en ? 'Almost full' : 'Nästan fullt') : (en ? 'Low on free space' : 'Lite ledigt utrymme')}: ${labels(g)}`, detail: desc(g) + '.' }));
 }
 
 // Kontroll var 5:e minut (varje minut när omkodningsmappen har lite plats)

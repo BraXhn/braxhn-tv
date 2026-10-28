@@ -230,6 +230,34 @@ kör granskningsskriptet `test/helpers/a11y-audit.js` över alla vyer (lägg til
 - **Undertexter:** utseendet styrs av användaren (`player/comfort.js`: storlek, typsnitt, färg, kantlinje, bakgrund
   och färg, placering) – rita undertextytor med CSS-variablerna `--subcolor`, `--subbg`, `--subshadow`, `--subfont`.
 
+## Språk – `t()` i `core.js`
+
+Webben finns på svenska (standard och källspråk) och engelska. All text som användaren ser eller hör – rubriker,
+knappar, `aria-label`/`title`/`placeholder`, toasts, dialoger, tomma lägen och fel från klienten – går genom `t()`:
+
+```js
+import { t, tn, locale } from '../core.js';
+toast(t('Sparat'));
+main.innerHTML = `<h2>${t('Mitt konto – {name}', { name: esc(me.name) })}</h2>`;
+const n = tn(count, '{n} titel', '{n} titlar');          // plural efter Intl.PluralRules för valt språk
+new Date(s * 1000).toLocaleDateString(locale, { … });  // datum, tid och tal med vald locale (fmtDate, fmtDay, hhmm …)
+```
+
+- **Nyckeln är den svenska texten.** Utan engelsk rad i `web/i18n/en.js` visas svenskan. Lägg till raden där för
+  varje ny text (testet kräver det för text med å/ä/ö). Hela meningar, inte ord för ord: `t('Visa {n} titlar', { n })`
+  i stället för `t('Visa') + n + t('titlar')`.
+- **Variabler** skrivs `{namn}` och fylls i ett varv (värdena tolkas inte igen). I HTML-mallar är texten HTML: escapa
+  värdena med `esc()` som förut, och behåll taggarna (`<b>`, `<a href="…">`) i översättningen.
+- Komponenterna (`openDialog`, `emptyState`, `iconButton` …) tar emot färdig text – anroparen översätter:
+  `confirmDialog(t('Ta bort profilen?'), { okLabel: t('Ta bort') })`.
+- Jämför aldrig med svensk text (`textContent === 'Pausad'`, `/^Idag/`) – jämför med `t('…')` eller med data.
+- `t()` fungerar även på modulnivå (tabeller med etiketter): katalogen läses in före modulerna och språkbyte laddar
+  om sidan (`setLang` i `core.js`). Språket väljs per profil i *Mitt konto → Språk* och sparas på servern.
+- Serverns felmeddelanden är svenska; `api()` översätter dem med samma katalog (de vanligaste finns sist i `en.js`).
+  Fasta etiketter från servern översätts där de visas (`t(label)`); text med variabler som servern bygger
+  (säkerhetskontrollen, mappförslagen i installationen) skriver servern på profilens språk (`c.user.lang`).
+  Innehåll som ska vara orört (serverloggen, fritext i säkerhetsloggen) märks `translate="no"`.
+
 ## Riktlinjer
 
 - **esc() på all servertext** som hamnar i HTML. Komponenterna escapar sina egna parametrar (rubriker,
@@ -245,11 +273,13 @@ kör granskningsskriptet `test/helpers/a11y-audit.js` över alla vyer (lägg til
 - **Telefon**: minst 44 px stora mål (`--touch`) på pekskärm, dialoger och menyer som ark nerifrån, inget som
   gör sidan bredare än skärmen (kontrollera vid 375 px), och `env(safe-area-inset-*)` för installerad app.
 - **Rörelse**: animationer bara under `prefers-reduced-motion: no-preference` (eller stängs av under `reduce`).
-- **Svenska** i all text som användaren ser, och skriv vad som händer ("Ta bort", inte "OK") på knappar.
+- **Svenska som källa** i all text som användaren ser, alltid genom `t()` (se *Språk*), och skriv vad som händer
+  ("Ta bort", inte "OK") på knappar.
 
 ## Testa
 
 - `test/web-a11y.test.js` granskar alla vyer och tangentbordsflödena (se *Tillgänglighet* ovan).
+- `test/web-i18n.test.js` kontrollerar katalogen och letar svensk text i alla vyer på engelska (och kör granskningen där).
 - `test/ui-components.test.js` testar strängbyggarna (escapning, aria-attribut, kortmenyns val per sort och roll).
 - `test/card-actions.test.js` testar `/api/items/:id/state` och `/api/items/:id/continue` mot en riktig server,
   även att barnprofiler inte kan nå titlar över åldersgränsen.

@@ -1,5 +1,5 @@
 // Ljudspelaren: sovtimer och låttexter
-import { $, $$, api, esc, keyClick, toast } from './core.js';
+import { $, $$, api, esc, keyClick, toast, t } from './core.js';
 import { M, applyVolume, seekTo, spokenPos } from './audio.js';
 import { iconButton } from './ui/buttons.js';
 import { openDialog } from './ui/dialog.js';
@@ -36,26 +36,26 @@ function sleepTick() {
   M.fade = left < SLEEP_FADE ? Math.max(0, left / SLEEP_FADE) : 1;
   applyVolume();
   // Pausen sparar positionen (ljudböcker/poddar) via onpause
-  if (left <= 0.3) { a.pause(); setSleep(0); toast('Sovtimern pausade uppspelningen'); return; }
+  if (left <= 0.3) { a.pause(); setSleep(0); toast(t('Sovtimern pausade uppspelningen')); return; }
   sleepLabel(left);
 }
 function sleepLabel(left) {
   const b = $('#msleep'); if (!b) return;
   b.classList.toggle('on', !!(SLEEP.until || SLEEP.end));
-  b.textContent = SLEEP.until ? `☾ ${Math.max(1, Math.ceil((left ?? sleepLeft()) / 60))} min` : SLEEP.end ? '☾ slut' : '☾';
-  b.setAttribute('aria-label', SLEEP.until ? `Sovtimer, ${Math.max(1, Math.ceil((left ?? sleepLeft()) / 60))} minuter kvar` : SLEEP.end ? 'Sovtimer, pausar vid slutet' : 'Sovtimer');
+  b.textContent = SLEEP.until ? t('☾ {v} min', { v: Math.max(1, Math.ceil((left ?? sleepLeft()) / 60)) }) : SLEEP.end ? t('☾ slut') : '☾';
+  b.setAttribute('aria-label', SLEEP.until ? t('Sovtimer, {v} minuter kvar', { v: Math.max(1, Math.ceil((left ?? sleepLeft()) / 60)) }) : SLEEP.end ? t('Sovtimer, pausar vid slutet') : t('Sovtimer'));
 }
 export function sleepDialog() {
-  const what = M.spoken ? (M.spoken.kind === 'book' ? 'kapitlet' : 'avsnittet') : 'låten';
-  const h = openDialog({ title: 'Sovtimer', closeOnRoute: false, body: `<p class="muted small">Ljudet tonas ner och pausas – positionen i ljudböcker och poddar sparas.</p>
-    <div class="plpick">${[15, 30, 45, 60].map(m => `<button class="ghost" data-sl="${m}">${m} minuter</button>`).join('')}
-    <button class="ghost" data-sl="end">När ${what} tar slut</button>${SLEEP.until || SLEEP.end ? '<button class="ghost" data-sl="0">Stäng av sovtimern</button>' : ''}</div>` });
+  const what = M.spoken ? (M.spoken.kind === 'book' ? t('kapitlet') : t('avsnittet')) : t('låten');
+  const h = openDialog({ title: t('Sovtimer'), closeOnRoute: false, body: `<p class="muted small">${t('Ljudet tonas ner och pausas – positionen i ljudböcker och poddar sparas.')}</p>
+    <div class="plpick">${[15, 30, 45, 60].map(m => `<button class="ghost" data-sl="${m}">${t('{m} minuter', { m })}</button>`).join('')}
+    <button class="ghost" data-sl="end">${t('När {what} tar slut', { what })}</button>${SLEEP.until || SLEEP.end ? t('<button class="ghost" data-sl="0">Stäng av sovtimern</button>') : ''}</div>` });
   const d = h.el, close = () => h.close();
   $('[data-sl]', d)?.focus();
   $$('[data-sl]', d).forEach(b => b.onclick = () => {
     const v = b.dataset.sl;
     setSleep(v === 'end' ? 'end' : +v);
-    if (v !== '0') toast(v === 'end' ? `Pausar när ${what} tar slut` : `Pausar om ${v} minuter`);
+    if (v !== '0') toast(v === 'end' ? t('Pausar när {what} tar slut', { what }) : t('Pausar om {v} minuter', { v }));
     close();
   });
 }
@@ -65,7 +65,7 @@ const LY = { open: false, data: null, tid: null, idx: -1, seq: 0 };
 export function ensureLyricsPanel() {
   if ($('#lyrics')) return;
   const p = document.createElement('div'); p.id = 'lyrics'; p.hidden = true;
-  p.innerHTML = `<div class="lyhead"><b id="lytitle"></b>${iconButton({ icon: '✕', label: 'Stäng låttexten', id: 'lyx' })}</div><div id="lybody"></div>`;
+  p.innerHTML = `<div class="lyhead"><b id="lytitle"></b>${iconButton({ icon: '✕', label: t('Stäng låttexten'), id: 'lyx' })}</div><div id="lybody"></div>`;
   document.body.append(p);
   $('#lyx').onclick = () => showLyrics(false);
 }
@@ -77,21 +77,21 @@ export function showLyrics(on) {
 }
 export const toggleLyrics = () => showLyrics(!LY.open);
 export async function loadLyrics() {
-  const t = M.cur;
-  if (!LY.open || !t?.id || M.spoken || LY.tid === t.id) return;
-  LY.tid = t.id; LY.data = null; LY.idx = -1;
+  const tt = M.cur;
+  if (!LY.open || !tt?.id || M.spoken || LY.tid === tt.id) return;
+  LY.tid = tt.id; LY.data = null; LY.idx = -1;
   const seq = ++LY.seq;
-  $('#lytitle').textContent = t.title;
-  $('#lybody').innerHTML = loadingState({ kind: 'inline', label: 'Hämtar låttext…' });
+  $('#lytitle').textContent = tt.title;
+  $('#lybody').innerHTML = loadingState({ kind: 'inline', label: t('Hämtar låttext…') });
   let d;
-  try { d = await api(`/music/tracks/${t.id}/lyrics`, { bg: true }); } catch { d = { lines: [] }; }
+  try { d = await api(`/music/tracks/${tt.id}/lyrics`, { bg: true }); } catch { d = { lines: [] }; }
   if (seq !== LY.seq) return; // en annan låt hann starta
   LY.data = d;
   // source: lrc/tag = egen fil, lrclib = hämtad från LRCLIB (server/musicmeta.js)
   $('#lybody').innerHTML = d.lines.length ? d.lines.map((l, i) => `<p data-ly="${i}" class="${d.synced ? 'sync' : ''}">${esc(l.text) || '&nbsp;'}</p>`).join('')
-      + (d.source === 'lrclib' ? '<p class="muted small lysrc">Text från LRCLIB</p>' : '')
-    : d.instrumental ? '<p class="muted">Instrumental – ingen text.</p>'
-    : '<p class="muted">Ingen text hittades. Lägg en .lrc-fil med samma namn bredvid ljudfilen, eller bädda in texten i filens taggar.</p>';
+      + (d.source === 'lrclib' ? t('<p class="muted small lysrc">Text från LRCLIB</p>') : '')
+    : d.instrumental ? t('<p class="muted">Instrumental – ingen text.</p>')
+    : t('<p class="muted">Ingen text hittades. Lägg en .lrc-fil med samma namn bredvid ljudfilen, eller bädda in texten i filens taggar.</p>');
   if (d.synced) $$('[data-ly]', $('#lybody')).forEach(p => keyClick(p).onclick = () => seekTo(d.lines[+p.dataset.ly].t));
   lyricsTick();
 }

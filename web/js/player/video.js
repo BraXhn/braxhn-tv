@@ -1,5 +1,5 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr } from '../core.js';
+import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { castItem, castReady } from './cast.js';
@@ -79,46 +79,46 @@ export async function play(id, start = 0, opts = {}) {
   const chaps = it.chapters || [];
   const line2 = it.kind === 'episode' ? `${sxe(it)} — ${esc(it.title)}` : (it.year || '');
   el.innerHTML = `<video id="vid" autoplay playsinline x-webkit-airplay="allow"></video>
-    <div class="pbar"><button class="ghost small" id="pclose">← Tillbaka</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
-      <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="Casta till Chromecast">📺 Casta</button>
+    <div class="pbar"><button class="ghost small" id="pclose">${t('← Tillbaka')}</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
+      <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="${t('Casta till Chromecast')}">${t('📺 Casta')}</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
       ${remoteButton('pdevs', 'ghost small')}
-      <button class="ghost small" id="pparty" title="Titta tillsammans med någon annanstans">👥 ${partyId ? 'Rummet' : 'Titta tillsammans'}</button></div>
-    <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>Titta tillsammans</b><button class="ghost small" id="pbclose" aria-label="Stäng Titta tillsammans" title="Stäng">✕</button></div>
-      <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">Kopiera</button></div>
-      <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="Skriv ett meddelande…" maxlength="300"></div>
-    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">Avbryt</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+      <button class="ghost small" id="pparty" title="${t('Titta tillsammans med någon annanstans')}">👥 ${partyId ? t('Rummet') : t('Titta tillsammans')}</button></div>
+    <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>${t('Titta tillsammans')}</b><button class="ghost small" id="pbclose" aria-label="${t('Stäng Titta tillsammans')}" title="${t('Stäng')}">✕</button></div>
+      <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">${t('Kopiera')}</button></div>
+      <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="${t('Skriv ett meddelande…')}" maxlength="300"></div>
+    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">${t('Avbryt')}</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
-      <label>Kvalitet<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
-      ${audios.length > 1 ? `<label>Ljud<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
-      <label>Undertexter<select id="ps"><option value="">Inga undertexter</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
-      ${textSubs.length > 1 ? `<label>Andra undertext<select id="ps2"><option value="">Ingen</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
-      <span id="poff" class="row" hidden>Undertextens tid <button class="ghost small" data-off="-0.5" title="Tidigare" aria-label="Undertexten 0,5 s tidigare">−</button><button class="ghost small" data-off="-0.1" title="0,1 s tidigare" aria-label="Undertexten 0,1 s tidigare">−0,1</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.1" title="0,1 s senare" aria-label="Undertexten 0,1 s senare">+0,1</button><button class="ghost small" data-off="0.5" title="Senare" aria-label="Undertexten 0,5 s senare">+</button></span>
+      <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
+      ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
+      <label>${t('Undertexter')}<select id="ps"><option value="">${t('Inga undertexter')}</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
+      ${textSubs.length > 1 ? `<label>${t('Andra undertext')}<select id="ps2"><option value="">${t('Ingen')}</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
+      <span id="poff" class="row" hidden>${t('Undertextens tid')} <button class="ghost small" data-off="-0.5" title="${t('Tidigare')}" aria-label="${t('Undertexten 0,5 s tidigare')}">−</button><button class="ghost small" data-off="-0.1" title="${t('0,1 s tidigare')}" aria-label="${t('Undertexten 0,1 s tidigare')}">−0,1</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.1" title="${t('0,1 s senare')}" aria-label="${t('Undertexten 0,1 s senare')}">+0,1</button><button class="ghost small" data-off="0.5" title="${t('Senare')}" aria-label="${t('Undertexten 0,5 s senare')}">+</button></span>
       <div id="psync" class="psync" hidden></div>
-      <label>Hastighet<select id="prate">${RATES.map(r => `<option value="${r}">${r === 1 ? 'Normal' : String(r).replace('.', ',') + '×'}</option>`).join('')}</select></label>
-      <div class="setgrp"><b>Ljud</b>
-        <label class="chk"><input type="checkbox" id="pnight"> Nattläge <span class="muted">jämnare ljud, svaga ljud lyfts</span></label>
-        <label class="chk"><input type="checkbox" id="pdialog"> Tydligare dialog <span class="muted">rösterna förstärks</span></label></div>
-      <details class="setgrp"><summary>Undertextens utseende</summary>${subStyleFields('pst')}</details></div>
+      <label>${t('Hastighet')}<select id="prate">${RATES.map(r => `<option value="${r}">${r === 1 ? 'Normal' : String(r).replace('.', ',') + '×'}</option>`).join('')}</select></label>
+      <div class="setgrp"><b>${t('Ljud')}</b>
+        <label class="chk"><input type="checkbox" id="pnight"> ${t('Nattläge')} <span class="muted">${t('jämnare ljud, svaga ljud lyfts')}</span></label>
+        <label class="chk"><input type="checkbox" id="pdialog"> ${t('Tydligare dialog')} <span class="muted">${t('rösterna förstärks')}</span></label></div>
+      <details class="setgrp"><summary>${t('Undertextens utseende')}</summary>${subStyleFields('pst')}</details></div>
     <div class="ctl" id="ctl">
-      <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Tidslinje" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
+      <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="${t('Tidslinje')}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
         <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
       <div class="crow">
         <div class="cinfo"><b>${esc(it.kind === 'episode' ? it.showTitle || it.title : it.title)}</b><span>${line2}</span><span id="ctime">0:00</span></div>
         <div class="cmid">
-          <button id="cprev" title="${chaps.length ? 'Föregående kapitel' : 'Till början'}" aria-label="${chaps.length ? 'Föregående kapitel' : 'Till början'}">${ICON.prev}</button>
-          <button id="cback" title="10 s bakåt (←)" aria-label="10 s bakåt (←)">${ICON.back10}</button>
-          <button id="cplay" class="big" title="Spela/pausa (mellanslag)" aria-label="Spela/pausa (mellanslag)">${ICON.play}</button>
-          <button id="cfwd" title="30 s framåt (→)" aria-label="30 s framåt (→)">${ICON.fwd30}</button>
-          <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" aria-label="${it.nextId ? 'Nästa avsnitt' : 'Nästa kapitel'}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
-          <button id="cstop" title="Stoppa" aria-label="Stoppa">${ICON.stop}</button>
+          <button id="cprev" title="${chaps.length ? t('Föregående kapitel') : t('Till början')}" aria-label="${chaps.length ? t('Föregående kapitel') : t('Till början')}">${ICON.prev}</button>
+          <button id="cback" title="${t('10 s bakåt (←)')}" aria-label="${t('10 s bakåt (←)')}">${ICON.back10}</button>
+          <button id="cplay" class="big" title="${t('Spela/pausa (mellanslag)')}" aria-label="${t('Spela/pausa (mellanslag)')}">${ICON.play}</button>
+          <button id="cfwd" title="${t('30 s framåt (→)')}" aria-label="${t('30 s framåt (→)')}">${ICON.fwd30}</button>
+          <button id="${it.nextId ? 'pnext' : 'cnextch'}" title="${it.nextId ? t('Nästa avsnitt') : t('Nästa kapitel')}" aria-label="${it.nextId ? t('Nästa avsnitt') : t('Nästa kapitel')}" ${it.nextId || chaps.length > 1 ? '' : 'disabled'}>${ICON.next}</button>
+          <button id="cstop" title="${t('Stoppa')}" aria-label="${t('Stoppa')}">${ICON.stop}</button>
         </div>
         <div class="cright">
-          ${chaps.length ? `<button id="pchap" title="Kapitel" aria-label="Kapitel">${ICON.list}</button>` : ''}
-          <button id="cset" title="Kvalitet, ljud och undertexter" aria-label="Kvalitet, ljud och undertexter">${ICON.gear}</button>
-          <span class="vol"><button id="cmute" title="Ljud av/på (m)" aria-label="Ljud av/på (m)">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="Volym"></span>
-          <button id="cmini" title="Litet fönster (fortsätt bläddra)" aria-label="Litet fönster (fortsätt bläddra)">${ICON.mini}</button>
-          <button id="cfull" title="Helskärm (f)" aria-label="Helskärm (f)">${ICON.full}</button>
+          ${chaps.length ? `<button id="pchap" title="${t('Kapitel')}" aria-label="${t('Kapitel')}">${ICON.list}</button>` : ''}
+          <button id="cset" title="${t('Kvalitet, ljud och undertexter')}" aria-label="${t('Kvalitet, ljud och undertexter')}">${ICON.gear}</button>
+          <span class="vol"><button id="cmute" title="${t('Ljud av/på (m)')}" aria-label="${t('Ljud av/på (m)')}">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="${t('Volym')}"></span>
+          <button id="cmini" title="${t('Litet fönster (fortsätt bläddra)')}" aria-label="${t('Litet fönster (fortsätt bläddra)')}">${ICON.mini}</button>
+          <button id="cfull" title="${t('Helskärm (f)')}" aria-label="${t('Helskärm (f)')}">${ICON.full}</button>
         </div>
       </div>
     </div>`;
@@ -176,14 +176,14 @@ export async function play(id, start = 0, opts = {}) {
   if (q('#pnext')) q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
   q('#pparty').onclick = async () => {
     if (!cur.party) {
-      try { const r = await api('/party', { method: 'POST', body: { itemId: it.id }, bg: true }); if (P !== cur) return; cur.party = r.id; pushState(); joinParty(); toast('Rum skapat – dela länken'); }
+      try { const r = await api('/party', { method: 'POST', body: { itemId: it.id }, bg: true }); if (P !== cur) return; cur.party = r.id; pushState(); joinParty(); toast(t('Rum skapat – dela länken')); }
       catch (e) { return toastErr(e); }
     }
     q('#partybox').hidden = !q('#partybox').hidden;
   };
   q('#pbclose').onclick = () => { q('#partybox').hidden = true; };
   if (opts.startParty && !cur.party) q('#pparty').click(); // "Titta tillsammans…" från kortets meny
-  q('#pcopy').onclick = () => { navigator.clipboard?.writeText(q('#plink').value).then(() => toast('Länken kopierad')); };
+  q('#pcopy').onclick = () => { navigator.clipboard?.writeText(q('#plink').value).then(() => toast(t('Länken kopierad'))); };
   q('#pmsg').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim() && cur.party) { api(`/party/${cur.party}/chat`, { method: 'POST', body: { text: e.target.value }, bg: true }).catch(() => {}); e.target.value = ''; } };
   // Lokala händelser skickas till rummet (men inte de som kommer från rummet självt)
   const pushState = () => { if (P === cur && cur.party && !cur.applying) api(`/party/${cur.party}/state`, { method: 'POST', body: { playing: !v.paused, position: v.currentTime }, bg: true }).catch(() => {}); };
@@ -226,9 +226,9 @@ export async function play(id, start = 0, opts = {}) {
   v.addEventListener('pause', () => P === cur && sendProgress());
   v.addEventListener('ended', () => P === cur && onEnded());
   v.addEventListener('error', () => {
-    if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast('Webbläsaren kunde inte spela filen direkt – byter läge'); cur.forceHls = true; reload(true); }
+    if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast(t('Webbläsaren kunde inte spela filen direkt – byter läge')); cur.forceHls = true; reload(true); }
     else if (P === cur && h264Fallback(cur)) return;
-    else if (P === cur && v.error) toast(`Kunde inte spela upp (${['', 'avbrutet', 'nätverksfel', 'avkodningsfel', 'formatet stöds inte'][v.error.code] || 'fel'}) – prova en lägre kvalitet under ⚙`);
+    else if (P === cur && v.error) toast(t('Kunde inte spela upp ({v}) – prova en lägre kvalitet under ⚙', { v: ['', t('avbrutet'), t('nätverksfel'), t('avkodningsfel'), t('formatet stöds inte')][v.error.code] || 'fel' }));
   });
   // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
   let idle; const wake = () => {
@@ -244,8 +244,8 @@ export async function play(id, start = 0, opts = {}) {
 
 // Knappen för sammanfattning/intro/eftertexter. Med automatisk överhoppning (kontots val) visas först
 // "Hoppar över intro… Avbryt" i SKIP_DELAY sekunder; varje del hoppas över högst en gång per uppspelning.
-const SKIP_TEXT = { recap: ['Hoppa över sammanfattning ⏭', 'Hoppar över sammanfattningen…'], intro: ['Hoppa över intro ⏭', 'Hoppar över intro…'],
-  credits: ['Nästa avsnitt ⏭', 'Nästa avsnitt startar…'] };
+const SKIP_TEXT = { recap: [t('Hoppa över sammanfattning ⏭'), t('Hoppar över sammanfattningen…')], intro: [t('Hoppa över intro ⏭'), t('Hoppar över intro…')],
+  credits: [t('Nästa avsnitt ⏭'), t('Nästa avsnitt startar…')] };
 function stopSkipCountdown(cur) {
   if (!cur) return;
   clearInterval(cur.skipTimer); cur.skipTimer = null;
@@ -317,7 +317,7 @@ async function load(start, { play = true } = {}) {
   }
   let pb;
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
-  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = 'Förbereder…';
+  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = t('Förbereder…');
   try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
   catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
   if (!live()) return;
@@ -334,10 +334,10 @@ async function load(start, { play = true } = {}) {
   }
   cur.pb = pb;
   applyFilter(cur, v, pb);
-  const label = { direct: 'Direkt', remux: 'Remux', transcode: 'Omkodning' }[pb.mode];
+  const label = { direct: t('Direkt'), remux: 'Remux', transcode: t('Omkodning') }[pb.mode];
   const pm = $('#pmode', el);
   const vcl = pb.mode === 'transcode' && pb.vcodec && pb.vcodec !== 'h264' ? ' · ' + pb.vcodec.toUpperCase() : '';
-  pm.textContent = `${label}${vcl}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? ' · utanför hemmet' : ''}`;
+  pm.textContent = `${label}${vcl}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? t(' · utanför hemmet') : ''}`;
   pm.title = pb.reasons.join(', ');
   v.autoplay = play; // pausad vid bytet: den nya strömmen ska inte starta av sig själv
   if (pb.mode === 'direct' || v.canPlayType('application/vnd.apple.mpegurl')) {
@@ -345,7 +345,7 @@ async function load(start, { play = true } = {}) {
   } else {
     let Hls;
     try { Hls = await loadHls(); if (!Hls.isSupported()) throw new Error(); }
-    catch { if (live()) toast('Kunde inte ladda HLS-spelaren'); return; }
+    catch { if (live()) toast(t('Kunde inte ladda HLS-spelaren')); return; }
     if (!live()) return;
     if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
     // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
@@ -361,7 +361,7 @@ async function load(start, { play = true } = {}) {
       fragLoadPolicy: { default: slow }, xhrSetup: (x) => { x.withCredentials = true; } });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
-      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = `${label}${vcl} · ${l.height}p (anpassas)${pb.remote ? ' · utanför hemmet' : ''}`;
+      if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = t('{label}{vcl} · {height}p (anpassas){v}', { label, vcl, height: l.height, v: pb.remote ? t(' · utanför hemmet') : '' });
     });
     // Fatala fel: försök igen några gånger, men inte i all oändlighet (utgången inloggning, borttagen fil …)
     let netTries = 0, mediaTries = 0;
@@ -369,11 +369,11 @@ async function load(start, { play = true } = {}) {
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || cur.hls !== hls || !live()) return;
       const code = d.response?.code;
-      if (code === 401 || code === 403) { toast(code === 401 ? 'Inloggningen har gått ut – logga in igen' : 'Uppspelningen nekades'); return closePlayer(false); }
+      if (code === 401 || code === 403) { toast(code === 401 ? t('Inloggningen har gått ut – logga in igen') : t('Uppspelningen nekades')); return closePlayer(false); }
       if (d.type === 'networkError' && ++netTries <= 3) return void setTimeout(() => cur.hls === hls && hls.startLoad(), 1000 * netTries);
       if (d.type === 'mediaError' && ++mediaTries <= 2) return hls.recoverMediaError();
       if (d.type === 'mediaError' && h264Fallback(cur)) return;
-      toast(d.type === 'networkError' ? 'Ingen kontakt med servern – uppspelningen stoppades' : 'Uppspelningsfel: ' + d.details);
+      toast(d.type === 'networkError' ? t('Ingen kontakt med servern – uppspelningen stoppades') : t('Uppspelningsfel: ') + d.details);
     });
     // Starta när spellistan är inläst – ett play() direkt efter attachMedia avbryts ofta av den nya laddningen
     // ("interrupted by a new load request") och filmen blev stående tills man pausade och startade igen
@@ -398,7 +398,7 @@ async function load(start, { play = true } = {}) {
 function h264Fallback(cur) {
   if (cur.h264 || cur.pb?.mode !== 'transcode' || !cur.pb.vcodec || cur.pb.vcodec === 'h264') return false;
   cur.h264 = true;
-  toast(`Enheten kunde inte spela ${cur.pb.vcodec === 'av1' ? 'AV1' : 'HEVC'} – byter till H.264`);
+  toast(t('Enheten kunde inte spela {v} – byter till H.264', { v: cur.pb.vcodec === 'av1' ? t('AV1') : 'HEVC' }));
   reload(true);
   return true;
 }
@@ -413,7 +413,7 @@ function sendProgress(final = false) {
   else fetch(`/api/items/${cur.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     .then(r => r.json()).then(d => {
       if (d.screenTime) screenBadge(d.screenTime);
-      if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast('Uppspelningen stoppades av administratören'); closePlayer(); } }
+      if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast(t('Uppspelningen stoppades av administratören')); closePlayer(); } }
     }).catch(() => {});
 }
 
@@ -426,16 +426,16 @@ function onEnded() {
   if (plan.auto && plan.seconds === 0) return goNext(it.nextId);
   const box = document.createElement('div'); box.className = 'next';
   let n = plan.seconds;
-  box.innerHTML = `<b>${plan.auto ? `Nästa avsnitt om <span class="cd">${n}</span> s` : 'Nästa avsnitt'}</b><div class="row"><button class="primary small" data-go>Spela nu</button><button class="ghost small" data-stay>${plan.auto ? 'Avbryt' : 'Stäng'}</button></div>`;
+  box.innerHTML = `<b>${plan.auto ? `${t('Nästa avsnitt om')} <span class="cd">${n}</span> s` : t('Nästa avsnitt')}</b><div class="row"><button class="primary small" data-go>${t('Spela nu')}</button><button class="ghost small" data-stay>${plan.auto ? t('Avbryt') : t('Stäng')}</button></div>`;
   cur.el.append(box);
   clearInterval(cur.nextTimer);
-  const t = cur.nextTimer = plan.auto ? setInterval(() => {
-    if (P !== cur) return clearInterval(t);
+  const tm = cur.nextTimer = plan.auto ? setInterval(() => {
+    if (P !== cur) return clearInterval(tm);
     n--; $('.cd', box).textContent = n;
-    if (n <= 0) { clearInterval(t); goNext(it.nextId); }
+    if (n <= 0) { clearInterval(tm); goNext(it.nextId); }
   }, 1000) : null;
-  $('[data-go]', box).onclick = () => { clearInterval(t); goNext(it.nextId); };
-  $('[data-stay]', box).onclick = () => { clearInterval(t); box.remove(); };
+  $('[data-go]', box).onclick = () => { clearInterval(tm); goNext(it.nextId); };
+  $('[data-stay]', box).onclick = () => { clearInterval(tm); box.remove(); };
 }
 
 async function goNext(nextId) {

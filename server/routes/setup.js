@@ -127,15 +127,16 @@ function guess(name, n) {
   if (byContent) return { type: byContent, by: byName ? 'content-over-name' : 'content' };
   return { type: null, by: null };
 }
-function reasonText(g, n) {
+// Förklaringen följer webbens språk för profilen (users.lang)
+function reasonText(g, n, en = false) {
   const parts = [];
-  if (n.videos) parts.push(`${n.videos} videofiler${n.episodes ? `, ${n.episodes} med avsnittsnummer (SxxEyy)` : ''}`);
-  if (n.audio) parts.push(`${n.audio} ljudfiler`);
-  if (n.books) parts.push(`${n.books} ljudböcker (m4b)`);
-  const found = parts.length ? parts.join(', ') : 'inga mediafiler hittades ännu';
-  if (g.by === 'name') return `Mappnamnet – ${found}`;
-  if (g.by === 'content') return `Innehållet: ${found}`;
-  if (g.by === 'content-over-name') return `Innehållet säger emot namnet: ${found}`;
+  if (n.videos) parts.push(en ? `${n.videos} video files${n.episodes ? `, ${n.episodes} with episode numbers (SxxEyy)` : ''}` : `${n.videos} videofiler${n.episodes ? `, ${n.episodes} med avsnittsnummer (SxxEyy)` : ''}`);
+  if (n.audio) parts.push(en ? `${n.audio} audio files` : `${n.audio} ljudfiler`);
+  if (n.books) parts.push(en ? `${n.books} audiobooks (m4b)` : `${n.books} ljudböcker (m4b)`);
+  const found = parts.length ? parts.join(', ') : en ? 'no media files found yet' : 'inga mediafiler hittades ännu';
+  if (g.by === 'name') return en ? `The folder name – ${found}` : `Mappnamnet – ${found}`;
+  if (g.by === 'content') return en ? `The content: ${found}` : `Innehållet: ${found}`;
+  if (g.by === 'content-over-name') return en ? `The content contradicts the name: ${found}` : `Innehållet säger emot namnet: ${found}`;
   return found;
 }
 
@@ -160,7 +161,7 @@ route('GET', '/api/setup/suggest', admin, async (c) => {
     const g = guess(path.basename(dir), n);
     const lib = covering(real);
     const homeVideo = HOME.test(path.basename(dir)) && (!g.type || g.type === 'movie');
-    out.push({ name: label, path: real, type: homeVideo ? 'movie' : g.type, by: g.by || (homeVideo ? 'name' : null), reason: reasonText(g, n), ...n,
+    out.push({ name: label, path: real, type: homeVideo ? 'movie' : g.type, by: g.by || (homeVideo ? 'name' : null), reason: reasonText(g, n, c.user.lang === 'en'), ...n,
       suggestedName: g.type && GENERIC.test(path.basename(dir)) ? NICE[g.type] : path.basename(dir),
       // homeVideo: läggs till som hemvideor; library/libraryId: mappen ingår redan i ett bibliotek
       homeVideo, library: lib ? lib.name : null, libraryId: lib ? lib.id : null });

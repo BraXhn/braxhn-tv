@@ -1,7 +1,7 @@
 // Snabbinloggning med kod (för TV-webbläsare och TV-appar): visa en sexsiffrig kod som godkänns från en inloggad
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 // telefon/dator, och vyn #/quickconnect(/<kod>) där den inloggade godkänner. Servern: /api/quickconnect i server/routes/auth.js.
-import { $, act, api, esc, later, main, me, onLeave, pageAfterLogin, toast, views } from '../core.js';
+import { $, act, api, esc, later, main, me, onLeave, pageAfterLogin, toast, views, t } from '../core.js';
 import { boot } from '../router.js';
 import { openDialog } from '../ui/dialog.js';
 
@@ -21,8 +21,8 @@ const spaced = (c) => `${c.slice(0, 3)} ${c.slice(3)}`;
 function deviceName() {
   const ua = navigator.userAgent;
   const tv = /SMART-TV|SmartTV|Tizen|Web0S|webOS|BRAVIA|AFT|Android TV|GoogleTV|CrKey|HbbTV/i.test(ua);
-  const b = /Edg\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Webbläsare';
-  return `${b}${tv ? ' på TV' : ''}`;
+  const b = /Edg\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : t('Webbläsare');
+  return `${b}${tv ? t(' på TV') : ''}`;
 }
 
 /**
@@ -30,33 +30,33 @@ function deviceName() {
  * Loggar in (kaka från servern) när koden godkänts. onCancel visar inloggningsformuläret igen.
  */
 export async function codeLogin({ remember = true, onCancel } = {}) {
-  let stop = false, t = null;
-  const cancel = () => { stop = true; t?.(); };
+  let stop = false, tm = null;
+  const cancel = () => { stop = true; tm?.(); };
   onLeave(cancel);
   const show = (html) => {
     main.innerHTML = `<div class="auth qc-login">
       <div class="brand"><img class="logo-full" src="/brand/logo.svg" alt="BraXhn TV"></div>${html}
-      <button type="button" class="ghost" id="qcback">Logga in med lösenord i stället</button></div>`;
+      <button type="button" class="ghost" id="qcback">${t('Logga in med lösenord i stället')}</button></div>`;
     $('#qcback').onclick = () => { cancel(); onCancel?.(); };
   };
   const begin = async () => {
-    show('<p>Hämtar kod…</p>');
+    show(t('<p>Hämtar kod…</p>'));
     let r;
     try {
-      const res = await fetch('/api/quickconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deviceName(), device: 'Webbläsare', remember }) });
+      const res = await fetch('/api/quickconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deviceName(), device: t('Webbläsare'), remember }) });
       r = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(r.error || 'Fel ' + res.status);
+      if (!res.ok) throw new Error(r.error ? t(r.error) : t('Fel {status}', { status: res.status }));
     } catch (e) {
-      show(`<p class="err">${esc(e.message)}</p><button type="button" class="primary" id="qcnew">Försök igen</button>`);
+      show(`<p class="err">${esc(e.message)}</p><button type="button" class="primary" id="qcnew">${t('Försök igen')}</button>`);
       $('#qcnew').onclick = begin; return;
     }
     if (stop) return;
     const link = `${location.origin}/#/quickconnect/${r.code}`;
-    show(`<p>Logga in på din telefon eller dator och ange koden under <b>Godkänn inloggning på TV</b> i menyn – eller skanna QR-koden.</p>
+    show(`<p>${t('Logga in på din telefon eller dator och ange koden under <b>Godkänn inloggning på TV</b> i menyn – eller skanna QR-koden.')}</p>
       <div class="qc-code" aria-label="Kod ${esc(r.code.split('').join(' '))}">${esc(spaced(r.code))}</div>
       <div class="qc-qr" id="qcqr" aria-hidden="true"></div>
       <p class="muted small qc-link">${esc(location.origin)}/#/quickconnect</p>
-      <p class="muted small" id="qcst" role="status">Väntar på godkännande… Koden gäller i 5 minuter.</p>`);
+      <p class="muted small" id="qcst" role="status">${t('Väntar på godkännande… Koden gäller i 5 minuter.')}</p>`);
     drawQr($('#qcqr'), link, 6);
     const poll = async () => {
       if (stop) return;
@@ -64,7 +64,7 @@ export async function codeLogin({ remember = true, onCancel } = {}) {
       try {
         const res = await fetch('/api/quickconnect/' + r.secret, { headers: { 'X-Requested-With': 'BraXhnTV' } });
         d = await res.json().catch(() => ({}));
-        if (!res.ok) { stop = true; show(`<p class="err">${esc(d.error || 'Fel ' + res.status)}</p><button type="button" class="primary" id="qcnew">Ny kod</button>`); $('#qcnew').onclick = () => { stop = false; begin(); }; return; }
+        if (!res.ok) { stop = true; show(`<p class="err">${esc(d.error ? t(d.error) : t('Fel {status}', { status: res.status }))}</p><button type="button" class="primary" id="qcnew">${t('Ny kod')}</button>`); $('#qcnew').onclick = () => { stop = false; begin(); }; return; }
       } catch { d = { status: 'pending' }; } // tillfälligt nätverksfel: fortsätt försöka
       if (stop) return;
       if (d.status === 'approved') {
@@ -74,12 +74,12 @@ export async function codeLogin({ remember = true, onCancel } = {}) {
         return;
       }
       if (d.status === 'expired') {
-        show('<p>Koden har gått ut.</p><button type="button" class="primary" id="qcnew">Visa en ny kod</button>');
+        show(t('<p>Koden har gått ut.</p><button type="button" class="primary" id="qcnew">Visa en ny kod</button>'));
         $('#qcnew').onclick = begin; $('#qcnew').focus(); return;
       }
-      t = later(poll, 3000);
+      tm = later(poll, 3000);
     };
-    t = later(poll, 3000);
+    tm = later(poll, 3000);
   };
   await begin();
 }
@@ -87,11 +87,11 @@ export async function codeLogin({ remember = true, onCancel } = {}) {
 // ---------- Godkänn inloggning på TV (#/quickconnect och #/quickconnect/<kod> från QR-koden) ----------
 views.quickconnect = async (pre) => {
   const code0 = String(pre || '').replace(/\D/g, '').slice(0, 6);
-  main.innerHTML = `<div class="panel qc-approve"><h2>Godkänn inloggning på TV</h2>
-    <p class="muted">Välj <b>Logga in med kod</b> på TV:n eller i TV-appen och skriv in koden som visas där. TV:n loggas in som <b>${esc(me.name)}</b>${me.kid ? ` (barnprofil, max ${esc(me.maxAge)} år)` : ''}.</p>
+  main.innerHTML = `<div class="panel qc-approve"><h2>${t('Godkänn inloggning på TV')}</h2>
+    <p class="muted">${t('Välj <b>Logga in med kod</b> på TV:n eller i TV-appen och skriv in koden som visas där. TV:n loggas in som <b>{name}</b>{v}.', { name: esc(me.name), v: me.kid ? ` ${t('(barnprofil, max {maxAge} år)', { maxAge: esc(me.maxAge) })}` : '' })}</p>
     <form id="qcf" class="row" style="align-items:flex-end">
       <div><label for="qcc">Kod</label><input id="qcc" class="qc-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="\\d{3} ?\\d{3}" required value="${esc(code0)}" placeholder="123456"></div>
-      <button class="primary">Fortsätt</button></form>
+      <button class="primary">${t('Fortsätt')}</button></form>
     <div class="err" id="qce" role="alert"></div></div>`;
   const input = $('#qcc');
   input.focus();
@@ -99,21 +99,21 @@ views.quickconnect = async (pre) => {
     ev.preventDefault();
     const code = input.value.replace(/\D/g, '');
     $('#qce').textContent = '';
-    if (code.length !== 6) { $('#qce').textContent = 'Koden har sex siffror'; return; }
+    if (code.length !== 6) { $('#qce').textContent = t('Koden har sex siffror'); return; }
     let info;
     try { info = await api('/quickconnect/approve', { method: 'POST', body: { code } }); }
     catch (e) { $('#qce').textContent = e.message; return; }
-    const where = [info.name, info.device && info.device !== info.name ? info.device : null].filter(Boolean).join(' · ') || 'Okänd enhet';
-    const d = openDialog({ title: 'Godkänn inloggning',
-      body: `<table class="qc-info"><tr><th>Enhet</th><td>${esc(where)}</td></tr><tr><th>IP-adress</th><td>${esc(info.ip)}</td></tr>
-        <tr><th>Loggas in som</th><td>${esc(info.profile)}</td></tr></table>
-        <p class="muted small">Godkänn bara om du själv ser koden på din TV. Enheten syns sedan under Mitt konto → Inloggade enheter.</p>`,
-      actions: [{ label: 'Avbryt', value: false }, { label: 'Godkänn', kind: 'primary', value: true }] });
+    const where = [info.name, info.device && info.device !== info.name ? info.device : null].filter(Boolean).join(' · ') || t('Okänd enhet');
+    const d = openDialog({ title: t('Godkänn inloggning'),
+      body: `<table class="qc-info"><tr><th>${t('Enhet')}</th><td>${esc(where)}</td></tr><tr><th>${t('IP-adress')}</th><td>${esc(info.ip)}</td></tr>
+        <tr><th>${t('Loggas in som')}</th><td>${esc(info.profile)}</td></tr></table>
+        <p class="muted small">${t('Godkänn bara om du själv ser koden på din TV. Enheten syns sedan under Mitt konto → Inloggade enheter.')}</p>`,
+      actions: [{ label: t('Avbryt'), value: false }, { label: t('Godkänn'), kind: 'primary', value: true }] });
     d.$('.dlg-actions .primary')?.focus();
     if (await d.closed !== true) return;
     try { await api('/quickconnect/approve', { method: 'POST', body: { code, confirm: true } }); }
     catch (e) { $('#qce').textContent = e.message; return; }
-    toast('Klart – TV:n loggas in om några sekunder');
+    toast(t('Klart – TV:n loggas in om några sekunder'));
     input.value = '';
     if (location.hash !== '#/quickconnect') location.hash = '#/quickconnect';
   });

@@ -3,7 +3,7 @@
 // på sparad synk när undertexten hämtas, så efter en ändring räcker det att hämta spåret igen (sub.sv i subs.js).
 // Laddas vid behov från subs.js när en undertextfil väljs; körs automatiskt för nedladdade undertexter utan synk
 // (Mitt konto → Uppspelning, subAutoSync i /playback).
-import { $, api, esc, toast, toastErr } from '../core.js';
+import { $, api, esc, toast, toastErr, t } from '../core.js';
 import { P } from './video.js';
 import { setSubs } from './subs.js';
 
@@ -15,10 +15,10 @@ const NTSC = 24000 / 1001;
 const PAIRS = [[25, NTSC], [NTSC, 25], [25, 24], [24, 25], [24, NTSC], [NTSC, 24]]; // som FPS_PAIRS i server/subsync.js
 /** "flyttad +1,8 s · takt 25 → 23,976 bilder/s" */
 export function describe(r) {
-  const parts = [`flyttad ${sec(r.offset || 0)}`];
+  const parts = [t('flyttad {v}', { v: sec(r.offset || 0) })];
   const fps = r.fps || (r.ratio && PAIRS.filter(p => Math.abs(p[0] / p[1] - r.ratio) < 1e-6).map(([from, to]) => ({ from, to }))[0]);
-  if (fps) parts.push(`takt ${num(fps.from)} → ${num(fps.to)} bilder/s`);
-  else if (r.ratio && Math.abs(r.ratio - 1) > 1e-6) parts.push(`takt × ${num(r.ratio)}`);
+  if (fps) parts.push(t('takt {from} → {to} bilder/s', { from: num(fps.from), to: num(fps.to) }));
+  else if (r.ratio && Math.abs(r.ratio - 1) > 1e-6) parts.push(t('takt × {ratio}', { ratio: num(r.ratio) }));
   return parts.join(' · ');
 }
 const live = (cur, sub) => P === cur && cur.sub === sub.id && cur.sync?.sub === sub.id;
@@ -52,11 +52,11 @@ async function first(cur, sub) {
 function render(cur, sub) {
   const box = $('#psync', cur.el), g = cur.sync; if (!box || !g) return;
   const extra = cur.offset || 0;
-  const now = sub.sync ? `Synkad: ${describe(sub.sync)}` : '';
+  const now = sub.sync ? t('Synkad: {sync}', { sync: describe(sub.sync) }) : '';
   box.innerHTML = `<span class="small psyncs" role="status" aria-live="polite">${esc(g.text || now)}</span>
-    <span class="row"><button class="ghost small" id="psyncgo" ${g.busy ? 'disabled' : ''}>Synka automatiskt</button>
-    ${g.undo ? '<button class="ghost small" id="psyncundo">Ångra</button>' : ''}
-    ${extra ? `<button class="ghost small" id="psyncsave" title="Sparar justeringen för den här undertexten – gäller alla som tittar">Spara ${esc(sec(extra))}</button>` : ''}</span>`;
+    <span class="row"><button class="ghost small" id="psyncgo" ${g.busy ? 'disabled' : ''}>${t('Synka automatiskt')}</button>
+    ${g.undo ? t('<button class="ghost small" id="psyncundo">Ångra</button>') : ''}
+    ${extra ? `<button class="ghost small" id="psyncsave" title="${t('Sparar justeringen för den här undertexten – gäller alla som tittar')}">${t('Spara {v}', { v: esc(sec(extra)) })}</button>` : ''}</span>`;
   $('#psyncgo', box).onclick = () => start(cur, sub, !!sub.sync);
   const u = $('#psyncundo', box); if (u) u.onclick = () => undo(cur, sub);
   const s = $('#psyncsave', box); if (s) s.onclick = () => saveManual(cur, sub);
@@ -64,7 +64,7 @@ function render(cur, sub) {
 
 async function start(cur, sub, force) {
   const g = cur.sync; if (!g || g.busy) return;
-  g.busy = true; g.text = 'Synkar mot ljudet …'; render(cur, sub);
+  g.busy = true; g.text = t('Synkar mot ljudet …'); render(cur, sub);
   try { follow(cur, sub, await api(syncUrl(sub), { method: 'POST', body: { audio: cur.audio || null, force }, bg: true })); }
   catch (e) { g.busy = false; g.text = ''; if (live(cur, sub)) render(cur, sub); toastErr(e); }
 }
@@ -76,7 +76,7 @@ function follow(cur, sub, st) {
   const j = st.job;
   if (j && (j.state === 'queued' || j.state === 'running')) {
     g.busy = true;
-    g.text = j.state === 'queued' ? 'Väntar på tur …' : `Synkar mot ljudet … ${Math.round((j.progress || 0) * 100)} %`;
+    g.text = j.state === 'queued' ? t('Väntar på tur …') : t('Synkar mot ljudet … {v} %', { v: Math.round((j.progress || 0) * 100) });
     render(cur, sub);
     g.timer = setTimeout(async () => {
       try { follow(cur, sub, await api(syncUrl(sub), { bg: true })); }
@@ -87,14 +87,14 @@ function follow(cur, sub, st) {
   g.busy = false;
   if (j?.state === 'done' && j.result) {
     g.undo = j.previous || { offset: 0, ratio: 1 };
-    g.text = `Klar – ${describe(j.result)}`;
+    g.text = t('Klar – {result}', { result: describe(j.result) });
     apply(cur, sub, st);
-    toast(`Undertexten synkad – ${describe(j.result)}`);
+    toast(t('Undertexten synkad – {result}', { result: describe(j.result) }));
   } else if (j?.state === 'unsure') {
-    g.text = 'Hittade ingen säker förskjutning – justera med − och +';
+    g.text = t('Hittade ingen säker förskjutning – justera med − och +');
     render(cur, sub);
   } else if (j?.state === 'error') {
-    g.text = j.error || 'Synkningen misslyckades';
+    g.text = j.error || t('Synkningen misslyckades');
     render(cur, sub);
   } else render(cur, sub);
 }
@@ -119,11 +119,11 @@ async function undo(cur, sub) {
   const g = cur.sync; if (!g?.undo) return;
   const prev = g.undo;
   g.undo = null; g.text = '';
-  if (await put(cur, sub, prev)) { g.text = 'Återställd'; render(cur, sub); }
+  if (await put(cur, sub, prev)) { g.text = t('Återställd'); render(cur, sub); }
 }
 async function saveManual(cur, sub) {
   const g = cur.sync; if (!g) return;
   const was = sub.sync || { offset: 0, ratio: 1 };
   const body = { offset: Math.round(((was.offset || 0) + (cur.offset || 0)) * 1000) / 1000, ratio: was.ratio || 1 };
-  if (await put(cur, sub, body)) { g.undo = was; g.text = `Sparad – ${describe(body)}`; render(cur, sub); }
+  if (await put(cur, sub, body)) { g.undo = was; g.text = t('Sparad – {body}', { body: describe(body) }); render(cur, sub); }
 }

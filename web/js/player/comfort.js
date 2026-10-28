@@ -1,22 +1,22 @@
 // Tittarkomfort i videospelaren: nattläge och tydligare dialog, undertextens utseende och förhandsbilder
 // ur spolningsbilderna (kapitellistan). Valen sparas per användare i webbläsaren.
-import { me, store } from '../core.js';
+import { me, store, t } from '../core.js';
 
 const ukey = (k) => `${k}.${me?.id ?? ''}`;
 
 // ---------------- undertextens utseende ----------------
 // Allt som FCC (47 CFR 79.103) och WCAG räknar upp för undertexter: storlek, typsnitt, textfärg, bakgrund (färg
 // och täckning), kantlinje och placering. Äldre sparade val (bg = outline/box/none) översätts i subStyle().
-export const SUB_SIZES = { s: ['Liten', 0.75], m: ['Mellan', 1], l: ['Stor', 1.3], xl: ['Mycket stor', 1.65], xxl: ['Störst', 2] };
-export const SUB_COLORS = { white: ['Vit', '#ffffff'], yellow: ['Gul', '#ffe14d'], cyan: ['Cyan', '#5ff4ff'], green: ['Grön', '#6dff7a'],
-  magenta: ['Magenta', '#ff7dff'], red: ['Röd', '#ff6b6b'], blue: ['Blå', '#8fb4ff'], black: ['Svart', '#000000'] };
-export const SUB_FONTS = { sans: ['Standard (utan seriffer)', 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'], serif: ['Med seriffer', 'Georgia,"Times New Roman",serif'],
-  mono: ['Jämnbred', 'ui-monospace,Menlo,Consolas,monospace'], casual: ['Handskriven', '"Comic Sans MS","Comic Neue",cursive'],
-  caps: ['Kapitäler', 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'] };
-export const SUB_BGS = { none: 'Ingen', semi: 'Halvgenomskinlig ruta', solid: 'Täckande ruta' };
-export const SUB_BGCOLORS = { black: ['Svart', '0,0,0'], gray: ['Grå', '60,60,60'], white: ['Vit', '255,255,255'], blue: ['Blå', '10,30,110'] };
-export const SUB_EDGES = { outline: 'Kantlinje', shadow: 'Skugga', raised: 'Upphöjd', depressed: 'Nedsänkt', none: 'Ingen' };
-export const SUB_POS = { 0: 'Längst ner', 6: 'Lite högre', 12: 'Högre', 24: 'Mitt på' };
+export const SUB_SIZES = { s: [t('Liten'), 0.75], m: [t('Mellan'), 1], l: [t('Stor'), 1.3], xl: [t('Mycket stor'), 1.65], xxl: [t('Störst'), 2] };
+export const SUB_COLORS = { white: [t('Vit'), '#ffffff'], yellow: [t('Gul'), '#ffe14d'], cyan: ['Cyan', '#5ff4ff'], green: [t('Grön'), '#6dff7a'],
+  magenta: ['Magenta', '#ff7dff'], red: [t('Röd'), '#ff6b6b'], blue: [t('Blå'), '#8fb4ff'], black: [t('Svart'), '#000000'] };
+export const SUB_FONTS = { sans: [t('Standard (utan seriffer)'), 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'], serif: [t('Med seriffer'), 'Georgia,"Times New Roman",serif'],
+  mono: [t('Jämnbred'), 'ui-monospace,Menlo,Consolas,monospace'], casual: [t('Handskriven'), '"Comic Sans MS","Comic Neue",cursive'],
+  caps: [t('Kapitäler'), 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'] };
+export const SUB_BGS = { none: t('Ingen'), semi: t('Halvgenomskinlig ruta'), solid: t('Täckande ruta') };
+export const SUB_BGCOLORS = { black: [t('Svart'), '0,0,0'], gray: [t('Grå'), '60,60,60'], white: [t('Vit'), '255,255,255'], blue: [t('Blå'), '10,30,110'] };
+export const SUB_EDGES = { outline: t('Kantlinje'), shadow: t('Skugga'), raised: t('Upphöjd'), depressed: t('Nedsänkt'), none: t('Ingen') };
+export const SUB_POS = { 0: t('Längst ner'), 6: t('Lite högre'), 12: t('Högre'), 24: t('Mitt på') };
 const SHADOW = { outline: '0 0 .08em #000,0 0 .08em #000,.04em .04em .1em #000,-.04em -.04em .1em #000,.04em -.04em .1em #000,-.04em .04em .1em #000',
   shadow: '.06em .06em .12em rgba(0,0,0,.95)', raised: '-.04em -.04em 0 #fff8,.05em .05em 0 #000', depressed: '.04em .04em 0 #fff8,-.05em -.05em 0 #000', none: 'none' };
 // Standard för TV-avstånd: mellanstorlek (ca 5 % av bildhöjden), vit text med kantlinje
@@ -61,9 +61,9 @@ export function subStyleFields(prefix = 'pst') {
   const s = subStyle();
   const sel = (id, label, opts, val) => `<label>${label}<select id="${prefix}-${id}" data-substyle="${id}">${Object.entries(opts).map(([k, v]) =>
     `<option value="${k}" ${String(val) === k ? 'selected' : ''}>${Array.isArray(v) ? v[0] : v}</option>`).join('')}</select></label>`;
-  return sel('size', 'Textstorlek', SUB_SIZES, s.size) + sel('font', 'Typsnitt', SUB_FONTS, s.font) + sel('color', 'Textfärg', SUB_COLORS, s.color) +
-    sel('edge', 'Kantlinje', SUB_EDGES, s.edge) + sel('bg', 'Bakgrund', SUB_BGS, s.bg) + sel('bgcolor', 'Bakgrundsfärg', SUB_BGCOLORS, s.bgcolor) +
-    sel('pos', 'Placering', SUB_POS, s.pos);
+  return sel('size', t('Textstorlek'), SUB_SIZES, s.size) + sel('font', t('Typsnitt'), SUB_FONTS, s.font) + sel('color', t('Textfärg'), SUB_COLORS, s.color) +
+    sel('edge', t('Kantlinje'), SUB_EDGES, s.edge) + sel('bg', t('Bakgrund'), SUB_BGS, s.bg) + sel('bgcolor', t('Bakgrundsfärg'), SUB_BGCOLORS, s.bgcolor) +
+    sel('pos', t('Placering'), SUB_POS, s.pos);
 }
 export function bindSubStyleFields(root, onChange) {
   root.querySelectorAll('[data-substyle]').forEach(x => x.addEventListener('change', () => { setSubStyle({ [x.dataset.substyle]: x.value }); onChange?.(); }));

@@ -58,7 +58,7 @@ const DEPS = JSON.stringify(LAZY_DEPS).replace(/</g, '\\u003c');
 // Moduler märkta "// @lazy" (vyer i LAZY i web/js/router.js) får aldrig nås statiskt från app.js (test/web-perf.test.js)
 export const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
 // Service workerns skal: filerna med hash (sw.js läser listan)
-const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|start\.js|style\.css|vendor\/hls\.min\.js)$/.test(r))));
+const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|start\.js|style\.css|vendor\/hls\.min\.js|i18n\/en\.js)$/.test(r))));
 
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK)
 const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} https://www.gstatic.com`,
@@ -67,11 +67,18 @@ const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} https://w
 
 // Färdiga svar per fil: { raw, br, gz, etag, type, mtime }. Byts när filen ändras (utveckling); i imagen aldrig.
 const cache = new Map();
-function load(f, st) {
-  const c = cache.get(f);
+// Språk: index.html finns i två varianter – svenska (standard, ingen katalog) och engelska (<html lang="en"> och
+// katalogen web/i18n/en.js som ett vanligt skript före modulerna, så att t() i web/js/core.js har den direkt).
+function load(f, st, lang = 'sv') {
+  const name = rel(f);
+  const key = name === 'index.html' && lang === 'en' ? f + '#en' : f;
+  const c = cache.get(key);
   if (c && c.mtime === st.mtimeMs && c.size === st.size) return c;
   let raw = fs.readFileSync(f);
-  const name = rel(f);
+  if (name === 'index.html') {
+    raw = Buffer.from(String(raw).replace('{{i18n}}', key === f ? '' : '<script src="/v/{{b}}/i18n/en.js"></script>')
+      .replace('<html lang="sv">', `<html lang="${key === f ? 'sv' : 'en'}">`));
+  }
   // Mallvärden: rätt bygge i index.html och service workern
   if (name === 'index.html' || name === 'sw.js' || name === 'offline.html') {
     raw = Buffer.from(String(raw).replace(/\/v\/\{\{b\}\}\/([\w./-]+)/g, (_, r) => FILEHASH.has(r) ? hashedUrl(r) : `${PREFIX}/${r}`)
@@ -85,11 +92,12 @@ function load(f, st) {
     e.gz = zlib.gzipSync(raw, { level: 9 });
   }
   if (cache.size > 500) cache.clear();
-  cache.set(f, e);
+  cache.set(key, e);
   return e;
 }
 
-export function serveStatic(req, res, pathname, search = '') {
+/** langOf: () => 'sv' | 'en' – sidans språk för index.html (http/router.js, pageLang) */
+export function serveStatic(req, res, pathname, search = '', langOf = null) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, '');
   // /v/<bygge>/… = samma fil utan prefix. Rätt bygge cachas för alltid; ett gammalt bygge (en flik som stått
   // öppen över en uppdatering) får dagens fil utan cache, så att den inte fastnar i webbläsaren.
@@ -112,7 +120,9 @@ export function serveStatic(req, res, pathname, search = '') {
       try { s = fs.statSync(f); } catch { return fail(res, 404, 'Hittades inte'); }
     }
     let c;
-    try { c = load(f, s); } catch { return fail(res, 404, 'Hittades inte'); }
+    let lang = 'sv';
+    if (f === path.join(WEB, 'index.html') && langOf) { try { lang = langOf(); } catch {} }
+    try { c = load(f, s, lang); } catch { return fail(res, 404, 'Hittades inte'); }
     const ext = path.extname(f);
     // Fasta adresser (index.html, sw.js, /app.js utan prefix …): fråga varje gång (no-cache + ETag → 304).
     // Bilder utan prefix (ikoner, logotyp) får cachas en timme.
@@ -120,7 +130,8 @@ export function serveStatic(req, res, pathname, search = '') {
       : /\.(png|jpe?g|webp|ico|woff2?)$/.test(ext) || pathname.startsWith('/brand/') ? 'max-age=3600' : 'no-cache';
     const h = { 'Content-Type': c.type, 'Cache-Control': cc, ETag: c.etag };
     if (ext === '.html') h['Content-Security-Policy'] = CSP;
-    if (c.br) h.Vary = 'Accept-Encoding';
+    if (f === path.join(WEB, 'index.html')) h.Vary = 'Cookie, Accept-Language';
+    if (c.br) h.Vary = h.Vary ? h.Vary + ', Accept-Encoding' : 'Accept-Encoding';
     if (req.headers['if-none-match'] === c.etag) { res.writeHead(304, h); return res.end(); }
     const ae = String(req.headers['accept-encoding'] || '');
     let body = c.raw;

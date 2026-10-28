@@ -6,6 +6,7 @@
 //         buffert → fade → norm ┴→ master (volym) → begränsare (mot klippning) → kompensation → högtalarna
 // audio.js äger kön och gränssnittet; motorn frågar efter nästa spår (hooks.upcoming) och meddelar byten (hooks.advance).
 import { fadeCurve, gainFor, planTransition, trimFor } from './audiomix.js';
+import { t } from './core.js';
 
 const MAX_SECONDS = 20 * 60;   // längre spår spelas av elementet (en avkodad minut stereo ≈ 21 MB)
 const MAX_BYTES = 250 << 20;
@@ -79,20 +80,20 @@ export function applyGains() {
 // ---------- hämtning och avkodning ----------
 const streamUrl = (t) => `/api/music/tracks/${t.id}/stream?a=${E.caps}&gl=1`;
 /** Hämtar och avkodar låten (cachas: högst två väntande buffertar). Löser till { buf, front, len } (sekunder). */
-export function prepare(t) {
-  const key = t.id;
+export function prepare(tm) {
+  const key = tm.id;
   const have = E.cache.get(key);
   // Ett misslyckat försök (nät, 503 vid för många omkodningar) provas igen först efter 30 s
   if (have && !(have.err && Date.now() - have.failedAt > 30e3)) { E.cache.delete(key); E.cache.set(key, have); return have.p; }
   const ent = { p: null, dec: null, err: null };
   ent.p = (async () => {
-    const res = await fetch(streamUrl(t), { credentials: 'same-origin' });
+    const res = await fetch(streamUrl(tm), { credentials: 'same-origin' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    if (+res.headers.get('content-length') > MAX_BYTES) throw new Error('för stor');
+    if (+res.headers.get('content-length') > MAX_BYTES) throw new Error(t('för stor'));
     const data = await res.arrayBuffer();
     const buf = await new Promise((ok, no) => { const r = E.ctx.decodeAudioData(data, ok, no); r?.catch?.(no); });
     // Omkodat (FLAC från servern) är redan exakt; annars jämförs längden med serverns sampelantal
-    const tr = res.headers.get('x-transcoded') === '1' ? { front: 0, back: 0 } : trimFor(buf.length, buf.sampleRate, t.gapless);
+    const tr = res.headers.get('x-transcoded') === '1' ? { front: 0, back: 0 } : trimFor(buf.length, buf.sampleRate, tm.gapless);
     const n = Math.max(1, buf.length - tr.front - tr.back);
     return { buf, front: tr.front / buf.sampleRate, len: n / buf.sampleRate, trim: tr };
   })();

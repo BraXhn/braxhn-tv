@@ -1,5 +1,6 @@
 // Vad klarar den här webbläsaren? Video- och ljudformat som skickas till servern
 // ---------- uppspelning: vad klarar den här webbläsaren? ----------
+import { t } from '../core.js';
 let CAPS = null;
 // AV1 som omkodningsmål bara när webbläsaren avkodar det jämnt (ofta hårdvara) – mäts i bakgrunden när modulen
 // laddas; tills svaret kommit (eller utan Media Capabilities) blir det HEVC eller H.264

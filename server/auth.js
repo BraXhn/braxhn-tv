@@ -92,7 +92,7 @@ export function userFromReq(req, query, allowQuery = false) {
   const t = tokenFromReq(req, query, allowQuery);
   if (!t || !/^[a-f0-9]{64}$/.test(t.token)) return null;
   const h = sha(t.token);
-  const u = get(`SELECT u.id,u.name,u.is_admin,u.remote_allowed,u.totp_enabled,u.parent_id,u.max_age,s.kind,s.scope_item,s.last_seen,s.remember,s.rowid AS sid
+  const u = get(`SELECT u.id,u.name,u.is_admin,u.remote_allowed,u.totp_enabled,u.parent_id,u.max_age,u.lang,s.kind,s.scope_item,s.last_seen,s.remember,s.rowid AS sid
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires > ?`, h, now());
   if (!u) return null;
   if (t.via === 'query' && !['media', 'img'].includes(u.kind)) return null;

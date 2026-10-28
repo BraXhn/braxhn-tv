@@ -5,7 +5,7 @@
 //   webbspelaren (var 10:e sekund, vid paus, när titeln byts och när uppspelningen slutar).
 // - Kontrollpanelen (#castbar, som mini-spelaren) styr mottagaren: spola, paus, ±10 s, volym, ljud- och undertextspår, stopp.
 // Vilken titel som spelas står i MediaInfo.customData (bx: 1) – så hittar en omladdad sida tillbaka till en pågående cast.
-import { $, api, esc, fmtTime, status, sxe, toast, toastErr } from '../core.js';
+import { $, api, esc, fmtTime, status, sxe, toast, toastErr, t } from '../core.js';
 import { P, closePlayer } from './video.js';
 import { serverFxParams } from './comfort.js';
 import { M, spokenPos, stopAudio } from '../audio.js';
@@ -45,7 +45,7 @@ function remote() {
     C.lastPos = pos();
     // Familjefiltret (Tysta + hoppa över): mottagaren hoppar över markerade scener. Ljudet är redan tystat av servern.
     const k = C.cur.skip?.find(x => C.lastPos >= x[0] && C.lastPos < x[1] - 0.5);
-    if (k && !C.player.isPaused) { seekTo(k[1]); toast('Hoppade över en markerad scen'); }
+    if (k && !C.player.isPaused) { seekTo(k[1]); toast(t('Hoppade över en markerad scen')); }
     if (!C.player.isPaused && Date.now() - C.lastSent >= SEND_EVERY) report(C.cur, C.lastPos);
     paint();
   });
@@ -90,7 +90,7 @@ function report(cur, position, final = false) {
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true })
     .then(r => r.json()).then(d => {
       // Administratören stoppade uppspelningen eller skärmtiden tog slut
-      if (d?.stop && !final && C.cur === cur) { toast(d.screenTime?.message || 'Uppspelningen stoppades'); stopCast(); }
+      if (d?.stop && !final && C.cur === cur) { toast(d.screenTime?.message || t('Uppspelningen stoppades')); stopCast(); }
     }).catch(() => {});
 }
 window.addEventListener('pagehide', () => { if (C.cur) report(C.cur, C.lastPos, true); });
@@ -125,7 +125,7 @@ async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
   const active = si >= 0 ? [si + 1] : [];
   mi.customData = { bx: 1, kind: 'video', id: it.id, version: it.version || null, title, sub: it.kind !== 'episode' && it.year ? String(it.year) : '',
     duration: p.duration || it.duration || 0, nextId: it.nextId || null, audio: p.audioSelected != null ? String(p.audioSelected) : String(audio || ''),
-    audios: (p.audio || []).map(a => ({ i: a.index, l: [a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ') })),
+    audios: (p.audio || []).map(a => ({ i: a.index, l: [a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ') })),
     subs: p.subtitles.map((s, i) => ({ t: i + 1, l: s.label })),
     // Familjefiltret: scener att hoppa över ([start, slut]) – ljudet tystas av servern (ingen ffc=1)
     ...(p.filter?.skip?.length ? { skip: p.filter.skip.slice(0, 100).map(k => [k.start, k.end]) } : {}) };
@@ -133,7 +133,7 @@ async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
 }
 /** Casta en film eller ett avsnitt från position (s). opts.audio/opts.sub: spårval (annars webbspelarens). */
 export async function castItem(it, position, opts = {}) {
-  if (!castReady) return toast('Chromecast kräver Chrome och att servern nås via HTTPS');
+  if (!castReady) return toast(t('Chromecast kräver Chrome och att servern nås via HTTPS'));
   const sess = await session(); if (!sess) return;
   let m;
   try { m = await videoMedia(it, { audio: opts.audio ?? P?.audio ?? '', sub: opts.sub ?? P?.sub }); }
@@ -144,9 +144,9 @@ export async function castItem(it, position, opts = {}) {
   C.queued.clear();
   try {
     await sess.loadMedia(req);
-    if (!opts.quiet) toast('Spelas på ' + sess.getCastDevice().friendlyName);
+    if (!opts.quiet) toast(t('Spelas på ') + sess.getCastDevice().friendlyName);
     if (P) closePlayer(false, { cast: true });
-  } catch (e) { toast('Kunde inte casta: ' + (e?.code || e)); return; }
+  } catch (e) { toast(t('Kunde inte casta: ') + (e?.code || e)); return; }
   // Händelsen från mottagaren kan dröja – följ titeln direkt. En ny laddning ersätter mottagarens kö, så nästa avsnitt
   // köas igen även när det är samma titel (byte av ljudspår).
   const c = curOf(m.info);
@@ -160,7 +160,7 @@ async function queueNext(nextId) {
   try {
     const nx = await api('/items/' + nextId, { bg: true });
     const m = await videoMedia(nx, { queue: true });
-    const media = C.ctx.getCurrentSession()?.getMediaSession(); if (!media) throw new Error('ingen mediesession');
+    const media = C.ctx.getCurrentSession()?.getMediaSession(); if (!media) throw new Error(t('ingen mediesession'));
     const qi = new chrome.cast.media.QueueItem(m.info);
     qi.autoplay = true; qi.preloadTime = 20;
     if (m.active.length) qi.activeTrackIds = m.active;
@@ -182,7 +182,7 @@ function audioInfo(url, type, meta, data) {
 }
 /** Casta det som ljudspelaren spelar: musikspåret (och resten av kön), ljudbokens fil eller poddavsnittet från samma position */
 export async function castAudio() {
-  if (!castReady) return toast('Chromecast kräver Chrome och att servern nås via HTTPS');
+  if (!castReady) return toast(t('Chromecast kräver Chrome och att servern nås via HTTPS'));
   if (!M.cur && !M.spoken) return;
   const sess = await session(); if (!sess) return;
   const items = []; let start = 0;
@@ -221,9 +221,9 @@ export async function castAudio() {
   const req = new chrome.cast.media.LoadRequest(items[0]);
   req.currentTime = start; req.autoplay = true;
   C.queued.clear();
-  try { await sess.loadMedia(req); } catch (e) { return toast('Kunde inte casta: ' + (e?.code || e)); }
+  try { await sess.loadMedia(req); } catch (e) { return toast(t('Kunde inte casta: ') + (e?.code || e)); }
   stopAudio(); // sparar ljudbokens/poddens position och stänger ljudspelaren här
-  toast('Spelas på ' + sess.getCastDevice().friendlyName);
+  toast(t('Spelas på ') + sess.getCastDevice().friendlyName);
   const c0 = curOf(items[0]);
   if (C.player) adopt(c0, (c0.offset || 0) + (c0.ss || 0) + start);
   if (items.length > 1) {
@@ -263,7 +263,7 @@ async function setAudioTrack(index) {
 function setSubTrack(trackId) {
   const media = C.ctx.getCurrentSession()?.getMediaSession(); if (!media) return;
   const ids = trackId ? [+trackId] : [];
-  promise((ok, no) => media.editTracksInfo(new chrome.cast.media.EditTracksInfoRequest(ids), ok, no)).catch(() => toast('Kunde inte byta undertext'));
+  promise((ok, no) => media.editTracksInfo(new chrome.cast.media.EditTracksInfoRequest(ids), ok, no)).catch(() => toast(t('Kunde inte byta undertext')));
 }
 
 // ---------- panelen ----------
@@ -273,13 +273,13 @@ function ensureBar() {
   bar = document.createElement('div'); bar.id = 'castbar'; bar.hidden = true;
   bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Chromecast');
   bar.innerHTML = `<div class="mleft"><div class="castico" aria-hidden="true">📺</div><div class="mtxt"><b id="cxtitle"></b><span id="cxdev" class="muted small"></span></div></div>
-    <div class="mmid"><div class="row mctl"><button class="ghost small" id="cxback" title="10 sekunder bakåt" aria-label="10 sekunder bakåt">↺10</button>
-      <button class="primary" id="cxplay" title="Pausa" aria-label="Pausa">⏸</button>
-      <button class="ghost small" id="cxfwd" title="10 sekunder framåt" aria-label="10 sekunder framåt">10↻</button>
-      <button class="ghost small" id="cxstop" title="Sluta casta" aria-label="Sluta casta">⏹</button></div>
-      <div class="mseek"><span id="cxcur" class="small muted">0:00</span><div class="track" id="cxtrack" role="slider" tabindex="0" aria-label="Spola" aria-valuemin="0"><i id="cxfill"></i></div><span id="cxdur" class="small muted">0:00</span></div></div>
-    <div class="mright"><select id="cxaudio" aria-label="Ljudspår" hidden></select><select id="cxsub" aria-label="Undertexter" hidden></select>
-      <button class="ghost small" id="cxmute" title="Ljud av" aria-label="Ljud av">🔊</button><input type="range" id="cxvol" min="0" max="1" step="0.05" aria-label="Volym på Chromecast"></div>`;
+    <div class="mmid"><div class="row mctl"><button class="ghost small" id="cxback" title="${t('10 sekunder bakåt')}" aria-label="${t('10 sekunder bakåt')}">↺10</button>
+      <button class="primary" id="cxplay" title="${t('Pausa')}" aria-label="${t('Pausa')}">⏸</button>
+      <button class="ghost small" id="cxfwd" title="${t('10 sekunder framåt')}" aria-label="${t('10 sekunder framåt')}">10↻</button>
+      <button class="ghost small" id="cxstop" title="${t('Sluta casta')}" aria-label="${t('Sluta casta')}">⏹</button></div>
+      <div class="mseek"><span id="cxcur" class="small muted">0:00</span><div class="track" id="cxtrack" role="slider" tabindex="0" aria-label="${t('Spola')}" aria-valuemin="0"><i id="cxfill"></i></div><span id="cxdur" class="small muted">0:00</span></div></div>
+    <div class="mright"><select id="cxaudio" aria-label="${t('Ljudspår')}" hidden></select><select id="cxsub" aria-label="${t('Undertexter')}" hidden></select>
+      <button class="ghost small" id="cxmute" title="${t('Ljud av')}" aria-label="${t('Ljud av')}">🔊</button><input type="range" id="cxvol" min="0" max="1" step="0.05" aria-label="${t('Volym på Chromecast')}"></div>`;
   document.body.append(bar);
   $('#cxplay').onclick = () => C.ctrl?.playOrPause();
   $('#cxback').onclick = () => seekTo(pos() - 10);
@@ -306,14 +306,14 @@ function paint() {
   const cur = C.cur, p = C.player;
   const sess = C.ctx.getCurrentSession();
   $('#cxtitle').textContent = cur.title || '';
-  $('#cxdev').textContent = [cur.sub, sess ? 'på ' + sess.getCastDevice().friendlyName : ''].filter(Boolean).join(' · ');
-  const t = pos(), d = cur.duration || ((cur.offset || 0) + (cur.ss || 0) + (p.duration || 0));
-  $('#cxcur').textContent = fmtTime(t); $('#cxdur').textContent = fmtTime(d);
-  $('#cxfill').style.width = d ? Math.min(100, t / d * 100) + '%' : '0';
-  const tr = $('#cxtrack'); tr.setAttribute('aria-valuemax', String(Math.round(d))); tr.setAttribute('aria-valuenow', String(Math.round(t))); tr.setAttribute('aria-valuetext', fmtTime(t));
+  $('#cxdev').textContent = [cur.sub, sess ? t('på ') + sess.getCastDevice().friendlyName : ''].filter(Boolean).join(' · ');
+  const tm = pos(), d = cur.duration || ((cur.offset || 0) + (cur.ss || 0) + (p.duration || 0));
+  $('#cxcur').textContent = fmtTime(tm); $('#cxdur').textContent = fmtTime(d);
+  $('#cxfill').style.width = d ? Math.min(100, tm / d * 100) + '%' : '0';
+  const tr = $('#cxtrack'); tr.setAttribute('aria-valuemax', String(Math.round(d))); tr.setAttribute('aria-valuenow', String(Math.round(tm))); tr.setAttribute('aria-valuetext', fmtTime(tm));
   const pb = $('#cxplay'), paused = !!p.isPaused;
-  pb.textContent = paused ? '▶' : '⏸'; pb.title = paused ? 'Spela' : 'Pausa'; pb.setAttribute('aria-label', pb.title);
-  const mute = $('#cxmute'); mute.textContent = p.isMuted ? '🔇' : '🔊'; mute.title = p.isMuted ? 'Ljud på' : 'Ljud av'; mute.setAttribute('aria-label', mute.title);
+  pb.textContent = paused ? '▶' : '⏸'; pb.title = paused ? t('Spela') : t('Pausa'); pb.setAttribute('aria-label', pb.title);
+  const mute = $('#cxmute'); mute.textContent = p.isMuted ? '🔇' : '🔊'; mute.title = p.isMuted ? t('Ljud på') : t('Ljud av'); mute.setAttribute('aria-label', mute.title);
   if (document.activeElement !== $('#cxvol')) $('#cxvol').value = String(p.volumeLevel ?? 1);
   // Spårväljare (bara filmer och avsnitt; byggs om när titeln byts)
   const a = $('#cxaudio'), s = $('#cxsub');
@@ -321,7 +321,7 @@ function paint() {
     a.dataset.key = cur.key;
     const audios = cur.kind === 'video' ? cur.audios || [] : [], subs = cur.kind === 'video' ? cur.subs || [] : [];
     a.innerHTML = audios.map(x => `<option value="${+x.i}">${esc(x.l)}</option>`).join(''); a.hidden = audios.length < 2; a.value = cur.audio || '';
-    s.innerHTML = `<option value="">Inga undertexter</option>` + subs.map(x => `<option value="${+x.t}">${esc(x.l)}</option>`).join(''); s.hidden = !subs.length;
+    s.innerHTML = `<option value="">${t('Inga undertexter')}</option>` + subs.map(x => `<option value="${+x.t}">${esc(x.l)}</option>`).join(''); s.hidden = !subs.length;
   }
   const act = sess?.getMediaSession()?.activeTrackIds || [];
   if (document.activeElement !== s) s.value = String(act.find(id => (cur.subs || []).some(x => x.t === id)) || '');

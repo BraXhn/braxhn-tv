@@ -1,5 +1,5 @@
 // Spelare för live-TV och inspelningar
-import { $, act, api, esc, fmtTime, hhmm, me, store, toast } from '../core.js';
+import { $, act, api, esc, fmtTime, hhmm, me, store, toast, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { overlayClose, overlayOpen, stopVideo } from './overlay.js';
 import { closeAllPlayers, loadHls } from './video.js';
@@ -25,12 +25,12 @@ export async function playLive(ch) {
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
   el.innerHTML = `<video id="lvid" controls autoplay playsinline></video>
-    <div class="pbar"><button class="ghost small" id="lclose">← Tillbaka</button><span class="title">${esc(ch.number ? ch.number + ' · ' : '')}${esc(ch.name)}</span>
+    <div class="pbar"><button class="ghost small" id="lclose">${t('← Tillbaka')}</button><span class="title">${esc(ch.number ? ch.number + ' · ' : '')}${esc(ch.name)}</span>
       <span class="muted small" id="lnow">${ch.now ? esc(ch.now.title) + ' · ' + hhmm(ch.now.start) + '–' + hhmm(ch.now.stop) : ''}</span>
-      <span class="muted small" id="lstat">Startar kanalen…</span>
-      <button class="ghost small" id="lback" title="Spola tillbaka 30 sekunder" hidden>⏪ 30 s</button><button class="ghost small" id="lfwd" title="Spola fram 30 sekunder" hidden>30 s ⏩</button>
+      <span class="muted small" id="lstat">${t('Startar kanalen…')}</span>
+      <button class="ghost small" id="lback" title="${t('Spola tillbaka 30 sekunder')}" hidden>⏪ 30 s</button><button class="ghost small" id="lfwd" title="${t('Spola fram 30 sekunder')}" hidden>30 s ⏩</button>
       <button class="small liveind" id="llive" hidden>● Live</button>
-      ${ch.now ? `<button class="ghost small" id="lrec">⏺ Spela in</button>` : ''}</div>`;
+      ${ch.now ? `<button class="ghost small" id="lrec">${t('⏺ Spela in')}</button>` : ''}</div>`;
   overlayOpen(el);
   const v = $('#lvid', el), stat = $('#lstat', el);
   // Lokal referens: om spelaren stängs (eller en annan öppnas) under start avbryter vi utan att röra borttagna element
@@ -41,7 +41,7 @@ export async function playLive(ch) {
   $('#lclose', el).onclick = () => closeLive(lp);
   for (const f of liveHooks) { try { f(lp); } catch {} }
   const rb = $('#lrec', el);
-  if (rb) rb.onclick = act(async () => { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id }, bg: true }); toast('Spelar in ' + ch.now.title); rb.disabled = true; });
+  if (rb) rb.onclick = act(async () => { await api('/dvr/program', { method: 'POST', body: { programId: ch.now.id }, bg: true }); toast(t('Spelar in ') + ch.now.title); rb.disabled = true; });
   try {
     const r = await api(`/live/${ch.id}/play`, { method: 'POST', bg: true });
     if (!cur()) return;
@@ -54,11 +54,11 @@ export async function playLive(ch) {
       const hls = lp.hls = new Hls({ liveSyncDurationCount: 3, backBufferLength: 90, enableWorker: false, xhrSetup: (x) => { x.withCredentials = true; } });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || !cur() || lp.hls !== hls) return;
-        if (d.response?.code === 403) { hls.destroy(); lp.hls = null; if (screenSt?.limited) { closeLive(lp); timeUp(); } else setStat('Uppspelningen nekades'); }
-        else if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? 'Alla tuners används' : 'Kanalen kunde inte startas'); hls.destroy(); lp.hls = null; }
+        if (d.response?.code === 403) { hls.destroy(); lp.hls = null; if (screenSt?.limited) { closeLive(lp); timeUp(); } else setStat(t('Uppspelningen nekades')); }
+        else if (d.response?.code === 409 || d.response?.code === 502) { setStat(d.response.code === 409 ? t('Alla tuners används') : t('Kanalen kunde inte startas')); hls.destroy(); lp.hls = null; }
         else if (d.type === 'networkError') setTimeout(() => { if (cur() && lp.hls === hls) hls.startLoad(); }, 1500);
         // Kan inte avkodas (t.ex. HEVC i en webbläsare utan stöd): ett par försök, sedan besked i stället för en evig slinga
-        else if (d.type === 'mediaError') { if ((lp.recovers = (lp.recovers || 0) + 1) > 3) { setStat('Kanalen kan inte spelas i den här webbläsaren'); hls.destroy(); lp.hls = null; } else hls.recoverMediaError(); }
+        else if (d.type === 'mediaError') { if ((lp.recovers = (lp.recovers || 0) + 1) > 3) { setStat(t('Kanalen kan inte spelas i den här webbläsaren')); hls.destroy(); lp.hls = null; } else hls.recoverMediaError(); }
       });
       hls.loadSource(r.url); hls.attachMedia(v);
     }
@@ -85,7 +85,7 @@ function liveControls(lp) {
     const behind = e == null ? 0 : e - v.currentTime;
     const atLive = behind < 10 && !v.paused;
     btn.classList.toggle('on', atLive);
-    btn.textContent = atLive ? '● Live' : `Gå till live (−${fmtTime(Math.max(0, behind))})`;
+    btn.textContent = atLive ? '● Live' : t('Gå till live (−{v})', { v: fmtTime(Math.max(0, behind)) });
     fwd.disabled = behind < 10;
   };
   lp.tick = setInterval(update, 1000);
@@ -106,10 +106,10 @@ export async function playRec(r, cs = {}) {
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
   const ads = Array.isArray(r.commercials) ? r.commercials : [];
-  el.innerHTML = `<video id="rvid" controls autoplay playsinline${u.live ? '' : ` src="${esc(u.url)}"`}></video><div class="pbar"><button class="ghost small" id="rclose">← Tillbaka</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
-    ${u.live ? '<span class="small liveind on">⏺ Spelas in</span><span class="muted small" id="rstat">Startar…</span>' : ''}
-    ${ads.length ? `<button class="ghost small" id="rchap" aria-haspopup="menu">Kapitel</button><label class="small"><input type="checkbox" id="rauto"> Hoppa över reklam automatiskt</label>` : ''}</div>
-    <button class="skip" id="rskip" hidden>Hoppa över reklam ⏭</button>`;
+  el.innerHTML = `<video id="rvid" controls autoplay playsinline${u.live ? '' : ` src="${esc(u.url)}"`}></video><div class="pbar"><button class="ghost small" id="rclose">${t('← Tillbaka')}</button><span class="title">${esc(r.title)}${r.subtitle ? ' – ' + esc(r.subtitle) : ''}</span>
+    ${u.live ? t('<span class="small liveind on">⏺ Spelas in</span><span class="muted small" id="rstat">Startar…</span>') : ''}
+    ${ads.length ? `<button class="ghost small" id="rchap" aria-haspopup="menu">${t('Kapitel')}</button><label class="small"><input type="checkbox" id="rauto"> ${t('Hoppa över reklam automatiskt')}</label>` : ''}</div>
+    <button class="skip" id="rskip" hidden>${t('Hoppa över reklam ⏭')}</button>`;
   overlayOpen(el);
   const rp = RP = { el, v: $('#rvid', el), hls: null };
   videoSession(rp.v);
@@ -132,7 +132,7 @@ async function growingSource(rp, url) {
       if (!d.fatal || RP !== rp || rp.hls !== hls) return;
       if (d.type === 'networkError' && d.response?.code !== 404) setTimeout(() => { if (RP === rp && rp.hls === hls) hls.startLoad(); }, 1500);
       else if (d.type === 'mediaError') hls.recoverMediaError();
-      else setStat(d.response?.code === 404 ? 'Inspelningen är klar – öppna den från listan' : 'Kunde inte visa inspelningen');
+      else setStat(d.response?.code === 404 ? t('Inspelningen är klar – öppna den från listan') : t('Kunde inte visa inspelningen'));
     });
     hls.loadSource(url); hls.attachMedia(v);
     v.play().catch(() => {});
@@ -150,14 +150,14 @@ function recCommercials(rp, ads, autoDefault) {
     if (RP !== rp) return;
     const pl = adPlan(ads, v.currentTime, { auto: auto.checked, done: skipped });
     if (!pl) { b.hidden = true; return; }
-    if (pl.auto) { skipped.add(pl.i); v.currentTime = pl.to; toast('Reklam överhoppad'); b.hidden = true; return; }
+    if (pl.auto) { skipped.add(pl.i); v.currentTime = pl.to; toast(t('Reklam överhoppad')); b.hidden = true; return; }
     b.hidden = false;
     b.onclick = () => { skipped.add(pl.i); v.currentTime = pl.to; b.hidden = true; };
   });
   if (chap) chap.onclick = () => {
     const list = adChapters(ads, Number.isFinite(v.duration) ? v.duration : null);
     openMenu(chap, list.map(c => ({ label: c.label, icon: c.ad ? '📺' : '▶', hint: fmtTime(c.start), onSelect: () => { v.currentTime = c.start + (c.ad ? 0 : 0.1); v.play().catch(() => {}); } })),
-      { title: 'Kapitel', label: 'Kapitel i inspelningen' });
+      { title: t('Kapitel'), label: t('Kapitel i inspelningen') });
   };
 }
 export function closeRec(rp = RP) {

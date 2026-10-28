@@ -1,5 +1,5 @@
 // Videospelarens kontroller och kortkommandon
-import { $, fmtTime, store } from '../core.js';
+import { $, fmtTime, store, t } from '../core.js';
 import { setMini } from './overlay.js';
 import { P, closePlayer } from './video.js';
 import { setIconButton } from '../ui/buttons.js';
@@ -11,10 +11,10 @@ export function bindControls(cur, v) {
   const chaps = it.chapters || [];
   const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
   const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
-  const sync = () => { setIconButton(playBtn, v.paused ? 'play' : 'pause', v.paused ? 'Spela (mellanslag)' : 'Pausa (mellanslag)'); el.classList.toggle('paused', v.paused); };
+  const sync = () => { setIconButton(playBtn, v.paused ? 'play' : 'pause', v.paused ? t('Spela (mellanslag)') : t('Pausa (mellanslag)')); el.classList.toggle('paused', v.paused); };
   // Familjefiltret (familyfilter.js) tystar med video.muted – knappen visar användarens eget val
   const userMuted = () => cur.ff?.muted ? cur.ff.user : v.muted;
-  const syncVol = () => { const off = userMuted() || v.volume === 0; setIconButton(muteBtn, off ? 'mute' : 'vol', off ? 'Slå på ljudet (m)' : 'Stäng av ljudet (m)'); vol.value = userMuted() ? 0 : v.volume; };
+  const syncVol = () => { const off = userMuted() || v.volume === 0; setIconButton(muteBtn, off ? 'mute' : 'vol', off ? t('Slå på ljudet (m)') : t('Stäng av ljudet (m)')); vol.value = userMuted() ? 0 : v.volume; };
   v.volume = +store.get('pvol', 1); syncVol();
   ['play', 'pause', 'playing'].forEach(ev => v.addEventListener(ev, sync)); sync();
   v.addEventListener('volumechange', syncVol);
@@ -37,12 +37,12 @@ export function bindControls(cur, v) {
   });
   // Spelarens läge för skärmläsare (sparsamt: bara paus/spela, laddning som dröjer och ändringar man gjort själv)
   let wait = 0;
-  v.addEventListener('waiting', () => { clearTimeout(wait); wait = setTimeout(() => say(el, 'Laddar…'), 1500); });
+  v.addEventListener('waiting', () => { clearTimeout(wait); wait = setTimeout(() => say(el, t('Laddar…')), 1500); });
   v.addEventListener('playing', () => clearTimeout(wait));
-  v.addEventListener('pause', () => { if (!v.ended && v.readyState > 1) say(el, 'Pausad'); });
-  v.addEventListener('play', () => { if (v.currentTime > 0.5) say(el, 'Spelar'); });
+  v.addEventListener('pause', () => { if (!v.ended && v.readyState > 1) say(el, t('Pausad')); });
+  v.addEventListener('play', () => { if (v.currentTime > 0.5) say(el, t('Spelar')); });
   // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
-  const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? 'Startar omkodning…' : 'Laddar…'; };
+  const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? t('Startar omkodning…') : t('Laddar…'); };
   v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
   v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
   const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();
@@ -73,9 +73,9 @@ export function bindControls(cur, v) {
   q('#cstop').onclick = () => closePlayer();
   q('#cmini').onclick = () => setMini(!cur.mini);
   q('#cset').onclick = (e) => { e.stopPropagation(); q('#chlist').hidden = true; q('#setp').hidden = !q('#setp').hidden; };
-  muteBtn.onclick = () => { if (cur.ff?.muted) { cur.ff.user = !cur.ff.user; return syncVol(); } v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; say(el, v.muted ? 'Ljudet av' : 'Ljudet på'); };
+  muteBtn.onclick = () => { if (cur.ff?.muted) { cur.ff.user = !cur.ff.user; return syncVol(); } v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; say(el, v.muted ? t('Ljudet av') : t('Ljudet på')); };
   vol.oninput = () => { v.volume = +vol.value; v.muted = v.volume === 0; store.set('pvol', v.volume); };
-  const volText = () => vol.setAttribute('aria-valuetext', v.muted ? 'Ljudet av' : Math.round(v.volume * 100) + ' %');
+  const volText = () => vol.setAttribute('aria-valuetext', v.muted ? t('Ljudet av') : Math.round(v.volume * 100) + ' %');
   v.addEventListener('volumechange', volText); volText();
 }
 
@@ -106,30 +106,30 @@ export function keys(e) {
   else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
     v.volume = Math.max(0, Math.min(1, Math.round((v.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10)); v.muted = v.volume === 0;
-    store.set('pvol', v.volume); say(P.el, `Volym ${Math.round(v.volume * 100)} %`);
+    store.set('pvol', v.volume); say(P.el, t('Volym {v} %', { v: Math.round(v.volume * 100) }));
   }
   // 0–9: hoppa till 0 %, 10 % … 90 % av filmen (som YouTube)
   else if (/^[0-9]$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && isFinite(v.duration)) v.currentTime = v.duration * (+e.key / 10);
   else if (e.key === 's' && !$('#pskip', P.el).hidden) $('#pskip', P.el).click();
   else if (e.key === 'f') document.fullscreenElement ? document.exitFullscreen() : P.el.requestFullscreen?.();
-  else if (e.key === 'm') { v.muted = !v.muted; say(P.el, v.muted ? 'Ljudet av' : 'Ljudet på'); }
+  else if (e.key === 'm') { v.muted = !v.muted; say(P.el, v.muted ? t('Ljudet av') : t('Ljudet på')); }
   // c: undertexterna av/på (senast valda kommer tillbaka), < och >: långsammare/snabbare
   else if (e.key === 'c') toggleSubs();
   else if (e.key === '<' || e.key === '>') {
     const r = $('#prate', P.el); if (!r) return;
     const i = r.selectedIndex + (e.key === '>' ? 1 : -1);
     if (i < 0 || i >= r.options.length) return;
-    r.selectedIndex = i; r.dispatchEvent(new Event('change')); say(P.el, 'Hastighet ' + r.options[i].text);
+    r.selectedIndex = i; r.dispatchEvent(new Event('change')); say(P.el, t('Hastighet ') + r.options[i].text);
   }
 }
 
 let lastSub = '';
 function toggleSubs() {
-  const ps = $('#ps', P.el); if (!ps || ps.options.length < 2) return say(P.el, 'Inga undertexter');
+  const ps = $('#ps', P.el); if (!ps || ps.options.length < 2) return say(P.el, t('Inga undertexter'));
   if (ps.value) { lastSub = ps.value; ps.value = ''; }
   else ps.value = lastSub && [...ps.options].some(o => o.value === lastSub) ? lastSub : ps.options[1].value;
   ps.dispatchEvent(new Event('change'));
-  say(P.el, ps.value ? 'Undertexter: ' + ps.options[ps.selectedIndex].text : 'Undertexter av');
+  say(P.el, ps.value ? t('Undertexter: ') + ps.options[ps.selectedIndex].text : t('Undertexter av'));
 }
 
 // Fjärrkontroll och tangentbord: när en knapp i spelaren har synligt fokus flyttar pilarna fokus mellan knapparna

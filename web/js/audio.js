@@ -1,7 +1,7 @@
 // Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå.
 // Musik spelas glapplöst/med övertoning av Web Audio-motorn (audioengine.js) när det går, annars av <audio id="maudio">.
 // M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
-import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, routeGen, store, toast } from './core.js';
+import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, routeGen, store, toast, t } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
 import { castAudio, castReady } from './player/cast.js';
@@ -48,7 +48,7 @@ export function stopAudio() {
   document.body.classList.remove('hasbar');
   setSession({});
 }
-const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.textContent = playing ? '⏸' : '▶'; b.title = playing ? 'Pausa' : 'Spela'; b.setAttribute('aria-label', b.title); };
+const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.textContent = playing ? '⏸' : '▶'; b.title = playing ? t('Pausa') : t('Spela'); b.setAttribute('aria-label', b.title); };
 function setPlaying(playing) {
   setMplay(playing);
   if (navigator.mediaSession) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
@@ -81,10 +81,10 @@ function ensureBar() {
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
-    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="Föregående" title="Föregående">⏮</button><button class="primary" id="mplay" aria-label="Pausa" title="Pausa">⏸</button><button class="ghost small" id="mnext" aria-label="Nästa" title="Nästa">⏭</button>
-      <button class="ghost small" id="mrep" title="Upprepa" aria-label="Upprepa" aria-pressed="false">🔁</button><button class="ghost small" id="mset" title="Ljudinställningar" aria-label="Ljudinställningar" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small" id="msleep" title="Sovtimer" aria-label="Sovtimer" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="Låttext" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="Casta till Chromecast" aria-label="Casta till Chromecast" ${castReady ? '' : 'hidden'}>📺</button><button class="ghost small" id="mradio" title="Starta låtradio från låten" aria-label="Starta låtradio från låten" aria-pressed="false">📻</button></div>
+    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="${t('Föregående')}" title="${t('Föregående')}">⏮</button><button class="primary" id="mplay" aria-label="${t('Pausa')}" title="${t('Pausa')}">⏸</button><button class="ghost small" id="mnext" aria-label="${t('Nästa')}" title="${t('Nästa')}">⏭</button>
+      <button class="ghost small" id="mrep" title="${t('Upprepa')}" aria-label="${t('Upprepa')}" aria-pressed="false">🔁</button><button class="ghost small" id="mset" title="${t('Ljudinställningar')}" aria-label="${t('Ljudinställningar')}" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small" id="msleep" title="${t('Sovtimer')}" aria-label="${t('Sovtimer')}" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="${t('Låttext')}" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="${t('Casta till Chromecast')}" aria-label="${t('Casta till Chromecast')}" ${castReady ? '' : 'hidden'}>📺</button><button class="ghost small" id="mradio" title="${t('Starta låtradio från låten')}" aria-label="${t('Starta låtradio från låten')}" aria-pressed="false">📻</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
-    <div class="mright"><select id="mspeed" title="Hastighet" aria-label="Uppspelningshastighet" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="Volym" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">Kö</button><button class="ghost small" id="mx" title="Stäng spelaren" aria-label="Stäng spelaren">✕</button></div>`;
+    <div class="mright"><select id="mspeed" title="${t('Hastighet')}" aria-label="${t('Uppspelningshastighet')}" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="${t('Volym')}" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">${t('Kö')}</button><button class="ghost small" id="mx" title="${t('Stäng spelaren')}" aria-label="${t('Stäng spelaren')}">✕</button></div>`;
   document.body.append(bar);
   const a = M.el = $('#maudio');
   M.audio = FACADE;
@@ -95,7 +95,7 @@ function ensureBar() {
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
   a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) setPlaying(true); };
   a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); };
-  a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; toast('Kunde inte spela låten', { error: true }); };
+  a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; toast(t('Kunde inte spela låten'), { error: true }); };
   $('#mplay').onclick = () => M.audio.paused ? M.audio.play() : M.audio.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
   $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (M.audio.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
@@ -135,7 +135,7 @@ function setBarMode(spoken) {
   $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mset').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
   $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
-  $('#mprev').title = spoken ? `${b} sekunder bakåt` : 'Föregående'; $('#mnext').title = spoken ? `${f} sekunder framåt` : 'Nästa';
+  $('#mprev').title = spoken ? t('{b} sekunder bakåt', { b }) : t('Föregående'); $('#mnext').title = spoken ? t('{f} sekunder framåt', { f }) : t('Nästa');
   $('#mprev').setAttribute('aria-label', $('#mprev').title); $('#mnext').setAttribute('aria-label', $('#mnext').title);
   if (spoken) showLyrics(false);
   applyVolume();
@@ -191,12 +191,12 @@ function spokenSave(final) {
   if (!final && position < 5) return;
   const url = s.kind === 'book' ? `/api/audiobooks/book/${s.id}/progress` : `/api/podcasts/episodes/${s.id}/progress`;
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position, speed: s.speed }), keepalive: true })
-    .then(r => r.json()).then(d => { if (d.screenTime) screenBadge(d.screenTime); if (d.stop && M.spoken === s && !M.audio.paused) { M.audio.pause(); toast(d.screenTime?.message || 'Tiden är slut för idag'); } }).catch(() => {});
+    .then(r => r.json()).then(d => { if (d.screenTime) screenBadge(d.screenTime); if (d.stop && M.spoken === s && !M.audio.paused) { M.audio.pause(); toast(d.screenTime?.message || t('Tiden är slut för idag')); } }).catch(() => {});
 }
 function spokenEnded() {
   const s = M.spoken, i = s.files.indexOf(M.sfile);
   if (i >= 0 && i + 1 < s.files.length) spokenSeek(s.files[i + 1].offset + 0.01);
-  else { spokenSave(true); setSleep(0); toast(s.kind === 'book' ? 'Boken är slut' : 'Avsnittet är slut'); }
+  else { spokenSave(true); setSleep(0); toast(s.kind === 'book' ? t('Boken är slut') : t('Avsnittet är slut')); }
 }
 window.addEventListener('pagehide', () => { if (M.spoken) spokenSave(); });
 export function seekTo(t) {
@@ -262,9 +262,9 @@ const setRadioState = () => { const b = $('#mradio'); if (!b) return; b.classLis
 /** Startar en låtradio från en låt, ett album eller en artist. */
 export async function startRadio(seed, name = '') {
   const r = await api('/music/radio', { method: 'POST', body: { ...seed, count: 25 }, bg: true });
-  if (!r.trackList.length) return toast('Hittade inga låtar till radion');
+  if (!r.trackList.length) return toast(t('Hittade inga låtar till radion'));
   playQueue(r.trackList, 0, { radio: seed, radioName: r.name || name });
-  toast(r.sonic ? `Låtradio: ${r.name || name}` : `Låtradio: ${r.name || name} (efter genre och artist – ljudanalysen är inte klar)`);
+  toast(r.sonic ? t('Låtradio: {v}', { v: r.name || name }) : t('Låtradio: {v} (efter genre och artist – ljudanalysen är inte klar)', { v: r.name || name }));
 }
 // Fyller på kön när tre låtar återstår: servern får det som spelats (för drift) och hela kön (inga upprepningar)
 async function extendRadio() {
@@ -287,7 +287,7 @@ function nextTrack(auto) {
   else if (auto) { M.audio.pause(); }
 }
 function showQueue() {
-  const h = openDialog({ title: M.radio ? `Kö – låtradio${M.radio.name ? ': ' + M.radio.name : ''}` : 'Kö', closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });
+  const h = openDialog({ title: M.radio ? t('Kö – låtradio{v}', { v: M.radio.name ? ': ' + M.radio.name : '' }) : t('Kö'), closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });
   const d = h.el;
   $$('tr[data-ti]', d).forEach(r => { if (+r.dataset.ti === M.idx) { r.classList.add('playing'); r.setAttribute('aria-current', 'true'); } keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; loadTrack(+r.dataset.ti); h.close(); }; });
   // Fokus på låten som spelas (TV/fjärrkontroll: pilarna går vidare därifrån)
@@ -314,46 +314,46 @@ async function saveListen(body) {
   enginePrefs();
   if (M.el) { if (M.spoken) setBarMode(true); else applyVolume(); }
 }
-const NORM_LABEL = { track: 'Spår', album: 'Album', off: 'Av' };
-const fadeLabel = (s) => s ? `${s} s` : 'Av';
+const NORM_LABEL = { track: t('Spår'), album: 'Album', off: t('Av') };
+const fadeLabel = (s) => s ? `${s} s` : t('Av');
 /** Musikspelarens meny med ljudinställningar (jämn ljudnivå, glapplöst, övertoning) – sparas på kontot. */
 function soundMenu(anchor) {
   const save = (body, msg) => act(async () => { await saveListen(body); toast(msg); })();
   const nm = normMode(), cf = +LPREFS.crossfade || 0, noWa = !AE.ready() && AE.E.failed;
   openMenu(anchor, [
-    { icon: '⚖', label: 'Jämn ljudnivå', hint: NORM_LABEL[nm], submenu: [
-      { label: 'Spår – varje låt lika högt', icon: nm === 'track' ? '✓' : '', onSelect: () => save({ normMode: 'track' }, 'Jämn ljudnivå per spår') },
-      { label: 'Album – behåll skillnaderna inom albumet', icon: nm === 'album' ? '✓' : '', onSelect: () => save({ normMode: 'album' }, 'Jämn ljudnivå per album') },
-      { label: 'Av', icon: nm === 'off' ? '✓' : '', onSelect: () => save({ normMode: 'off' }, 'Jämn ljudnivå av') }] },
-    { icon: '∞', label: 'Glapplös uppspelning', hint: LPREFS.gapless === false ? 'Av' : 'På', disabled: noWa,
-      onSelect: () => save({ gapless: LPREFS.gapless === false }, LPREFS.gapless === false ? 'Glapplös uppspelning på' : 'Glapplös uppspelning av') },
-    { icon: '⤨', label: 'Övertoning', hint: fadeLabel(cf), disabled: noWa, submenu: (LPREFS.choices?.crossfade || [0, 2, 4, 6, 8, 10, 12]).map(s => ({
-      label: s ? `${s} sekunder` : 'Av', icon: s === cf ? '✓' : '', onSelect: () => save({ crossfade: s }, s ? `Övertoning ${s} sekunder` : 'Övertoning av') })) },
+    { icon: '⚖', label: t('Jämn ljudnivå'), hint: NORM_LABEL[nm], submenu: [
+      { label: t('Spår – varje låt lika högt'), icon: nm === 'track' ? '✓' : '', onSelect: () => save({ normMode: 'track' }, t('Jämn ljudnivå per spår')) },
+      { label: t('Album – behåll skillnaderna inom albumet'), icon: nm === 'album' ? '✓' : '', onSelect: () => save({ normMode: 'album' }, t('Jämn ljudnivå per album')) },
+      { label: t('Av'), icon: nm === 'off' ? '✓' : '', onSelect: () => save({ normMode: 'off' }, t('Jämn ljudnivå av')) }] },
+    { icon: '∞', label: t('Glapplös uppspelning'), hint: LPREFS.gapless === false ? t('Av') : t('På'), disabled: noWa,
+      onSelect: () => save({ gapless: LPREFS.gapless === false }, LPREFS.gapless === false ? t('Glapplös uppspelning på') : t('Glapplös uppspelning av')) },
+    { icon: '⤨', label: t('Övertoning'), hint: fadeLabel(cf), disabled: noWa, submenu: (LPREFS.choices?.crossfade || [0, 2, 4, 6, 8, 10, 12]).map(s => ({
+      label: s ? t('{s} sekunder', { s }) : t('Av'), icon: s === cf ? '✓' : '', onSelect: () => save({ crossfade: s }, s ? t('Övertoning {s} sekunder', { s }) : t('Övertoning av')) })) },
     'separator',
-    { label: noWa ? 'Webbläsaren saknar Web Audio – bara ljudnivån gäller' : 'Gäller inte vid Chromecast', disabled: true },
-    { label: 'Fler lyssningsinställningar', href: '#/account' }
-  ], { title: 'Ljud' });
+    { label: noWa ? t('Webbläsaren saknar Web Audio – bara ljudnivån gäller') : t('Gäller inte vid Chromecast'), disabled: true },
+    { label: t('Fler lyssningsinställningar'), href: '#/account' }
+  ], { title: t('Ljud') });
 }
 export async function renderListenPrefs(box) {
   const gen = routeGen;
   const p = await api('/me/listening');
   if (gen !== routeGen || !box.isConnected) return;
-  const opts = (list, v) => list.map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${n} sekunder</option>`).join('');
+  const opts = (list, v) => list.map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${t('{n} sekunder', { n })}</option>`).join('');
   const nm = p.normalize === false ? 'off' : (p.normMode || 'track');
-  box.innerHTML = `<h2>Lyssning</h2>
-    <div class="row"><div><label for="lpnorm">Jämn ljudnivå i musik</label><select id="lpnorm">${['track', 'album', 'off'].map(m => `<option value="${m}" ${m === nm ? 'selected' : ''}>${{ track: 'Per spår', album: 'Per album', off: 'Av' }[m]}</option>`).join('')}</select></div>
-      <div><label for="lpfade">Övertoning mellan låtar</label><select id="lpfade">${(p.choices.crossfade || [0]).map(s => `<option value="${s}" ${s === p.crossfade ? 'selected' : ''}>${s ? `${s} sekunder` : 'Av'}</option>`).join('')}</select></div></div>
-    <p class="muted small" style="margin:4px 0 12px">Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. <i>Per album</i> behåller skillnaden mellan albumets låtar. Toppvärdet hindrar att något klipps. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.</p>
-    <label class="row"><input type="checkbox" id="lpgap" ${p.gapless !== false ? 'checked' : ''} style="width:auto"> Glapplös uppspelning</label>
-    <p class="muted small" style="margin:4px 0 12px">Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).</p>
-    <div class="row"><div><label for="lpback">Hopp bakåt (ljudböcker och poddar)</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
-      <div><label for="lpfwd">Hopp framåt</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
-    <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> Hoppa över tystnad i poddar</label>
-    <p class="muted small" style="margin:4px 0 0">Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.</p>`;
+  box.innerHTML = `<h2>${t('Lyssning')}</h2>
+    <div class="row"><div><label for="lpnorm">${t('Jämn ljudnivå i musik')}</label><select id="lpnorm">${['track', 'album', 'off'].map(m => `<option value="${m}" ${m === nm ? 'selected' : ''}>${{ track: t('Per spår'), album: 'Per album', off: t('Av') }[m]}</option>`).join('')}</select></div>
+      <div><label for="lpfade">${t('Övertoning mellan låtar')}</label><select id="lpfade">${(p.choices.crossfade || [0]).map(s => `<option value="${s}" ${s === p.crossfade ? 'selected' : ''}>${s ? t('{s} sekunder', { s }) : t('Av')}</option>`).join('')}</select></div></div>
+    <p class="muted small" style="margin:4px 0 12px">${t('Låtar spelas lika högt med hjälp av ReplayGain-taggar, eller med ljudstyrka som servern mäter i bakgrunden efter skanning. <i>Per album</i> behåller skillnaden mellan albumets låtar. Toppvärdet hindrar att något klipps. I Safari på iPhone/iPad kan webbsidan inte ändra volymen – använd appen där.')}</p>
+    <label class="row"><input type="checkbox" id="lpgap" ${p.gapless !== false ? 'checked' : ''} style="width:auto"> ${t('Glapplös uppspelning')}</label>
+    <p class="muted small" style="margin:4px 0 12px">${t('Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).')}</p>
+    <div class="row"><div><label for="lpback">${t('Hopp bakåt (ljudböcker och poddar)')}</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
+      <div><label for="lpfwd">${t('Hopp framåt')}</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
+    <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> ${t('Hoppa över tystnad i poddar')}</label>
+    <p class="muted small" style="margin:4px 0 0">${t('Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.')}</p>`;
   const save = act(async () => {
     await saveListen({ normMode: $('#lpnorm').value, crossfade: +$('#lpfade').value, gapless: $('#lpgap').checked,
       skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked });
-    toast('Sparat');
+    toast(t('Sparat'));
   });
   for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil']) $(id, box).onchange = save;
 }

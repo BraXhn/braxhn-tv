@@ -2,7 +2,7 @@
 // tonas in och ut och stängs av när man lämnar sidan. Spelas bara när profilen vill det (it.theme.play, valet under
 // Mitt konto – standard på för serier), aldrig när något annat spelar (musik, ljudbok, video, live-TV) och aldrig innan
 // användaren har rört sidan (webbläsarnas autoplay-spärr – då försöker vi inte alls).
-import { $, act, api, onLeave } from '../core.js';
+import { $, act, api, onLeave, t } from '../core.js';
 import { M } from '../audio.js';
 
 const LEVEL = 0.25, FADE_IN = 1500, FADE_OUT = 900;
@@ -57,18 +57,18 @@ export function playTheme(it) {
   a.addEventListener('ended', () => { if (cur === c) stopTheme(0); });
   c.watch = setInterval(() => { if (cur === c && othersPlaying(a)) stopTheme(); }, 300);
   (c.ctx?.state === 'suspended' ? c.ctx.resume() : Promise.resolve())
-    .then(() => { if (cur !== c) return; if (c.ctx && c.ctx.state !== 'running') throw new Error('ljudet är spärrat'); return a.play(); })
+    .then(() => { if (cur !== c) return; if (c.ctx && c.ctx.state !== 'running') throw new Error(t('ljudet är spärrat')); return a.play(); })
     .then(() => { if (cur === c) fade(c, LEVEL, FADE_IN); })
     .catch(() => { if (cur === c) stopTheme(0); }); // spärrat av webbläsaren eller filen saknas – tyst
 }
 /** Valen under Mitt konto */
 export async function renderThemePrefs(box) {
   const p = await api('/me/theme-music', { bg: true });
-  box.innerHTML = `<h2>Temamusik</h2>
-    <p class="muted small">Ligger det en <code>theme.mp3</code> eller <code>theme.m4a</code> i seriens eller filmens mapp spelas den svagt när du öppnar titelsidan – aldrig om något annat redan spelar. Sparas för din profil.</p>
+  box.innerHTML = `<h2>${t('Temamusik')}</h2>
+    <p class="muted small">${t('Ligger det en <code>theme.mp3</code> eller <code>theme.m4a</code> i seriens eller filmens mapp spelas den svagt när du öppnar titelsidan – aldrig om något annat redan spelar. Sparas för din profil.')}</p>
     <div class="row" style="gap:18px">
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="thshows"${p.shows ? ' checked' : ''}> Serier</label>
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="thmovies"${p.movies ? ' checked' : ''}> Filmer</label></div>`;
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="thshows"${p.shows ? ' checked' : ''}> ${t('Serier')}</label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="thmovies"${p.movies ? ' checked' : ''}> ${t('Filmer')}</label></div>`;
   const save = act(async () => { await api('/me/theme-music', { method: 'PUT', body: { shows: $('#thshows', box).checked, movies: $('#thmovies', box).checked }, bg: true }); });
   $('#thshows', box).onchange = save; $('#thmovies', box).onchange = save;
 }

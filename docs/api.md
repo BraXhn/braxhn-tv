@@ -46,6 +46,12 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 - När `preroll` finns förstartar servern inte filmen. Hämta gärna `/playback` igen (utan `cinema=1`) när kön är slut,
   annars startar omkodningen först när spelaren börjar hämta filmen.
 
+## Språk per profil: `/api/me/lang`
+
+`/api/status` har `user.lang` (nytt fält): `"sv"`, `"en"` eller `null` (inget val än – svenska). `PUT /api/me/lang`
+med `{ "lang": "sv" | "en" }` sparar valet (400 för andra värden). Webben väljer `index.html` efter det (svensk eller
+engelsk variant, se `server/http/static.js`); serverns felmeddelanden i API:t är alltid svenska. Apparna läser inte fältet.
+
 ## Uppspelningsval per konto: `/api/me/playback-prefs`
 
 `GET`/`PUT /api/me/playback-prefs` (PUT ändrar bara fälten som skickas):

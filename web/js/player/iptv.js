@@ -3,7 +3,7 @@
 // catch-up och filmer/avsnitt (HLS-session med egen tidslinje: spolning utanför det som hunnit skrivas startar om
 // sessionen från den tidpunkten). Påminnelser visas som toast medan sidan är öppen.
 // Laddas med vyerna live/epg/vod (inte vid start).
-import { $, act, api, esc, fmtTime, hhmm, me, toast, toastErr } from '../core.js';
+import { $, act, api, esc, fmtTime, hhmm, me, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { overlayOpen } from './overlay.js';
 import { closeAllPlayers, loadHls } from './video.js';
@@ -31,7 +31,7 @@ async function zapTo(dir) {
 async function zapNumber(n) {
   const l = await zapList();
   const ch = l.find(c => String(c.number) === n) || l[+n - 1];
-  if (ch) playLive(ch); else toast('Kanal ' + n + ' finns inte');
+  if (ch) playLive(ch); else toast(t('Kanal ') + n + t(' finns inte'));
 }
 
 // ---------- tillägg i livespelaren ----------
@@ -42,8 +42,8 @@ liveHooks.add((lp) => {
   const fav = known ? known.favorite : !!lp.ch.favorite;
   const box = document.createElement('span');
   box.className = 'iptvbar';
-  box.innerHTML = iconButton({ icon: '▲', label: 'Föregående kanal (Page Up)', id: 'lzu' }) + iconButton({ icon: '▼', label: 'Nästa kanal (Page Down)', id: 'lzd' })
-    + iconButton({ icon: fav ? '★' : '☆', label: 'Favorit', id: 'lfav', pressed: fav })
+  box.innerHTML = iconButton({ icon: '▲', label: t('Föregående kanal (Page Up)'), id: 'lzu' }) + iconButton({ icon: '▼', label: t('Nästa kanal (Page Down)'), id: 'lzd' })
+    + iconButton({ icon: fav ? '★' : '☆', label: t('Favorit'), id: 'lfav', pressed: fav })
     + `<a class="btn ghost small" href="#/epg" id="lguide">TV-guide</a>`;
   bar.insertBefore(box, stat);
   $('#lzu', box).onclick = () => zapTo(-1);
@@ -52,9 +52,9 @@ liveHooks.add((lp) => {
   fb.onclick = act(async () => {
     const on = fb.getAttribute('aria-pressed') !== 'true';
     await api('/iptv/favorites/' + lp.ch.id, { method: 'PUT', body: { on }, bg: true });
-    fb.setAttribute('aria-pressed', String(on)); setIconButton(fb, on ? '★' : '☆', 'Favorit');
+    fb.setAttribute('aria-pressed', String(on)); setIconButton(fb, on ? '★' : '☆', t('Favorit'));
     const z = zap.find(c => c.id === lp.ch.id); if (z) z.favorite = on;
-    toast(on ? `${lp.ch.name} är en favorit` : `${lp.ch.name} är inte längre en favorit`);
+    toast(on ? t('{name} är en favorit', { name: lp.ch.name }) : t('{name} är inte längre en favorit', { name: lp.ch.name }));
   });
   // Återanslutning: står bilden still i 10 s trots att den ska spela laddas strömmen om
   let lastT = -1, still = 0, tries = 0;
@@ -66,7 +66,7 @@ liveHooks.add((lp) => {
     lastT = v.currentTime;
     if (still >= 10 && tries < 5) {
       still = 0; tries++;
-      if (stat) stat.textContent = 'Återansluter…';
+      if (stat) stat.textContent = t('Återansluter…');
       if (lp.hls) { const u = lp.hls.url; try { lp.hls.stopLoad(); lp.hls.loadSource(u); lp.hls.startLoad(); } catch {} }
       else if (v.src) { const u = v.src; v.src = u; v.play().catch(() => {}); }
       v.addEventListener('playing', () => { if (LP === lp && stat) stat.textContent = ''; }, { once: true });
@@ -83,14 +83,14 @@ liveHooks.add((lp) => {
 let digits = '', digitTimer = 0;
 document.addEventListener('keydown', (e) => {
   if (!LP || document.querySelector('dialog[open]') || e.altKey || e.ctrlKey || e.metaKey) return;
-  const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  const tm = e.target, typing = tm && (tm.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tm.tagName));
   if (typing) return;
-  const free = !t || t === document.body || t === LP.el || t.id === 'lvid';
-  if (e.key === 'PageUp' || e.key === 'ChannelUp' || (e.key === 'ArrowUp' && free && t?.id !== 'lvid')) { e.preventDefault(); zapTo(-1); }
-  else if (e.key === 'PageDown' || e.key === 'ChannelDown' || (e.key === 'ArrowDown' && free && t?.id !== 'lvid')) { e.preventDefault(); zapTo(1); }
+  const free = !tm || tm === document.body || tm === LP.el || tm.id === 'lvid';
+  if (e.key === 'PageUp' || e.key === 'ChannelUp' || (e.key === 'ArrowUp' && free && tm?.id !== 'lvid')) { e.preventDefault(); zapTo(-1); }
+  else if (e.key === 'PageDown' || e.key === 'ChannelDown' || (e.key === 'ArrowDown' && free && tm?.id !== 'lvid')) { e.preventDefault(); zapTo(1); }
   else if (/^[0-9]$/.test(e.key) && free) {
     digits = (digits + e.key).slice(-4);
-    const stat = $('#lstat', LP.el); if (stat) stat.textContent = 'Kanal ' + digits + '…';
+    const stat = $('#lstat', LP.el); if (stat) stat.textContent = t('Kanal ') + digits + '…';
     clearTimeout(digitTimer);
     digitTimer = setTimeout(() => { const n = digits; digits = ''; zapNumber(n); }, 1500);
   }
@@ -109,11 +109,11 @@ export async function playSession(o) {
   if (M.audio && !M.audio.paused) M.audio.pause();
   const el = $('#player');
   el.innerHTML = `<video id="svid" autoplay playsinline></video>
-    <div class="pbar"><button class="ghost small" id="sclose">← Tillbaka</button><span class="title">${esc(o.title)}${o.sub ? ` <span class="muted small">${esc(o.sub)}</span>` : ''}</span>
-      <span class="muted small" id="sstat">Startar…</span>${o.live ? '<button class="small liveind" id="slive">● Till live</button>' : ''}</div>
-    <div class="sbar">${iconButton({ icon: '↺', label: 'Bakåt 30 sekunder', id: 'sb30' })}${iconButton({ icon: 'pause', label: 'Pausa', id: 'spp' })}${iconButton({ icon: '↻', label: 'Framåt 30 sekunder', id: 'sf30' })}
-      <span class="small" id="stime">0:00</span><input type="range" id="sseek" min="0" max="${Math.max(1, Math.round(o.duration || 1))}" step="1" value="0" aria-label="Tidslinje">
-      <span class="small" id="sdur">${o.duration ? fmtTime(o.duration) : ''}</span>${iconButton({ icon: 'full', label: 'Helskärm', id: 'sfull' })}</div>`;
+    <div class="pbar"><button class="ghost small" id="sclose">${t('← Tillbaka')}</button><span class="title">${esc(o.title)}${o.sub ? ` <span class="muted small">${esc(o.sub)}</span>` : ''}</span>
+      <span class="muted small" id="sstat">${t('Startar…')}</span>${o.live ? t('<button class="small liveind" id="slive">● Till live</button>') : ''}</div>
+    <div class="sbar">${iconButton({ icon: '↺', label: t('Bakåt 30 sekunder'), id: 'sb30' })}${iconButton({ icon: 'pause', label: t('Pausa'), id: 'spp' })}${iconButton({ icon: '↻', label: t('Framåt 30 sekunder'), id: 'sf30' })}
+      <span class="small" id="stime">0:00</span><input type="range" id="sseek" min="0" max="${Math.max(1, Math.round(o.duration || 1))}" step="1" value="0" aria-label="${t('Tidslinje')}">
+      <span class="small" id="sdur">${o.duration ? fmtTime(o.duration) : ''}</span>${iconButton({ icon: 'full', label: t('Helskärm'), id: 'sfull' })}</div>`;
   overlayOpen(el);
   const v = $('#svid', el), stat = $('#sstat', el), seek = $('#sseek', el);
   const rp = { el, v, hls: null, sid: null, offset: 0, direct: false, closed: false };
@@ -137,7 +137,7 @@ export async function playSession(o) {
     stopSession();
     rp.sid = res.sid || null; rp.offset = res.direct ? 0 : (res.offset || 0); rp.direct = !!res.direct;
     if (!o.duration && res.duration) o.duration = res.duration;
-    setStat('Startar…');
+    setStat(t('Startar…'));
     if (res.direct || (v.canPlayType('application/vnd.apple.mpegurl') && !window.MediaSource)) {
       v.src = res.url;
       if (res.direct && startAt > 0) v.addEventListener('loadedmetadata', () => { v.currentTime = startAt; }, { once: true });
@@ -149,9 +149,9 @@ export async function playSession(o) {
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (!d.fatal || rp.hls !== hls || !cur()) return;
         // Bilden/ljudet går inte att avkoda här: försök ett par gånger, sedan ett tydligt besked (inte en evig slinga)
-        if (d.type === 'mediaError' && ++recovers > 3) { setStat('Formatet kan inte spelas i den här webbläsaren'); hls.destroy(); rp.hls = null; return; }
-        if (d.response?.code === 409) { setStat('Alla anslutningar till källan används'); hls.destroy(); rp.hls = null; }
-        else if (d.response?.code >= 400 && d.response?.code < 600 && d.details === 'manifestLoadError') { setStat('Kunde inte startas'); hls.destroy(); rp.hls = null; }
+        if (d.type === 'mediaError' && ++recovers > 3) { setStat(t('Formatet kan inte spelas i den här webbläsaren')); hls.destroy(); rp.hls = null; return; }
+        if (d.response?.code === 409) { setStat(t('Alla anslutningar till källan används')); hls.destroy(); rp.hls = null; }
+        else if (d.response?.code >= 400 && d.response?.code < 600 && d.details === 'manifestLoadError') { setStat(t('Kunde inte startas')); hls.destroy(); rp.hls = null; }
         else if (d.type === 'networkError') setTimeout(() => { if (rp.hls === hls) hls.startLoad(); }, 1500);
         else if (d.type === 'mediaError') hls.recoverMediaError();
       });
@@ -163,21 +163,21 @@ export async function playSession(o) {
   v.addEventListener('error', act(async () => {
     if (!cur() || !rp.direct || !o.openHls) return;
     const at = v.currentTime || o.position || 0;
-    setStat('Formatet stöds inte direkt – startar via servern…');
+    setStat(t('Formatet stöds inte direkt – startar via servern…'));
     await load(await o.openHls(at));
   }));
   v.addEventListener('playing', () => setStat(''));
-  v.addEventListener('waiting', () => setStat('Laddar…'));
+  v.addEventListener('waiting', () => setStat(t('Laddar…')));
   // Spola: inom det som hunnit skrivas lokalt, annars en ny session från den tidpunkten
   let seekGen = 0;
-  const seekTo = act(async (t) => {
+  const seekTo = act(async (tm) => {
     const len = total();
-    t = Math.max(0, len ? Math.min(len - 3, t) : t);
+    tm = Math.max(0, len ? Math.min(len - 3, tm) : tm);
     const sk = v.seekable, end = sk.length ? sk.end(sk.length - 1) : 0;
-    if (rp.direct || (t >= rp.offset && t - rp.offset <= end - 1)) { v.currentTime = t - rp.offset; return; }
+    if (rp.direct || (tm >= rp.offset && tm - rp.offset <= end - 1)) { v.currentTime = tm - rp.offset; return; }
     const g = ++seekGen;
-    setStat('Spolar…');
-    const res = await o.open(Math.floor(t));
+    setStat(t('Spolar…'));
+    const res = await o.open(Math.floor(tm));
     if (g !== seekGen || !cur()) return;
     await load(res);
   });
@@ -186,8 +186,8 @@ export async function playSession(o) {
   const pp = $('#spp', el);
   pp.onclick = () => { v.paused ? v.play().catch(() => {}) : v.pause(); };
   v.addEventListener('click', () => pp.click());
-  v.addEventListener('play', () => setIconButton(pp, 'pause', 'Pausa'));
-  v.addEventListener('pause', () => setIconButton(pp, 'play', 'Spela'));
+  v.addEventListener('play', () => setIconButton(pp, 'pause', t('Pausa')));
+  v.addEventListener('pause', () => setIconButton(pp, 'play', t('Spela')));
   $('#sfull', el).onclick = () => { document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : el.requestFullscreen?.().catch(() => {}); };
   let dragging = false;
   seek.addEventListener('input', () => { dragging = true; $('#stime', el).textContent = fmtTime(+seek.value); });
@@ -244,7 +244,7 @@ async function checkReminders() {
       if (shown.has(k)) continue;
       shown.add(k);
       const mins = Math.round((r.start - Date.now() / 1000) / 60);
-      toast(`${r.title} börjar ${mins > 0 ? `om ${mins} min` : 'nu'} på ${r.channel}`, { action: { label: 'Titta', onClick: () => playLive({ id: r.channelId, name: r.channel, number: r.number }) } });
+      toast(t('{title} börjar {v} på {channel}', { title: r.title, v: mins > 0 ? t('om {mins} min', { mins }) : 'nu', channel: r.channel }), { action: { label: t('Titta'), onClick: () => playLive({ id: r.channelId, name: r.channel, number: r.number }) } });
     }
   } catch {}
 }

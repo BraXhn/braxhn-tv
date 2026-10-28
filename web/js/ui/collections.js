@@ -1,9 +1,9 @@
 // Egna samlingar: "Lägg till i samling…" (från kortmenyn och titelsidan), formuläret för ny/ändrad samling
 // och borttagning. Vyerna (översikt och samlingssida) ligger i views/collections.js.
-import { act, api, esc, me, toast, toastErr } from '../core.js';
+import { act, api, esc, me, toast, toastErr, t } from '../core.js';
 import { confirmDialog, openDialog } from './dialog.js';
 
-export const SORT_LABEL = { manual: 'Egen ordning', title: 'Titel', year: 'År', added: 'Senast tillagda i samlingen' };
+export const SORT_LABEL = { manual: t('Egen ordning'), title: t('Titel'), year: t('År'), added: t('Senast tillagda i samlingen') };
 let seq = 0;
 
 /**
@@ -17,17 +17,17 @@ export async function collectionForm(col = null, item = null, smart = null) {
   const id = 'cf' + (++seq), canShare = !!me?.adminHere;
   const v = col || { name: '', overview: '', sort: 'manual', shared: false, home: false };
   const isSmart = !!(smart || col?.smart);
-  const body = `<div class="field"><label for="${id}n">Namn</label><input id="${id}n" name="name" required maxlength="100" value="${esc(v.name)}" autocomplete="off"></div>
-    <div class="field"><label for="${id}o">Beskrivning (valfritt)</label><textarea id="${id}o" name="overview" rows="3" maxlength="2000">${esc(v.overview || '')}</textarea></div>
-    ${isSmart ? `<p class="hint small muted">Smart samling: innehållet och ordningen följer filtret och uppdateras av sig själv när biblioteket ändras.</p>`
-      : `<div class="field"><label for="${id}s">Sortering</label><select id="${id}s" name="sort">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${v.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`}
-    <label class="ccheck"><input type="checkbox" id="${id}h"${v.home ? ' checked' : ''}> Visa på startsidan</label>
-    ${canShare ? `<label class="ccheck"><input type="checkbox" id="${id}d"${v.shared ? ' checked' : ''} aria-describedby="${id}dh"> Delad med alla profiler</label>
-      <p class="hint small muted" id="${id}dh">Annars syns samlingen bara för dig. Barnprofiler ser bara titlar inom sin åldersgräns.</p>`
-      : `<p class="hint small muted">Samlingen syns bara för dig.</p>`}`;
+  const body = `<div class="field"><label for="${id}n">${t('Namn')}</label><input id="${id}n" name="name" required maxlength="100" value="${esc(v.name)}" autocomplete="off"></div>
+    <div class="field"><label for="${id}o">${t('Beskrivning (valfritt)')}</label><textarea id="${id}o" name="overview" rows="3" maxlength="2000">${esc(v.overview || '')}</textarea></div>
+    ${isSmart ? `<p class="hint small muted">${t('Smart samling: innehållet och ordningen följer filtret och uppdateras av sig själv när biblioteket ändras.')}</p>`
+      : `<div class="field"><label for="${id}s">${t('Sortering')}</label><select id="${id}s" name="sort">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${v.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`}
+    <label class="ccheck"><input type="checkbox" id="${id}h"${v.home ? ' checked' : ''}> ${t('Visa på startsidan')}</label>
+    ${canShare ? `<label class="ccheck"><input type="checkbox" id="${id}d"${v.shared ? ' checked' : ''} aria-describedby="${id}dh"> ${t('Delad med alla profiler')}</label>
+      <p class="hint small muted" id="${id}dh">${t('Annars syns samlingen bara för dig. Barnprofiler ser bara titlar inom sin åldersgräns.')}</p>`
+      : `<p class="hint small muted">${t('Samlingen syns bara för dig.')}</p>`}`;
   const d = openDialog({
-    title: col ? 'Ändra samling' : smart ? 'Ny smart samling' : 'Ny samling', form: true, body,
-    actions: [{ label: 'Avbryt', value: null }, { label: col ? 'Spara' : 'Skapa', kind: 'primary', submit: true, onClick: async (h) => {
+    title: col ? t('Ändra samling') : smart ? t('Ny smart samling') : t('Ny samling'), form: true, body,
+    actions: [{ label: t('Avbryt'), value: null }, { label: col ? t('Spara') : t('Skapa'), kind: 'primary', submit: true, onClick: async (h) => {
       const b = { name: h.$(`#${id}n`).value.trim(), overview: h.$(`#${id}o`).value, home: h.$(`#${id}h`).checked };
       if (!isSmart) b.sort = h.$(`#${id}s`).value;
       if (smart) b.smart = smart;
@@ -44,9 +44,9 @@ export async function collectionForm(col = null, item = null, smart = null) {
 
 /** Tar bort samlingen efter bekräftelse. true om den togs bort. */
 export async function deleteCollection(col) {
-  if (!await confirmDialog(`Titlarna finns kvar i biblioteket.`, { title: `Ta bort samlingen ${col.name}?`, okLabel: 'Ta bort', danger: true })) return false;
+  if (!await confirmDialog(t('Titlarna finns kvar i biblioteket.'), { title: t('Ta bort samlingen {name}?', { name: col.name }), okLabel: t('Ta bort'), danger: true })) return false;
   await api(`/custom-collections/${col.id}`, { method: 'DELETE' });
-  toast(`Samlingen ${col.name} är borttagen`);
+  toast(t('Samlingen {name} är borttagen', { name: col.name }));
   return true;
 }
 
@@ -58,13 +58,13 @@ export async function deleteCollection(col) {
 export async function addToCollection(it) {
   let cols;
   try { cols = await api(`/custom-collections?editable=1&item=${+it.id}`, { bg: true }); } catch (e) { return toastErr(e); }
-  const name = it.kind === 'episode' ? it.showTitle || 'Serien' : it.title || 'Titeln';
+  const name = it.kind === 'episode' ? it.showTitle || t('Serien') : it.title || t('Titeln');
   const row = (c) => `<li><button type="button" class="ghost ctoggle" data-ccol="${+c.id}" aria-pressed="${c.has ? 'true' : 'false'}">
-    <span class="ck" aria-hidden="true">${c.has ? '✓' : '+'}</span><span class="cn">${esc(c.name)}</span><span class="muted small">${c.shared ? 'Delad' : 'Privat'} · ${+c.count}</span></button></li>`;
+    <span class="ck" aria-hidden="true">${c.has ? '✓' : '+'}</span><span class="cn">${esc(c.name)}</span><span class="muted small">${c.shared ? t('Delad') : t('Privat')} · ${+c.count}</span></button></li>`;
   const d = openDialog({
-    title: `Lägg till ${name} i samling`,
-    body: (cols.length ? `<ul class="ccols">${cols.map(row).join('')}</ul>` : '<p class="muted">Du har inga samlingar ännu.</p>'),
-    actions: [{ label: 'Ny samling…', kind: 'ghost', value: 'new' }, { label: 'Klar', kind: 'primary', value: 'done' }]
+    title: t('Lägg till {name} i samling', { name }),
+    body: (cols.length ? `<ul class="ccols">${cols.map(row).join('')}</ul>` : t('<p class="muted">Du har inga samlingar ännu.</p>')),
+    actions: [{ label: t('Ny samling…'), kind: 'ghost', value: 'new' }, { label: t('Klar'), kind: 'primary', value: 'done' }]
   });
   d.el.querySelectorAll('[data-ccol]').forEach(b => b.addEventListener('click', act(async () => {
     const c = cols.find(x => x.id === +b.dataset.ccol), add = !c.has;
@@ -76,11 +76,11 @@ export async function addToCollection(it) {
     c.has = add; c.count += add ? 1 : -1;
     b.setAttribute('aria-pressed', String(add));
     b.querySelector('.ck').textContent = add ? '✓' : '+';
-    b.querySelector('.small').textContent = `${c.shared ? 'Delad' : 'Privat'} · ${c.count}`;
-    toast(add ? `${name} ligger nu i ${c.name}` : `${name} är borttagen från ${c.name}`);
+    b.querySelector('.small').textContent = `${c.shared ? t('Delad') : t('Privat')} · ${c.count}`;
+    toast(add ? t('{name} ligger nu i {name2}', { name, name2: c.name }) : t('{name} är borttagen från {name2}', { name, name2: c.name }));
   })));
   if (await d.closed === 'new') {
     const id = await collectionForm(null, it.id);
-    if (id) toast(`${name} ligger nu i den nya samlingen`, { action: { label: 'Visa', onClick: () => { location.hash = `#/ucollection/${id}`; } } });
+    if (id) toast(t('{name} ligger nu i den nya samlingen', { name }), { action: { label: t('Visa'), onClick: () => { location.hash = `#/ucollection/${id}`; } } });
   }
 }
