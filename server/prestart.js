@@ -31,7 +31,7 @@ export const io = { open: (p, flags = 'r') => fs.promises.open(p, flags), diskOf
 export const hooks = { keyframes: null };
 
 const over = {}; // tester: { maxBytes, seconds, rate, awakeMs }
-export function __setConfig(o) { const { forget, ...rest } = o; Object.assign(over, rest); if (forget) { touched.clear(); woke.clear(); } }
+export function __setConfig(o) { const { forget, ...rest } = o; Object.assign(over, rest); if (forget) { touched.clear(); woke.clear(); wakers.clear(); } }
 
 /** Gällande inställningar. Mappen kommer från PRESTART_DIR eller Docker-mallens /prestart – aldrig från webben. */
 export function config() {
@@ -531,11 +531,23 @@ export function notePlay(it, startAt = 0, mode = 'direct') {
 
 // ---------------- väckning i förväg ----------------
 const woke = new Map();
-/** Läser lite av filen i bakgrunden så att disken börjar snurra upp (titelsidan öppnas, pekaren på Spela) */
-export function wake(it) {
+// En profil får väcka högst WAKE_MAX titlar per minut (titelsidor, pekare på Spela, /wake) – en klient som går igenom
+// hela biblioteket ska inte kunna hålla alla arraydiskar vakna
+export const WAKE_MAX = 30;
+const wakers = new Map(); // profil → { t, n }
+function wakeLimited(who, t) {
+  if (who == null) return false;
+  const w = wakers.get(who);
+  if (!w || t - w.t > 60e3) { if (wakers.size > 5000) wakers.clear(); wakers.set(who, { t, n: 1 }); return false; }
+  return ++w.n > WAKE_MAX;
+}
+/** Läser lite av filen i bakgrunden så att disken börjar snurra upp (titelsidan öppnas, pekaren på Spela).
+ *  who = profilen som orsakade väckningen (taket per minut), null = servern själv (uppspelning). */
+export function wake(it, who = null) {
   if (!it?.path || !config().on) return false;
   const t = Date.now();
   if (t - (woke.get(it.id) || 0) < 60e3) return false;
+  if (wakeLimited(who, t)) return false;
   woke.set(it.id, t);
   if (woke.size > 1000) for (const [k, v] of woke) if (t - v > 300e3) woke.delete(k);
   (async () => {

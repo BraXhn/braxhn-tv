@@ -1,7 +1,7 @@
 // Kopplingen mellan livetv.js och IPTV-modulerna: det livetv.js anropar (listor, guider, rubriker, reservströmmar,
 // kontroll av strömadresser). Importerar inte livetv.js (livetv.js importerar den här filen).
 import { all, get } from '../db.js';
-import { ffHeaders, assertStream, cleanHeaders, redact } from './net.js';
+import { ffHeaders, assertStream, cleanHeaders, redact, ffGuard } from './net.js';
 import { sourceCtx } from './sources.js';
 
 export { loadChannels, beforeSync, afterSync } from './sources.js';
@@ -33,4 +33,11 @@ export const allowEmpty = (t) => sourceCtx(t.id)?.type === 'xtream' && !get('SEL
 export async function checkStream(ch) {
   const c = sourceCtx(ch.tuner_id);
   if (c) await assertStream(ch.stream_url, c.pol);
+}
+/** ffmpeg genom strömvakten (net.js ffGuard) med källans policy. Kanaler som inte kommer från en IPTV-källa (HDHomeRun)
+ *  går direkt som förut. Ger { args, env, release }; kastar om adressen är spärrad eller vakten inte lyssnar. */
+export function guardFor(ch) {
+  const c = sourceCtx(ch.tuner_id);
+  if (!c) return { args: [], env: process.env, release: () => {} };
+  return ffGuard(ch.stream_url, c.pol);
 }

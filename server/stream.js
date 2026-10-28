@@ -1012,8 +1012,10 @@ export function comfortFilters(d, it) {
 const comfortArgs = (d, it, pre = []) => { const f = d.audio !== '' && d.audioMode !== 'copy' ? [...pre, ...comfortFilters(d, it)] : []; return f.length ? ['-af', f.join(',')] : []; };
 // Familjefiltret (ff=1): volymfilter för körningen som börjar på off s (kopplas av app.js – familyfilter.js muteFilters).
 // Filtrets t räknas från körningens start (-ss), därför flyttas intervallen med off.
-let muteHook = null;
+let muteHook = null, familyForce = null;
 export function setMuteHook(fn) { muteHook = fn; }
+// Påtvingat familjefilter (barnprofil, kopplas av app.js): sessionen tystas även när ff=1 saknas i adressen
+export function setFamilyForce(fn) { familyForce = fn; }
 const familyAf = (s, it, off) => { if (!s.d.ff || !muteHook) return []; try { return muteHook(it, s.user, s.d.audio, off) || []; } catch (e) { console.warn('[familjefilter]', e.message); return []; } };
 
 function audioArgs(d) {
@@ -1244,6 +1246,13 @@ function ensureCapacity(s, userId) {
 function sessionFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
+  // Påtvingat familjefilter: klienten kan inte välja bort tystnaden genom att ta bort ff=1, välja am=copy eller audio=''
+  // (volymfiltret kräver omkodat ljud och ett valt spår)
+  if (!d.ff && familyForce?.(userId, it, d.audio)) {
+    d.ff = true;
+    if (d.audioMode === 'copy') d.audioMode = 'aac';
+    if (d.audio === '') { const a = streamsOf(it).filter(x => x.type === 'audio'); const def = a.find(x => x.default) || a[0]; if (def) d.audio = String(def.index); }
+  } else if (d.ff && d.audioMode === 'copy') d.audioMode = 'aac';
   const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {

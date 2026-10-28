@@ -11,7 +11,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { TRANSCODE, liveEncoder } from '../stream.js';
 import { getSetting } from '../db.js';
 import { fail, send, streamFile } from '../util.js';
-import { ffHeaders, assertStream, redact, iptvFetch } from './net.js';
+import { ffHeaders, assertStream, redact, iptvFetch, ffGuard } from './net.js';
 
 export const PLAY_SCOPE = 9e9; // mediatoken för en session: 9e9 + sessionens nummer (BRAIN.md: scope-intervall)
 const DIR = path.join(TRANSCODE, 'iptv');
@@ -32,19 +32,20 @@ const hasReadrate = () => {
 const httpIn = (u) => /^https?:/i.test(u) ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-rw_timeout', '20000000'] : [];
 
 /** Codec och längd (ffprobe med samma rubriker) */
-function probe(url, headers) {
+function probe(url, headers, pol) {
   return new Promise((resolve) => {
-    let p;
+    let p, g;
     try {
-      p = spawn('ffprobe', ['-v', 'error', '-protocol_whitelist', 'http,https,tcp,tls,crypto,hls,httpproxy', ...ffHeaders(headers), ...(/^https?:/i.test(url) ? ['-rw_timeout', '10000000'] : []),
-        '-analyzeduration', '4000000', '-probesize', '4000000', '-show_entries', 'stream=codec_type,codec_name:format=duration', '-of', 'json', url], { stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch { return resolve({}); }
+      g = ffGuard(url, pol); // anslutningarna (även omdirigeringar och HLS-segment) kontrolleras av strömvakten
+      p = spawn('ffprobe', ['-v', 'error', '-protocol_whitelist', 'http,https,tcp,tls,crypto,hls,httpproxy', ...g.args, ...ffHeaders(headers), ...(/^https?:/i.test(url) ? ['-rw_timeout', '10000000'] : []),
+        '-analyzeduration', '4000000', '-probesize', '4000000', '-show_entries', 'stream=codec_type,codec_name:format=duration', '-of', 'json', url], { stdio: ['ignore', 'pipe', 'ignore'], env: g.env });
+    } catch { g?.release(); return resolve({}); }
     let out = '';
     p.stdout.on('data', d => { if (out.length < 200000) out += d; });
     const t = setTimeout(() => p.kill('SIGKILL'), 12000);
-    p.on('error', () => { clearTimeout(t); resolve({}); });
+    p.on('error', () => { clearTimeout(t); g.release(); resolve({}); });
     p.on('close', () => {
-      clearTimeout(t);
+      clearTimeout(t); g.release();
       try {
         const j = JSON.parse(out);
         const v = j.streams?.find(s => s.codec_type === 'video'), a = j.streams?.find(s => s.codec_type === 'audio');
@@ -69,22 +70,23 @@ export async function start(o) {
   sessions.set(sid, s);
   try {
     fs.mkdirSync(s.dir, { recursive: true });
-    const info = await probe(o.url, o.headers);
+    const info = await probe(o.url, o.headers, o.pol);
     if (!sessions.has(sid)) throw new Error('Avbruten');
     if (!s.duration && info.duration) s.duration = Math.round(info.duration);
     const copyV = getSetting('live_transcode', 'auto') !== 'always' && /^(h264|avc)/i.test(info.v || '');
     const enc = liveEncoder({ deinterlace: true, maxHeight: +getSetting('live_max_height', '1080') || null });
-    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...L.SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpIn(o.url), ...ffHeaders(o.headers),
+    const g = s.guard = ffGuard(o.url, o.pol);
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...L.SAFE_LIVE, ...g.args, '-fflags', '+genpts+discardcorrupt', ...httpIn(o.url), ...ffHeaders(o.headers),
       ...(hasReadrate() ? ['-readrate', '2'] : []), ...(o.seek > 0 ? ['-ss', String(o.seek)] : []), ...(copyV ? [] : enc.pre), '-i', o.url,
       '-map', '0:v:0?', '-map', '0:a:0?', ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
       '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event',
       '-hls_flags', 'independent_segments+temp_file', '-hls_segment_filename', path.join(s.dir, 'seg-%05d.ts'), path.join(s.dir, 'index.m3u8')];
-    const proc = s.proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = s.proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'], env: g.env });
     let err = '';
     proc.stderr.on('data', d => { err = (err + d).slice(-800); });
-    proc.on('error', (e) => { s.error = 'ffmpeg kunde inte startas: ' + e.message; });
+    proc.on('error', (e) => { s.error = 'ffmpeg kunde inte startas: ' + e.message; g.release(); });
     proc.on('close', (code) => {
-      s.proc = null; s.done = true;
+      s.proc = null; s.done = true; g.release();
       L.releaseTuner(s.tunerId, s.key);
       if (code && sessions.get(sid) === s) s.error ||= redact(err.trim().split('\n').pop() || 'Strömmen avbröts');
     });
@@ -95,6 +97,7 @@ export function stop(sid) {
   const s = sessions.get(+sid); if (!s) return;
   sessions.delete(s.sid);
   try { s.proc?.kill('SIGKILL'); } catch {}
+  if (!s.proc) s.guard?.release(); // annars när processen avslutats
   live().then(L => L.releaseTuner(s.tunerId, s.key)).catch(() => {});
   fs.rm(s.dir, { recursive: true, force: true }, () => {});
 }

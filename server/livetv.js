@@ -114,48 +114,91 @@ export function xmltvTime(s) {
   const tz = m[7] ? (m[7][0] === '-' ? -1 : 1) * (+m[7].slice(1, 3) * 60 + +m[7].slice(3)) : 0;
   return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) / 1000) - tz * 60;
 }
+// Elementen tolkas med indexOf, inte med regex som /<title[^>]*>([\s\S]*?)<\/title>/: en fientlig guide med tusentals
+// ofullständiga taggar i ett element gav annars kvadratisk tid (240 kB → 9 s med servern stilla). Varje sökning börjar
+// där förra slutade, så ett element läses i linjär tid.
+const MAX_ELEM = 1 << 20;   // ett <programme> eller <channel> större än 1 MB är inte en riktig guide
+const MAX_ATTR = 4096;
+/** Värdet av attributet name="…" i en starttagg (attribut-texten), annars null */
+const attrRe = new Map();
+function attrOf(a, name) {
+  let re = attrRe.get(name);
+  if (!re) attrRe.set(name, re = new RegExp(`(?:^|\\s)${name}="([^"]{0,${MAX_ATTR}})"`));
+  return re.exec(a.length > 4 * MAX_ATTR ? a.slice(0, 4 * MAX_ATTR) : a)?.[1] ?? null;
+}
+/** Alla förekomster av <tag …>text</tag> i b: [{ attrs, text }] (högst max) – linjär tid */
+function tagsOf(b, tag, max = 20) {
+  const out = [], open = '<' + tag, close = '</' + tag + '>';
+  let i = 0;
+  while (out.length < max) {
+    i = b.indexOf(open, i);
+    if (i < 0) break;
+    const nx = b.charCodeAt(i + open.length);
+    // <title> eller <title lang="sv"> – inte <titles>
+    if (nx !== 62 && nx !== 32 && nx !== 9 && nx !== 10 && nx !== 13 && nx !== 47) { i += open.length; continue; }
+    const gt = b.indexOf('>', i + open.length);
+    if (gt < 0) break;
+    const attrs = b.slice(i + open.length, gt);
+    if (attrs.endsWith('/')) { out.push({ attrs: attrs.slice(0, -1), text: '' }); i = gt + 1; continue; }
+    const end = b.indexOf(close, gt + 1);
+    if (end < 0) break; // ingen sluttagg längre fram: inga fler kompletta element
+    out.push({ attrs, text: b.slice(gt + 1, end) });
+    i = end + close.length;
+  }
+  return out;
+}
+const textOf = (b, tag) => tagsOf(b, tag, 1)[0]?.text;
+const iconOf = (b) => { const t = tagsOf(b, 'icon', 1)[0]; const u = t && attrOf(t.attrs, 'src'); return u && u.length <= 2000 ? u : null; };
 function parseChannel(a, b) {
-  const id = /\bid="([^"]+)"/.exec(a)?.[1];
+  const id = attrOf(a, 'id');
   if (!id) return null;
-  return { id: dec(id), names: [...b.matchAll(/<display-name[^>]*>([\s\S]*?)<\/display-name>/g)].map(x => dec(x[1])), icon: /<icon\s+src="([^"]+)"/.exec(b)?.[1] || null };
+  return { id: dec(id), names: tagsOf(b, 'display-name', 10).map(x => dec(x.text)), icon: iconOf(b) };
 }
 function parseProgramme(a, b) {
-  const start = xmltvTime(/start="([^"]+)"/.exec(a)?.[1]), stop = xmltvTime(/stop="([^"]+)"/.exec(a)?.[1]);
-  const ch = dec(/channel="([^"]+)"/.exec(a)?.[1]);
+  const start = xmltvTime(attrOf(a, 'start')), stop = xmltvTime(attrOf(a, 'stop'));
+  const ch = dec(attrOf(a, 'channel'));
   if (!start || !ch) return null;
-  const ns = /<episode-num[^>]*system="xmltv_ns"[^>]*>([^<]*)</.exec(b)?.[1];
   let season = null, episode = null;
-  if (ns) { const [s, e] = ns.split('.'); season = s?.trim() ? parseInt(s) + 1 : null; episode = e?.trim() ? parseInt(e) + 1 : null; }
-  const onscreen = /<episode-num[^>]*system="onscreen"[^>]*>\s*S(\d+)\s*E(\d+)/i.exec(b);
-  if (onscreen) { season = +onscreen[1]; episode = +onscreen[2]; }
-  return { channel: ch, start, stop: stop || start + 1800, title: dec(/<title[^>]*>([\s\S]*?)<\/title>/.exec(b)?.[1]) || 'Program',
-    subtitle: dec(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/.exec(b)?.[1]) || null, description: dec(/<desc[^>]*>([\s\S]*?)<\/desc>/.exec(b)?.[1]) || null,
-    category: dec(/<category[^>]*>([\s\S]*?)<\/category>/.exec(b)?.[1]) || null, season: Number.isFinite(season) ? season : null, episode: Number.isFinite(episode) ? episode : null,
-    icon: /<icon\s+src="([^"]+)"/.exec(b)?.[1] || null, isNew: /<new\s*\/>/.test(b) || /<premiere/.test(b) };
+  for (const n of tagsOf(b, 'episode-num', 6)) {
+    const sys = attrOf(n.attrs, 'system');
+    if (sys === 'xmltv_ns' && season == null && episode == null && !n.text.includes('<')) {
+      const [s, e] = n.text.split('.'); season = s?.trim() ? parseInt(s) + 1 : null; episode = e?.trim() ? parseInt(e) + 1 : null;
+    }
+  }
+  for (const n of tagsOf(b, 'episode-num', 6)) {
+    const m = attrOf(n.attrs, 'system') === 'onscreen' && /^\s*S(\d{1,4})\s*E(\d{1,5})/i.exec(n.text.slice(0, 100));
+    if (m) { season = +m[1]; episode = +m[2]; break; }
+  }
+  return { channel: ch, start, stop: stop || start + 1800, title: dec(textOf(b, 'title')) || 'Program',
+    subtitle: dec(textOf(b, 'sub-title')) || null, description: dec(textOf(b, 'desc')) || null,
+    category: dec(textOf(b, 'category')) || null, season: Number.isFinite(season) ? season : null, episode: Number.isFinite(episode) ? episode : null,
+    icon: iconOf(b), isNew: tagsOf(b, 'new', 1).length > 0 || b.includes('<premiere') };
 }
 /** Stegvis XMLTV-tolk: matas med textbitar och anropar onChannel/onProgram för varje komplett element (linjär tid, litet minne). */
 export class XmltvParser {
-  constructor({ onChannel, onProgram }) { this.onChannel = onChannel; this.onProgram = onProgram; this.buf = ''; }
+  constructor({ onChannel, onProgram }) { this.onChannel = onChannel; this.onProgram = onProgram; this.buf = ''; this.from = 0; }
   feed(s) {
     const b = this.buf ? this.buf + s : s;
     const re = /<(channel|programme)[\s>]/g;
     let pos = 0, m;
     while ((m = re.exec(b))) {
-      const isCh = m[1] === 'channel';
-      const close = b.indexOf(isCh ? '</channel>' : '</programme>', m.index);
+      const isCh = m[1] === 'channel', tag = isCh ? '</channel>' : '</programme>';
+      // Ofullständigt element från förra biten: leta sluttaggen bara i det nya (minus taggens längd)
+      const close = b.indexOf(tag, m.index === 0 && this.from ? Math.max(0, this.from - tag.length) : m.index);
       if (close < 0) { pos = m.index; break; } // ofullständigt element: vänta på mer data
       const gt = b.indexOf('>', m.index);
-      if (gt > 0 && gt < close) {
+      if (gt > 0 && gt < close && close - m.index <= MAX_ELEM) {
         const attrs = b.slice(m.index + m[0].length - 1, gt), body = b.slice(gt + 1, close);
         if (isCh) { const c = parseChannel(attrs, body); if (c) this.onChannel(c); }
         else { const p = parseProgramme(attrs, body); if (p) this.onProgram(p); }
       }
-      pos = close + (isCh ? 10 : 12);
+      pos = close + tag.length;
       re.lastIndex = pos;
     }
     if (!m) { const lt = b.lastIndexOf('<'); pos = Math.max(pos, lt >= pos ? lt : b.length); }
     this.buf = b.slice(pos);
-    if (this.buf.length > 64 << 20) throw new Error('Ogiltig XMLTV (för stort element)');
+    this.from = m ? this.buf.length : 0;
+    if (this.buf.length > MAX_ELEM) throw new Error('Ogiltig XMLTV (för stort element)');
   }
 }
 export function parseXMLTV(xml) {
@@ -509,13 +552,16 @@ function startLive(ch) {
   const key = `live-${ch.id}-${started}`;
   if (!acquireTuner(ch.tuner_id, key)) throw Object.assign(new Error('Alla tuners används just nu (live-TV eller inspelningar)'), { status: 409 });
   const s = { proc: null, dir: path.join(LIVE, `${ch.id}-${started}`), last: started, tunerId: ch.tuner_id, key, started, error: null, minSeg: 0 };
+  let g = null;
   try {
     fs.rmSync(s.dir, { recursive: true, force: true }); fs.mkdirSync(s.dir, { recursive: true });
     const transcode = getSetting('live_transcode', 'auto'); // auto | always
     const enc = liveEncoder({ deinterlace: true, maxHeight: +getSetting('live_max_height', '1080') || null });
     // auto: försök kopiera H.264, annars koda om (MPEG-2 från antenn kräver omkodning för webbläsare)
     const copyV = transcode !== 'always' && /h264|avc/i.test(ch.codec || '');
-    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
+    // IPTV: ffmpegs anslutningar går genom strömvakten (omdirigeringar och HLS-segment kontrolleras också)
+    g = iptv.guardFor(ch);
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, ...g.args, '-fflags', '+genpts+discardcorrupt', ...httpOpts(ch.stream_url),
       ...(/^https?:/i.test(ch.stream_url) ? ['-rw_timeout', '15000000'] : []), // en källa som slutar svara ger fel (och reservström) i stället för att hänga
       ...(copyV ? [] : enc.pre), '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a:0?',
       ...(copyV ? ['-c:v', 'copy'] : [...enc.vf, ...enc.enc, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0']),
@@ -523,11 +569,12 @@ function startLive(ch) {
       // Timeshift: ffmpeg håller hela fönstret bakåt i spellistan och tar själv bort äldre segment (disktaket i timeshift.js)
       '-hls_list_size', String(listSize()), '-hls_delete_threshold', '3', '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
       '-hls_segment_filename', path.join(s.dir, 'seg-%05d.ts'), path.join(s.dir, 'live.m3u8')];
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'], env: g.env });
     let err = '', ended = false;
     proc.stderr.on('data', d => { err = (err + d).slice(-800); });
     const end = (code, msg) => {
       if (ended) return; ended = true;
+      g.release();
       releaseTuner(ch.tuner_id, key); // nyckeln är unik för sessionen
       // Adresser i ffmpegs fel kan innehålla inloggning (Xtream) – bara värden visas
       if (sessions.get(ch.id) === s) { s.error = iptv.redact(msg || (code ? (err.trim().split('\n').pop() || 'Strömmen avbröts') : '')) || null; s.proc = null; }
@@ -535,7 +582,7 @@ function startLive(ch) {
     proc.on('error', (e) => end(1, 'ffmpeg kunde inte startas: ' + e.message));
     proc.on('close', (code) => end(code));
     s.proc = proc;
-  } catch (e) { releaseTuner(ch.tuner_id, key); fs.rm(s.dir, { recursive: true, force: true }, () => {}); throw e; }
+  } catch (e) { g?.release(); releaseTuner(ch.tuner_id, key); fs.rm(s.dir, { recursive: true, force: true }, () => {}); throw e; }
   sessions.set(ch.id, s);
   return s;
 }
@@ -569,13 +616,13 @@ const codecCache = new Map();
 async function probeCodec(ch) {
   if (codecCache.has(ch.id)) return codecCache.get(ch.id);
   const c = await new Promise((resolve) => {
-    let p;
-    try { p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, ...iptv.headerOpts(ch.stream_url), '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'] }); }
-    catch { return resolve(null); }
+    let p, g;
+    try { g = iptv.guardFor(ch); p = spawn('ffprobe', ['-v', 'error', ...SAFE_LIVE, ...g.args, ...iptv.headerOpts(ch.stream_url), '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', '-analyzeduration', '3000000', '-probesize', '3000000', ch.stream_url], { stdio: ['ignore', 'pipe', 'ignore'], env: g.env }); }
+    catch { g?.release(); return resolve(null); }
     let out = ''; p.stdout.on('data', d => out += d);
     const t = setTimeout(() => p.kill('SIGKILL'), 8000);
-    p.on('error', () => { clearTimeout(t); resolve(null); });
-    p.on('close', () => { clearTimeout(t); resolve(out.trim() || null); });
+    p.on('error', () => { clearTimeout(t); g.release(); resolve(null); });
+    p.on('close', () => { clearTimeout(t); g.release(); resolve(out.trim() || null); });
   });
   if (c) { codecCache.set(ch.id, c); if (codecCache.size > 5000) codecCache.delete(codecCache.keys().next().value); }
   return c;
