@@ -163,6 +163,24 @@ där, 429 vid upprepning inom 5 min) och `PUT /lang` (`{ item, track, lang }`, `
 inbäddad undertext, `<källa>:<filnamn>` undertextfil; `lang` = tre bokstäver, tomt = ta bort). **För apparna:** en
 rättad märkning syns som vanligt `lang` i `/api/items/:id/playback` (`audio`, `subtitles`) och `/api/items/:id` – inga
 nya fält; filen ändras aldrig och rättelsen gäller bara så länge filen är oförändrad (mtime/storlek).
+## Diskrådgivaren: `/api/admin/shrink*`
+
+Bara för administratören på betrott nät (webbens `#/shrink`, `server/shrink.js`); apparna använder det inte.
+`GET /api/admin/shrink?lib=&sort=size|gain|rate|seen&limit=&codec=&notSeenDays=` → `{ report, settings, encoders, metric,
+jobs, trash, state, waitReason, arr }`. `report` har `totals` (`bytes`, `count`, `saving`, `never`, `stale`, `wanted`),
+grupper `libraries`, `shows`, `resolutions`, `codecs` (`key`, `label`, `bytes`, `count`, `minutes`, `mbPerMin`, `saving`,
+`lastSeen`), `versions` (`main`, `files`, `reclaim`, `extra`), `titles` (per fil: `size`, `mbPerMin`, `res`, `vcodec`,
+`lastSeen`, `never`, `wanted`, `estimate` = `{ saving, after, videoKbps, afterKbps }` eller `{ skip }`, `job`) och
+`calibration`. `PUT /settings` (`{ codec: hevc|av1, allowCpu, window: 'HH:MM-HH:MM'|'', onlyIdle, paused, quality:
+high|balanced|small, minVmaf, minSsim, minPsnr, samples, trashDays, notSeenDays }`, 400 vid fel värde).
+`POST /queue` (`{ items: [id], codec?, force? }` eller `{ rule: { library, codecs, minMbPerMin, notSeenDays, minGainPct },
+preview? }`) → `{ queued, skipped: [{ id, reason }] }` (409 när ingen kodare får användas; preview → `{ matches, saving,
+titles }`). `POST /calibrate` (`{ item, codec? }`) → `{ encoder, measured, model, factor }`. `POST /run`.
+`POST /jobs/:id/cancel`, `POST /jobs/:id/restore` (originalet tillbaka ur papperskorgen, 404 om det inte finns kvar) och
+`DELETE /jobs/:id/trash` (töm nu). Jobbens `status`: `queued`, `running`, `done`, `rejected` (kvaliteten räckte inte –
+originalet behållet), `failed`, `cancelled`, `restored`. **För apparna:** efter ett byte har titeln samma id; `vcodec`,
+storlek och spår i `/api/items/:id` och `/playback` beskriver den nya filen (vanligen HEVC) – inga nya fält.
+
 ## Omkodning till HEVC/AV1: `tc=` och `vcodec`
 
 Bara tillägg – en klient utan `tc` får H.264 i MPEG-TS vid omkodning precis som förut.

@@ -34,6 +34,7 @@ import * as family from './familyfilter.js';
 import './routes/auth.js';
 import './routes/admin.js';
 import './routes/health.js'; // hälsokontroll av biblioteket (admin)
+import './routes/shrink.js'; // diskrådgivaren: analys och omkodning till HEVC/AV1 (admin)
 import './routes/setup.js';
 import './routes/library.js';
 import './routes/metadata.js'; // Redigera: fält med lås och bilder

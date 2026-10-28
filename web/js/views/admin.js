@@ -111,6 +111,7 @@ views.admin = async (sec) => {
       || '<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>'}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
     <p><a class="btn ghost small" href="#/health">Hälsokontroll: trasiga filer, synk, språk, dubbletter och saknade avsnitt →</a></p>
+    <p><a class="btn ghost small" href="#/shrink">Diskrådgivaren: var platsen tar vägen och omkodning till HEVC/AV1 →</a></p>
     <h3 style="margin:22px 0 4px;font-size:.9375rem">Lägg till bibliotek</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label for="ln">Namn</label><input id="ln" placeholder="Filmer" required></div>
       <div><label for="lt">Typ</label><select id="lt"><option value="movie">Filmer</option><option value="show">Serier</option><option value="music">Musik</option><option value="audiobook">Ljudböcker</option><option value="photo">Foton</option></select></div></div>
