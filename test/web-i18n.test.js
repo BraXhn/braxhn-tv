@@ -188,6 +188,9 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   const books = (await srv.req(`/api/audiobooks/${S.audiobook}`)).data;
   S.book = (books.books || books.items || books)[0]?.id;
   assert.ok(S.alfa && S.show, JSON.stringify(S));
+  // Kvällsvalet: en lobby där administratören är värd (filterformuläret, koden och QR-koden)
+  S.tonight = (await srv.req('/api/tonight', { method: 'POST', body: {} })).data.id;
+  assert.ok(S.tonight);
 });
 
 const VIEWS = () => [
@@ -199,7 +202,8 @@ const VIEWS = () => [
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'],
   ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['setup/libraries', 'Installation: bibliotek'],
   ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier'],
-  ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar']
+  ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar'],
+  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby']
 ];
 const MODES = {
   phone: { viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true },

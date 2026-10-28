@@ -52,6 +52,7 @@ import './routes/iptv.js'; // IPTV: kanaler per profil, rutnätsguide, catch-up,
 import './routes/calendar.js';
 import './routes/subsonic.js'; // /rest/* (musikappar) och /api/me/subsonic
 import './routes/remote.js';
+import './routes/tonight.js'; // Kvällsvalet: hushållet röstar fram filmen
 import './routes/history.js';
 import './routes/photos.js';
 export { handle } from './http/router.js';
