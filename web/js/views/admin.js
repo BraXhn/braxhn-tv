@@ -30,6 +30,7 @@ function editLibrary(l, mediaRoot) {
     <div class="fsb" id="le-fsb"></div>
     ${video ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-nfo" ${l.nfo !== 0 ? 'checked' : ''}> ${t('Använd NFO-filer (movie.nfo, tvshow.nfo, &lt;avsnitt&gt;.nfo från Kodi, Jellyfin eller tinyMediaManager) – värdena går före TMDB')}</label>` : ''}
     ${l.type === 'photo' ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-kids" ${l.kids ? 'checked' : ''}> ${t('Barnprofiler får se fotona (foton har ingen åldersgräns)')}</label>` : ''}
+    ${l.type === 'ebook' ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="le-kids" ${l.kids ? 'checked' : ''}> ${t('Barnprofiler får se e-böckerna (inom åldersgränsen i ComicInfo, okänd ålder visas)')}</label>` : ''}
     ${l.type === 'movie' ? `<label class="switch"><input type="checkbox" id="le-hv" ${l.home_video ? 'checked' : ''}> ${t('Hemvideor / andra videor – ingen TMDB, titel från filnamnet, datum från filen, mapparna blir navigering')}</label>` : ''}
     <p class="small libwarn" id="le-warn" role="status" hidden></p>`;
   const d = openDialog({ title: t('Ändra {name}', { name: l.name }), body, form: true, size: 'wide', actions: [{ label: t('Avbryt') }, { label: t('Spara'), kind: 'primary', submit: true, onClick: async (h) => {
@@ -106,7 +107,7 @@ views.admin = async (sec) => {
   </div>
   <div class="panel"><h2>${t('Bibliotek')}</h2>
     <table><tr><th>${t('Namn')}</th><th>${t('Typ')}</th><th>${t('Mapp')}</th><th>${t('Titlar')}</th><th></th></tr>
-    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: t('Filmer'), show: t('Serier'), music: t('Musik'), audiobook: t('Ljudböcker'), photo: t('Foton') }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="${t('Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger')}"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted small">${(l.paths || [l.path]).map(esc).join('<br>')}${l.home_video ? t(' <span class="ok-badge">Hemvideor</span>') : ''}${(l.type === 'movie' || l.type === 'show') && l.nfo === 0 ? t(' <span class="warn-badge">NFO av</span>') : ''}${l.type === 'photo' && l.kids ? t(' <span class="ok-badge">Barnprofiler ser det</span>') : ''}</td><td>${l.count}</td>
+    ${L.map(l => `<tr><td>${esc(l.name)}</td><td>${{ movie: t('Filmer'), show: t('Serier'), music: t('Musik'), audiobook: t('Ljudböcker'), photo: t('Foton'), ebook: t('E-böcker') }[l.type]}${l.type === 'show' ? ` <label class="small muted" title="${t('Absolut avsnittsnumrering (t.ex. One Piece - 1071) mappas till säsonger')}"><input type="checkbox" data-anime="${l.id}" ${l.anime ? 'checked' : ''}> anime</label>` : ''}</td><td class="muted small">${(l.paths || [l.path]).map(esc).join('<br>')}${l.home_video ? t(' <span class="ok-badge">Hemvideor</span>') : ''}${(l.type === 'movie' || l.type === 'show') && l.nfo === 0 ? t(' <span class="warn-badge">NFO av</span>') : ''}${(l.type === 'photo' || l.type === 'ebook') && l.kids ? t(' <span class="ok-badge">Barnprofiler ser det</span>') : ''}</td><td>${l.count}</td>
       <td class="r"><button class="ghost small" data-ledit="${l.id}">${t('Ändra…')}</button> <button class="ghost small" data-scan="${l.id}">${t('Skanna')}</button> <button class="danger small" data-del="${l.id}">${t('Ta bort')}</button></td></tr>`).join('')
       || t('<tr><td colspan="5" class="muted">Inga bibliotek ännu.</td></tr>')}</table>
     <div id="scanst" class="muted" style="margin-top:12px"></div>
@@ -114,9 +115,9 @@ views.admin = async (sec) => {
     <p><a class="btn ghost small" href="#/shrink">${t('Diskrådgivaren: var platsen tar vägen och omkodning till HEVC/AV1 →')}</a></p>
     <h3 style="margin:22px 0 4px;font-size:.9375rem">${t('Lägg till bibliotek')}</h3>
     <form id="addlib"><div class="row"><div style="flex:1;min-width:180px"><label for="ln">${t('Namn')}</label><input id="ln" placeholder="${t('Filmer')}" required></div>
-      <div><label for="lt">${t('Typ')}</label><select id="lt"><option value="movie">${t('Filmer')}</option><option value="show">${t('Serier')}</option><option value="music">${t('Musik')}</option><option value="audiobook">${t('Ljudböcker')}</option><option value="photo">${t('Foton')}</option></select></div></div>
+      <div><label for="lt">${t('Typ')}</label><select id="lt"><option value="movie">${t('Filmer')}</option><option value="show">${t('Serier')}</option><option value="music">${t('Musik')}</option><option value="audiobook">${t('Ljudböcker')}</option><option value="photo">${t('Foton')}</option><option value="ebook">${t('E-böcker och serietidningar')}</option></select></div></div>
       <label class="switch" id="lanimew" hidden><input type="checkbox" id="lanime"> ${t('Anime (absolut avsnittsnumrering som "Serie - 1071" mappas till säsonger)')}</label>
-      <label class="switch" id="lkidsw" hidden><input type="checkbox" id="lkids"> ${t('Barnprofiler får se fotona (foton har ingen åldersgräns – standard är att barnprofiler inte ser fotobiblioteket)')}</label>
+      <label class="switch" id="lkidsw" hidden><input type="checkbox" id="lkids"> ${t('Barnprofiler får se biblioteket (standard nej – för e-böcker gäller dessutom åldersgränsen i ComicInfo)')}</label>
       <label class="switch" id="lhvw"><input type="checkbox" id="lhv"> ${t('Hemvideor / andra videor (ingen TMDB – titel från filnamnet, sorteras på datum, mapparna blir navigering)')}</label>
       <label for="lp">${t('Mapp (under {mediaRoot})', { mediaRoot: esc(S.mediaRoot) })}</label><input id="lp" value="${esc(S.mediaRoot)}" required>
       <div class="fsb" id="fsb"></div>
@@ -296,10 +297,10 @@ views.admin = async (sec) => {
   browse(S.mediaRoot);
   $('#addlib').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked, homeVideo: $('#lt').value === 'movie' && $('#lhv').checked, kids: $('#lt').value === 'photo' && $('#lkids').checked } }); toast(t('Bibliotek tillagt – skannar')); await loadLibs(); route(); }
+    try { await api('/libraries', { method: 'POST', body: { name: $('#ln').value, type: $('#lt').value, path: $('#lp').value, anime: $('#lanime').checked, homeVideo: $('#lt').value === 'movie' && $('#lhv').checked, kids: ($('#lt').value === 'photo' || $('#lt').value === 'ebook') && $('#lkids').checked } }); toast(t('Bibliotek tillagt – skannar')); await loadLibs(); route(); }
     catch (er) { toastErr(er); }
   };
-  const typeOpts = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; $('#lhvw').hidden = $('#lt').value !== 'movie'; $('#lkidsw').hidden = $('#lt').value !== 'photo'; };
+  const typeOpts = () => { $('#lanimew').hidden = $('#lt').value !== 'show'; $('#lhvw').hidden = $('#lt').value !== 'movie'; $('#lkidsw').hidden = $('#lt').value !== 'photo' && $('#lt').value !== 'ebook'; };
   $('#lt').onchange = typeOpts;
   typeOpts();
   $$('[data-ledit]').forEach(b => b.onclick = () => editLibrary(L.find(l => l.id === +b.dataset.ledit), S.mediaRoot));

@@ -13,7 +13,7 @@ i själva filen – den här sidan är översikten.
 | `ui/buttons.js` | `iconButton`, `setIconButton` | knappar med bara ✕ ♥ ⏮ utan namn |
 | `ui/tabs.js` | `tabsHtml`, `bindTabs` | `.tabs` med knappar/länkar utan roller |
 | `ui/menu.js` | `openMenu`, `openPopover`, `closeMenu`, `contextMenu` | – (nytt) |
-| `ui/cards.js` | `card`, `seasonCard`, `art`, `shelf`, `shelfHtml`, `colCard`, `personCard`, `cardItem` | – |
+| `ui/cards.js` | `card`, `seasonCard`, `art`, `shelf`, `shelfHtml`, `colCard`, `personCard`, `cardItem`, `ebookCard`, `ebookCover` | – |
 | `ui/shelves.js` | `initShelves`, `initCardSize` | – (‹ › på hyllor, piltangenter mellan kort, kortstorlek) |
 | `ui/cardmenu.js` | `initCardMenus`, `openCardMenu`, `cardActions` | – (snabbåtgärder på korten) |
 | `ui/activity.js` | `startActivity`, `stopActivity` | – (aktivitetsindikatorn för administratörer) |

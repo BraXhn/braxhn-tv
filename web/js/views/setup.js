@@ -11,7 +11,7 @@ import { emptyState, errorState, bindRetry, loadingState } from '../ui/states.js
 const STEPS = [
   { id: 'welcome', title: t('Välkommen') }, { id: 'metadata', title: 'Metadata' }, { id: 'libraries', title: t('Bibliotek') },
   { id: 'hardware', title: t('Omkodning') }, { id: 'remote', title: t('Utanför hemmet') }, { id: 'household', title: t('Hushållet') }, { id: 'done', title: t('Klart') }];
-const TYPES = { movie: t('Filmer'), show: t('Serier'), music: t('Musik'), audiobook: t('Ljudböcker'), photo: t('Foton') };
+const TYPES = { movie: t('Filmer'), show: t('Serier'), music: t('Musik'), audiobook: t('Ljudböcker'), photo: t('Foton'), ebook: t('E-böcker') };
 const LANGS = [['sv-SE', t('Svenska')], ['en-US', t('Engelska')], ['nb-NO', t('Norska')], ['da-DK', t('Danska')], ['fi-FI', t('Finska')], ['de-DE', t('Tyska')]];
 const REPO = 'https://github.com/BraXhn/braxhn-tv';
 const ext = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
@@ -161,7 +161,7 @@ const STEP = {
       <p class="muted small">${t('Hittar du inte mappen? Lägg till den som en sökväg i Unraid-mallen (t.ex. <code>/mnt/user/Filmer</code> → <code>{mediaRoot}/Filmer</code>) och starta om containern.\n      Hur filerna bör heta står i README under <i>Namnge filer</i>.', { mediaRoot: esc(S.mediaRoot) })}</p>`;
     let libs = S.checks.libraries;
     const drawLibs = () => {
-      $('#stlibs').innerHTML = libs.length ? `<h3>${t('Dina bibliotek')}</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? t('Hemvideor') : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? t('böcker') : l.type === 'photo' ? t('foton') : t('titlar')}</span></li>`).join('')}</ul>` : '';
+      $('#stlibs').innerHTML = libs.length ? `<h3>${t('Dina bibliotek')}</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? t('Hemvideor') : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? t('böcker') : l.type === 'photo' ? t('foton') : l.type === 'ebook' ? t('böcker') : t('titlar')}</span></li>`).join('')}</ul>` : '';
     };
     drawLibs();
     const add = async (name, type, p, homeVideo = false) => {

@@ -14,6 +14,7 @@ import vm from 'node:vm';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { startServer, PW } from './media/server.mjs';
 import { auditPage } from './helpers/a11y-audit.js';
+import { epub, cbz, png, paragraphs } from './helpers/ebook-fixtures.js';
 
 const WEB = path.join(import.meta.dirname, '..', 'web');
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
@@ -135,6 +136,10 @@ before(async () => {
   ff('-f', 'lavfi', '-i', 'sine=frequency=250:duration=10', '-metadata', 'title=Part 1', '-metadata', 'album=The Book', '-metadata', 'artist=The Writer', path.join(bok, '01.mp3'));
   const pics = path.join(MEDIA, 'Photos', '2024', 'Summer'); fs.mkdirSync(pics, { recursive: true });
   for (const [n, c] of [[1, 'red'], [2, 'blue']]) ff('-f', 'lavfi', '-i', `color=c=${c}:s=320x240`, '-frames:v', '1', path.join(pics, `pic${n}.jpg`));
+  const eb = path.join(MEDIA, 'Ebooks', 'The Saga'); fs.mkdirSync(eb, { recursive: true });
+  fs.writeFileSync(path.join(MEDIA, 'Ebooks', 'The Novel.epub'), epub({ title: 'The Novel', author: 'The Author', lang: 'en', publisher: 'The Publisher', subject: 'Adventure', cover: png(120, 180),
+    chapters: [{ title: 'Beginning', body: '<p>It was a dark and stormy night. The end came quickly.</p>'.repeat(30) }, { title: 'Ending', body: '<p>The end.</p>' }] }));
+  fs.writeFileSync(path.join(eb, 'The Saga 001.cbz'), cbz({ pages: 4, w: 120, h: 180, info: { Series: 'The Saga', Number: '1' } }));
   const T0 = Math.floor(Date.now() / 1000 / 1800) * 1800;
   const guide = `<tv><channel id="k1"><display-name>Channel One</display-name></channel>
     ${[-1, 0, 1, 2].map(h => `<programme start="${xt(T0 + h * 3600)}" stop="${xt(T0 + (h + 1) * 3600)}" channel="k1"><title>Programme ${h + 2}</title><desc>Description</desc></programme>`).join('')}</tv>`;
@@ -171,7 +176,7 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   assert.equal((await srv.req('/api/me/lang', { method: 'PUT', body: { lang: 'en' } })).status, 200);
   assert.equal((await srv.req('/api/status')).data.user.lang, 'en');
   assert.match(await html({ 'accept-language': 'sv-SE' }), /<html lang="en">/); // profilens val går före
-  for (const [name, type, p] of [['Movies', 'movie', 'Movies'], ['Shows', 'show', 'Shows'], ['Music', 'music', 'Music'], ['Audiobooks', 'audiobook', 'Audiobooks'], ['Photos', 'photo', 'Photos']]) {
+  for (const [name, type, p] of [['Movies', 'movie', 'Movies'], ['Shows', 'show', 'Shows'], ['Music', 'music', 'Music'], ['Audiobooks', 'audiobook', 'Audiobooks'], ['Photos', 'photo', 'Photos'], ['Ebooks', 'ebook', 'Ebooks']]) {
     r = await srv.req('/api/libraries', { method: 'POST', body: { name, type, path: path.join(MEDIA, p) } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
   }
@@ -187,7 +192,9 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   S.album = (albums.albums || albums.items || albums)[0]?.id;
   const books = (await srv.req(`/api/audiobooks/${S.audiobook}`)).data;
   S.book = (books.books || books.items || books)[0]?.id;
-  assert.ok(S.alfa && S.show, JSON.stringify(S));
+  const ebs = (await srv.req(`/api/ebooks/lib/${S.ebook}`)).data.books;
+  S.epub = ebs.find(b => b.format === 'epub')?.id; S.comic = ebs.find(b => b.format === 'cbz')?.id;
+  assert.ok(S.alfa && S.show && S.epub && S.comic, JSON.stringify(S));
   // Kvällsvalet: en lobby där administratören är värd (filterformuläret, koden och QR-koden)
   S.tonight = (await srv.req('/api/tonight', { method: 'POST', body: {} })).data.id;
   assert.ok(S.tonight);
@@ -196,7 +203,7 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
 const VIEWS = () => [
   ['', 'Hem'], [`lib/${S.movie}`, 'Filmer'], [`lib/${S.show}`, 'Serier'], [`item/${S.alfa}`, 'Film'], [`item/${S.show}`, 'Serie'],
   [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
-  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], ['search?q=alpha', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
+  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search?q=alpha', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'],

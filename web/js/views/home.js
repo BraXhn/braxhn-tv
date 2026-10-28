@@ -4,14 +4,14 @@ import { $, act, api, cardW, esc, fmtDay, fmtDur, heroUrl, imgSrc, later, libs, 
 import { need, playSpoken, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
-import { bookCard, card, colCard, podCover, seasonCard, shelf, shelfHtml, upcomingCard } from '../ui/cards.js';
+import { bookCard, card, colCard, ebookCard, podCover, seasonCard, shelf, shelfHtml, upcomingCard } from '../ui/cards.js';
 import { bindFeatured, featuredHtml } from '../ui/featured.js';
 import { SORT_DIR, SORT_LABEL, chips, chipsHtml, filterCount, hasFilter, hashQuery, openFilterPanel } from '../ui/libfilter.js';
 import { emptyState } from '../ui/states.js';
 
 // Startsidans hyllor i den ordning användaren valt (homeLayout från servern, "Anpassa startsidan"). Hyllor som
 // servern inte känner till ritas inte; en äldre server utan homeLayout ger standardordningen nedan.
-const DEFAULT_ORDER = ['foryou', 'continue', 'listening', 'watchlist', 'upcoming', 'because', 'recommended', 'custom', 'recent',
+const DEFAULT_ORDER = ['foryou', 'continue', 'listening', 'reading', 'watchlist', 'upcoming', 'because', 'recommended', 'custom', 'recent',
   'short', 'toprated', 'onthisday', 'memories', 'genre', 'gems', 'collections'];
 const cards = (list) => list.map(i => card(i)).join('');
 /** Kort i "Fortsätt lyssna": ljudböcker öppnar boken, poddavsnitt fortsätter spelas direkt */
@@ -63,6 +63,8 @@ async function renderHome(d, cols, own, fromCache) {
       extra: `<span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">${t('Markera som sedda')}</a>` }) : '',
     continue: () => d.continue.length ? shelfHtml(t('Fortsätt titta'), cards(d.continue), { row: 'continue' }) : '',
     listening: () => d.listening?.length ? shelfHtml(t('Fortsätt lyssna'), d.listening.map(listenCard).join(''), { row: 'listening' }) : '',
+    // Fortsätt läsa: påbörjade e-böcker och serietidningar (fältet reading)
+    reading: () => d.reading?.length ? shelfHtml(t('Fortsätt läsa'), d.reading.map(b => ebookCard(b)).join(''), { row: 'reading' }) : '',
     watchlist: () => shelf(t('Min lista'), d.watchlist, false, t('<a href="#/watchlist">Visa alla</a>'), 'watchlist'),
     // Kommer snart: avsnitt de närmaste sju dagarna (fältet upcoming)
     upcoming: () => d.upcoming?.length ? shelfHtml(t('Kommer snart'), d.upcoming.map(upcomingCard).join(''), { more: t('<a href="#/calendar">Visa kalendern</a>') }) : '',

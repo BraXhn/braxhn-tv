@@ -13,6 +13,7 @@ export const SHELVES = [
   { id: 'foryou', name: 'Nytt för dig' },
   { id: 'continue', name: 'Fortsätt titta' },
   { id: 'listening', name: 'Fortsätt lyssna' },
+  { id: 'reading', name: 'Fortsätt läsa' },
   { id: 'watchlist', name: 'Min lista' },
   { id: 'upcoming', name: 'Kommer snart' },
   { id: 'because', name: 'Eftersom du såg …' },

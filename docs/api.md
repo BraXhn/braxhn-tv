@@ -440,6 +440,26 @@ Regler: varje förslag är tillåtet för **varje** deltagare (`allowedFor` – 
 under röstningen tar bort det som inte är tillåtet för den (eller som den sett, med `unseen`) ur listan för alla.
 Ingen ser vem som sett eller röstat vad – bara hur många förslag var och en svept och, när ingen match blev av, antalet
 gillningar per titel. Match när antalet gillningar når `need` (alla, eller hälften + 1).
+## E-böcker och serietidningar: `/api/ebooks/*` och OPDS `/api/opds/*`
+
+Bara webben (apparna får inte bibliotekstypen `ebook` i `/api/libraries`, och `reading` i `/api/home` samt `ebooks` i `/api/search/all` är tomma för apptoken). Allt kontrolleras mot profilens behörighet: biblioteket, barnprofiler bara när `libraries.kids` = 1 och då bara böcker utan högre `age` – annars 404.
+
+| Anrop | Svar |
+|---|---|
+| `GET /api/ebooks/lib/:lib?sort=title\|author\|series\|added\|recent&series=` | `{ library, series: [{ name, count, read, cover }], continue, books }` – böckerna som kort: `id, library, format (epub\|pdf\|cbz), title, author, series, seriesNo, year, cover, pages, rtl, added, percent, finished, updated` |
+| `GET /api/ebooks/:id` | kortets fält + `description, publisher, language, isbn, volume, genres, manga, age, locator, spine [{ href, chars, linear }], toc [{ title, href, frag, level }], marks, sameSeries, canDownload` |
+| `GET /api/ebooks/:id/cover?w=` | JPEG (alternativet `img`) |
+| `GET /api/ebooks/:id/res?p=` | en post i EPUB:en: XHTML som `text/plain`, CSS, typsnitt och bilder (typ ur byten); alltid `Content-Security-Policy: … sandbox`. 400 för sökvägar ut ur arkivet, 404 för poster som saknas, 422 för zip-bomber/trasiga poster, 415 för andra typer |
+| `GET /api/ebooks/:id/page/:n` | serietidningens sida `n` (0 = första) som bild |
+| `GET /api/ebooks/:id/pdf` | PDF:en `inline` (webbläsarens läsare) |
+| `GET /api/ebooks/:id/file` | originalfilen som nedladdning – kräver rätten att ladda ner (403) |
+| `POST /api/ebooks/:id/progress` | `{ locator, percent, finished?, at? }` – `locator` är klientens position (JSON-objekt ≤ 2000 tecken: EPUB `{ ch, p }`, serietidning `{ page }`), `at` = när den sparades (ett äldre läge skriver inte över ett nyare, svaret har då `stale: true`). ≥ 99,5 % = utläst |
+| `DELETE /api/ebooks/:id/progress` | börja om / oläst |
+| `POST /api/ebooks/:id/marks` | `{ kind: bookmark\|highlight, locator, text, note, color (yellow\|green\|blue\|pink) }` – markeringens `locator` = `{ ch, start, end }` (textposition i kapitlet) |
+| `PUT\|DELETE /api/ebooks/marks/:mid` | ändra `note`/`color`, ta bort (bara egna) |
+| `GET\|POST\|DELETE /api/me/opds` | lösenordet för läsappar: läget, skapa (`{ password, code? }` – kontots lösenord, utifrån även tvåstegskod; `secret` visas bara i svaret) och återkalla |
+
+**OPDS** (OPDS 1.2/Atom) under `/api/opds`: `/` (navigering), `/continue`, `/recent`, `/search?q=`, `/opensearch.xml`, `/lib/:lib?page=` (50 per sida, `next`/`previous`), `/lib/:lib/series`, `/lib/:lib/series/:name`, `/book/:id/cover`, `/book/:id/file` (kräver nedladdningsrätt) och `/book/:id/page/:n` (OPDS-PSE, `pse:count` i flödet). Inloggning bara med HTTP Basic: profilens namn och lösenordet för läsappar – kaka, Bearer och `?t=` gäller inte där, och lösenordet gäller ingen annanstans (routealternativet `opds`). Utan inloggning 401 med `WWW-Authenticate: Basic`; för många fel ger 429.
 
 ## Kontraktstestet
 
