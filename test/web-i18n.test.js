@@ -198,7 +198,8 @@ const VIEWS = () => [
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'],
   ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['setup/libraries', 'Installation: bibliotek'],
-  ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier']
+  ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier'],
+  ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar']
 ];
 const MODES = {
   phone: { viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true },
