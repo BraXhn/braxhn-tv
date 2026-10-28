@@ -42,9 +42,9 @@ class App : Application() {
 
 @Serializable data class AudioStream(
     val index: Int, val codec: String? = null, val lang: String? = null, val title: String? = null,
-    val channels: Int? = null, val default: Boolean? = null
+    val channels: Int? = null, val default: Boolean? = null, val vi: Boolean? = null, val comment: Boolean? = null
 ) {
-    val label: String get() = listOfNotNull(lang?.uppercase() ?: "Ljud", title, codec?.uppercase(), channels?.let { "${it}ch" }).joinToString(" · ")
+    val label: String get() = listOfNotNull(lang?.uppercase() ?: "Ljud", title, codec?.uppercase(), channels?.let { "${it}ch" }, if (isAudioDesc && title?.contains("syntolk", true) != true) "Syntolkning" else null).joinToString(" · ")
 }
 
 @Serializable data class SubtitleTrack(
@@ -76,7 +76,7 @@ fun castLine(cast: List<CastMember>?): String? {
     val children: List<MediaItem>? = null, val next: ItemRef? = null,
     val audio: List<AudioStream>? = null, val subtitles: List<SubtitleTrack>? = null,
     val nextId: Int? = null, val prevId: Int? = null,
-    val cast: List<CastMember>? = null, val inWatchlist: Boolean? = null, val onThisDay: DayNote? = null
+    val cast: List<CastMember>? = null, val inWatchlist: Boolean? = null, val onThisDay: DayNote? = null, val userRating: Double? = null, val extras: List<ExtraFile>? = null, val theme: ThemeInfo? = null
 ) {
     val isShow get() = kind == "show"
     val isEpisode get() = kind == "episode"
@@ -94,12 +94,12 @@ fun castLine(cast: List<CastMember>?): String? {
     /** Nya avsnitt av serier man följer (saknas hos äldre servrar) */
     val forYou: List<MediaItem> = emptyList())
 @Serializable data class LibraryItems(val library: Library, val items: List<MediaItem>)
-@Serializable data class PlaybackSubtitle(val id: String, val label: String, val lang: String? = null, val url: String)
+@Serializable data class PlaybackSubtitle(val id: String, val label: String, val lang: String? = null, val url: String, val syncable: Boolean? = null, val source: String? = null)
 @Serializable data class Playback(
     val mode: String, val url: String, val reasons: List<String> = emptyList(), val subtitles: List<PlaybackSubtitle> = emptyList(),
     val intro: Marker? = null, val recap: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
     val remote: Boolean? = null, val tonemap: Boolean? = null,
-    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null, val preroll: List<PrerollEntry> = emptyList()
+    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null, val preroll: List<PrerollEntry> = emptyList(), val filter: FamilyPlan? = null, val subAutoSync: Boolean? = null
 )
 @Serializable data class Chapter(val start: Double, val end: Double, val title: String)
 

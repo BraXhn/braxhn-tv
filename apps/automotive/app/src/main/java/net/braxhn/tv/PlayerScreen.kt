@@ -75,6 +75,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var audioApplied by remember(req) { mutableStateOf(false) }
     var localAudio by remember(req) { mutableStateOf<Int?>(null) }
     var modeNote by remember { mutableStateOf<String?>(null) }
+    // Familjefiltret (överhoppad scen) och automatisk undertextsynk visas en stund i statusraden
+    var note by remember { mutableStateOf<String?>(null) }
 
     val player = remember {
         val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
@@ -173,9 +175,16 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 p?.credits != null && item?.nextId != null && t >= p.credits && t < p.credits + 60 -> "Nästa avsnitt"
                 else -> null
             }
+            // Familjefiltret i läget "hoppa över scener": planen från /playback (servern tystar svordomarna själv)
+            val f = p?.filter
+            if (f != null && f.mode == "skip" && idx >= mainIndex && player.isPlaying) {
+                val sc = f.skip.firstOrNull { x -> t >= x.start && t < x.end - 0.3 }
+                if (sc != null) { player.seekTo((sc.end * 1000).toLong()); note = "Hoppade över: ${sc.label ?: "markerad scen"}" }
+            }
             if (++n % 20 == 0 && player.isPlaying) report()
         }
     }
+    LaunchedEffect(note) { if (note != null && note?.startsWith("Synkar") != true) { delay(4000); note = null } }
 
     /**
      * Direktuppspelning (atrack=1): välj ljudspåret i spelaren i stället för att servern remuxar. Serverns spårlista
@@ -292,6 +301,30 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         player.trackSelectionParameters = b.build()
     }
 
+    /** Automatisk synk av undertextfilen mot ljudet (servern räknar); undertexten laddas om när den är klar */
+    fun autoSync(s: SubtitleTrack) {
+        val it = item ?: return
+        note = "Synkar undertexten…"
+        scope.launch {
+            val audio: Int? = localAudio ?: pb?.audioSelected?.toIntOrNull() ?: req.audio
+            val r = runCatching { Api.autoSyncSubtitle(it.id, s.id, audio) { pr: Double -> note = "Synkar undertexten… ${(pr * 100).toInt()} %" } }
+            val job: SubSyncJob? = r.getOrNull()
+            note = when {
+                r.isFailure -> "Kunde inte synka: ${r.exceptionOrNull()?.message ?: ""}"
+                job?.state == "done" -> "Undertexten är synkad" + (job?.result?.offset?.let { o -> " (%+.1f s)".format(o).replace('.', ',') } ?: "")
+                job?.state == "unsure" -> "Ingen säker förskjutning hittades – undertexten är oförändrad"
+                else -> "Kunde inte synka: ${job?.error ?: "okänt fel"}"
+            }
+            if (job?.state == "done") restart(sub = s)
+        }
+    }
+
+    // Statusraden: syntolkning (valt ljudspår) och familjefiltret
+    val selAudio: Int? = localAudio ?: pb?.audioSelected?.toIntOrNull() ?: req.audio
+    val audioDesc: Boolean = item?.audio?.let { list -> (list.firstOrNull { a -> a.index == selAudio } ?: list.firstOrNull { a -> selAudio == null && a.default == true })?.isAudioDesc } == true
+    val extraStatus: String? = listOfNotNull(if (audioDesc) "Syntolkning" else null,
+        pb?.filter?.let { f -> if (f.mode == "skip") "Familjefilter: hoppar över scener" else "Familjefilter" }).joinToString(" · ").takeIf { x -> x.isNotEmpty() }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player; setShowSubtitleButton(true); keepScreenOn = true } },
             update = { v -> v.useController = !inPip }, modifier = Modifier.fillMaxSize())
@@ -303,7 +336,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             }
             Spacer(Modifier.width(12.dp))
             Text(item?.let { if (it.isEpisode) "${it.showTitle} · ${it.sxe} · ${it.title}" else it.title } ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(prerollLabel ?: modeNote ?: status, color = Color.LightGray, fontSize = 12.sp)
+            Text(prerollLabel ?: modeNote ?: note ?: listOfNotNull(status.takeIf { x -> x.isNotEmpty() }, extraStatus).joinToString(" · "), color = Color.LightGray, fontSize = 12.sp)
             val p = pb
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { menu = "speed" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
@@ -351,7 +384,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                                 this.item { Text("Ljud", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
                                 val sel = localAudio ?: p.audioSelected?.toIntOrNull() ?: req.audio
                                 items(p.audio) { a ->
-                                    OptionRow(a.label, a.index == sel) {
+                                    // Syntolkning syns i titelsidans spårlista (vi), som har filens alla flaggor
+                                    OptionRow(item?.audio?.firstOrNull { x -> x.index == a.index }?.label ?: a.label, a.index == sel) {
                                         menu = null
                                         // Direktuppspelning: byt i spelaren (ingen omstart, ljudet orört); annars via servern
                                         if (a.index != sel && !selectLocalAudio(a.index)) restart(audio = a.index)
@@ -361,6 +395,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                             this.item { Text("Undertexter", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
                             this.item { OptionRow("Inga", currentSub == null) { selectSubtitle(null); menu = null } }
                             items(item?.subtitles ?: emptyList()) { s -> OptionRow(s.label, s.id == currentSub?.id) { selectSubtitle(s); menu = null } }
+                            // Undertextfiler kan synkas mot ljudet av servern (inbäddade spår kan inte)
+                            val cs = currentSub
+                            if (!offline && cs != null && p.subtitles.firstOrNull { x -> x.id == cs.id }?.syncable == true) {
+                                this.item { CheckRow("Synka automatiskt (mot ljudet)", false) { menu = null; autoSync(cs) } }
+                            }
                             // Nattläge/tydligare dialog: servern filtrerar ljudet, så strömmen startas om där man är
                             if (!offline) {
                                 this.item { Text("Ljudkomfort", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }

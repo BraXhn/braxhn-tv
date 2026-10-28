@@ -61,7 +61,11 @@ sealed class Screen {
     data class Play(val id: Int, val start: Double, val audio: Int?, val sub: SubtitleTrack?, val nonce: Int = 0, val skipPreroll: Boolean = false) : Screen()
     data object Live : Screen()
     data object Recordings : Screen()
-    data class LivePlay(val id: Int, val title: String) : Screen()
+    /** breaks/autoSkip: reklamavbrott i en inspelning (Hoppa över reklam) */
+    data class LivePlay(val id: Int, val title: String, val breaks: List<Marker> = emptyList(), val autoSkip: Boolean = false) : Screen()
+    data class VodDetail(val id: Int) : Screen()
+    /** kind: "extra" (extramaterial), "vod"/"vodep" (IPTV-film/avsnitt), "catchup" (program ur kanalens arkiv) */
+    data class Stream(val kind: String, val id: Int, val title: String, val start: Double = 0.0) : Screen()
     data object Profiles : Screen()
 }
 
@@ -82,6 +86,13 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Bg) { AppRoot() }
             }
         }
+    }
+
+    /** Fjärrkontrollens kanal- och sifferknappar går till live-spelaren (KeyHook) före PlayerView och Compose */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val h = KeyHook.handler
+        if (h != null && h(event)) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -113,7 +124,8 @@ fun AppRoot() {
         PlayerScreen(current, onClose = pop, onPlay = { stack[stack.lastIndex] = it })
         return
     }
-    if (current is Screen.LivePlay) { LivePlayerScreen(current, onClose = pop); return }
+    if (current is Screen.LivePlay) { LivePlayerScreen(current, onClose = pop, onPlay = push); return }
+    if (current is Screen.Stream) { StreamPlayerScreen(current, onClose = pop); return }
     var hasLive by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { hasLive = runCatching { Api.get<LiveChannels>("/api/live/channels").channels.isNotEmpty() }.getOrDefault(false) }
     Row(Modifier.fillMaxSize()) {
@@ -144,7 +156,8 @@ fun AppRoot() {
                 is Screen.Live -> LiveScreen(onPlay = push, push = push)
                 is Screen.Recordings -> RecordingsScreen(onPlay = push)
                 is Screen.Profiles -> ProfilesScreen()
-                is Screen.Play, is Screen.LivePlay -> {}
+                is Screen.VodDetail -> VodDetailScreen(current.id, push)
+                is Screen.Play, is Screen.LivePlay, is Screen.Stream -> {}
             }
         }
     }
@@ -314,15 +327,20 @@ fun LibraryScreen(lib: Library, push: (Screen) -> Unit) {
 fun SearchScreen(push: (Screen) -> Unit) {
     var q by remember { mutableStateOf("") }
     var res by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    LaunchedEffect(q) {
-        if (q.length < 2) { res = emptyList(); return@LaunchedEffect }
+    var lines by remember { mutableStateOf(false) } // repliksökning i undertexterna
+    LaunchedEffect(q, lines) {
+        if (q.length < 2 || lines) { res = emptyList(); return@LaunchedEffect }
         delay(300)
         res = runCatching { Api.get<List<MediaItem>>("/api/search", mapOf("q" to q)) }.getOrDefault(emptyList())
     }
     Column {
-        OutlinedTextField(q, { q = it }, label = { Text("Sök filmer och serier") }, singleLine = true,
-            leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth().padding(20.dp))
-        ItemGrid(res, push = push)
+        OutlinedTextField(q, { q = it }, label = { Text(if (lines) "Sök en replik" else "Sök filmer och serier") }, singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp))
+        Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterChip(selected = !lines, onClick = { lines = false }, label = { Text("Titlar", fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
+            FilterChip(selected = lines, onClick = { lines = true }, label = { Text("Repliker", fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
+        }
+        if (lines) LinesResults(q, push) else ItemGrid(res, push = push)
     }
 }
 
@@ -464,6 +482,8 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
             ?: it.subtitles?.firstOrNull { s -> Api.subtitleLang.isNotEmpty() && s.lang == Api.subtitleLang && s.bitmap != true })
     }
 
+    // Temamusik enligt profilens val (låg volym, tonas ut när sidan lämnas)
+    ThemeMusicEffect(it)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -476,6 +496,8 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     it.overview?.let { o -> Text(o, color = Color(0xFFCFD3DD), maxLines = 6, overflow = TextOverflow.Ellipsis) }
                     // Rollista: regi/skapare och de första skådespelarna
                     castLine(it.cast)?.let { c -> Text(c, color = Color.Gray, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+                    // Eget betyg (stjärnor, halva steg)
+                    RatingRow(it)
                     if (!it.isShow) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
@@ -517,6 +539,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                 }
             }
         }
+        it.extras?.takeIf { x -> x.isNotEmpty() }?.let { x -> item { ExtrasShelf(x, push) } }
         if (it.isShow) {
             val eps = it.children.orEmpty()
             val seasons = eps.mapNotNull { e -> e.season }.distinct().sorted()

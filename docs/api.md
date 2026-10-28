@@ -116,7 +116,7 @@ Varje replik: `id` (filmen eller avsnittet – spela med `/api/items/:id/playbac
 kommer från en annan filmversion), `kind`, `title` (filmen/serien), `year`, för avsnitt `episodeTitle`, `season`,
 `episode`, `show`; `t`/`end` (sekunder, med undertextsynken inräknad), `line`, `marks` (`[[start, slut]]`, teckenindex
 i `line`), `before`/`after` (repliken före/efter eller `null`), `lang`, `label` och `thumb` (`{ url, col, row, cols,
-rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null`). Apparna använder den inte än.
+rows, w, h }` = rutan i ett ark från `/api/items/:id/trickplay/:n`, eller `null`). Android-appen läser `id`, `t`, `line`, `marks`, `before`/`after`, titelfälten och `status` (`indexing` som valfri typ – ett objekt för administratören).
 
 ## Familjefilter: `filter` i `/api/items/:id/playback`
 
@@ -387,6 +387,13 @@ Formatet beskrivs i [test/contracts/README.md](../test/contracts/README.md).
 
 Ett obligatoriskt fält i en ny appversion är bara säkert om alla servrar som kan köra appen redan skickar det.
 Välj valfritt (med standardvärde) om du är osäker. Det gäller också för fält som läggs till i servern samtidigt.
+
+### Android-appens anrop utanför kontraktet
+
+Android-appen anropar också `POST /api/iptv/vod/:id/play`, `POST /api/iptv/episodes/:eid/play` (`?ss=` vid Fortsätt),
+`POST /api/iptv/programs/:pid/catchup?offset=`, `POST /api/iptv/play/:sid/stop` och `POST /api/iptv/progress`. De kräver en
+Xtream-källa eller ett catch-up-arkiv som testservern saknar och finns därför inte i kontraktet; appen läser bara `url`,
+`direct`, `sid`, `offset`, `duration` och `position` (alla utom `url` valfria). Ändra inte de fälten.
 
 ### Valfria tillägg som iOS/tvOS-appen läser
 
