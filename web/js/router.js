@@ -24,7 +24,7 @@ if (lang !== 'sv') {
 }
 
 // ---------- routing ----------
-const LIB_PATH = { music: 'music', audiobook: 'books', photo: 'photos' };
+const LIB_PATH = { music: 'music', audiobook: 'books', photo: 'photos', ebook: 'ebooks' };
 const railItem = (href, icon, label) => `<a class="ri" href="${href}" title="${esc(label)}">${RAIL_ICON[icon] || RAIL_ICON.movie}<span class="lbl">${esc(label)}</span></a>`;
 const libIcon = (l) => /barn|kids|junior/i.test(l.name) && (l.type === 'movie' || l.type === 'show') ? 'kids' : l.type;
 export async function loadLibs() {
@@ -39,7 +39,8 @@ export async function loadLibs() {
 const CRUMB = { '': t('Hem'), home: t('Hem'), watchlist: t('Min lista'), search: t('Sök'), podcasts: t('Poddar'), podcast: t('Poddar'), live: t('Live-TV'), streaming: t('Strömmande'),
   account: t('Mitt konto'), admin: t('Administration'), setup: t('Installation'), stats: t('Statistik'), requests: t('Önskningar'), calendar: t('Kommande'), wrapped: t('Årssammanfattning'), collection: t('Samling'), collections: t('Samlingar'), ucollection: t('Samling'), person: 'Person',
   history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'), sso: t('Enkel inloggning'),
-  quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker') };
+  quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker'),
+  ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren') };
 // Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
 const PAGE = { login: t('Logga in'), profiles: t('Välj profil'), invite: t('Skapa konto'), timeup: t('Skärmtiden är slut') };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
@@ -57,7 +58,7 @@ function markNav() {
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
-  const lib = ['lib', 'music', 'books', 'photos'].includes(name) ? libs.find(l => String(l.id) === arg) : null;
+  const lib = ['lib', 'music', 'books', 'photos', 'ebooks'].includes(name) ? libs.find(l => String(l.id) === arg) : null;
   $('#crumb').textContent = lib ? lib.name : CRUMB[name] ?? '';
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
@@ -99,7 +100,7 @@ export async function boot() {
   return true;
 }
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
-const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
+const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', ebooks: 'grid', ebook: 'detail', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
   admin: 'panels', iptvadmin: 'panels', vod: 'shelves', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels', health: 'panels', shrink: 'panels', tonight: 'panels', sso: 'panels' };
 // Vyerna utom startsidan laddas först när de öppnas (eller när pekaren/fokus når en länk dit): vy -> modul i js/
@@ -111,7 +112,8 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
-  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight', sso: 'views/sso' }));
+  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight', sso: 'views/sso',
+  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för
@@ -236,7 +238,9 @@ const SHORTCUTS = [[t('Överallt'), [['?', t('Visa den här listan')], ['/', t('
     ['m', t('Ljud av/på')], ['c', t('Undertexter av/på')], ['< >', t('Långsammare/snabbare')], ['f', t('Helskärm')], ['0–9', t('Hoppa till 0 %, 10 % … 90 %')],
     ['Home End', t('Början/slutet (på tidslinjen)')], ['PageUp PageDown', t('En minut framåt/bakåt (på tidslinjen)')],
     ['s', t('Hoppa över intro/eftertexter (när knappen visas)')], ['Esc', t('Litet fönster')]]],
-  [t('TV-guiden och foton'), [['← → ↑ ↓', t('Flytta mellan program/kanaler och foton')], ['PageUp PageDown', t('En skärm i taget')], ['Enter', t('Öppna programmet eller fotot')], ['Esc', t('Stäng fotovisaren')]]]];
+  [t('TV-guiden och foton'), [['← → ↑ ↓', t('Flytta mellan program/kanaler och foton')], ['PageUp PageDown', t('En skärm i taget')], ['Enter', t('Öppna programmet eller fotot')], ['Esc', t('Stäng fotovisaren')]]],
+  [t('Läsaren'), [[t('→ eller Mellanslag'), t('Nästa sida (manga: ←)')], ['← PageUp', t('Föregående sida')], ['Home End', t('Första/sista sidan')], ['t', t('Innehåll')],
+    ['b', t('Bokmärk sidan')], ['+ −', t('Zooma serietidningen')], ['f', t('Helskärm')], ['Esc', t('Tillbaka till boken')]]]];
 export function showShortcuts() {
   openDialog({ title: t('Kortkommandon'), body: SHORTCUTS.map(([h, list]) => `<h3>${esc(h)}</h3><table class="tbl keys">${list.map(([k, tm]) =>
     `<tr><td>${k.split(' ').map(x => [t('eller'), '…'].includes(x) ? esc(x) : `<kbd>${esc(x)}</kbd>`).join(' ')}</td><td>${esc(tm)}</td></tr>`).join('')}</table>`).join('') });

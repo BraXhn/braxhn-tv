@@ -473,7 +473,8 @@ export function forgetFolder(lib, root, keep = []) {
     tx(() => { for (const r of all('SELECT id, path FROM items WHERE library_id=? AND substr(path, 1, ?)=?', lib.id, pre.length, pre)) if (!kept(r.path)) { run('DELETE FROM items WHERE id=?', r.id); gone.push(r.id); } });
     for (const id of gone) removeImages(id);
   }
-  const [table, col] = lib.type === 'music' ? ['tracks', 'path'] : lib.type === 'audiobook' ? ['books', 'key'] : lib.type === 'photo' ? ['photos', 'path'] : [null, null];
+  const [table, col] = lib.type === 'music' ? ['tracks', 'path'] : lib.type === 'audiobook' ? ['books', 'key'] : lib.type === 'photo' ? ['photos', 'path']
+    : lib.type === 'ebook' ? ['ebooks', 'path'] : [null, null];
   if (!table) return 0;
   let n = 0;
   tx(() => {
@@ -482,6 +483,7 @@ export function forgetFolder(lib, root, keep = []) {
         run(`DELETE FROM ${table} WHERE id=?`, r.id); n++;
         // Bokens omslag (audiobooks.js coverFile) – annars kunde en ny bok med samma id få det
         if (table === 'books') fs.rm(path.join(IMAGES, `b${r.id}-cover.jpg`), { force: true }, () => {});
+        if (table === 'ebooks') fs.rm(path.join(IMAGES, `e${r.id}-cover.jpg`), { force: true }, () => {});
       }
   });
   return n;
@@ -960,6 +962,8 @@ export function scan(libId = null) {
           else if (l.type === 'audiobook') { status.library = l.name; await hooks.audiobooks?.(l, status); }
           // Foton (photos.js); videoklippen i fotobiblioteket får nyckelbilder i bakgrundsanalysen som filmer
           else if (l.type === 'photo') { status.library = l.name; await hooks.photos?.(l, status); analyses.push(requestAnalysis(l.id)); }
+          // E-böcker och serietidningar (ebooks.js)
+          else if (l.type === 'ebook') { status.library = l.name; await hooks.ebooks?.(l, status); }
           else { await scanLibrary(l); analyses.push(requestAnalysis(l.id)); }
         } catch (e) { console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`); }
       }

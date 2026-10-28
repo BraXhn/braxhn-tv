@@ -5,6 +5,7 @@ import { send } from '../util.js';
 import * as people from '../people.js';
 import * as music from '../music.js';
 import * as books from '../audiobooks.js';
+import * as ebooks from '../ebooks.js';
 import * as pods from '../podcasts.js';
 import * as live from '../livetv.js';
 import { parseQuery, searchItemIds } from '../search.js';
@@ -62,7 +63,7 @@ route('GET', '/api/search/lines', user, (c) => {
 });
 
 // Grupperna i svaret, i standardordning (order i svaret sorterar dem efter bästa träff)
-const GROUPS = ['movies', 'shows', 'people', 'episodes', 'artists', 'albums', 'tracks', 'books', 'podcasts', 'podcastEpisodes', 'channels', 'programs'];
+const GROUPS = ['movies', 'shows', 'people', 'episodes', 'artists', 'albums', 'tracks', 'books', 'ebooks', 'podcasts', 'podcastEpisodes', 'channels', 'programs'];
 const nameOf = { people: 'name', artists: 'name', channels: 'name' };
 /**
  * Universell sökning. ?q= och ?limit= (per grupp, 1–50, standard 12). Barnprofiler: titlar och personer inom
@@ -79,6 +80,8 @@ route('GET', '/api/search/all', user, (c) => {
   out.people = people.searchPeople(Q, age, lim);
   Object.assign(out, music.searchMusic(Q, uid, null, { artists: lim, albums: lim, tracks: lim }));
   out.books = books.searchBooks(Q, uid, lim);
+  // E-böcker och serietidningar: bara bibliotek och åldersgränser profilen får se (ebooks.visible), bara webben
+  if (c.user.kind !== 'app') out.ebooks = ebooks.searchEbooks(Q, uid, lim);
   if (!kid) { out.podcasts = pods.searchPodcasts(Q, lim); out.podcastEpisodes = pods.searchEpisodes(Q, uid, lim); }
   if (!kid || allowUnrated()) {
     out.channels = live.searchChannels(Q, lim);

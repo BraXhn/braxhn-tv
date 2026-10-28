@@ -4,7 +4,7 @@
 // när rutan är tom. Sökrutan i menyraden (#q) kopplas här. Fliken Repliker (#/search/<fråga>?t=lines) söker i
 // undertexterna – den delen laddas först när fliken väljs (views/searchlines.js).
 import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views, t, locale } from '../core.js';
-import { bookCard, card, chLogo, personArt, personCard, podCover, shelfHtml } from '../ui/cards.js';
+import { bookCard, card, ebookCard, chLogo, personArt, personCard, podCover, shelfHtml } from '../ui/cards.js';
 import { bindRetry, emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTracks, cover, trackRows } from './music.js';
 import { playLive } from '../player/live.js';
@@ -26,7 +26,7 @@ export function rememberSearch(q) {
 }
 
 // ---------- grupperna ----------
-const LIB_PATH = { music: 'music', audiobook: 'books', movie: 'lib', show: 'lib' };
+const LIB_PATH = { music: 'music', audiobook: 'books', ebook: 'ebooks', movie: 'lib', show: 'lib' };
 const albumCard = (a) => `<a class="card mcard" href="#/album/${+a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + +a.year : ''}</div></a>`;
 const artistCard = (a) => `<a class="card pcard" href="#/artist/${+a.id}">${personArt({ id: a.id, name: a.name, image: false })}<div class="t">${esc(a.name)}</div><div class="s">Artist</div></a>`;
 const titles = (n) => `${n} ${n === 1 ? t('titel') : t('titlar')}`;
@@ -40,6 +40,7 @@ const GROUPS = {
   albums: { name: 'Album', html: (r) => `<section class="section"><h2>Album</h2><div class="shelf">${r.map(albumCard).join('')}</div></section>` },
   tracks: { name: t('Låtar'), html: (r) => `<section class="section"><h2>${t('Låtar')}</h2><div data-tracks>${trackRows(r, { showCover: true })}</div></section>` },
   books: { name: t('Ljudböcker'), html: (r) => `<section class="section"><h2>${t('Ljudböcker')}</h2><div class="shelf">${r.map(bookCard).join('')}</div></section>` },
+  ebooks: { name: t('E-böcker'), html: (r) => `<section class="section"><h2>${t('E-böcker och serietidningar')}</h2><div class="shelf">${r.map(b => ebookCard(b)).join('')}</div></section>` },
   podcasts: { name: t('Poddar'), html: (r) => `<section class="section"><h2>${t('Poddar')}</h2><div class="shelf">${r.map(p => `<a class="card mcard" href="#/podcast/${+p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${esc(p.author || '')}</div></a>`).join('')}</div></section>` },
   podcastEpisodes: { name: t('Poddavsnitt'), html: (r) => `<section class="section"><h2>${t('Poddavsnitt')}</h2>${list(r.map(e => `<a class="srow" href="#/podcast/${+e.podcast}">
     <b>${esc(e.title || '')}</b><span class="muted small">${esc(e.podcastTitle || '')}${e.published ? ' · ' + new Date(e.published * 1000).toLocaleDateString(locale) : ''}${e.duration ? ' · ' + fmtDur(e.duration) : ''}</span></a>`))}</section>` },

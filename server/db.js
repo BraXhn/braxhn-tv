@@ -497,16 +497,17 @@ CREATE TRIGGER IF NOT EXISTS sub_lines_ad AFTER DELETE ON sub_lines BEGIN INSERT
   }
 })();
 
-// Fotobibliotek (server/photos.js): libraries.type får även 'photo'. SQLite kan inte ändra en CHECK-begränsning, så
+// Nya bibliotekstyper: libraries.type får även 'photo' (fotobibliotek, server/photos.js, user_version 6) och 'ebook'
+// (e-böcker och serietidningar, server/ebooks.js, user_version 7). SQLite kan inte ändra en CHECK-begränsning, så
 // tabellen byggs om med samma kolumner (även de som addCol lagt till) och alla rader. Främmande nycklar stängs av under
 // ombyggnaden – annars skulle DROP TABLE ta bort alla titlar, låtar och böcker (ON DELETE CASCADE) – och kontrolleras
-// efteråt i samma transaktion. Körs en gång (user_version 6) och bara om CHECK-listan saknar 'photo'.
-function allowPhotoLibraries() {
+// efteråt i samma transaktion. Körs en gång per typ och bara om CHECK-listan saknar typen.
+function allowLibraryType(type) {
   const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='libraries'").get().sql;
-  if (/'photo'/.test(sql)) return;
+  if (sql.includes(`'${type}'`)) return;
   const check = /CHECK\s*\(\s*type\s+IN\s*\(([^)]*)\)\s*\)/i.exec(sql);
   if (!check) throw new Error('[db] libraries: hittar inte typbegränsningen');
-  const newSql = sql.replace(check[0], `CHECK(type IN(${check[1].trim()},'photo'))`).replace(/^CREATE TABLE\s+("?)libraries\1/i, 'CREATE TABLE libraries_new');
+  const newSql = sql.replace(check[0], `CHECK(type IN(${check[1].trim()},'${type}'))`).replace(/^CREATE TABLE\s+("?)libraries\1/i, 'CREATE TABLE libraries_new');
   const names = db.prepare('PRAGMA table_info(libraries)').all().map(c => `"${c.name.replace(/"/g, '""')}"`).join(',');
   const before = db.prepare('SELECT COUNT(*) AS n FROM libraries').get().n;
   db.exec('PRAGMA foreign_keys=OFF');
@@ -592,8 +593,39 @@ CREATE TABLE IF NOT EXISTS sso_links(provider_id INTEGER NOT NULL REFERENCES sso
   created INTEGER NOT NULL, last_login INTEGER, PRIMARY KEY(provider_id, subject));
 CREATE INDEX IF NOT EXISTS sso_links_user ON sso_links(user_id);`);
 
+// E-böcker och serietidningar (server/ebooks.js, bibliotekstypen 'ebook'). En rad per fil: format epub | cbz | pdf;
+// series/series_no ur OPF (calibre:series, belongs-to-collection), ComicInfo.xml eller filnamnet; age = åldersgräns ur
+// ComicInfo (AgeRating, år) – barnprofiler ser bara bibliotek med libraries.kids = 1 och där bara böcker utan högre
+// gräns; rtl = läses höger till vänster (manga, page-progression-direction); pages = sidor (serietidningar, PDF);
+// spine = EPUB:ens läsordning [{ href, chars, linear }] (chars = ungefärligt antal tecken, för procent), toc =
+// innehållsförteckningen [{ title, href, frag, level }], manifest = { href: mediatyp } (vilka poster som får hämtas),
+// page_names = serietidningens sidor (postnamn i arkivet). cover = 1 när e<id>-cover.jpg finns i /config/images.
+// ebook_progress: läsposition per profil (locator = klientens position som JSON, percent 0–100). ebook_marks:
+// bokmärken och markeringar per profil. ebook_fail: filer som inte gick att läsa (läses om när storlek/tid ändras).
+// opds_passwords: lösenord för läsappar (OPDS, Basic-inloggning) – bara SHA-256 sparas, gäller bara /api/opds/*.
+db.exec(`CREATE TABLE IF NOT EXISTS ebooks(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  path TEXT NOT NULL, format TEXT NOT NULL, title TEXT NOT NULL, sort_title TEXT, author TEXT, series TEXT, series_no REAL, volume INTEGER,
+  year INTEGER, publisher TEXT, language TEXT, description TEXT, isbn TEXT, genres TEXT, age INTEGER, rtl INTEGER NOT NULL DEFAULT 0,
+  manga INTEGER NOT NULL DEFAULT 0, pages INTEGER, spine TEXT, toc TEXT, manifest TEXT, page_names TEXT, chars INTEGER,
+  cover INTEGER NOT NULL DEFAULT 0, size INTEGER, mtime INTEGER, added INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS ebooks_path ON ebooks(library_id, path);
+CREATE INDEX IF NOT EXISTS ebooks_series ON ebooks(library_id, series);
+CREATE INDEX IF NOT EXISTS ebooks_added ON ebooks(library_id, added);
+CREATE TABLE IF NOT EXISTS ebook_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ebook_id INTEGER NOT NULL REFERENCES ebooks(id) ON DELETE CASCADE, locator TEXT, percent REAL NOT NULL DEFAULT 0,
+  finished INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, PRIMARY KEY(user_id, ebook_id));
+CREATE INDEX IF NOT EXISTS ebook_progress_upd ON ebook_progress(user_id, updated);
+CREATE TABLE IF NOT EXISTS ebook_marks(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ebook_id INTEGER NOT NULL REFERENCES ebooks(id) ON DELETE CASCADE, kind TEXT NOT NULL CHECK(kind IN('bookmark','highlight')),
+  locator TEXT NOT NULL, text TEXT, note TEXT, color TEXT, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ebook_marks_book ON ebook_marks(user_id, ebook_id);
+CREATE TABLE IF NOT EXISTS ebook_fail(path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER, error TEXT);
+CREATE TABLE IF NOT EXISTS opds_passwords(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  key_hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, created_ip TEXT, trusted INTEGER NOT NULL DEFAULT 0,
+  last_used INTEGER, last_ip TEXT, client TEXT);`);
+
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
-const LATEST = 6;
+const LATEST = 7;
 let ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver < 2) {
   // v0.2: analysera om alla filer (HDR-info, bildundertexter)
@@ -615,9 +647,14 @@ if (ver < 5) {
   ver = 5;
 }
 if (ver < 6) {
-  // Fotobibliotek: libraries.type tillåter 'photo' (allowPhotoLibraries ovan)
-  allowPhotoLibraries();
+  // Fotobibliotek: libraries.type tillåter 'photo' (allowLibraryType ovan)
+  allowLibraryType('photo');
   ver = 6;
+}
+if (ver < 7) {
+  // E-böcker och serietidningar: libraries.type tillåter 'ebook' (allowLibraryType ovan)
+  allowLibraryType('ebook');
+  ver = 7;
 }
 if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
 // Äldre programversion mot en nyare databas (t.ex. efter återgång till en gammal image): fungerar oftast,
@@ -774,3 +811,4 @@ searchKeys('artists', ['name']);
 searchKeys('albums', ['title']);
 searchKeys('tracks', ['title']);
 searchKeys('iptv_vod', ['name']);
+searchKeys('ebooks', ['title'], ['author', 'series']);

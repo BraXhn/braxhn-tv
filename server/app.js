@@ -24,6 +24,7 @@ import * as sonic from './sonic.js';
 import * as gapless from './gapless.js';
 import * as webhooks from './webhooks.js';
 import * as photos from './photos.js';
+import * as ebooks from './ebooks.js';
 import { metadataOf, itemMeta } from './activity.js';
 import * as libfilter from './libfilter.js';
 import * as sublines from './sublines.js';
@@ -56,6 +57,7 @@ import './routes/remote.js';
 import './routes/tonight.js'; // Kvällsvalet: hushållet röstar fram filmen
 import './routes/history.js';
 import './routes/photos.js';
+import './routes/ebooks.js'; // e-böcker och serietidningar, lösenord för läsappar och OPDS (/api/opds/*)
 export { handle } from './http/router.js';
 
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
@@ -81,6 +83,8 @@ hooks.afterScan = () => {
 hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
 // Fotobibliotek: miniatyrerna görs i bakgrunden efter skanningen (och väntar medan video omkodas)
 hooks.photos = (lib, status) => photos.scanPhotos(lib, status);
+// E-böcker och serietidningar (ebooks.js): metadata och omslag ur filerna
+hooks.ebooks = (lib, status) => ebooks.scanEbooks(lib, status);
 photos.setBusyCheck(() => st.activeTranscodes().length > 0);
 photos.kickThumbs(30000);
 // Snabbstart: startcachen kopplas in i strömningen; nya titlar har just lästs av skanningen (disken är vaken)

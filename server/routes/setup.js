@@ -30,6 +30,7 @@ function checks(c) {
   const libs = all(`SELECT l.id, l.name, l.type, l.path, l.home_video,
     CASE WHEN l.type='music' THEN (SELECT COUNT(*) FROM albums a WHERE a.library_id=l.id)
     WHEN l.type='audiobook' THEN (SELECT COUNT(*) FROM books b WHERE b.library_id=l.id)
+    WHEN l.type='ebook' THEN (SELECT COUNT(*) FROM ebooks e WHERE e.library_id=l.id)
     ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count
     FROM libraries l ORDER BY l.name`).map(l => ({ ...l, paths: rootsOf(l) }));
   const users = all('SELECT id, name, is_admin, parent_id, max_age FROM users ORDER BY name');

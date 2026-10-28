@@ -133,6 +133,7 @@ views.account = async () => {
     : `<p class="muted small">${t('Synka vad du sett med Trakt.tv – åt båda hållen.')}</p><div id="trbox"><button class="primary" id="tron">${t('Koppla Trakt')}</button></div>`}</div>` : ''}
   <div class="panel" id="scrobble" hidden></div>
   <div class="panel" id="subsonic" hidden></div>
+  <div class="panel" id="opds" hidden></div>
   <div class="panel" id="listenprefs"></div>
   <div class="panel" id="calfeed"></div>
   <div class="panel"><h2>${t('Inloggade enheter')}</h2>
@@ -150,6 +151,7 @@ views.account = async () => {
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
+  renderOpds($('#opds')).catch(e => { if (!e?.aborted && $('#opds')) $('#opds').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
   if ($('#ssolinks')) renderSsoLinks($('#ssolinks')).catch(e => { if (!e?.aborted && $('#ssolinks')) $('#ssolinks').hidden = true; });
   renderPlaybackPrefs($('#pbprefs')).catch(e => { if (!e?.aborted && $('#pbprefs')) $('#pbprefs').hidden = true; });
@@ -348,6 +350,44 @@ async function renderSubsonic(el, data) {
   if ($('#suboff', el)) $('#suboff', el).onclick = act(async () => {
     if (!await confirmDialog(t('Återkalla lösenordet för musikappar? Alla musikappar som använder det slutar fungera.'), { okLabel: t('Återkalla'), danger: true })) return;
     again(await api('/me/subsonic', { method: 'DELETE' })); toast(t('Lösenordet för musikappar är återkallat'));
+  });
+}
+
+// ---------- läsappar (OPDS): eget lösenord ----------
+Object.assign(EVENTS, { opds_password_created: t('Lösenord för läsappar skapat'), opds_password_revoked: t('Lösenord för läsappar återkallat'),
+  opds_login_fail: t('Fel lösenord från läsapp'), opds_denied: t('Läsapp nekad') });
+async function renderOpds(el, data) {
+  const O = data || await api('/me/opds');
+  if (!el.isConnected || !O.libraries) return;
+  const url = `${location.origin}${O.path}`;
+  el.hidden = false;
+  el.innerHTML = `<h2>${t('Läsappar (OPDS) {v}', { v: O.password ? t('<span class="ok-badge">På</span>') : '' })}</h2>
+    <p class="muted small">${t('Läs e-böckerna och serietidningarna i läsappar som KOReader, Panels, Chunky eller Moon+ Reader. Apparna loggar in med ditt användarnamn och ett eget lösenord som bara ger tillgång till böckerna.')}</p>
+    <table><tr><td>${t('Katalogens adress')}</td><td><code style="user-select:all">${esc(url)}</code></td></tr>
+      <tr><td>${t('Användarnamn')}</td><td><code style="user-select:all">${esc(O.user)}</code></td></tr></table>
+    ${O.password ? `<p class="muted small" style="margin-top:8px">${t('Lösenordet skapades {created} · senast använt {used}. Det visas bara när det skapas.', { created: fmtDate(O.password.created), used: O.password.lastUsed ? fmtDate(O.password.lastUsed) : t('aldrig') })}</p>` : ''}
+    <div class="row" style="margin-top:12px"><button type="button" class="primary" id="opdsnew">${O.password ? t('Skapa nytt lösenord') : t('Skapa lösenord för läsappar')}</button>${O.password ? `<button type="button" class="danger" id="opdsoff">${t('Återkalla')}</button>` : ''}</div>`;
+  const again = (d) => renderOpds(el, d).catch(() => {});
+  $('#opdsnew', el).onclick = async () => {
+    const f = await formDialog({ title: t('Lösenord för läsappar'), okLabel: t('Skapa'), fields: [
+      { name: 'password', label: O.profile ? t('Huvudkontots lösenord') : t('Ditt lösenord'), type: 'password', required: true },
+      ...(!O.atHome ? [{ name: 'code', label: t('Kod från autentiseringsappen'), inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12, required: true,
+        hint: t('Utanför hemmet krävs tvåstegsverifiering för att skapa lösenordet.') }] : [])] });
+    if (!f) return;
+    let r;
+    try { r = await api('/me/opds', { method: 'POST', body: { password: f.password, code: f.code } }); } catch (e) { toastErr(e); return; }
+    openDialog({ title: t('Ditt lösenord för läsappar'),
+      body: `<p class="muted small">${t('Lägg till en OPDS-katalog i läsappen med uppgifterna nedan. Lösenordet visas bara nu.')}</p>
+        <label for="opu">${t('Katalogens adress')}</label><input readonly id="opu" value="${esc(url)}" class="subcopy">
+        <label for="opn">${t('Användarnamn')}</label><input readonly id="opn" value="${esc(r.user)}" class="subcopy">
+        <label for="opp">${t('Lösenord')}</label><input readonly id="opp" value="${esc(r.secret)}" class="subcopy">`,
+      actions: [{ label: t('Kopiera lösenordet'), onClick: () => { navigator.clipboard?.writeText(r.secret).then(() => toast(t('Kopierat')), () => {}); return false; } }, { label: t('Klar'), kind: 'primary' }],
+      onClose: () => again() });
+    for (const i of $$('.subcopy')) i.onfocus = () => i.select();
+  };
+  if ($('#opdsoff', el)) $('#opdsoff', el).onclick = act(async () => {
+    if (!await confirmDialog(t('Återkalla lösenordet för läsappar? Alla läsappar som använder det slutar fungera.'), { okLabel: t('Återkalla'), danger: true })) return;
+    again(await api('/me/opds', { method: 'DELETE' })); toast(t('Lösenordet för läsappar är återkallat'));
   });
 }
 

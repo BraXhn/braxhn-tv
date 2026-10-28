@@ -13,6 +13,7 @@ import http from 'node:http';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { startServer, PW } from './media/server.mjs';
 import { auditPage, focusInfo } from './helpers/a11y-audit.js';
+import { epub, cbz, png, paragraphs } from './helpers/ebook-fixtures.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -59,6 +60,10 @@ before(async () => {
   ff('-f', 'lavfi', '-i', 'sine=frequency=250:duration=10', '-metadata', 'title=Del 1', '-metadata', 'album=Boken', '-metadata', 'artist=Författaren', path.join(bok, '01.mp3'));
   const pics = path.join(MEDIA, 'Foton', '2024', 'Sommar'); fs.mkdirSync(pics, { recursive: true });
   for (const [n, c] of [[1, 'red'], [2, 'blue'], [3, 'green']]) ff('-f', 'lavfi', '-i', `color=c=${c}:s=320x240`, '-frames:v', '1', path.join(pics, `bild${n}.jpg`));
+  // E-böcker: en EPUB med omslag och en serietidning
+  const eb = path.join(MEDIA, 'E-böcker', 'Serien'); fs.mkdirSync(eb, { recursive: true });
+  fs.writeFileSync(path.join(MEDIA, 'E-böcker', 'Boken.epub'), epub({ title: 'Boken', author: 'Författaren', cover: png(120, 180), chapters: [{ title: 'Början', body: paragraphs(20) }, { title: 'Slutet', body: paragraphs(3) }] }));
+  fs.writeFileSync(path.join(eb, 'Serien 001.cbz'), cbz({ pages: 4, w: 120, h: 180, info: { Series: 'Serien', Number: '1' } }));
   // IPTV: en M3U-lista med guide från en liten lokal server
   const T0 = Math.floor(Date.now() / 1000 / 1800) * 1800;
   const guide = `<tv><channel id="k1"><display-name>Kanal Ett</display-name></channel><channel id="k2"><display-name>Kanal Två</display-name></channel>
@@ -123,7 +128,7 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
   assert.equal(r.status, 200);
   r = await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW } });
   cookie = /kt=([0-9a-f]+)/.exec(r.headers.get('set-cookie'))[1];
-  for (const [name, type, p] of [['Filmer', 'movie', 'Filmer'], ['Serier', 'show', 'Serier'], ['Musik', 'music', 'Musik'], ['Ljudböcker', 'audiobook', 'Ljudböcker'], ['Foton', 'photo', 'Foton']]) {
+  for (const [name, type, p] of [['Filmer', 'movie', 'Filmer'], ['Serier', 'show', 'Serier'], ['Musik', 'music', 'Musik'], ['Ljudböcker', 'audiobook', 'Ljudböcker'], ['Foton', 'photo', 'Foton'], ['E-böcker', 'ebook', 'E-böcker']]) {
     r = await srv.req('/api/libraries', { method: 'POST', body: { name, type, path: path.join(MEDIA, p) } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
   }
@@ -139,7 +144,9 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
   S.album = (albums.albums || albums.items || albums)[0]?.id;
   const books = (await srv.req(`/api/audiobooks/${S.audiobook}`)).data;
   S.book = (books.books || books.items || books)[0]?.id;
-  assert.ok(S.alfa && S.show, JSON.stringify(S));
+  const ebs = (await srv.req(`/api/ebooks/lib/${S.ebook}`)).data.books;
+  S.epub = ebs.find(b => b.format === 'epub')?.id; S.comic = ebs.find(b => b.format === 'cbz')?.id;
+  assert.ok(S.alfa && S.show && S.epub && S.comic, JSON.stringify(S));
   // Kvällsvalet: en lobby där administratören är värd (filterformuläret, koden och QR-koden)
   S.tonight = (await srv.req('/api/tonight', { method: 'POST', body: {} })).data.id;
   assert.ok(S.tonight);
@@ -149,7 +156,7 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
 const VIEWS = () => [
   ['', 'Hem'], [`lib/${S.movie}`, 'Filmer'], [`lib/${S.show}`, 'Serier'], [`item/${S.alfa}`, 'Film'], [`item/${S.show}`, 'Serie'],
   [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
-  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], ['search?q=alfa', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
+  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search?q=alfa', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'], ['shrink', 'Diskrådgivaren'],

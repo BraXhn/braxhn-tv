@@ -174,6 +174,17 @@ export const chLogo = (c, cls = '') => `<span class="chlogo ${cls}">${c.logo ? `
 export const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style="--h1:hsl(${hue(String(b.id))} 35% 30%);--h2:hsl(${(hue(String(b.id)) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/audiobooks/cover/${+b.id}`, cls) : `<span>${esc((b.title || '').slice(0, 40))}</span>`}</div>`;
 export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
   <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
+// ---------- e-böcker och serietidningar (startsidan, sökningen och views/ebooks.js) ----------
+const FORMAT = { epub: 'EPUB', pdf: 'PDF', cbz: t('Serietidning') };
+export const ebookFormat = (b) => FORMAT[b.format] || '';
+export const ebookCover = (b, cls = '') => `<div class="cover book ebook ${cls}" style="--h1:hsl(${hue('e' + b.id)} 35% 30%);--h2:hsl(${(hue('e' + b.id) + 60) % 360} 40% 15%)">${b.cover ? coverImg(`/api/ebooks/${+b.id}/cover`, cls) : `<span>${esc((b.title || '').slice(0, 60))}</span>`}</div>`;
+/** Kort för en e-bok: omslag, läst andel, titel och författare (eller sub) */
+export function ebookCard(b, sub) {
+  const pc = Math.round(b.percent || 0);
+  const s = sub ?? [b.author, b.finished ? '✓' : pc > 0 ? `${pc} %` : ''].filter(Boolean).join(' · ');
+  return `<a class="card mcard ecard" href="#/ebook/${+b.id}" aria-label="${esc([b.title, b.author, b.finished ? t('utläst') : pc > 0 ? t('{pc} % läst', { pc }) : ''].filter(Boolean).join(', '))}">${ebookCover(b)}${pc > 0 && !b.finished ? `<div class="prog"><i style="width:${Math.min(100, pc)}%"></i></div>` : ''}
+  <div class="t">${esc(b.title)}</div><div class="s">${esc(s)}</div></a>`;
+}
 export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
 const ymd = (d) => d.toLocaleDateString('sv-SE'); // ÅÅÅÅ-MM-DD (inte visningsformat)
 const parseDay = (s) => new Date(s + 'T12:00:00');
