@@ -566,6 +566,17 @@ addCol('dvr_rules', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
 addCol('recordings', 'is_new', 'INTEGER');
 addCol('recordings', 'keep_forever', 'INTEGER NOT NULL DEFAULT 0');
 db.exec('CREATE INDEX IF NOT EXISTS rec_rule ON recordings(rule_id, status)');
+// Diskrådgivaren (server/shrink.js): ett jobb per omkodning till HEVC/AV1. status queued → running → done | rejected
+// (kvaliteten räckte inte, originalet behålls) | failed | cancelled | restored. src_path/src_size = originalet,
+// dst_path = den nya filen, tmp_path = kandidaten medan den skrivs, trash_path/trash_until = originalet i papperskorgen och
+// när det tas bort. item_id blir NULL om titeln försvinner – papperskorgen rensas ändå.
+db.exec(`CREATE TABLE IF NOT EXISTS shrink_jobs(id INTEGER PRIMARY KEY, item_id INTEGER REFERENCES items(id) ON DELETE SET NULL, title TEXT,
+  codec TEXT NOT NULL, encoder TEXT, status TEXT NOT NULL DEFAULT 'queued', created INTEGER NOT NULL, started INTEGER, finished INTEGER,
+  src_path TEXT, src_size INTEGER, dst_path TEXT, tmp_path TEXT, out_size INTEGER, metric TEXT, score REAL, scores TEXT, error TEXT,
+  trash_path TEXT, trash_until INTEGER, created_by INTEGER);
+CREATE INDEX IF NOT EXISTS shrink_jobs_status ON shrink_jobs(status, id);
+CREATE INDEX IF NOT EXISTS shrink_jobs_item ON shrink_jobs(item_id);
+CREATE INDEX IF NOT EXISTS shrink_jobs_trash ON shrink_jobs(trash_until) WHERE trash_path IS NOT NULL;`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 6;
