@@ -14,7 +14,8 @@ import * as invites from '../invites.js';
 import { kidsHaveChannels } from '../iptv/channels.js';
 import { vodAllowed } from '../iptv/vod.js';
 import * as family from '../familyfilter.js';
-import { route, pub, isTrusted, adminAnywhere, user } from '../http/router.js';
+import * as sso from '../sso.js';
+import { route, pub, isTrusted, adminAnywhere, user, has2fa } from '../http/router.js';
 import { ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
 // Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
@@ -81,11 +82,30 @@ route('POST', '/api/login', pub, async (c) => {
   // Kontospärren gäller inte från hemnätet – annars kan en angripare låsa ute dig från ditt eget nät
   if (userLocked(uname) && !isTrusted(c.req)) { noteFail(ip); audit('login_locked', { ip, user: { name: uname } }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
   const u0 = get('SELECT * FROM users WHERE name=?', uname);
-  const u = u0 && !u0.parent_id ? u0 : null; // profiler nås bara via profilbyte i sitt hushåll
-  const ok = u ? await checkPw(String(password || ''), u.pass) : await dummyCheck(String(password || ''));
+  let u = u0 && !u0.parent_id ? u0 : null; // profiler nås bara via profilbyte i sitt hushåll
+  let ok = u ? await checkPw(String(password || ''), u.pass) : await dummyCheck(String(password || ''));
+  // Enkel inloggning (sso.js): "bara administratörer med lösenord" – andra loggar in via leverantören (LDAP nedan eller
+  // "Logga in med …"). Administratörernas lokala lösenord fungerar alltid (reservinloggning).
+  const adminOnly = ok && !u.is_admin && sso.localLogin() === 'admin';
+  if (adminOnly) ok = false;
+  // LDAP: samma formulär. Lokala konton provas först; ett lokalt konto tas aldrig över av en LDAP-användare med samma
+  // namn – då krävs bekräftelse med det lokala lösenordet (biljett, #/login/link/…).
+  let via = null, ldapDown = false;
+  if (!ok && uname && password && sso.ldapProviders().length) {
+    const l = await sso.ldapLogin(uname, String(password));
+    if (l?.id) {
+      const r = await sso.resolve(l.p, l.id, { hashPw: () => hashPw(crypto.randomBytes(24).toString('hex')), remember: remember !== false, app: !!app });
+      if (r.deny) { audit('login_denied', { ip, user: { name: uname }, detail: `${l.p.name}: ${r.deny}` }); return fail(c.res, 403, r.deny); }
+      if (r.ticket) { audit('sso_link_pending', { ip, user: { name: r.account }, detail: l.p.name }); return send(c.res, 409, { error: 'Det finns redan ett konto med samma namn', needLink: true, ticket: r.ticket, account: r.account, provider: l.p.name }); }
+      if (r.created) audit('sso_user_created', { ip, user: get('SELECT id, name FROM users WHERE id=?', r.uid), detail: l.p.name });
+      u = get('SELECT * FROM users WHERE id=?', r.uid); ok = !!u; via = l.p.name;
+    } else if (l?.error) ldapDown = true;
+  }
+  if (!ok && adminOnly) { audit('login_denied', { ip, user: u0, detail: 'lösenord bara för administratörer' }); return fail(c.res, 403, 'Logga in med enkel inloggning – lösenordsinloggning är bara för administratörer'); }
   if (!ok) {
     const locked = noteFail(ip, isTrusted(c.req) ? null : uname);
-    audit('login_fail', { ip, user: { id: u?.id, name: uname }, detail: locked ? 'kontot spärrat tillfälligt för inloggning utifrån' : null });
+    audit('login_fail', { ip, user: { id: u?.id, name: uname }, detail: locked ? 'kontot spärrat tillfälligt för inloggning utifrån' : ldapDown ? 'LDAP-servern svarar inte' : null });
+    if (ldapDown && !u) return fail(c.res, 503, 'Inloggningen via katalogtjänsten (LDAP) fungerar inte just nu – försök igen om en stund');
     return generic();
   }
   // Läs om 2FA-fälten efter den långsamma lösenordskontrollen: två samtidiga inloggningar får inte
@@ -106,9 +126,10 @@ route('POST', '/api/login', pub, async (c) => {
     }
   }
   clearFails(uname);
-  audit('login_ok', { ip, user: u, detail: app ? 'app' : 'webb' });
+  audit('login_ok', { ip, user: u, detail: (app ? 'app' : 'webb') + (via ? ', ' + via : '') });
   const meta = { ua: c.req.headers['user-agent'], ip };
-  const pwOld = weakPassword(password, u.name) ? true : false;
+  const pwOld = !via && weakPassword(password, u.name) ? true : false; // LDAP-lösenordet ägs av katalogen
+
   if (app) return send(c.res, 200, { ok: true, token: createSession(u.id, 'app', meta), user: { id: u.id, name: u.name, is_admin: u.is_admin }, weakPassword: pwOld });
   const keep = remember !== false; // äldre klienter skickar inget: håll inloggad som förut
   send(c.res, 200, { ok: true, weakPassword: pwOld }, { 'Set-Cookie': cookieHeader(createSession(u.id, 'web', { ...meta, remember: keep }), isHttps(c.req), keep) });
@@ -308,11 +329,8 @@ const QC_OFF = 'Inloggning med kod är avstängd på servern';
 function qcDenied(u, trusted) {
   if (trusted) return null;
   if (!u.remote_allowed) return 'Ditt konto får bara användas på hemnätverket';
-  if (require2faRemote()) {
-    const owner = u.parent_id || u.id;
-    const has = u.totp_enabled || (u.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', u.parent_id)?.totp_enabled) || pk.hasPasskey(owner);
-    if (!has) return 'Tvåstegsverifiering krävs för inloggning utanför hemmet. Aktivera den under Mitt konto från hemnätet.';
-  }
+  // Samma 2FA-regel som routern (has2fa: TOTP, huvudkontots TOTP, passkey eller leverantör som sköter 2FA)
+  if (require2faRemote() && !has2fa(u)) return 'Tvåstegsverifiering krävs för inloggning utanför hemmet. Aktivera den under Mitt konto från hemnätet.';
   return null;
 }
 const qcInfo = (r) => ({ name: r.name, device: r.device, ip: r.ip, created: r.created, expires: r.expires });

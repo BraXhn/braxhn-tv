@@ -144,7 +144,8 @@ views.admin = async (sec) => {
       <button class="primary">${t('Lägg till')}</button></form>
   </div>
   <div class="panel" id="adm-invites"><h2>${t('Inbjudningar')}</h2><div id="invp"></div></div>
-  <div class="panel"><h2>${t('Säkerhet')}</h2><form id="secform">
+  <div class="panel"><h2>${t('Säkerhet')}</h2>
+    <p><a class="btn ghost small" href="#/sso">${t('Enkel inloggning: OpenID Connect (Authentik, Keycloak, Google …) och LDAP →')}</a></p><form id="secform">
     <label class="switch"><input type="checkbox" id="s2fa" ${S.require2faRemote ? 'checked' : ''}> ${t('Kräv tvåstegsverifiering för inloggning utanför hemmet')}</label>
     <label class="switch"><input type="checkbox" id="sqc" ${S.quickConnect !== false ? 'checked' : ''}> ${t('Tillåt inloggning med kod på TV (en inloggad användare godkänner koden från mobilen)')}</label>
     <label class="switch"><input type="checkbox" id="ssub" ${S.subsonic !== false ? 'checked' : ''}> ${t('Tillåt musikappar (Subsonic: Symfonium, Amperfy, play:Sub …) – var och en skapar ett eget lösenord för musikappar under Mitt konto')}</label>

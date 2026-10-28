@@ -52,6 +52,30 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 med `{ "lang": "sv" | "en" }` sparar valet (400 för andra värden). Webben väljer `index.html` efter det (svensk eller
 engelsk variant, se `server/http/static.js`); serverns felmeddelanden i API:t är alltid svenska. Apparna läser inte fältet.
 
+## Enkel inloggning: `/api/sso/*` och `/api/me/sso`
+
+Bara webben använder dem; apparna loggar in som förut (LDAP-användare med `POST /api/login`, se nedan).
+
+- `GET /api/sso/providers` (utan inloggning): `{ providers: [{ id, name, kind: "oidc" }], ldap: [namn], localLogin: "all" | "admin" }`.
+- `GET /api/sso/oidc/:id/start?remember=0|1[&link=1]` → 302 till leverantören (sätter kakan `bxsso`, Path=/api/sso/). Kommer
+  förfrågan till en annan värd än den vitlistade adressen skickas webbläsaren först dit. `link=1` kopplar det inloggade
+  webbkontot (huvudkontot) i stället för att logga in.
+- `GET /api/sso/oidc/:id/callback` (leverantören skickar hit) → 302 till `/#/login/done` (kakan för webben satt),
+  `/#/login/link/<biljett>` (bekräfta koppling), `/#/account` (kopplat) eller `/#/login/sso/<kod>` med koden `state`,
+  `denied`, `token`, `provider`, `groups`, `email`, `noaccount`, `linked`, `remote`, `2fa`, `disabled` eller `blocked`.
+- `GET /api/sso/link/:biljett` → `{ provider, account, canCreate, need2fa, expires }`; `POST` med `{ password, code? }`
+  kopplar och loggar in (kaka, eller `token` om inloggningen kom från en app), `{ create: true }` skapar ett nytt konto
+  med ledigt namn (bara när leverantören får skapa konton). Biljetten gäller 10 minuter, en gång, högst 5 fel lösenord.
+- `POST /api/login` provar LDAP-leverantörerna när det lokala lösenordet inte stämmer (eller kontot inte finns). Nya svar:
+  `409 { needLink: true, ticket, account, provider }` (LDAP-användaren heter som ett lokalt konto som inte är kopplat),
+  `403` när lösenordsinloggning bara gäller administratörer eller kontot saknar rätt grupp, `503` när LDAP-servern inte svarar.
+- `GET /api/me/sso` → `{ providers: [{ id, name, kind, linked, managed, lastLogin }], profile }`; `DELETE /api/me/sso/:pid`
+  tar bort kopplingen (400 för konton som leverantören skapat).
+- Administration (betrott nät): `GET /api/sso`, `PUT /api/sso/settings` (`{ localLogin }`), `POST /api/sso/providers`,
+  `PUT|DELETE /api/sso/providers/:id`, `POST /api/sso/providers/:id/test` (`{ username?, password? }` för LDAP),
+  `GET /api/sso/providers/:id/links`, `DELETE /api/sso/providers/:id/links/:uid`. Svaren har `hasSecret` men aldrig
+  `clientSecret`/`bindPassword`; ett tomt hemlighetsfält i `PUT` behåller den sparade, `clearSecret: true` tar bort den.
+
 ## Uppspelningsval per konto: `/api/me/playback-prefs`
 
 `GET`/`PUT /api/me/playback-prefs` (PUT ändrar bara fälten som skickas):
