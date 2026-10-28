@@ -32,6 +32,7 @@ import * as health from './health.js';
 import * as family from './familyfilter.js';
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
+import './routes/sso.js'; // enkel inloggning: OIDC, bekräftad koppling, Mitt konto och administration
 import './routes/admin.js';
 import './routes/health.js'; // hälsokontroll av biblioteket (admin)
 import './routes/shrink.js'; // diskrådgivaren: analys och omkodning till HEVC/AV1 (admin)

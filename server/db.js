@@ -579,6 +579,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS shrink_jobs(id INTEGER PRIMARY KEY, item_id 
 CREATE INDEX IF NOT EXISTS shrink_jobs_status ON shrink_jobs(status, id);
 CREATE INDEX IF NOT EXISTS shrink_jobs_item ON shrink_jobs(item_id);
 CREATE INDEX IF NOT EXISTS shrink_jobs_trash ON shrink_jobs(trash_until) WHERE trash_path IS NOT NULL;`);
+// Enkel inloggning (server/sso.js): sso_providers = OIDC-/LDAP-leverantörer (config = JSON utan hemligheter, secret =
+// klienthemligheten/tjänstekontots lösenord krypterat med /config/sso.key, trust_mfa = leverantören sköter 2FA),
+// sso_links = användaren hos leverantören (subject = OIDC sub, LDAP entryUUID/objectGUID/DN) → konto; managed = kontot
+// skapades av leverantören och får roll/bibliotek från grupperna. users.email = e-post från leverantören (eller NULL).
+addCol('users', 'email', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS sso_providers(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN('oidc','ldap')), name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1, config TEXT NOT NULL DEFAULT '{}', secret TEXT, trust_mfa INTEGER NOT NULL DEFAULT 0, sort INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sso_links(provider_id INTEGER NOT NULL REFERENCES sso_providers(id) ON DELETE CASCADE, subject TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, managed INTEGER NOT NULL DEFAULT 0, email TEXT, username TEXT,
+  created INTEGER NOT NULL, last_login INTEGER, PRIMARY KEY(provider_id, subject));
+CREATE INDEX IF NOT EXISTS sso_links_user ON sso_links(user_id);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 6;

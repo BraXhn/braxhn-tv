@@ -14,6 +14,7 @@ import { clientIp, isPrivate, inCidr, fail, isHttps, send } from '../util.js';
 import { userFromReq, calendarUser, require2faRemote, audit, cookieHeader } from '../auth.js';
 import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
+import { mfaTrusted } from '../sso.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import { serveStatic } from './static.js';
@@ -83,10 +84,11 @@ export const isTrusted = (req) => { const ip = clientIp(req); return isPrivate(i
 /** Får administratörer administrera utanför betrott nät? (avstängt som standard) */
 export const adminAnywhere = () => getSetting('admin_anywhere', process.env.ADMIN_ANYWHERE || '0') === '1';
 
-/** Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll); en passkey räknas också */
+/** Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll); en passkey räknas också, liksom
+ *  en koppling till en leverantör för enkel inloggning som administratören markerat "sköter tvåstegsverifieringen" (sso.js) */
 export function has2fa(u) {
   const owner = u.parent_id || u.id;
-  return !!(u.totp_enabled || (u.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', u.parent_id)?.totp_enabled) || pk.hasPasskey(owner));
+  return !!(u.totp_enabled || (u.parent_id && get('SELECT totp_enabled FROM users WHERE id=?', u.parent_id)?.totp_enabled) || pk.hasPasskey(owner) || mfaTrusted(owner));
 }
 /**
  * Varför kontot nekas från förfrågans nät (null = släpps in). Konton utan fjärråtkomst släpps bara in från betrott nät;
@@ -182,7 +184,7 @@ export async function handle(req, res) {
     // CSRF: ändrande anrop med kaka måste komma från samma origin. Inloggning och första kontot
     // utan kaka nekas också från annan origin (skyddar mot inloggnings-CSRF).
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && c.user?.via === 'cookie' && !sameOrigin(req)) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
-    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login|invite\/[^/]+)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
+    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login|invite\/[^/]+|sso\/link\/[^/]+)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
     // Fel med e.status är avsedda för användaren; övriga loggas och ger "Internt fel"
     try { return await r.fn(c); }
     catch (e) { if (!e.status) console.error(e); return fail(res, e.status || 500, e.status ? e.message : 'Internt fel'); }

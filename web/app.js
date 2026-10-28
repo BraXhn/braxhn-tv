@@ -46,7 +46,8 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
     return;
   }
   // Djuplänk utan inloggning (t.ex. QR-koden för inloggning med kod): öppnas efter inloggningen
-  if (!me && location.hash.startsWith('#/invite/')) route(); // inbjudan: skapa konto utan att logga in först
+  // inbjudan: skapa konto utan att logga in först; #/login/… = tillbaka från enkel inloggning (felkod eller bekräfta koppling)
+  if (!me && (location.hash.startsWith('#/invite/') || location.hash.startsWith('#/login/'))) route();
   else if (!me) { rememberPage(); location.hash = '#/login'; if (location.hash === '#/login') route(); }
   else { if (location.hash === '#/login') location.hash = '#/'; else await route(); }
   // När sidan är ritad: spelaren (med Chromecast), titelsidan och sökningen i förväg – första klicket ska inte vänta

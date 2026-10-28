@@ -20,7 +20,8 @@ export const EVENTS = { login_ok: t('Inloggning'), login_fail: t('Misslyckad inl
   setup: t('Server konfigurerad'), password_changed: t('Lösenord bytt'), '2fa_enabled': t('2FA aktiverad'), '2fa_disabled': t('2FA avstängd'),
   '2fa_recovery_used': t('Reservkod använd'), '2fa_recovery_regenerated': t('Nya reservkoder'), session_revoked: t('Enhet utloggad'), sessions_revoked_all: t('Alla enheter utloggade'),
   user_created: t('Användare skapad'), user_updated: t('Användare ändrad'), user_deleted: t('Användare borttagen'), settings_changed: t('Inställningar ändrade'),
-  admin_denied: t('Admin nekad (utifrån)'), passkey_added: t('Passkey tillagd'), passkey_removed: t('Passkey borttagen'), passkey_add_fail: t('Passkey misslyckades'), acme_obtain: t('Certifikat begärt'), quickconnect_approved: t('Inloggning med kod godkänd'), quickconnect_fail: t('Fel kod för TV-inloggning'), quickconnect_denied: t('TV-inloggning nekad'), library_added: t('Bibliotek tillagt'), library_removed: t('Bibliotek borttaget') };
+  admin_denied: t('Admin nekad (utifrån)'), passkey_added: t('Passkey tillagd'), passkey_removed: t('Passkey borttagen'), passkey_add_fail: t('Passkey misslyckades'), acme_obtain: t('Certifikat begärt'), quickconnect_approved: t('Inloggning med kod godkänd'), quickconnect_fail: t('Fel kod för TV-inloggning'), quickconnect_denied: t('TV-inloggning nekad'), library_added: t('Bibliotek tillagt'), library_removed: t('Bibliotek borttaget'),
+  sso_linked: t('Enkel inloggning kopplad'), sso_unlinked: t('Enkel inloggning bortkopplad'), sso_link_pending: t('Koppling väntar på bekräftelse'), sso_user_created: t('Konto skapat via enkel inloggning'), sso_error: t('Fel hos inloggningsleverantören') };
 const device = (ua) => {
   ua = ua || '';
   if (/BraXhnTV-Android|Android.*Automotive/i.test(ua)) return 'Android-app';
@@ -117,6 +118,7 @@ views.account = async () => {
     ${pks.length ? `<table>${pks.map(k => `<tr><td>${esc(k.name || 'Passkey')}</td><td class="muted small">${t('Skapad {created} · senast använd {last_used}', { created: fmtDate(k.created), last_used: fmtDate(k.last_used) })}</td>
       <td class="r"><button class="danger small" data-pkdel="${esc(k.id)}">${t('Ta bort')}</button></td></tr>`).join('')}</table>` : ''}
     <div class="row" style="margin-top:12px">${passkeyOk() ? t('<button class="primary" id="pkadd">Lägg till passkey</button>') : t('<span class="muted">Passkeys kräver HTTPS (eller localhost) i den här webbläsaren.</span>')}</div></div>` : ''}
+  ${!me.kid ? '<div class="panel" id="ssolinks" hidden></div>' : ''}
   ${!me.kid ? `<div class="panel"><h2>${t('Profiler i hushållet')}</h2>
     <p class="muted small">${t('Profiler delar inloggning men har egen tittarhistorik och Min lista. Barnprofiler ser bara titlar upp till sin åldersgräns. Med PIN kan barnen inte byta till vuxnas profiler.')}</p>
     <div id="proflist">${loadingState({ kind: 'inline' })}</div>
@@ -149,6 +151,7 @@ views.account = async () => {
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   calendarFeedPanel($('#calfeed')).catch(() => {});
+  if ($('#ssolinks')) renderSsoLinks($('#ssolinks')).catch(e => { if (!e?.aborted && $('#ssolinks')) $('#ssolinks').hidden = true; });
   renderPlaybackPrefs($('#pbprefs')).catch(e => { if (!e?.aborted && $('#pbprefs')) $('#pbprefs').hidden = true; });
   renderFamilyPrefs($('#familyprefs')).catch(e => { if (!e?.aborted && $('#familyprefs')) $('#familyprefs').hidden = true; });
   renderCinemaPrefs($('#cinemaprefs')).catch(e => { if (!e?.aborted && $('#cinemaprefs')) $('#cinemaprefs').hidden = true; });
@@ -239,6 +242,26 @@ views.account = async () => {
 };
 
 // ---------- scrobbling av musik (ListenBrainz och Last.fm) ----------
+// Enkel inloggning (server/routes/sso.js): koppla kontot till en leverantör (OIDC) eller ta bort kopplingen.
+// Kopplingen görs i leverantörens inloggning med den här webbläsarens kaka – ingen annan kan koppla ditt konto.
+async function renderSsoLinks(el) {
+  const d = await api('/me/sso');
+  if (!d.providers.length || d.profile) return;
+  el.hidden = false;
+  el.innerHTML = `<h2>${t('Enkel inloggning')}</h2>
+    <p class="muted small">${t('Koppla kontot till inloggningen i hemmet eller på jobbet, så loggar du in med den i stället för lösenordet.')}</p>
+    <table>${d.providers.map(p => `<tr><td>${esc(p.name)} <span class="muted small">${p.kind === 'ldap' ? 'LDAP' : 'OpenID Connect'}</span></td>
+      <td class="muted small">${p.linked ? (p.lastLogin ? t('Kopplat · senast {date}', { date: fmtDate(p.lastLogin) }) : t('Kopplat')) : t('Inte kopplat')}</td>
+      <td class="r">${p.linked ? (p.managed ? `<span class="muted small">${t('Kontot skapades av inloggningen')}</span>` : `<button class="ghost small" data-ssodel="${+p.id}">${t('Koppla bort')}</button>`)
+        : p.kind === 'oidc' ? `<button class="primary small" data-ssolink="${+p.id}">${t('Koppla')}</button>` : ''}</td></tr>`).join('')}</table>`;
+  $$('[data-ssolink]', el).forEach(b => b.onclick = () => { location.href = `/api/sso/oidc/${+b.dataset.ssolink}/start?link=1`; });
+  $$('[data-ssodel]', el).forEach(b => b.onclick = act(async () => {
+    if (!await confirmDialog(t('Du loggar sedan in med lösenordet som förut.'), { title: t('Koppla bort den enkla inloggningen?'), okLabel: t('Koppla bort'), danger: true })) return;
+    await api('/me/sso/' + b.dataset.ssodel, { method: 'DELETE' });
+    toast(t('Kopplingen är borttagen')); route();
+  }));
+}
+
 async function renderScrobble(el, data) {
   const S = data || await api('/me/scrobble');
   if (!el.isConnected || !S.allowed) return;
