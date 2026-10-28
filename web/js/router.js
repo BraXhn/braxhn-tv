@@ -38,7 +38,7 @@ export async function loadLibs() {
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': t('Hem'), home: t('Hem'), watchlist: t('Min lista'), search: t('Sök'), podcasts: t('Poddar'), podcast: t('Poddar'), live: t('Live-TV'), streaming: t('Strömmande'),
   account: t('Mitt konto'), admin: t('Administration'), setup: t('Installation'), stats: t('Statistik'), requests: t('Önskningar'), calendar: t('Kommande'), wrapped: t('Årssammanfattning'), collection: t('Samling'), collections: t('Samlingar'), ucollection: t('Samling'), person: 'Person',
-  history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'),
+  history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'),
   quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker') };
 // Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
 const PAGE = { login: t('Logga in'), profiles: t('Välj profil'), invite: t('Skapa konto'), timeup: t('Skärmtiden är slut') };
@@ -101,7 +101,7 @@ export async function boot() {
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
 const SKELETON = { home: 'shelves', lib: 'grid', photos: 'grid', watchlist: 'grid', search: 'grid', books: 'grid', podcasts: 'grid', music: 'grid', streaming: 'grid',
   item: 'detail', album: 'detail', artist: 'detail', playlist: 'detail', smart: 'detail', book: 'detail', podcast: 'detail', collection: 'detail', ucollection: 'detail', collections: 'shelves', person: 'detail',
-  admin: 'panels', iptvadmin: 'panels', vod: 'shelves', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels', health: 'panels', shrink: 'panels' };
+  admin: 'panels', iptvadmin: 'panels', vod: 'shelves', setup: 'panels', account: 'panels', stats: 'panels', wrapped: 'panels', playstats: 'panels', webhooks: 'panels', health: 'panels', shrink: 'panels', tonight: 'panels' };
 // Vyerna utom startsidan laddas först när de öppnas (eller när pekaren/fokus når en länk dit): vy -> modul i js/
 // (märkt @lazy). need() i lazy.js hämtar modulen och hela dess kedja av beroenden på en gång (samma bygge,
 // /v/<bygge>/js/…). Modulen registrerar sina vyer i views när den laddats.
@@ -111,7 +111,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   music: 'views/music', album: 'views/music', artist: 'views/music', playlist: 'views/music', smart: 'views/music', smartedit: 'views/music',
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
-  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink' }));
+  history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för

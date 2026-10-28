@@ -386,6 +386,37 @@ barnprofiler helt utan `allow_unrated`). `/api/status` → `user.iptvVod` (filme
   `POST|PUT|DELETE /api/iptv/guides[/:id]`, `PUT /api/iptv/settings`. Xtream-lösenordet lämnas aldrig ut; adresser
   visas maskerade.
 
+## Kvällsvalet: `/api/tonight*`
+
+Hushållet röstar fram kvällens film eller serie (`server/tonight.js`, `server/routes/tonight.js`; webben
+`#/tonight`). Alla routes kräver vanlig inloggning (kaka eller apptoken, aldrig medie-/bildtoken). Inget används av
+apparna än – en app kan vara deltagare med samma anrop. Allt ligger i minnet: ett kvällsval stängs efter 4 timmar,
+efter 30 minuter utan ansluten deltagare och 30 minuter efter matchen.
+
+- `GET /api/tonight` → `{ sessions: [{ id, host, phase, members, joined }], libraries: [{ id, name, type }], genres: [..] }`
+  – öppna kvällsval i profilens hushåll och vad filtren kan väljas bland (det profilen får se).
+- `POST /api/tonight` `{ filters }` → `{ id, code }`. Filter: `kinds` (`movie`/`show`), `libs` (id), `genres`,
+  `maxMinutes` (30–600; serier: avsnittens medellängd), `minRating` (TMDB 0–10), `unseen` (standard `true`),
+  `rule` (`all` | `majority`), `size` (10/20/30). Okända värden ignoreras. Högst två öppna per värd (det äldsta stängs).
+- `POST /api/tonight/join` `{ code }` → `{ id }` – sex siffror (mellanslag tillåtna), alla konton. 404 vid fel kod,
+  429 efter tio fel på tio minuter per profil. `POST /api/tonight/:id/join` – utan kod, bara inom hushållet.
+- `GET /api/tonight/:id` → läget + `deck` (titlarna i samma form som listorna, uppslagna med deltagarens egen
+  åldersgräns). `GET /api/tonight/:id/events` (SSE): `state` (läget, vid varje ändring), `deck` (förslagen ändrades –
+  hämta `GET` igen), `closed`, `left`. Bara deltagare (annars 404).
+- Läget: `{ id, code, phase: lobby|voting|matched, isHost, host, filters, need, maxAge, members: [{ name, kid, self,
+  host, voted, online }], total, done, more, votes: { <id>: true|false } (bara de egna), fits (lobbyn), match: { id,
+  likes, of, picked, by, play: { id, position } } | null, top: [{ id, likes }] | null, party, expires }`. `match.play`
+  är det deltagaren ska spela (serie: påbörjat eller första osedda avsnittet).
+- Värden: `PUT /api/tonight/:id/filters` (bara i lobbyn), `POST …/start` (409 om inget passar alla), `POST …/more`
+  (tio förslag till), `POST …/pick` `{ item }` (välj bland förslagen), `DELETE /api/tonight/:id` (avsluta för alla).
+- Alla: `POST …/vote` `{ item, like: true|false|null }` (`null` = ångra), `POST …/party` → `{ id }` (Titta
+  tillsammans med matchen; samma rum för alla), `DELETE …/me` (lämna; värdskapet går till den som varit med längst).
+
+Regler: varje förslag är tillåtet för **varje** deltagare (`allowedFor` – åldersgräns och bibliotek); den som går med
+under röstningen tar bort det som inte är tillåtet för den (eller som den sett, med `unseen`) ur listan för alla.
+Ingen ser vem som sett eller röstat vad – bara hur många förslag var och en svept och, när ingen match blev av, antalet
+gillningar per titel. Match när antalet gillningar når `need` (alla, eller hälften + 1).
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med
