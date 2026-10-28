@@ -79,17 +79,19 @@ before(async () => {
 after(async () => { await browser?.close(); srv?.kill(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 const t = (name, fn) => test(name, { skip }, fn);
 
-// Inspelning av spelarens utgång: AudioWorklet (bypassCSP – blob-modul) som skickar block om 4096 sampel
+// Inspelning av spelarens utgång: AudioWorklet (bypassCSP – blob-modul) som skickar varje block direkt (128 sampel).
+// Förut samlades 4096 sampel per meddelande, och när motorn stängde av ljudet efter sista låten blev det sista,
+// halvfulla blocket aldrig skickat – längden blev då ~44 ms för kort
 function tapScript() {
   const chunks = [];
   window.__rec = { chunks, on: false };
   window.__bxAudioTap = async (ctx, node) => {
-    const code = `class Rec extends AudioWorkletProcessor { constructor() { super(); this.b = new Float32Array(4096); this.n = 0; }
-      process(inp) { const c = inp[0] && inp[0][0]; if (c) { for (let i = 0; i < c.length; i++) { this.b[this.n++] = c[i]; if (this.n === 4096) { this.port.postMessage(this.b.slice()); this.n = 0; } } } return true; } }
+    const code = `class Rec extends AudioWorkletProcessor {
+      process(inp) { const c = inp[0] && inp[0][0]; if (c) this.port.postMessage(c.slice()); return true; } }
       registerProcessor('rec', Rec);`;
     await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
     const w = new AudioWorkletNode(ctx, 'rec');
-    w.port.onmessage = (e) => { if (window.__rec.on) chunks.push(e.data); };
+    w.port.onmessage = (e) => { if (window.__rec.on) { chunks.push(e.data); window.__rec.n = (window.__rec.n || 0) + e.data.length; } };
     node.connect(w); w.connect(ctx.destination);
     window.__rec.ctx = ctx;
     window.__rec.on = true;
@@ -110,12 +112,12 @@ async function playAndRecord(page, albumId, secs) {
   await page.goto(B + '/#/album/' + albumId);
   await page.click('tr[data-ti="0"]');
   await page.waitForFunction(() => window.__rec?.on);
-  try { await page.waitForFunction((n) => window.__rec.chunks.length * 4096 >= n || (window.__rec.chunks.length > 4 && window.__rec.ctx.state === 'suspended'), Math.round(secs * SR), { timeout: (secs + 30) * 1000 }); }
+  try { await page.waitForFunction((n) => (window.__rec.n || 0) >= n || (window.__rec.chunks.length > 128 && window.__rec.ctx.state === 'suspended'), Math.round(secs * SR), { timeout: (secs + 30) * 1000 }); }
   catch (e) {
     const st = await page.evaluate(async () => { const m = await import('/m/js/audioengine.js'); return { ...m.debugState(), ctx: m.E.ctx?.state, chunks: window.__rec.chunks.length, el: document.querySelector('#maudio').currentTime }; }).catch(x => String(x));
     e.message += ' ' + JSON.stringify(st); throw e;
   }
-  const data = await page.evaluate(() => { const c = window.__rec.chunks; const out = new Float32Array(c.length * 4096); c.forEach((b, i) => out.set(b, i * 4096)); return Array.from(out); });
+  const data = await page.evaluate(() => { const c = window.__rec.chunks; const out = new Float32Array(c.reduce((n, b) => n + b.length, 0)); let o = 0; for (const b of c) { out.set(b, o); o += b.length; } return Array.from(out); });
   return Float32Array.from(data);
 }
 function activeRange(x, thr = 0.05) {
@@ -169,7 +171,11 @@ t('glapplöst: obruten ton genom tre FLAC-spår utan glapp', async () => {
   const want = Math.round((1.7031 + 2.2017 + 1.5) * SR);
   const res = sineResidual(x, a + 8, b - 8, 440);
   assert.ok(res.max < 0.01, `skarv med glapp eller fasfel: residual ${res.max.toFixed(4)} vid sampel ${res.at - a}`);
-  assert.ok(Math.abs((b - a + 1) - want) < SR * 0.003, `längd ${b - a + 1} mot ${want} sampel`);
+  // Hann första låten inte avkodas inom GRACE (hårt belastad dator) spelade elementet den och motorn tog över
+  // med elementets precision (se testet nedan) – då gäller 25 ms, annars är längden exakt inom 3 ms
+  const st0 = await page.evaluate(async () => (await import('/m/js/audioengine.js')).debugState());
+  const tol = st0.handovers ? 0.025 : 0.003;
+  assert.ok(Math.abs((b - a + 1) - want) < SR * tol, `längd ${b - a + 1} mot ${want} sampel, a=${a} (${JSON.stringify(st0)})`);
   // Begränsaren och kompensationen ändrar inte nivån under tröskeln
   assert.ok(Math.abs(peakAmp(x, a, b) - 0.5) < 0.01, 'amplitud ' + peakAmp(x, a, b));
   const st = await page.evaluate(async () => (await import('/m/js/audioengine.js')).debugState());
@@ -226,8 +232,8 @@ t('övertoning: inte inom albumet där spåren går ihop, men till nästa album'
     playQueue([...a.trackList, ...b.trackList], 0);
   }, [S['Albumet A'], S['Albumet B']]);
   await page.waitForFunction(() => window.__rec?.on);
-  await page.waitForFunction(() => window.__rec.chunks.length > 4 && window.__rec.ctx.state === 'suspended', null, { timeout: 60000 });
-  const x = Float32Array.from(await page.evaluate(() => { const c = window.__rec.chunks; const o = new Float32Array(c.length * 4096); c.forEach((b, i) => o.set(b, i * 4096)); return Array.from(o); }));
+  await page.waitForFunction(() => window.__rec.chunks.length > 128 && window.__rec.ctx.state === 'suspended', null, { timeout: 60000 });
+  const x = Float32Array.from(await page.evaluate(() => { const c = window.__rec.chunks; const o = new Float32Array(c.reduce((n, b) => n + b.length, 0)); let p = 0; for (const b of c) { o.set(b, p); p += b.length; } return Array.from(o); }));
   const N = 1024, both = (f1, f2) => { let n = 0; for (let s = 0; s + N < x.length; s += N) if (goertzel(x, s, N, f1) > 0.08 && goertzel(x, s, N, f2) > 0.08) n++; return n; };
   const ab = both(300, 700);
   assert.ok(ab * N / SR > 1.2 && ab * N / SR < 2.6, `övertoning till nästa album: ${(ab * N / SR).toFixed(2)} s med båda tonerna`);

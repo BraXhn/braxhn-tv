@@ -187,7 +187,7 @@ function schedule(up, dec, pl, at, from) {
     if (x > 0) { from.fade.gain.setValueCurveAtTime(fadeCurve(true), at, x); from.src.stop(at + x); }
     else if (pl.curEnd < from.dec.len - 0.01) { from.fade.gain.setTargetAtTime(0, Math.max(E.ctx.currentTime, at - 0.04), 0.01); from.src.stop(at); }
   } else { // elementet → buffert
-    E.handover = true; E.elFading = true;
+    E.handover = true; E.elFading = true; E.handovers = (E.handovers || 0) + 1;
     const g = E.elGain.gain, now = E.ctx.currentTime;
     g.cancelScheduledValues(0); g.setValueAtTime(g.value, now);
     const base = gainFor(E.elT, E.prefs.normMode);
@@ -260,5 +260,5 @@ function tick() {
 /** Bara för testerna: läget i motorn. */
 export function debugState() {
   return { on: !!E.cur, cur: E.cur?.t.id ?? null, next: E.next?.t.id ?? null, at: E.next?.at ?? null, t0: E.cur?.t0 ?? null,
-    len: E.cur?.dec.len ?? null, trim: E.cur?.dec.trim ?? null, handover: E.handover, now: E.ctx?.currentTime ?? null, elT: E.elT?.id ?? null };
+    len: E.cur?.dec.len ?? null, trim: E.cur?.dec.trim ?? null, handover: E.handover, handovers: E.handovers || 0, now: E.ctx?.currentTime ?? null, elT: E.elT?.id ?? null };
 }
