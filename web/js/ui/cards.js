@@ -1,5 +1,5 @@
 // Återanvändbara kort och hyllor: titlar, säsonger, samlingar och personer
-import { coverImg, esc, hue, me, sxe, imgSrc, cardW, routeGen } from '../core.js';
+import { coverImg, esc, hue, me, sxe, imgSrc, cardW, routeGen, t, locale } from '../core.js';
 
 // ---------- kort ----------
 // Titlarna bakom korten som visas just nu – kortens meny (⋮) behöver hela titeln, inte bara id:t
@@ -35,7 +35,7 @@ const phOf = (it, pick, own) => !own ? (pick === 'poster' ? it.showPh : null)
   : pick === 'poster' ? it.ph : pick === 'thumb' ? it.phThumb : pick === 'backdrop' ? it.phBackdrop : null;
 /** Märket uppe till höger: antal osedda avsnitt (mörk ruta) eller ✓ när allt är sett */
 const countBadge = (n) => `<span class="badge" aria-hidden="true">${n}</span>`;
-const seenBadge = () => `<span class="seen" title="Sedd" aria-hidden="true">✓</span>`;
+const seenBadge = () => `<span class="seen" title="${t('Sedd')}" aria-hidden="true">✓</span>`;
 const progressBar = (pos, dur) => `<div class="bar" aria-hidden="true"><i style="width:${Math.min(100, pos / dur * 100)}%"></i></div>`;
 
 /** Bilden på ett kort: färgplatta med titeln som reserv, affisch/miniatyr ovanpå, märken och framsteg.
@@ -65,8 +65,8 @@ export function art(it, land, css) {
 function cardLabel(it, parts) {
   const left = (it.episodes || 0) - (it.watchedEpisodes || 0);
   const st = it.kind === 'show'
-    ? (it.watched ? 'sedd' : left > 0 ? `${left} osedda avsnitt` : '')
-    : it.watched ? 'sedd' : it.position > 0 && it.duration ? `${Math.round(it.position / it.duration * 100)} % sett` : '';
+    ? (it.watched ? t('sedd') : left > 0 ? t('{left} osedda avsnitt', { left }) : '')
+    : it.watched ? t('sedd') : it.position > 0 && it.duration ? t('{v} % sett', { v: Math.round(it.position / it.duration * 100) }) : '';
   return [...parts, st].filter(Boolean).join(', ');
 }
 const se = (season, episode) => `S${season} · A${episode}`;
@@ -77,19 +77,19 @@ function lines(it, land) {
     return [it.showTitle || it.title, it.showTitle ? it.title : '', se(it.season, it.episode)];
   }
   // note: egen rad 2 från hyllan (t.ex. "Premiär för 30 år sedan" i Den här dagen)
-  if (it.kind === 'show') return [it.title, it.note || (it.seasons > 1 ? `${it.seasons} säsonger` : it.seasons === 1 ? '1 säsong' : it.year ? String(it.year) : ''), ''];
+  if (it.kind === 'show') return [it.title, it.note || (it.seasons > 1 ? t('{seasons} säsonger', { seasons: it.seasons }) : it.seasons === 1 ? t('1 säsong') : it.year ? String(it.year) : ''), ''];
   // Hemvideor: inspelningsdagen i stället för året
   if (it.taken) return [it.title, it.note || fmtTaken(it.taken), ''];
   return [it.title, it.note || (it.year ? String(it.year) : ''), ''];
 }
 /** Hemvideons datum ("24 juni 2023") */
-export const fmtTaken = (t) => new Date(t * 1000).toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' });
+export const fmtTaken = (t) => new Date(t * 1000).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' });
 /** Knapparna ovanpå bilden: ▶ i mitten, ✎ nere till vänster (administratörer) och ⋮ nere till höger */
 function overlay({ id, name, play, edit, menu, data = '' }) {
   let h = '';
-  if (play) h += `<button type="button" class="cplay" ${data || `data-cplay="${+id}"`} aria-label="Spela ${esc(name)}" title="Spela">${PLAY_SVG}</button>`;
-  if (edit) h += `<button type="button" class="cedit" data-cedit="${+edit}" aria-label="Redigera ${esc(name)}" title="Redigera"><span aria-hidden="true">✎</span></button>`;
-  if (menu) h += `<button type="button" class="cmenu" data-cmenu="${+id}" aria-haspopup="menu" aria-expanded="false" aria-label="Fler åtgärder för ${esc(name)}" title="Fler åtgärder"><span aria-hidden="true">⋮</span></button>`;
+  if (play) h += `<button type="button" class="cplay" ${data || `data-cplay="${+id}"`} aria-label="${t('Spela {name}', { name: esc(name) })}" title="${t('Spela')}">${PLAY_SVG}</button>`;
+  if (edit) h += `<button type="button" class="cedit" data-cedit="${+edit}" aria-label="${t('Redigera {name}', { name: esc(name) })}" title="${t('Redigera')}"><span aria-hidden="true">✎</span></button>`;
+  if (menu) h += `<button type="button" class="cmenu" data-cmenu="${+id}" aria-haspopup="menu" aria-expanded="false" aria-label="${t('Fler åtgärder för {name}', { name: esc(name) })}" title="${t('Fler åtgärder')}"><span aria-hidden="true">⋮</span></button>`;
   return h ? `<div class="ov">${h}</div>` : '';
 }
 const textLines = (t, s, s2) => `<div class="t">${esc(t)}</div>${s ? `<div class="s">${esc(s)}</div>` : ''}${s2 ? `<div class="s s2">${esc(s2)}</div>` : ''}`;
@@ -118,16 +118,16 @@ export function card(it, land = false, { menu = true } = {}) {
  */
 export function seasonCard(g) {
   SEASONS.set(`${+g.show}:${+g.season}`, g);
-  const t = g.showTitle, sn = g.season === 0 ? 'Specialavsnitt' : `Säsong ${g.season}`;
+  const tm = g.showTitle, sn = g.season === 0 ? t('Specialavsnitt') : t('Säsong {season}', { season: g.season });
   const s = g.latest?.title || sn, s2 = g.latest ? se(g.season, g.latest.episode) : '';
-  const st = g.unwatched > 0 ? `${g.unwatched} ${g.unwatched === 1 ? 'nytt osett avsnitt' : 'nya osedda avsnitt'}` : 'sedd';
-  const label = [t, sn, g.latest ? `senaste avsnitt ${g.latest.episode}: ${g.latest.title}` : '', st].filter(Boolean).join(', ');
+  const st = g.unwatched > 0 ? `${g.unwatched} ${g.unwatched === 1 ? t('nytt osett avsnitt') : t('nya osedda avsnitt')}` : t('sedd');
+  const label = [tm, sn, g.latest ? t('senaste avsnitt {episode}: {title}', { episode: g.latest.episode, title: g.latest.title }) : '', st].filter(Boolean).join(', ');
   const pick = g.showPoster ? 'poster' : g.showThumb ? 'thumb' : '';
   const img = pick ? `<img ${loadAttr()} decoding="async" ${imgSrc(`/api/image/${+g.show}/${pick}`, cardW() * 1.2)} alt="" width="300" height="450" data-fb="1">` : '';
   const badge = g.unwatched > 0 ? countBadge(g.unwatched) : seenBadge();
   return `<div class="card scard" data-show="${+g.show}" data-season="${+g.season}"><a class="clink" href="#/item/${+g.show}/${+g.season}" aria-label="${esc(label)}">`
-    + `<div class="art">${placeholder(t, pick === 'poster' ? g.showPh : null)}${img}${badge}</div>${textLines(t, s, s2)}</a>`
-    + overlay({ id: g.show, name: `${t} ${sn}`, play: !!g.next, data: g.next ? `data-cplay="${+g.next.id}" data-pos="${+g.next.position || 0}"` : '', edit: me?.adminHere ? g.show : 0, menu: true })
+    + `<div class="art">${placeholder(tm, pick === 'poster' ? g.showPh : null)}${img}${badge}</div>${textLines(tm, s, s2)}</a>`
+    + overlay({ id: g.show, name: `${tm} ${sn}`, play: !!g.next, data: g.next ? `data-cplay="${+g.next.id}" data-pos="${+g.next.position || 0}"` : '', edit: me?.adminHere ? g.show : 0, menu: true })
     + '</div>';
 }
 
@@ -154,7 +154,7 @@ export function colCard(c) {
 }
 
 // ---------- Skådespelare och personsidor ----------
-export const ROLE_NAME = { director: 'Regi', creator: 'Skapare' };
+export const ROLE_NAME = { director: t('Regi'), creator: t('Skapare') };
 const initials = (n) => String(n || '').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 export function personArt(p, css) {
   const h = hue(p.name);
@@ -164,7 +164,7 @@ export function personArt(p, css) {
 export const personCard = (p, sub = '') => `<a class="card pcard" href="#/person/${+p.id}">${personArt(p)}<div class="t">${esc(p.name)}</div><div class="s">${esc(sub)}</div></a>`;
 export function castShelf(it) {
   if (!it.cast?.length) return '';
-  return `<section class="section"><h2>Rollista</h2><div class="shelf people">${it.cast.map(p => personCard(p, p.role === 'cast' ? p.character || '' : ROLE_NAME[p.role] || '')).join('')}</div></section>`;
+  return `<section class="section"><h2>${t('Rollista')}</h2><div class="shelf people">${it.cast.map(p => personCard(p, p.role === 'cast' ? p.character || '' : ROLE_NAME[p.role] || '')).join('')}</div></section>`;
 }
 
 /** Kanallogga (live-TV) med kanalnummer som reserv – används av live-vyerna och sökningen */
@@ -175,20 +175,20 @@ export const bookCover = (b, cls = '') => `<div class="cover book ${cls}" style=
 export const bookCard = (b) => `<a class="card mcard" href="#/book/${b.id}">${bookCover(b)}${b.duration && b.position ? `<div class="prog"><i style="width:${Math.min(100, b.position / b.duration * 100)}%"></i></div>` : ''}
   <div class="t">${esc(b.title)}</div><div class="s">${esc(b.author || '')}${b.finished ? ' · ✓' : ''}</div></a>`;
 export const podCover = (p, cls = '') => `<div class="cover ${cls}" style="--h1:hsl(${hue('p' + p.id)} 40% 30%);--h2:hsl(${(hue('p' + p.id) + 60) % 360} 45% 16%)">🎙${p.image ? coverImg(`/api/podcasts/${+p.id}/image`, cls) : ''}</div>`;
-const ymd = (d) => d.toLocaleDateString('sv-SE');
+const ymd = (d) => d.toLocaleDateString('sv-SE'); // ÅÅÅÅ-MM-DD (inte visningsformat)
 const parseDay = (s) => new Date(s + 'T12:00:00');
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /** Idag, I morgon, veckodag inom en vecka, sedan datum */
 export function dayLabel(s, today = ymd(new Date())) {
   const diff = Math.round((parseDay(s) - parseDay(today)) / 864e5);
-  if (diff === 0) return 'Idag';
-  if (diff === 1) return 'I morgon';
-  if (diff === -1) return 'I går';
+  if (diff === 0) return t('Idag');
+  if (diff === 1) return t('I morgon');
+  if (diff === -1) return t('I går');
   const d = parseDay(s);
-  if (diff > 1 && diff < 7) return cap(d.toLocaleDateString('sv-SE', { weekday: 'long' }));
-  return cap(d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', ...(d.getFullYear() !== parseDay(today).getFullYear() ? { year: 'numeric' } : {}) }));
+  if (diff > 1 && diff < 7) return cap(d.toLocaleDateString(locale, { weekday: 'long' }));
+  return cap(d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long', ...(d.getFullYear() !== parseDay(today).getFullYear() ? { year: 'numeric' } : {}) }));
 }
-export const timeOf = (e) => e.time ? new Date(e.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
+export const timeOf = (e) => e.time ? new Date(e.time).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : '';
 export const hrefOf = (e) => e.itemId ? `#/item/${+e.itemId}` : e.showId ? `#/item/${+e.showId}` : '';
 /** Kort till hyllan "Kommer snart" (fältet upcoming i /api/home) */
 export function upcomingCard(e) {

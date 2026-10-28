@@ -1,6 +1,6 @@
 // Tomma vyer, fel och laddning. Rena strängbyggare (ingen DOM) – används med main.innerHTML eller
 // insertAdjacentHTML. Skelett har samma mått som det riktiga innehållet så att sidan inte hoppar när den laddats.
-import { esc, main } from '../core.js';
+import { esc, main, t } from '../core.js';
 
 /**
  * Tomt läge: "inget här ännu" med förklaring och ev. en knapp vidare.
@@ -30,11 +30,11 @@ export function emptyState({ icon = '', title = '', text = '', html = '', action
  */
 export function errorState(err, { retry = false, retryId = 'retry', compact = false } = {}) {
   const off = !!err?.offline || (typeof navigator !== 'undefined' && navigator.onLine === false);
-  const title = off ? 'Ingen kontakt med servern' : 'Något gick fel';
-  const text = off ? 'Kontrollera att BraXhn TV körs och att du är ansluten till nätet. Det du har sparat finns kvar.'
-    : (err?.message || 'Okänt fel');
+  const title = off ? t('Ingen kontakt med servern') : t('Något gick fel');
+  const text = off ? t('Kontrollera att BraXhn TV körs och att du är ansluten till nätet. Det du har sparat finns kvar.')
+    : (err?.message || t('Okänt fel'));
   return `<div class="state error${compact ? ' compact' : ''}" role="alert"><div class="state-icon" aria-hidden="true">${off ? '📡' : '⚠'}</div>
-    <h2>${title}</h2><p>${esc(text)}</p>${retry ? `<div class="state-act"><button type="button" class="primary" id="${esc(retryId)}">Försök igen</button></div>` : ''}</div>`;
+    <h2>${title}</h2><p>${esc(text)}</p>${retry ? `<div class="state-act"><button type="button" class="primary" id="${esc(retryId)}">${t('Försök igen')}</button></div>` : ''}</div>`;
 }
 /** Kopplar "Försök igen"-knappen från errorState() */
 export function bindRetry(root, fn, retryId = 'retry') {
@@ -50,7 +50,7 @@ const SK_TEXT = '<div class="sk sk-line"></div><div class="sk sk-line short"></d
  *   panels = admin/konto, inline = liten indikator i en panel eller dialog
  * @returns {string}
  */
-export function loadingState({ kind = 'list', count, label = 'Laddar…' } = {}) {
+export function loadingState({ kind = 'list', count, label = t('Laddar…') } = {}) {
   const sr = `<span class="sr-only">${esc(label)}</span>`;
   const cards = (n, land) => Array.from({ length: n }, () => `<div class="sk-card${land ? ' land' : ''}"><div class="sk sk-art"></div>${SK_TEXT}</div>`).join('');
   let inner;
@@ -66,5 +66,5 @@ export function loadingState({ kind = 'list', count, label = 'Laddar…' } = {})
 
 /** Tom vy när en sorts bibliotek saknas */
 export function noLib(what, type) {
-  main.innerHTML = emptyState({ icon: '📁', title: `Inget bibliotek för ${what}`, text: `Lägg till ett bibliotek av typen ${type} under Administration.` });
+  main.innerHTML = emptyState({ icon: '📁', title: t('Inget bibliotek för {what}', { what }), text: t('Lägg till ett bibliotek av typen {type} under Administration.', { type }) });
 }

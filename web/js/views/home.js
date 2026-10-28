@@ -1,6 +1,6 @@
 // Vyer: startsidan, bibliotek (filter och sortering: ui/libfilter.js), Min lista och samlingar (sökningen: views/search.js).
 // Startsidans Utvalt-karusell: ui/featured.js, "Anpassa startsidan": views/homecustom.js.
-import { $, act, api, cardW, esc, fmtDay, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, safeColor, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, act, api, cardW, esc, fmtDay, fmtDur, heroUrl, imgSrc, later, libs, main, me, onLeave, safeColor, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { need, playSpoken, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
@@ -16,15 +16,15 @@ const DEFAULT_ORDER = ['foryou', 'continue', 'listening', 'watchlist', 'upcoming
 const cards = (list) => list.map(i => card(i)).join('');
 /** Kort i "Fortsätt lyssna": ljudböcker öppnar boken, poddavsnitt fortsätter spelas direkt */
 const listenCard = (x, i) => x.type === 'podcast'
-  ? `<a class="card mcard" href="#/podcast/${+x.podcast}" data-lpod="${i}" aria-label="${esc(`Fortsätt lyssna: ${x.title}, ${x.podcastTitle || ''}`)}">${podCover({ id: x.podcast, image: x.image })}${x.duration && x.position ? `<div class="prog"><i style="width:${Math.min(100, x.position / x.duration * 100)}%"></i></div>` : ''}
-    <div class="t">${esc(x.title || '')}</div><div class="s">${esc(x.podcastTitle || '')}${x.duration ? ` · ${esc(fmtDur(Math.max(0, x.duration - x.position)))} kvar` : ''}</div></a>`
+  ? `<a class="card mcard" href="#/podcast/${+x.podcast}" data-lpod="${i}" aria-label="${esc(t('Fortsätt lyssna: {title}, {v}', { title: x.title, v: x.podcastTitle || '' }))}">${podCover({ id: x.podcast, image: x.image })}${x.duration && x.position ? `<div class="prog"><i style="width:${Math.min(100, x.position / x.duration * 100)}%"></i></div>` : ''}
+    <div class="t">${esc(x.title || '')}</div><div class="s">${esc(x.podcastTitle || '')}${x.duration ? ` ${t('· {v} kvar', { v: esc(fmtDur(Math.max(0, x.duration - x.position))) })}` : ''}</div></a>`
   : bookCard(x);
 /** Minnen ur fotobiblioteken (photoMemories): ett liggande kort per år med en bild från dagens datum */
 const memoryCard = (g) => {
-  const t = g.yearsAgo === 1 ? 'För ett år sedan' : `För ${+g.yearsAgo} år sedan`, s = `${+g.count} ${g.count === 1 ? 'foto' : 'foton'} · ${fmtDay(g.day)}`;
-  return `<div class="card land phmem"><a class="clink" href="#/photos/${+g.library}/memories" aria-label="${esc(`${t}, ${s}`)}"><div class="art" style="background:${safeColor(g.cover?.c) || 'var(--bg3)'}">`
+  const tm = g.yearsAgo === 1 ? t('För ett år sedan') : t('För {yearsAgo} år sedan', { yearsAgo: +g.yearsAgo }), s = `${+g.count} ${g.count === 1 ? t('foto') : t('foton')} · ${fmtDay(g.day)}`;
+  return `<div class="card land phmem"><a class="clink" href="#/photos/${+g.library}/memories" aria-label="${esc(`${tm}, ${s}`)}"><div class="art" style="background:${safeColor(g.cover?.c) || 'var(--bg3)'}">`
     + (g.cover ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/photos/${+g.cover.id}/img`, cardW() * 1.9)} alt="" width="480" height="270" data-fb="1">` : '')
-    + `</div><div class="t">${esc(t)}</div><div class="s">${esc(s)}</div></a></div>`;
+    + `</div><div class="t">${esc(tm)}</div><div class="s">${esc(s)}</div></a></div>`;
 };
 
 // Startsidan visas direkt från förra besöket (sparad per profil i webbläsaren) och byts tyst när servern svarat –
@@ -47,51 +47,51 @@ async function renderHome(d, cols, own, fromCache) {
   const L = d.homeLayout || { order: DEFAULT_ORDER, hidden: [], hero: 'auto' };
   const off = new Set(L.hidden || []);
   // Installationsguiden är inte klar (bara administratörer på hemnätet, fältet setupPending i /api/status)
-  let html = me.setupPending ? `<div class="setup-banner" role="region" aria-label="Installation"><div><b>Slutför installationen</b>
-    <p class="muted small">Några steg kvar: metadata, bibliotek, omkodning, åtkomst utanför hemmet och hushållet.</p></div>
-    <a class="btn primary" href="#/setup">Fortsätt guiden</a></div>` : '';
+  let html = me.setupPending ? `<div class="setup-banner" role="region" aria-label="Installation"><div><b>${t('Slutför installationen')}</b>
+    <p class="muted small">${t('Några steg kvar: metadata, bibliotek, omkodning, åtkomst utanför hemmet och hushållet.')}</p></div>
+    <a class="btn primary" href="#/setup">${t('Fortsätt guiden')}</a></div>` : '';
   if (!libs.length) {
-    html += emptyState({ icon: '🎬', title: 'Inga bibliotek ännu', text: me.is_admin ? 'Lägg till en mapp med filmer eller serier för att komma igång.' : 'Be administratören att lägga till bibliotek.',
-      action: me.is_admin ? { label: 'Lägg till bibliotek', href: me.setupPending ? '#/setup/libraries' : '#/admin' } : null });
+    html += emptyState({ icon: '🎬', title: t('Inga bibliotek ännu'), text: me.is_admin ? t('Lägg till en mapp med filmer eller serier för att komma igång.') : t('Be administratören att lägga till bibliotek.'),
+      action: me.is_admin ? { label: t('Lägg till bibliotek'), href: me.setupPending ? '#/setup/libraries' : '#/admin' } : null });
   }
   // Utvalt överst: standard på bred skärm, valbart under "Anpassa startsidan"
   const hero = d.featured?.length && (L.hero === 'on' || (L.hero !== 'off' && matchMedia('(min-width: 900px)').matches));
   if (hero) html += featuredHtml(d.featured);
   // Som Plex: en vågrät rad per hylla med stående affischer. Seriebibliotek visar nya avsnitt per säsong.
   const part = {
-    foryou: () => d.forYou?.length ? shelfHtml('Nytt för dig', cards(d.forYou), { row: 'foryou',
-      extra: `<span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">Markera som sedda</a>` }) : '',
-    continue: () => d.continue.length ? shelfHtml('Fortsätt titta', cards(d.continue), { row: 'continue' }) : '',
-    listening: () => d.listening?.length ? shelfHtml('Fortsätt lyssna', d.listening.map(listenCard).join(''), { row: 'listening' }) : '',
-    watchlist: () => shelf('Min lista', d.watchlist, false, '<a href="#/watchlist">Visa alla</a>', 'watchlist'),
+    foryou: () => d.forYou?.length ? shelfHtml(t('Nytt för dig'), cards(d.forYou), { row: 'foryou',
+      extra: `<span class="fycount">${d.forYou.length}</span> <a href="#" id="fyclear">${t('Markera som sedda')}</a>` }) : '',
+    continue: () => d.continue.length ? shelfHtml(t('Fortsätt titta'), cards(d.continue), { row: 'continue' }) : '',
+    listening: () => d.listening?.length ? shelfHtml(t('Fortsätt lyssna'), d.listening.map(listenCard).join(''), { row: 'listening' }) : '',
+    watchlist: () => shelf(t('Min lista'), d.watchlist, false, t('<a href="#/watchlist">Visa alla</a>'), 'watchlist'),
     // Kommer snart: avsnitt de närmaste sju dagarna (fältet upcoming)
-    upcoming: () => d.upcoming?.length ? shelfHtml('Kommer snart', d.upcoming.map(upcomingCard).join(''), { more: '<a href="#/calendar">Visa kalendern</a>' }) : '',
-    because: () => (d.because || []).map(b => b.items.length ? shelfHtml(`Eftersom du såg ${b.seed.title}`, cards(b.items)) : '').join(''),
-    recommended: () => shelf('Rekommenderat för dig', d.recommended),
+    upcoming: () => d.upcoming?.length ? shelfHtml(t('Kommer snart'), d.upcoming.map(upcomingCard).join(''), { more: t('<a href="#/calendar">Visa kalendern</a>') }) : '',
+    because: () => (d.because || []).map(b => b.items.length ? shelfHtml(t('Eftersom du såg {title}', { title: b.seed.title }), cards(b.items)) : '').join(''),
+    recommended: () => shelf(t('Rekommenderat för dig'), d.recommended),
     // Egna samlingar med "Visa på startsidan" (ordningen följer samlingens sortering)
-    custom: () => (d.customCollections || []).map(c => shelfHtml(c.name, cards(c.items), { more: `<a href="#/ucollection/${+c.id}">Visa alla</a>` })).join(''),
+    custom: () => (d.customCollections || []).map(c => shelfHtml(c.name, cards(c.items), { more: `${t('<a href="#/ucollection/{id}">Visa alla</a>', { id: +c.id })}` })).join(''),
     recent: () => d.rows.map(r => {
-      const more = `<a href="#/lib/${+r.library.id}">Visa alla</a>`;
-      if (r.seasons?.length) return shelfHtml(`Nyligen tillagda i ${r.library.name}`, r.seasons.map(seasonCard).join(''), { more });
-      return r.items.length ? shelfHtml(`Nyligen tillagda i ${r.library.name}`, cards(r.items), { more }) : '';
+      const more = `${t('<a href="#/lib/{id}">Visa alla</a>', { id: +r.library.id })}`;
+      if (r.seasons?.length) return shelfHtml(t('Nyligen tillagda i {name}', { name: r.library.name }), r.seasons.map(seasonCard).join(''), { more });
+      return r.items.length ? shelfHtml(t('Nyligen tillagda i {name}', { name: r.library.name }), cards(r.items), { more }) : '';
     }).join(''),
-    short: () => d.shortTonight?.length >= 4 ? shelfHtml('Kort film ikväll', cards(d.shortTonight), { extra: '<span class="muted small">under 95 minuter</span>' }) : '',
-    toprated: () => d.topRated?.length >= 4 ? shelfHtml('Topprankat i biblioteket', cards(d.topRated)) : '',
+    short: () => d.shortTonight?.length >= 4 ? shelfHtml(t('Kort film ikväll'), cards(d.shortTonight), { extra: t('<span class="muted small">under 95 minuter</span>') }) : '',
+    toprated: () => d.topRated?.length >= 4 ? shelfHtml(t('Topprankat i biblioteket'), cards(d.topRated)) : '',
     // Den här dagen: anteckningen (premiär/sedd för N år sedan) ersätter årtalet under titeln
-    onthisday: () => d.onThisDay?.length ? shelfHtml('Den här dagen', d.onThisDay.map(i => card({ ...i, note: i.onThisDay?.note })).join('')) : '',
-    memories: () => d.photoMemories?.length ? shelfHtml('Den här dagen i dina foton', d.photoMemories.map(memoryCard).join(''), { land: true }) : '',
-    genre: () => d.genreOfDay?.items?.length ? shelfHtml(`Dagens genre: ${d.genreOfDay.genre}`, cards(d.genreOfDay.items)) : '',
-    gems: () => d.hiddenGems?.length >= 4 ? shelfHtml('Glömda guldkorn', cards(d.hiddenGems), { extra: '<span class="muted small">högt betyg, aldrig sedda</span>' }) : '',
+    onthisday: () => d.onThisDay?.length ? shelfHtml(t('Den här dagen'), d.onThisDay.map(i => card({ ...i, note: i.onThisDay?.note })).join('')) : '',
+    memories: () => d.photoMemories?.length ? shelfHtml(t('Den här dagen i dina foton'), d.photoMemories.map(memoryCard).join(''), { land: true }) : '',
+    genre: () => d.genreOfDay?.items?.length ? shelfHtml(t('Dagens genre: {genre}', { genre: d.genreOfDay.genre }), cards(d.genreOfDay.items)) : '',
+    gems: () => d.hiddenGems?.length >= 4 ? shelfHtml(t('Glömda guldkorn'), cards(d.hiddenGems), { extra: t('<span class="muted small">högt betyg, aldrig sedda</span>') }) : '',
     // Egna samlingar först, sedan TMDB:s filmserier
-    collections: () => cols.length || own.length ? shelfHtml('Samlingar', [...own, ...cols].map(colCard).join(''), { more: '<a href="#/collections">Visa alla</a>' }) : ''
+    collections: () => cols.length || own.length ? shelfHtml(t('Samlingar'), [...own, ...cols].map(colCard).join(''), { more: t('<a href="#/collections">Visa alla</a>') }) : ''
   };
   for (const id of L.order || DEFAULT_ORDER) if (!off.has(id) && part[id]) html += part[id]();
   if (libs.some(l => l.type === 'movie' || l.type === 'show') && !d.rows.some(r => r.items.length) && !fromCache) {
     const s = await api('/scan');
-    html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? 'Skannar bibliotek…' : 'Inget innehåll hittades', text: s.running ? `${s.phase} ${s.done}/${s.total}` : 'Kontrollera sökvägarna under Administration.' });
+    html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? t('Skannar bibliotek…') : t('Inget innehåll hittades'), text: s.running ? `${s.phase} ${s.done}/${s.total}` : t('Kontrollera sökvägarna under Administration.') });
     if (s.running) later(route, 3000);
   }
-  if (libs.length) html += `<div class="homefoot"><button type="button" class="ghost" id="homecustom">Anpassa startsidan</button></div>`;
+  if (libs.length) html += `<div class="homefoot"><button type="button" class="ghost" id="homecustom">${t('Anpassa startsidan')}</button></div>`;
   main.innerHTML = html;
   if (keep != null) window.scrollTo(0, keep);
   if (fromCache) main.removeAttribute('aria-busy');
@@ -147,22 +147,22 @@ views.lib = async (id, folder) => {
   const sort = P.get('sort') || 'title', dir = P.get('order') || SORT_DIR[sort] || 'asc';
   const filtered = hasFilter(qs), nf = filterCount(qs), ch = chips(qs, type), total = d.total ?? d.items.length;
   const editing = scol ? own.find(c => c.id === scol && c.smart && c.editable) : null;
-  const unit = movies ? (total === 1 ? 'titel' : 'titlar') : (total === 1 ? 'serie' : 'serier');
+  const unit = movies ? (total === 1 ? t('titel') : t('titlar')) : (total === 1 ? t('serie') : t('serier'));
   main.innerHTML = `<div class="toolbar libbar"><h1>${esc(lib.name)}</h1><span class="muted" id="libcount" aria-live="polite">${total} ${unit}</span>
     <div class="libctl">
-    ${movies ? `<select id="cols" aria-label="Visning" title="Visa filmer i samma samling som ett kort"><option value="1">Samlingar</option><option value="0">Alla filmer</option></select>` : ''}
-    <button type="button" class="ghost" id="fbtn" aria-haspopup="dialog" aria-expanded="false">Filter${nf ? ` <span class="fcount" aria-label="${nf} aktiva">${nf}</span>` : ''}</button>
-    <select id="srt" aria-label="Sortering">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${k === sort ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
-    ${sort === 'random' ? iconButton({ icon: '↻', label: 'Blanda om', id: 'reshuffle' })
-      : iconButton({ icon: dir === 'asc' ? '↑' : '↓', label: dir === 'asc' ? 'Stigande ordning – byt till fallande' : 'Fallande ordning – byt till stigande', id: 'sdir' })}
-    <button type="button" class="ghost" id="shuffle"${total ? '' : ' disabled'} title="Spela en slumpad titel ur det som visas">🔀 Blanda</button>
-    ${editing ? `<button type="button" class="primary" id="smartupd">Spara filtret i ${esc(editing.name)}</button>`
-      : filtered ? '<button type="button" class="ghost" id="smartsave">Spara som smart samling</button>' : ''}
+    ${movies ? `<select id="cols" aria-label="${t('Visning')}" title="${t('Visa filmer i samma samling som ett kort')}"><option value="1">${t('Samlingar')}</option><option value="0">${t('Alla filmer')}</option></select>` : ''}
+    <button type="button" class="ghost" id="fbtn" aria-haspopup="dialog" aria-expanded="false">Filter${nf ? ` <span class="fcount" aria-label="${t('{nf} aktiva', { nf })}">${nf}</span>` : ''}</button>
+    <select id="srt" aria-label="${t('Sortering')}">${Object.entries(SORT_LABEL).map(([k, l]) => `<option value="${k}"${k === sort ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    ${sort === 'random' ? iconButton({ icon: '↻', label: t('Blanda om'), id: 'reshuffle' })
+      : iconButton({ icon: dir === 'asc' ? '↑' : '↓', label: dir === 'asc' ? t('Stigande ordning – byt till fallande') : t('Fallande ordning – byt till stigande'), id: 'sdir' })}
+    <button type="button" class="ghost" id="shuffle"${total ? '' : ' disabled'} title="${t('Spela en slumpad titel ur det som visas')}">${t('🔀 Blanda')}</button>
+    ${editing ? `<button type="button" class="primary" id="smartupd">${t('Spara filtret i {name}', { name: esc(editing.name) })}</button>`
+      : filtered ? t('<button type="button" class="ghost" id="smartsave">Spara som smart samling</button>') : ''}
     </div></div>
     ${chipsHtml(ch)}
-    ${own.length ? shelfHtml('Egna samlingar', own.map(colCard).join(''), { more: '<a href="#/collections">Alla samlingar</a>' }) : ''}
+    ${own.length ? shelfHtml(t('Egna samlingar'), own.map(colCard).join(''), { more: t('<a href="#/collections">Alla samlingar</a>') }) : ''}
     ${d.items.length ? `<div class="grid" id="libgrid">${d.items.slice(0, FIRST).map(libCard).join('')}</div><div id="libmore" aria-hidden="true"></div>`
-      : emptyState({ title: filtered ? 'Inget som matchar filtret' : 'Inget här ännu', text: filtered ? 'Ta bort ett filter eller välj Rensa alla.' : 'Titlarna dyker upp här när biblioteket har skannats.' })}`;
+      : emptyState({ title: filtered ? t('Inget som matchar filtret') : t('Inget här ännu'), text: filtered ? t('Ta bort ett filter eller välj Rensa alla.') : t('Titlarna dyker upp här när biblioteket har skannats.') })}`;
   // Stora bibliotek: de första korten direkt, resten av sidan i omgångar och nästa sida när man närmar sig slutet
   // (tusentals kort på en gång låser webbläsaren en stund, särskilt på TV och telefon)
   const items = d.items;
@@ -209,16 +209,16 @@ views.lib = async (id, folder) => {
   });
   $('#shuffle').onclick = act(async (e) => {
     const b = e.currentTarget, r = await api(`/libraries/${id}/shuffle${qs ? '?' + qs : ''}`);
-    toast(r.play.kind === 'episode' ? `Blandat: ${r.item.title} · ${sxe(r.play)}` : `Blandat: ${r.play.title}`);
+    toast(r.play.kind === 'episode' ? t('Blandat: {title} · {play}', { title: r.item.title, play: sxe(r.play) }) : t('Blandat: {title}', { title: r.play.title }));
     startPlay(b, r.play.id, r.play.watched ? 0 : r.play.position || 0);
   });
   if ($('#smartsave')) $('#smartsave').onclick = act(async () => {
     const cid = await (await need('ui/collections.js')).collectionForm(null, null, { library: lib.id, query: qs }); // dialogen laddas när den behövs
-    if (cid) toast('Den smarta samlingen är sparad', { action: { label: 'Visa', onClick: () => { location.hash = `#/ucollection/${cid}`; } } });
+    if (cid) toast(t('Den smarta samlingen är sparad'), { action: { label: t('Visa'), onClick: () => { location.hash = `#/ucollection/${cid}`; } } });
   });
   if ($('#smartupd')) $('#smartupd').onclick = act(async () => {
     await api(`/custom-collections/${editing.id}`, { method: 'PUT', body: { smart: { library: lib.id, query: qs } } });
-    toast(`Filtret är sparat i ${editing.name}`);
+    toast(t('Filtret är sparat i {name}', { name: editing.name }));
     location.hash = `#/ucollection/${editing.id}`;
   });
 };
@@ -230,8 +230,8 @@ const yearSpan = (f) => {
 };
 /** En undermapp som kort: en av klippens miniatyrer, antal klipp och år */
 function folderCard(libId, f) {
-  const sub = [`${f.count} klipp`, yearSpan(f)].filter(Boolean).join(' · ');
-  return `<a class="card land fcard" href="#/lib/${+libId}/${encodeURIComponent(f.path)}" aria-label="${esc(`Mappen ${f.name}, ${sub}`)}"><div class="art">
+  const sub = [t('{count} klipp', { count: f.count }), yearSpan(f)].filter(Boolean).join(' · ');
+  return `<a class="card land fcard" href="#/lib/${+libId}/${encodeURIComponent(f.path)}" aria-label="${esc(t('Mappen {name}, {sub}', { name: f.name, sub }))}"><div class="art">
     <div class="ph fph" aria-hidden="true"><span class="ficon">📁</span></div>
     ${f.cover ? `<img loading="lazy" decoding="async" ${imgSrc(`/api/image/${+f.cover}/thumb`, cardW() * 1.9)} alt="" width="480" height="270" data-fb="1">` : ''}
     <span class="badge">${+f.count}</span></div><div class="t">📁 ${esc(f.name)}</div><div class="s">${esc(sub)}</div></a>`;
@@ -245,17 +245,17 @@ async function homeVideos(id, folderArg) {
   const folders = flat ? [] : d.folders || [];
   // Brödsmulor: biblioteket, sedan mapparna ner till den här
   const parts = flat || !folder ? [] : folder.split('/');
-  const crumbs = `<nav class="crumbs" aria-label="Mappar"><a href="#/lib/${+id}">${esc(d.library.name)}</a>${parts.map((p, i) =>
+  const crumbs = `<nav class="crumbs" aria-label="${t('Mappar')}"><a href="#/lib/${+id}">${esc(d.library.name)}</a>${parts.map((p, i) =>
     ` <span aria-hidden="true">›</span> <a href="#/lib/${+id}/${encodeURIComponent(parts.slice(0, i + 1).join('/'))}"${i === parts.length - 1 ? ' aria-current="page"' : ''}>${esc(p)}</a>`).join('')}</nav>`;
   const count = d.items.length + folders.reduce((n, f) => n + f.count, 0);
-  main.innerHTML = `<div class="toolbar"><h1>${esc(parts.at(-1) || d.library.name)}</h1><span class="muted">${count} klipp</span>
-    <select id="hvflat" title="Visa mapparna eller alla klipp på en gång" aria-label="Visning"><option value="0">Mappar</option><option value="1">Alla klipp</option></select>
-    <select id="flt" aria-label="Filter"><option value="">Alla</option><option value="unwatched">Osedda</option><option value="watched">Sedda</option></select>
-    <select id="srt" aria-label="Sortering"><option value="date">Datum (nyast först)</option><option value="title">Namn</option><option value="added">Senast tillagda</option></select></div>
+  main.innerHTML = `<div class="toolbar"><h1>${esc(parts.at(-1) || d.library.name)}</h1><span class="muted">${t('{count} klipp', { count })}</span>
+    <select id="hvflat" title="${t('Visa mapparna eller alla klipp på en gång')}" aria-label="${t('Visning')}"><option value="0">${t('Mappar')}</option><option value="1">${t('Alla klipp')}</option></select>
+    <select id="flt" aria-label="Filter"><option value="">${t('Alla')}</option><option value="unwatched">${t('Osedda')}</option><option value="watched">${t('Sedda')}</option></select>
+    <select id="srt" aria-label="${t('Sortering')}"><option value="date">${t('Datum (nyast först)')}</option><option value="title">${t('Namn')}</option><option value="added">${t('Senast tillagda')}</option></select></div>
     ${parts.length ? crumbs : ''}
-    ${folders.length ? `<h2 class="sr-only">Mappar</h2><div class="grid wide" id="hvfolders">${folders.map(f => folderCard(id, f)).join('')}</div>` : ''}
-    ${d.items.length ? `${folders.length ? '<h2 class="hvh">Klipp</h2>' : ''}<div class="grid wide" id="libgrid">${d.items.slice(0, FIRST).map(i => card(i, true)).join('')}</div>`
-      : folders.length ? '' : emptyState({ icon: '🎞️', title: filter ? 'Inget som matchar filtret' : 'Inga klipp här', text: filter ? 'Välj Alla för att se alla klipp.' : 'Klippen dyker upp här när biblioteket har skannats.' })}`;
+    ${folders.length ? `<h2 class="sr-only">${t('Mappar')}</h2><div class="grid wide" id="hvfolders">${folders.map(f => folderCard(id, f)).join('')}</div>` : ''}
+    ${d.items.length ? `${folders.length ? t('<h2 class="hvh">Klipp</h2>') : ''}<div class="grid wide" id="libgrid">${d.items.slice(0, FIRST).map(i => card(i, true)).join('')}</div>`
+      : folders.length ? '' : emptyState({ icon: '🎞️', title: filter ? t('Inget som matchar filtret') : t('Inga klipp här'), text: filter ? t('Välj Alla för att se alla klipp.') : t('Klippen dyker upp här när biblioteket har skannats.') })}`;
   const more = (from) => {
     const g = $('#libgrid');
     if (!g || from >= d.items.length) return;
@@ -271,14 +271,14 @@ async function homeVideos(id, folderArg) {
 
 views.watchlist = async () => {
   const items = await api('/watchlist');
-  main.innerHTML = `<div class="toolbar"><h1>Min lista</h1><span class="muted">${items.length} titlar</span></div>
-    ${items.length ? `<div class="grid" data-row="watchlist">${items.map(i => card(i)).join('')}</div>` : emptyState({ icon: '🔖', title: 'Min lista är tom', text: 'Lägg till filmer och serier med ”+ Min lista” eller med ⋮ på ett kort.' })}`;
+  main.innerHTML = `<div class="toolbar"><h1>${t('Min lista')}</h1><span class="muted">${t('{itemsN} titlar', { itemsN: items.length })}</span></div>
+    ${items.length ? `<div class="grid" data-row="watchlist">${items.map(i => card(i)).join('')}</div>` : emptyState({ icon: '🔖', title: t('Min lista är tom'), text: t('Lägg till filmer och serier med ”+ Min lista” eller med ⋮ på ett kort.') })}`;
 };
 views.collection = async (id) => {
   const c = await api('/collections/' + id);
   main.innerHTML = `<div class="hero">${c.backdrop ? `<div class="bd" style="background-image:url(${heroUrl(`/api/collection-image/${+c.id}/backdrop`)})"></div>` : ''}
-    <div class="in"><div><h1>${esc(c.name)}</h1><div class="meta"><span>${c.items.length} filmer</span></div>${c.overview ? `<p class="overview">${esc(c.overview)}</p>` : ''}
-    ${c.items.find(i => !i.watched) ? `<button class="primary" id="playfirst">▶ Spela ${esc(c.items.find(i => !i.watched).title)}</button>` : ''}</div></div></div>
+    <div class="in"><div><h1>${esc(c.name)}</h1><div class="meta"><span>${t('{itemsN} filmer', { itemsN: c.items.length })}</span></div>${c.overview ? `<p class="overview">${esc(c.overview)}</p>` : ''}
+    ${c.items.find(i => !i.watched) ? `<button class="primary" id="playfirst">${t('▶ Spela {v}', { v: esc(c.items.find(i => !i.watched).title) })}</button>` : ''}</div></div></div>
     <div class="grid" style="margin-top:20px">${c.items.map(i => card(i)).join('')}</div>`;
   const first = c.items.find(i => !i.watched);
   if (first) $('#playfirst').onclick = (e) => startPlay(e.currentTarget, first.id, first.position || 0);

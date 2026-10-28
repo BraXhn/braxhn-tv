@@ -129,6 +129,8 @@ addCol('items', 'collection_id', 'INTEGER');
 addCol('users', 'parent_id', 'INTEGER');
 addCol('users', 'pin', 'TEXT');
 addCol('users', 'max_age', 'INTEGER');
+// Webbklientens språk per profil ('sv' | 'en', NULL = inte valt ännu → svenska)
+addCol('users', 'lang', 'TEXT');
 addCol('users', 'color', 'TEXT');
 db.exec(`CREATE TABLE IF NOT EXISTS collections(id INTEGER PRIMARY KEY, name TEXT NOT NULL, overview TEXT,
   poster INTEGER NOT NULL DEFAULT 0, backdrop INTEGER NOT NULL DEFAULT 0);

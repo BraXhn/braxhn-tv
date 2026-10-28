@@ -1,6 +1,6 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, extramaterial, eget betyg, temamusik, metadataverktyg, undertextsökning och följ-knapp
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, store, sxe, toast, toastErr, views } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { curPlayer, liveOpen, loadPlayer, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
@@ -17,28 +17,28 @@ import { downloadEpisodes, downloadItem, stateOf, supported as offlineOk } from 
 
 // ---------- "Finns även på" (streamingtjänster för titeln) ----------
 // Här och inte i views/streaming.js: den vyn laddas först när den öppnas, men rutan syns på varje titelsida
-const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Öppna i ${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
+const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="${t('Öppna i {name}', { name: esc(p.name) })}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
 /** Tjänsterna där en titel finns (från /api/items/:id/watch) som HTML, '' om inga */
 export const provBlock = (w) => {
   if (!w) return '';
   const sub = [...w.flatrate, ...w.free], pay = [...w.rent, ...w.buy.filter(b => !w.rent.some(r => r.id === b.id))];
   if (!sub.length && !pay.length) return '';
-  return `${sub.length ? `<div class="provrow"><span class="muted small">Ingår i</span>${provLinks(sub)}</div>` : ''}${pay.length ? `<div class="provrow"><span class="muted small">Hyr/köp</span>${provLinks(pay.slice(0, 6))}</div>` : ''}
-    <div class="muted small" style="margin-top:4px">Uppgifter från JustWatch via TMDB. Öppnas i tjänstens app eller webbplats.</div>`;
+  return `${sub.length ? `<div class="provrow"><span class="muted small">${t('Ingår i')}</span>${provLinks(sub)}</div>` : ''}${pay.length ? `<div class="provrow"><span class="muted small">${t('Hyr/köp')}</span>${provLinks(pay.slice(0, 6))}</div>` : ''}
+    <div class="muted small" style="margin-top:4px">${t('Uppgifter från JustWatch via TMDB. Öppnas i tjänstens app eller webbplats.')}</div>`;
 };
 /** Fyller rutan "Finns även på" på titelsidan (anropas av route() när vyn visats) */
 export async function fillWatch() {
   const el = $('[data-wid]'); if (!el) return;
   const w = await api(`/items/${el.dataset.wid}/watch`).catch(() => null);
   const html = provBlock(w);
-  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:.9375rem;margin:14px 0 6px">Finns även på</h3>${html}`;
+  if (html && el.isConnected) el.innerHTML = `<h3 style="font-size:.9375rem;margin:14px 0 6px">${t('Finns även på')}</h3>${html}`;
 }
 
 function heroHtml(it, extra = '') {
   // Hemvideor (taken): inspelningsdagen i stället för året
-  const meta = [it.taken ? esc(fmtTaken(it.taken)) : it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? `${it.episodes} avsnitt` : ''),
+  const meta = [it.taken ? esc(fmtTaken(it.taken)) : it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? t('{episodes} avsnitt', { episodes: it.episodes }) : ''),
     it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
-    it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? 'Barntillåten' : it.age + '+'}</span>` : '',
+    it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? t('Barntillåten') : it.age + '+'}</span>` : '',
     (it.genres || []).slice(0, 3).map(esc).join(', '), it.studio ? esc(it.studio) : '']
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
   // Bakgrundens medelfärg (server/imgcolor.js) syns medan bilden laddas
@@ -58,39 +58,39 @@ views.item = async (id, season) => {
   const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = it.position > 30;
   const actions = `<div class="row">
-    ${resume ? `<button class="primary" data-play="${it.position}">▶ Fortsätt från ${fmtTime(it.position)}</button><button class="ghost" data-play="0">Börja om</button>`
-      : `<button class="primary" data-play="0">▶ Spela</button>`}
+    ${resume ? `<button class="primary" data-play="${it.position}">${t('▶ Fortsätt från {position}', { position: fmtTime(it.position) })}</button><button class="ghost" data-play="0">${t('Börja om')}</button>`
+      : `<button class="primary" data-play="0">${t('▶ Spela')}</button>`}
     ${remoteButton('playon')}
-    <button class="ghost" id="seen">${it.watched ? 'Markera som osedd' : 'Markera som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button>${it.kind === 'movie' ? '<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>' : ''}${trailerBtns(it)}
-    ${me.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="dloff" title="Spara i webbläsaren och titta utan nät">${stateOf(it.kind, it.id) === 'done' ? '✓ Sparad offline' : stateOf(it.kind, it.id) ? '⤓ Sparas offline…' : '⤓ Spara offline'}</button>`}
-    ${me.canDownload === false ? '' : `<a class="btn" href="/api/stream/${it.version || it.id}/download" download>Ladda ner</a>`}
-    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.taken ? '' : '<button class="ghost" id="match">Fel titel?</button>'}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
+    <button class="ghost" id="seen">${it.watched ? t('Markera som osedd') : t('Markera som sedd')}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button>${it.kind === 'movie' ? t('<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>') : ''}${trailerBtns(it)}
+    ${me.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="dloff" title="${t('Spara i webbläsaren och titta utan nät')}">${stateOf(it.kind, it.id) === 'done' ? t('✓ Sparad offline') : stateOf(it.kind, it.id) ? t('⤓ Sparas offline…') : t('⤓ Spara offline')}</button>`}
+    ${me.canDownload === false ? '' : `${t('<a class="btn" href="/api/stream/{v}/download" download>Ladda ner</a>', { v: it.version || it.id })}`}
+    ${me.is_admin ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.taken ? '' : t('<button class="ghost" id="match">Fel titel?</button>')}<button class="ghost" id="edit">${t('Redigera')}</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
-    <select id="ver"><option value="">Automatiskt</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
+    <select id="ver"><option value="">${t('Automatiskt')}</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
   main.innerHTML = heroHtml(it, back + actions + ratingHtml(it) + versions) + `<div class="tech">
-    <span>Fil</span><b>${esc(it.file)}</b><span>Storlek</span><b>${fmtSize(it.size)}</b>
+    <span>${t('Fil')}</span><b>${esc(it.file)}</b><span>${t('Storlek')}</span><b>${fmtSize(it.size)}</b>
     <span>Video</span><b>${esc(it.vcodec || '–')} ${it.width ? it.width + '×' + it.height : ''}</b>
-    <span>Ljud</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
-    <span>Undertexter</span><b>${it.subtitles.map(s => esc(s.label)).join(', ') || '–'}</b>
-    ${it.hdr ? `<span>HDR</span><b>${esc(it.hdr.toUpperCase())} – tonmappas automatiskt på skärmar utan HDR</b>` : ''}
-    ${it.recap ? `<span>Sammanfattning</span><b>${fmtTime(it.recap.start)}–${fmtTime(it.recap.end)}</b>` : ''}
+    <span>${t('Ljud')}</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
+    <span>${t('Undertexter')}</span><b>${it.subtitles.map(s => esc(s.label)).join(', ') || '–'}</b>
+    ${it.hdr ? `<span>HDR</span>${t('<b>{v} – tonmappas automatiskt på skärmar utan HDR</b>', { v: esc(it.hdr.toUpperCase()) })}` : ''}
+    ${it.recap ? `<span>${t('Sammanfattning')}</span><b>${fmtTime(it.recap.start)}–${fmtTime(it.recap.end)}</b>` : ''}
     ${it.intro ? `<span>Intro</span><b>${fmtTime(it.intro.start)}–${fmtTime(it.intro.end)}</b>` : ''}
-    ${it.credits ? `<span>Eftertexter</span><b>från ${fmtTime(it.credits)}</b>` : ''}
-    <span>Uppspelning</span><b id="pbinfo">…</b></div>
-    <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">Sök undertexter online</button>
-    ${me.is_admin && it.kind === 'episode' ? '<button class="ghost small" id="markers">Justera intro/eftertexter</button>' : ''}</div>`;
+    ${it.credits ? `<span>${t('Eftertexter')}</span>${t('<b>från {credits}</b>', { credits: fmtTime(it.credits) })}` : ''}
+    <span>${t('Uppspelning')}</span><b id="pbinfo">…</b></div>
+    <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">${t('Sök undertexter online')}</button>
+    ${me.is_admin && it.kind === 'episode' ? t('<button class="ghost small" id="markers">Justera intro/eftertexter</button>') : ''}</div>`;
   if ($('#ver')) {
     $('#ver').value = verSel;
     $('#ver').onchange = (e) => { store.set('version.' + it.id, e.target.value); route(); };
   }
   api(`/items/${it.id}/playback?${capsQuery(verSel ? { version: verSel } : {})}&info=1`).then(p => {
-    const m = { direct: 'Direktuppspelning', remux: 'Remux', transcode: 'Omkodning' }[p.mode];
+    const m = { direct: t('Direktuppspelning'), remux: 'Remux', transcode: t('Omkodning') }[p.mode];
     if ($('#pbinfo')) $('#pbinfo').textContent = m + (p.reasons.length ? ' (' + p.reasons.join(', ') + ')' : '');
     // Visa vilken version servern valde automatiskt
     const auto = !verSel && p.versions && p.versions.find(v => v.id === p.version);
-    if (auto && $('#ver')) $('#ver').options[0].textContent = 'Automatiskt (' + auto.label + ')';
+    if (auto && $('#ver')) $('#ver').options[0].textContent = t('Automatiskt (') + auto.label + ')';
   }).catch(() => {});
   $('#subsearch').onclick = () => subSearch(it);
   if ($('#dloff')) $('#dloff').onclick = () => downloadItem(verSel ? { ...it, version: +verSel } : it);
@@ -100,8 +100,8 @@ views.item = async (id, season) => {
   bindRating(it);
   main.insertAdjacentHTML('beforeend', castShelf(it) + extrasShelf(it));
   bindExtras(it);
-  if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(`Del av ${it.collectionInfo.name}`, it.collectionInfo.items, false, `<a href="#/collection/${it.collectionInfo.id}">Visa samlingen</a>`));
-  main.insertAdjacentHTML('beforeend', shelf('Liknande', it.similar));
+  if (it.collectionInfo && it.collectionInfo.items.length > 1) main.insertAdjacentHTML('beforeend', shelf(t('Del av {name}', { name: it.collectionInfo.name }), it.collectionInfo.items, false, `${t('<a href="#/collection/{id}">Visa samlingen</a>', { id: it.collectionInfo.id })}`));
+  main.insertAdjacentHTML('beforeend', shelf(t('Liknande'), it.similar));
   if ($('#markers')) $('#markers').onclick = () => editMarkers(it);
   $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play, verSel ? { version: verSel } : {}));
   $('#playon').onclick = (e) => openRemotePicker(e.currentTarget, { item: it.id, position: resume ? it.position : 0 });
@@ -120,25 +120,25 @@ function showView(it, season) {
   let cur = season != null && season !== '' && seasons.includes(+season) ? +season : store.get('season.' + it.id, it.next?.season ?? seasons[0]);
   if (!seasons.includes(cur)) cur = seasons[0];
   const nx = it.next;
-  const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}</button>` : ''}
-    <button class="ghost" id="seen">${it.watched ? 'Markera serien som osedd' : 'Markera serien som sedd'}</button>
-    <button class="ghost" id="wl">${it.inWatchlist ? '✓ I Min lista' : '+ Min lista'}</button><button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>${trailerBtns(it)}
-    <button class="ghost" id="follow" title="Få besked när nya avsnitt kommer">${it.following ? '🔔 Följer' : '🔕 Följ'}</button>
-    <select id="fsync" title="Håll nästa osedda avsnitt nedladdade i appen" ${it.following ? '' : 'hidden'}>${[['', 'Appen: standard'], ['0', 'Appen: ladda inte ner'], ...[1, 2, 3, 5].map(n => [String(n), `Appen: håll ${n} nedladdade`])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
-    ${me.is_admin ? `<button class="ghost" id="refresh">Uppdatera metadata</button>${it.kind !== 'episode' ? '<button class="ghost" id="match">Fel titel?</button>' : ''}<button class="ghost" id="edit">Redigera</button>` : ''}</div>`;
-  main.innerHTML = heroHtml(it, actions + ratingHtml(it) + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: 'Säsonger', panel: 'eps', current: cur,
-    items: seasons.map(s => ({ key: s, label: s === 0 ? 'Specialavsnitt' : 'Säsong ' + s })) }) + '<div id="eps" role="tabpanel"></div>';
+  const actions = `<div class="row">${nx ? `<button class="primary" id="playnext">▶ ${nx.position > 0 ? t('Fortsätt') : t('Spela')} ${sxe(nx)}</button>` : ''}
+    <button class="ghost" id="seen">${it.watched ? t('Markera serien som osedd') : t('Markera serien som sedd')}</button>
+    <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button><button class="ghost" id="addcol" aria-haspopup="dialog">${t('+ Samling')}</button>${trailerBtns(it)}
+    <button class="ghost" id="follow" title="${t('Få besked när nya avsnitt kommer')}">${it.following ? t('🔔 Följer') : t('🔕 Följ')}</button>
+    <select id="fsync" title="${t('Håll nästa osedda avsnitt nedladdade i appen')}" ${it.following ? '' : 'hidden'}>${[['', t('Appen: standard')], ['0', t('Appen: ladda inte ner')], ...[1, 2, 3, 5].map(n => [String(n), t('Appen: håll {n} nedladdade', { n })])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
+    ${me.is_admin ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.kind !== 'episode' ? t('<button class="ghost" id="match">Fel titel?</button>') : ''}<button class="ghost" id="edit">${t('Redigera')}</button>` : ''}</div>`;
+  main.innerHTML = heroHtml(it, actions + ratingHtml(it) + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: t('Säsonger'), panel: 'eps', current: cur,
+    items: seasons.map(s => ({ key: s, label: s === 0 ? t('Specialavsnitt') : t('Säsong ') + s })) }) + '<div id="eps" role="tabpanel"></div>';
   const renderEps = () => {
     const eps = it.children.filter(e => e.season === cur);
     const allSeen = eps.every(e => e.watched);
     // Lokal säsongsaffisch (season01-poster.jpg bredvid serien)
     const sp = (it.seasonPosters || []).includes(cur) ? `<img class="season-poster" ${imgSrc(`/api/image/${+it.id}/season${+cur}`, 90)} alt="" width="90" height="135" data-fb="1">` : '';
-    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd'}</button>${me.canDownload === false || !offlineOk() ? '' : '<button class="ghost small" id="seasonOff" title="Spara avsnitten i webbläsaren och titta utan nät">⤓ Spara säsongen offline</button>'}</div>
-      <h2 class="sr-only">${cur === 0 ? 'Specialavsnitt' : 'Säsong ' + cur}</h2><div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
-      <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? ' · Sedd' : e.position ? ` · ${fmtTime(e.position)} kvar: ${fmtTime(e.duration - e.position)}` : ''}</div>
+    $('#eps').innerHTML = `<div class="row" style="margin-bottom:10px">${sp}<button class="ghost small" id="seasonSeen">${allSeen ? t('Markera säsongen som osedd') : t('Markera säsongen som sedd')}</button>${me.canDownload === false || !offlineOk() ? '' : t('<button class="ghost small" id="seasonOff" title="Spara avsnitten i webbläsaren och titta utan nät">⤓ Spara säsongen offline</button>')}</div>
+      <h2 class="sr-only">${cur === 0 ? t('Specialavsnitt') : t('Säsong ') + cur}</h2><div class="eps">${eps.map(e => `<div class="ep">${card(e, true).replace(`href="#/item/${e.id}"`, `href="#/item/${e.id}"`)}
+      <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? t(' · Sedd') : e.position ? ` ${t('· {position} kvar: {v}', { position: fmtTime(e.position), v: fmtTime(e.duration - e.position) })}` : ''}</div>
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}
-      <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">▶ Spela</button>
-      <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? 'Osedd' : 'Sedd'}</button></div></div></div>`).join('')}</div>`;
+      <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">${t('▶ Spela')}</button>
+      <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? t('Osedd') : t('Sedd')}</button></div></div></div>`).join('')}</div>`;
     $$('[data-play]', $('#eps')).forEach(b => b.onclick = () => startPlay(b, +b.dataset.play, +b.dataset.pos));
     if ($('#seasonOff')) $('#seasonOff').onclick = () => downloadEpisodes({ id: it.id, title: it.title }, eps);
     $$('[data-seen]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.seen}/watched`, { method: 'POST', body: { watched: b.dataset.w !== '1' } }); route(); }));
@@ -153,7 +153,7 @@ function showView(it, season) {
   main.insertAdjacentHTML('beforeend', castShelf(it) + extrasShelf(it));
   bindExtras(it);
   bindFollow(it);
-  main.insertAdjacentHTML('beforeend', shelf('Liknande serier', it.similar));
+  main.insertAdjacentHTML('beforeend', shelf(t('Liknande serier'), it.similar));
   bindTabs($('#tabs'), (key, tab) => { cur = +key; store.set('season.' + it.id, cur); $('#eps').setAttribute('aria-label', tab.textContent); renderEps(); });
   if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
@@ -167,7 +167,7 @@ function bindCollections(it) {
   const fill = () => api(`/custom-collections?item=${+it.id}`, { bg: true }).then(cols => {
     const inCols = cols.filter(c => c.has);
     $('#incol')?.remove();
-    if (inCols.length && b.isConnected) b.closest('.row').insertAdjacentHTML('afterend', `<p class="muted small" id="incol">Ingår i ${inCols.map(c => `<a href="#/ucollection/${+c.id}">${esc(c.name)}</a>`).join(', ')}</p>`);
+    if (inCols.length && b.isConnected) b.closest('.row').insertAdjacentHTML('afterend', `<p class="muted small" id="incol">${t('Ingår i {v}', { v: inCols.map(c => `<a href="#/ucollection/${+c.id}">${esc(c.name)}</a>`).join(', ') })}</p>`);
   }).catch(() => {});
   b.onclick = async () => { await addToCollection(it); fill(); };
   fill();
@@ -178,8 +178,8 @@ function bindWatchlist(it) {
     const add = !it.inWatchlist;
     await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add } });
     it.inWatchlist = add;
-    b.textContent = it.inWatchlist ? '✓ I Min lista' : '+ Min lista';
-    toast(it.inWatchlist ? 'Tillagd i Min lista' : 'Borttagen från Min lista');
+    b.textContent = it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista');
+    toast(it.inWatchlist ? t('Tillagd i Min lista') : t('Borttagen från Min lista'));
   });
 }
 
@@ -202,7 +202,7 @@ function playTrailer(id, title, what = 'trailer') {
   v = d.$('video');
   v.onerror = () => {
     if (!tried) { tried = true; v.src = `/api/trailers/${+id}/stream?mp4=1`; v.play().catch(() => {}); return; }
-    toast('Filen kan inte spelas i webbläsaren (filformatet stöds inte)', { error: true });
+    toast(t('Filen kan inte spelas i webbläsaren (filformatet stöds inte)'), { error: true });
   };
 }
 
@@ -212,7 +212,7 @@ function extrasShelf(it) {
   if (!list.length) return '';
   const groups = [];
   for (const x of list) { let g = groups.find(y => y.type === x.type); if (!g) groups.push(g = { type: x.type, name: x.group, items: [] }); g.items.push(x); }
-  return `<section class="section extras" aria-labelledby="xh"><h2 id="xh">Extramaterial</h2><div class="xgroups">${groups.map(g => `<div class="xgroup"><h3>${esc(g.name)} <span class="muted small">${g.items.length}</span></h3>
+  return `<section class="section extras" aria-labelledby="xh"><h2 id="xh">${t('Extramaterial')}</h2><div class="xgroups">${groups.map(g => `<div class="xgroup"><h3>${esc(g.name)} <span class="muted small">${g.items.length}</span></h3>
     <div class="xrow">${g.items.map(x => `<button type="button" class="xcard" data-extra="${+x.id}"><span class="xplay" aria-hidden="true">▶</span><span class="xname">${esc(x.name)}</span>${x.size >= 5e5 ? `<span class="muted small">${fmtSize(x.size)}</span>` : ''}</button>`).join('')}</div></div>`).join('')}</div></section>`;
 }
 function bindExtras(it) {
@@ -220,7 +220,7 @@ function bindExtras(it) {
 }
 
 // ---------- Mitt betyg (stjärnor, tangenterna 1–5 när titelsidan har fokus) ----------
-const ratingHtml = (it) => `<div class="myrating"><span class="muted small" id="myratel">Mitt betyg</span>${starsHtml(it.userRating, { id: 'myrate', label: 'Mitt betyg' })}</div>`;
+const ratingHtml = (it) => `<div class="myrating"><span class="muted small" id="myratel">${t('Mitt betyg')}</span>${starsHtml(it.userRating, { id: 'myrate', label: t('Mitt betyg') })}</div>`;
 function bindRating(it) {
   const el = $('#myrate'); if (!el) return;
   const ctl = bindStars(el, async (v) => { const r = await saveRating('item', it.id, v); it.userRating = r ?? undefined; });
@@ -237,34 +237,34 @@ function bindRating(it) {
 }
 
 export async function refreshMeta(it) {
-  toast('Uppdaterar…');
-  try { await api(`/items/${it.id}/refresh`, { method: 'POST', body: {}, bg: true }); toast('Klart'); route(); }
+  toast(t('Uppdaterar…'));
+  try { await api(`/items/${it.id}/refresh`, { method: 'POST', body: {}, bg: true }); toast(t('Klart')); route(); }
   catch (e) { toastErr(e); }
 }
 export function matchItem(it) {
-  const h = openDialog({ title: `Välj rätt ${it.kind === 'show' ? 'serie' : 'film'}`, size: 'wide',
-    body: `<form id="mf" class="row" style="align-items:flex-end"><div style="flex:1;min-width:180px"><label for="mq">Sök</label><input id="mq" value="${esc(it.title)}"></div>
-    <div><label for="my">År</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">Sök</button></form>
-    <div id="mres" class="matchgrid" aria-live="polite">${loadingState({ kind: 'inline', label: 'Söker…' })}</div>
+  const h = openDialog({ title: t('Välj rätt {v}', { v: it.kind === 'show' ? t('serie') : 'film' }), size: 'wide',
+    body: `<form id="mf" class="row" style="align-items:flex-end"><div style="flex:1;min-width:180px"><label for="mq">${t('Sök')}</label><input id="mq" value="${esc(it.title)}"></div>
+    <div><label for="my">${t('År')}</label><input id="my" type="number" value="${it.year || ''}" style="width:100px"></div><button class="primary">${t('Sök')}</button></form>
+    <div id="mres" class="matchgrid" aria-live="polite">${loadingState({ kind: 'inline', label: t('Söker…') })}</div>
     <p class="muted small" id="mlock"></p>`,
-    actions: [{ label: 'Lås upp (automatisk matchning)', id: 'munlock', onClick: async () => {
-      await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true }, bg: true }); toast('Upplåst – matchas automatiskt vid nästa skanning');
-    } }, { label: 'Stäng' }] });
+    actions: [{ label: t('Lås upp (automatisk matchning)'), id: 'munlock', onClick: async () => {
+      await api(`/items/${it.id}/match`, { method: 'POST', body: { unlock: true }, bg: true }); toast(t('Upplåst – matchas automatiskt vid nästa skanning'));
+    } }, { label: t('Stäng') }] });
   const d = h.el, close = () => h.close();
   $('#munlock', d).hidden = true;
   const search = async () => {
-    $('#mres', d).innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
+    $('#mres', d).innerHTML = loadingState({ kind: 'inline', label: t('Söker…') });
     try {
       const r = await api(`/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`, { bg: true });
-      $('#mlock', d).textContent = r.locked ? 'Matchningen är låst och ändras inte vid omskanning.' : '';
+      $('#mlock', d).textContent = r.locked ? t('Matchningen är låst och ändras inte vid omskanning.') : '';
       $('#munlock', d).hidden = !r.locked;
       $('#mres', d).innerHTML = r.results.map(x => `<button class="mcard${x.id === r.current ? ' on' : ''}" data-tid="${x.id}">
         ${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
         <div><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}${x.original && x.original !== x.title ? `<div class="muted small">${esc(x.original)}</div>` : ''}
-        <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || emptyState({ compact: true, title: 'Inga träffar', text: 'Prova en annan stavning eller originaltiteln.' });
+        <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || emptyState({ compact: true, title: t('Inga träffar'), text: t('Prova en annan stavning eller originaltiteln.') });
       $$('[data-tid]', d).forEach(b => b.onclick = async () => {
         b.disabled = true;
-        try { await api(`/items/${it.id}/match`, { method: 'POST', body: { tmdbId: +b.dataset.tid }, bg: true }); toast('Matchat'); close(); route(); }
+        try { await api(`/items/${it.id}/match`, { method: 'POST', body: { tmdbId: +b.dataset.tid }, bg: true }); toast(t('Matchat')); close(); route(); }
         catch (e) { toastErr(e); b.disabled = false; }
       });
     } catch (e) { if (d.isConnected) $('#mres', d).innerHTML = errorState(e, { compact: true }); }
@@ -281,35 +281,35 @@ export async function editItem(it, tab = 'general') {
 async function subSearch(it) {
   let got = false;
   // Stängs dialogen: ladda bara om sidan om något faktiskt hämtades
-  const h = openDialog({ title: 'Sök undertexter', body: `<p class="muted" id="ssm" aria-live="polite">Söker på OpenSubtitles…</p><div id="ssr" class="scrollbox"></div>`,
+  const h = openDialog({ title: t('Sök undertexter'), body: `<p class="muted" id="ssm" aria-live="polite">${t('Söker på OpenSubtitles…')}</p><div id="ssr" class="scrollbox"></div>`,
     onClose: (v) => { if (got && v !== 'route' && !curPlayer() && !liveOpen()) route(); } });
   const d = h.el;
   try {
     const r = await api(`/items/${it.id}/subsearch`, { bg: true });
     if (!d.isConnected) return;
-    $('#ssm', d).textContent = r.length ? `${r.length} träffar – ✓ = exakt matchning mot din fil` : 'Inga träffar.';
+    $('#ssm', d).textContent = r.length ? t('{rN} träffar – ✓ = exakt matchning mot din fil', { rN: r.length }) : t('Inga träffar.');
     $('#ssr', d).innerHTML = `<table>${r.slice(0, 40).map((x, i) => `<tr><td>${x.hashMatch ? '✓ ' : ''}<b>${esc(x.lang)}</b></td><td style="word-break:break-all">${esc(x.name)}${x.hi ? ' <span class="muted">(HI)</span>' : ''}</td>
-      <td class="muted">${esc(x.downloads)}</td><td class="r"><button class="primary small" data-i="${i}">Hämta</button></td></tr>`).join('')}</table>`;
+      <td class="muted">${esc(x.downloads)}</td><td class="r"><button class="primary small" data-i="${i}">${t('Hämta')}</button></td></tr>`).join('')}</table>`;
     $$('[data-i]', d).forEach(b => b.onclick = async () => {
       const x = r[+b.dataset.i]; b.disabled = true; b.textContent = '…';
-      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang }, bg: true }); b.textContent = '✓ Hämtad'; got = true; toast(`Undertext sparad${res.remaining != null ? ` – ${res.remaining} nedladdningar kvar idag` : ''}`); }
-      catch (e) { b.textContent = 'Fel'; toastErr(e); }
+      try { const res = await api(`/items/${it.id}/subdownload`, { method: 'POST', body: { fileId: x.fileId, lang: x.lang }, bg: true }); b.textContent = t('✓ Hämtad'); got = true; toast(t('Undertext sparad{v}', { v: res.remaining != null ? ` ${t('– {remaining} nedladdningar kvar idag', { remaining: res.remaining })}` : '' })); }
+      catch (e) { b.textContent = t('Fel'); toastErr(e); }
     });
   } catch (e) { if ($('#ssm', d)) $('#ssm', d).textContent = e.message; }
 }
 
 function editMarkers(it) {
-  const t = (x) => x == null ? '' : fmtTime(x);
+  const tm = (x) => x == null ? '' : fmtTime(x);
   const sec = (v) => { v = v.trim(); if (!v) return null; return v.split(':').reduce((a, x) => a * 60 + (+x || 0), 0); };
-  openDialog({ title: 'Intro och eftertexter', form: true,
-    body: `<p class="muted">Ange tider som mm:ss eller h:mm:ss. Lämna tomt för att ta bort.</p>
-    <div class="row"><div style="flex:1"><label for="is">Intro start</label><input id="is" inputmode="numeric" value="${t(it.intro?.start)}"></div><div style="flex:1"><label for="ie">Intro slut</label><input id="ie" inputmode="numeric" value="${t(it.intro?.end)}"></div></div>
-    <label for="cs">Eftertexter börjar</label><input id="cs" inputmode="numeric" value="${t(it.credits)}">`,
-    actions: [{ label: 'Analysera säsongen igen', onClick: async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast('Analyserar i bakgrunden'); } },
-      { label: 'Avbryt' },
-      { label: 'Spara', kind: 'primary', submit: true, onClick: async ({ $: q }) => {
+  openDialog({ title: t('Intro och eftertexter'), form: true,
+    body: `<p class="muted">${t('Ange tider som mm:ss eller h:mm:ss. Lämna tomt för att ta bort.')}</p>
+    <div class="row"><div style="flex:1"><label for="is">Intro start</label><input id="is" inputmode="numeric" value="${tm(it.intro?.start)}"></div><div style="flex:1"><label for="ie">${t('Intro slut')}</label><input id="ie" inputmode="numeric" value="${tm(it.intro?.end)}"></div></div>
+    <label for="cs">${t('Eftertexter börjar')}</label><input id="cs" inputmode="numeric" value="${tm(it.credits)}">`,
+    actions: [{ label: t('Analysera säsongen igen'), onClick: async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast(t('Analyserar i bakgrunden')); } },
+      { label: t('Avbryt') },
+      { label: t('Spara'), kind: 'primary', submit: true, onClick: async ({ $: q }) => {
         await api(`/items/${it.id}/markers`, { method: 'PUT', body: { introStart: sec(q('#is').value), introEnd: sec(q('#ie').value), creditsStart: sec(q('#cs').value) }, bg: true });
-        toast('Sparat'); route();
+        toast(t('Sparat')); route();
       } }] });
 }
 function bindFollow(it) {
@@ -318,9 +318,9 @@ function bindFollow(it) {
   b.onclick = act(async () => {
     const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: !it.following } });
     it.following = r.following; it.sync = r.sync;
-    b.textContent = it.following ? '🔔 Följer' : '🔕 Följ';
+    b.textContent = it.following ? t('🔔 Följer') : t('🔕 Följ');
     if (sel) sel.hidden = !it.following;
-    toast(it.following ? `Du följer ${it.title} – nya avsnitt visas under Nytt för dig` : `Du följer inte längre ${it.title}`);
+    toast(it.following ? t('Du följer {title} – nya avsnitt visas under Nytt för dig', { title: it.title }) : t('Du följer inte längre {title}', { title: it.title }));
   });
-  if (sel) sel.onchange = act(async () => { const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: true, sync: sel.value } }); it.sync = r.sync; toast('Sparat'); });
+  if (sel) sel.onchange = act(async () => { const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: true, sync: sel.value } }); it.sync = r.sync; toast(t('Sparat')); });
 }

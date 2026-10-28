@@ -1,6 +1,6 @@
 // Knappar med bara en ikon (♥, ✕, ⏮ …): får alltid ett namn för skärmläsare (aria-label) och ett
 // verktygstips (title). Ikonen själv döljs för skärmläsare.
-import { esc } from '../core.js';
+import { esc, t } from '../core.js';
 import { ICON } from './icons.js';
 
 /**
@@ -38,4 +38,4 @@ export function setIconButton(b, icon, label) {
   b.setAttribute('aria-label', label); b.title = label;
 }
 /** Knappen "Spela på…" (titelsidan och spelaren) – menyn öppnas av openRemotePicker i player/remote.js */
-export const remoteButton = (id, cls = 'ghost') => `<button type="button" class="${cls} playon" id="${id}" aria-haspopup="menu" title="Spela på en annan enhet" aria-label="Spela på en annan enhet">${ICON.remote}<span>Spela på…</span></button>`;
+export const remoteButton = (id, cls = 'ghost') => `<button type="button" class="${cls} playon" id="${id}" aria-haspopup="menu" title="${t('Spela på en annan enhet')}" aria-label="${t('Spela på en annan enhet')}">${ICON.remote}<span>${t('Spela på…')}</span></button>`;

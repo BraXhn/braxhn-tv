@@ -2,7 +2,7 @@
 // Dialogen "Redigera" för administratören: flikarna Allmänt (fälten med lås per fält, som i Plex), Bilder (TMDB:s
 // affischer/bakgrunder/logotyper/stillbilder, egen bild, återställ) och Avancerat (låsen och matchningen).
 // Ett fält som ändras låses automatiskt; låsta fält skrivs aldrig över av Uppdatera metadata, NFO eller omskanning.
-import { $, $$, api, esc, toast, toastErr } from '../core.js';
+import { $, $$, api, esc, toast, toastErr, t } from '../core.js';
 import { route } from '../router.js';
 import { iconButton, setIconButton } from '../ui/buttons.js';
 import { openDialog } from '../ui/dialog.js';
@@ -11,26 +11,26 @@ import { bindTabs, tabsHtml } from '../ui/tabs.js';
 
 // Fälten i dialogen: API-namn → etikett och typ (bara de som servern säger gäller titeln visas)
 const FIELDS = {
-  title: { label: 'Titel', type: 'text', max: 300, required: true },
-  sortTitle: { label: 'Sorteringstitel', type: 'text', max: 300, hint: 'Tomt = räknas fram ur titeln' },
-  originalTitle: { label: 'Originaltitel', type: 'text', max: 300 },
-  season: { label: 'Säsong', type: 'number', min: 0, max: 1000, required: true },
-  episode: { label: 'Avsnitt', type: 'number', min: 0, max: 10000, required: true },
-  year: { label: 'År', type: 'number', min: 1870, max: 2200 },
-  released: { label: 'Premiärdatum', type: 'date' },
+  title: { label: t('Titel'), type: 'text', max: 300, required: true },
+  sortTitle: { label: t('Sorteringstitel'), type: 'text', max: 300, hint: t('Tomt = räknas fram ur titeln') },
+  originalTitle: { label: t('Originaltitel'), type: 'text', max: 300 },
+  season: { label: t('Säsong'), type: 'number', min: 0, max: 1000, required: true },
+  episode: { label: t('Avsnitt'), type: 'number', min: 0, max: 10000, required: true },
+  year: { label: t('År'), type: 'number', min: 1870, max: 2200 },
+  released: { label: t('Premiärdatum'), type: 'date' },
   tagline: { label: 'Tagline', type: 'text', max: 300 },
-  overview: { label: 'Beskrivning', type: 'textarea', max: 10000 },
-  genres: { label: 'Genrer', type: 'genres' },
+  overview: { label: t('Beskrivning'), type: 'textarea', max: 10000 },
+  genres: { label: t('Genrer'), type: 'genres' },
   studio: { label: 'Studio', type: 'text', max: 200 },
-  age: { label: 'Åldersgräns (år)', type: 'number', min: 0, max: 18, hint: 'Tomt = okänd' },
-  rating: { label: 'Betyg (0–10)', type: 'number', min: 0, max: 10, step: 0.1 },
+  age: { label: t('Åldersgräns (år)'), type: 'number', min: 0, max: 18, hint: t('Tomt = okänd') },
+  rating: { label: t('Betyg (0–10)'), type: 'number', min: 0, max: 10, step: 0.1 },
 };
-const IMG_LABEL = { poster: 'Affisch', backdrop: 'Bakgrund', logo: 'Logotyp', thumb: 'Miniatyr' };
-const imgLabel = (t) => IMG_LABEL[t] || (/^season(\d+)$/.test(t) ? (t === 'season0' ? 'Specialavsnitt' : 'Säsong ' + t.slice(6)) : t);
-const LANG = { sv: 'svenska', en: 'engelska', da: 'danska', no: 'norska', fi: 'finska', de: 'tyska', fr: 'franska', es: 'spanska', ja: 'japanska' };
-const langName = (l) => l ? (LANG[l] || l) : 'utan text';
+const IMG_LABEL = { poster: t('Affisch'), backdrop: t('Bakgrund'), logo: t('Logotyp'), thumb: t('Miniatyr') };
+const imgLabel = (tt) => IMG_LABEL[tt] || (/^season(\d+)$/.test(tt) ? (tt === 'season0' ? t('Specialavsnitt') : t('Säsong ') + tt.slice(6)) : tt);
+const LANG = { sv: t('svenska'), en: t('engelska'), da: t('danska'), no: t('norska'), fi: t('finska'), de: t('tyska'), fr: t('franska'), es: t('spanska'), ja: t('japanska') };
+const langName = (l) => l ? (LANG[l] || l) : t('utan text');
 const lockIcon = (on) => on ? '🔒' : '🔓';
-const lockLabel = (f, on) => on ? `${FIELDS[f].label}: låst – klicka för att låsa upp` : `${FIELDS[f].label}: lås fältet`;
+const lockLabel = (f, on) => on ? t('{v}: låst – klicka för att låsa upp', { v: FIELDS[f].label }) : t('{v}: lås fältet', { v: FIELDS[f].label });
 
 /** Bilder som visas på sidan just nu för titeln hämtas om (de cachas ett dygn i webbläsaren) */
 async function reloadImages(id) {
@@ -47,9 +47,9 @@ function fieldHtml(f, v, locked) {
   let input;
   if (d.type === 'textarea') input = `<textarea id="${id}" rows="5" maxlength="${d.max}">${esc(v || '')}</textarea>`;
   else if (d.type === 'genres') {
-    input = `<div class="mechips" id="me-genres-list" aria-label="Valda genrer" role="list">${(v || []).map(chip).join('')}</div>
-      <input id="${id}" list="me-genre-sugg" autocomplete="off" placeholder="Skriv en genre och tryck Enter" aria-describedby="${id}-h">
-      <span class="muted small" id="${id}-h">Enter eller komma lägger till. Förslag från biblioteket.</span>`;
+    input = `<div class="mechips" id="me-genres-list" aria-label="${t('Valda genrer')}" role="list">${(v || []).map(chip).join('')}</div>
+      <input id="${id}" list="me-genre-sugg" autocomplete="off" placeholder="${t('Skriv en genre och tryck Enter')}" aria-describedby="${id}-h">
+      <span class="muted small" id="${id}-h">${t('Enter eller komma lägger till. Förslag från biblioteket.')}</span>`;
   } else {
     const attrs = [`id="${id}"`, `type="${d.type}"`, d.max && d.type === 'text' ? `maxlength="${d.max}"` : '', d.type === 'number' ? `min="${d.min}" max="${d.max}" step="${d.step || 1}" inputmode="${d.step ? 'decimal' : 'numeric'}"` : '',
       d.required ? 'required' : '', d.hint ? `aria-describedby="${id}-h"` : ''].filter(Boolean).join(' ');
@@ -57,7 +57,7 @@ function fieldHtml(f, v, locked) {
   }
   return `<div class="mefield${d.type === 'textarea' || d.type === 'genres' ? ' wide' : ''}" data-field="${f}"><div class="melabel"><label for="${id}">${esc(d.label)}</label>${lock}</div>${input}</div>`;
 }
-const chip = (g) => `<span class="mechip" role="listitem">${esc(g)}${iconButton({ icon: '✕', label: `Ta bort genren ${g}`, cls: 'ghost small', data: { genre: g } })}</span>`;
+const chip = (g) => `<span class="mechip" role="listitem">${esc(g)}${iconButton({ icon: '✕', label: t('Ta bort genren {g}', { g }), cls: 'ghost small', data: { genre: g } })}</span>`;
 
 /**
  * Öppnar dialogen "Redigera".
@@ -69,17 +69,17 @@ export async function openEditor(it, tab = 'general') {
   try { m = await api(`/items/${+it.id}/metadata`, { bg: true }); } catch (e) { return toastErr(e); }
   const locked = new Set(m.locked), changed = new Set();
   let genres = [...m.values.genres], imgChanged = false, imgType = Object.keys(m.images)[0];
-  const tabs = [{ key: 'general', label: 'Allmänt' }, { key: 'images', label: 'Bilder' }, { key: 'advanced', label: 'Avancerat' }];
+  const tabs = [{ key: 'general', label: t('Allmänt') }, { key: 'images', label: t('Bilder') }, { key: 'advanced', label: t('Avancerat') }];
   const panel = (k, html) => `<div class="mepanel" id="me-p-${k}" role="tabpanel" aria-label="${esc(tabs.find(t => t.key === k).label)}" tabindex="0"${k === tab ? '' : ' hidden'}>${html}</div>`;
   const general = `<div class="megrid">${Object.keys(FIELDS).filter(f => m.fields.includes(f)).map(f => fieldHtml(f, m.values[f], locked.has(f))).join('')}</div>
     <datalist id="me-genre-sugg">${m.genreSuggestions.map(g => `<option value="${esc(g)}"></option>`).join('')}</datalist>
-    <p class="muted small">🔒 Låsta fält ändras aldrig av <i>Uppdatera metadata</i>, NFO-filer eller omskanning. Ett fält du ändrar låses automatiskt.</p>`;
+    <p class="muted small">${t('🔒 Låsta fält ändras aldrig av <i>Uppdatera metadata</i>, NFO-filer eller omskanning. Ett fält du ändrar låses automatiskt.')}</p>`;
   const images = `<div class="row meimgtypes" role="group" aria-label="Bildtyp">${Object.keys(m.images).map(t => `<button type="button" class="ghost small" data-imgtype="${esc(t)}" aria-pressed="${t === imgType}">${esc(imgLabel(t))}</button>`).join('')}</div>
     <div class="mecur" id="me-cur"></div><div id="me-opts" class="meopts" aria-live="polite"></div>`;
-  const h = openDialog({ title: `Redigera – ${it.title || m.values.title}`, size: 'wide', form: true, className: 'metaedit',
-    body: tabsHtml({ id: 'me-tabs', label: 'Redigera', current: tab, items: tabs }) + panel('general', general) + panel('images', images) + panel('advanced', ''),
+  const h = openDialog({ title: t('Redigera – {v}', { v: it.title || m.values.title }), size: 'wide', form: true, className: 'metaedit',
+    body: tabsHtml({ id: 'me-tabs', label: t('Redigera'), current: tab, items: tabs }) + panel('general', general) + panel('images', images) + panel('advanced', ''),
     onClose: (v) => { if (v !== 'route' && (imgChanged || v === 'saved')) reloadImages(m.id).then(() => route()); },
-    actions: [{ label: 'Avbryt' }, { label: 'Spara', kind: 'primary', submit: true, onClick: save }] });
+    actions: [{ label: t('Avbryt') }, { label: t('Spara'), kind: 'primary', submit: true, onClick: save }] });
   const d = h.el, q = (s) => d.querySelector(s);
 
   // ---- flikar ----
@@ -122,25 +122,25 @@ export async function openEditor(it, tab = 'general') {
     for (const f of changed) {
       if (f === 'genres') { values.genres = genres; continue; }
       const el = q('#me-' + f), v = el.value.trim();
-      if (FIELDS[f].required && !v) { el.focus(); throw new Error(`${FIELDS[f].label} får inte vara tomt`); }
+      if (FIELDS[f].required && !v) { el.focus(); throw new Error(t('{v} får inte vara tomt', { v: FIELDS[f].label })); }
       values[f] = FIELDS[f].type === 'number' ? (v === '' ? null : +v) : v;
     }
     const r = await api(`/items/${m.id}/metadata`, { method: 'PUT', body: { values, locked: [...locked] }, bg: true });
-    toast(r.locked.length ? `Sparat – ${r.locked.length} ${r.locked.length === 1 ? 'fält är låst' : 'fält är låsta'}` : 'Sparat');
+    toast(r.locked.length ? t('Sparat – {lockedN} {v}', { lockedN: r.locked.length, v: r.locked.length === 1 ? t('fält är låst') : t('fält är låsta') }) : t('Sparat'));
     return 'saved';
   }
 
   // ---- Avancerat ----
   function renderAdvanced() {
     const list = m.fields.filter(f => locked.has(f));
-    q('#me-p-advanced').innerHTML = `<h3 class="mesub">Låsta fält</h3>
-      ${list.length ? `<ul class="melocks">${list.map(f => `<li>🔒 ${esc(FIELDS[f].label)}</li>`).join('')}</ul>` : '<p class="muted">Inga fält är låsta – allt hämtas automatiskt (NFO före TMDB).</p>'}
-      <div class="row"><button type="button" class="ghost small" id="me-unlockall"${list.length ? '' : ' disabled'}>Lås upp alla fält</button></div>
-      <p class="muted small">Upplåsta fält får sina värden från NFO-filen eller TMDB nästa gång metadatan uppdateras. Spara för att ändra låsen.</p>
-      <h3 class="mesub">Källa</h3>
-      <dl class="tech mesrc">${m.file ? `<dt>Fil</dt><dd>${esc(m.file)}</dd>` : ''}<dt>TMDB</dt><dd>${m.tmdbId ? `${+m.tmdbId}${m.matchLocked ? ' (låst matchning)' : ''}` : 'Inte matchad'}</dd>
-      <dt>Bilder</dt><dd>${Object.entries(m.images).filter(([, v]) => v.lock).map(([k, v]) => `${esc(imgLabel(k))}: ${v.lock === 'upload' ? 'uppladdad' : 'vald från TMDB'}`).join(', ') || 'Automatiska'}</dd></dl>`;
-    q('#me-unlockall').onclick = () => { for (const f of [...locked]) setLock(f, false); renderAdvanced(); toast('Alla fält är upplåsta – spara för att behålla det'); };
+    q('#me-p-advanced').innerHTML = `<h3 class="mesub">${t('Låsta fält')}</h3>
+      ${list.length ? `<ul class="melocks">${list.map(f => `<li>🔒 ${esc(FIELDS[f].label)}</li>`).join('')}</ul>` : t('<p class="muted">Inga fält är låsta – allt hämtas automatiskt (NFO före TMDB).</p>')}
+      <div class="row"><button type="button" class="ghost small" id="me-unlockall"${list.length ? '' : ' disabled'}>${t('Lås upp alla fält')}</button></div>
+      <p class="muted small">${t('Upplåsta fält får sina värden från NFO-filen eller TMDB nästa gång metadatan uppdateras. Spara för att ändra låsen.')}</p>
+      <h3 class="mesub">${t('Källa')}</h3>
+      <dl class="tech mesrc">${m.file ? `<dt>${t('Fil')}</dt><dd>${esc(m.file)}</dd>` : ''}<dt>TMDB</dt><dd>${m.tmdbId ? `${+m.tmdbId}${m.matchLocked ? t(' (låst matchning)') : ''}` : t('Inte matchad')}</dd>
+      <dt>${t('Bilder')}</dt><dd>${Object.entries(m.images).filter(([, v]) => v.lock).map(([k, v]) => `${esc(imgLabel(k))}: ${v.lock === 'upload' ? t('uppladdad') : t('vald från TMDB')}`).join(', ') || t('Automatiska')}</dd></dl>`;
+    q('#me-unlockall').onclick = () => { for (const f of [...locked]) setLock(f, false); renderAdvanced(); toast(t('Alla fält är upplåsta – spara för att behålla det')); };
   }
 
   // ---- Bilder ----
@@ -148,33 +148,33 @@ export async function openEditor(it, tab = 'general') {
   const imgUrl = (t) => `/api/image/${m.id}/${t}?${t === 'logo' ? '' : 'w=320&'}v=${Date.now()}`;
   function renderCurrent() {
     const cur = m.images[imgType], wide = imgType === 'backdrop' || imgType === 'thumb' || imgType === 'logo';
-    const status = !cur.has ? 'Ingen bild' : cur.lock === 'upload' ? 'Uppladdad bild (låst)' : cur.lock === 'tmdb' ? 'Vald från TMDB (låst)' : 'Automatisk';
-    q('#me-cur').innerHTML = `<div class="meprev${wide ? ' wide' : ''}${imgType === 'logo' ? ' logo' : ''}">${cur.has ? `<img src="${imgUrl(imgType)}" alt="Nuvarande ${esc(imgLabel(imgType).toLowerCase())}">` : '<span class="muted">Ingen bild</span>'}</div>
+    const status = !cur.has ? t('Ingen bild') : cur.lock === 'upload' ? t('Uppladdad bild (låst)') : cur.lock === 'tmdb' ? t('Vald från TMDB (låst)') : t('Automatisk');
+    q('#me-cur').innerHTML = `<div class="meprev${wide ? ' wide' : ''}${imgType === 'logo' ? ' logo' : ''}">${cur.has ? `<img src="${imgUrl(imgType)}" alt="${t('Nuvarande {v}', { v: esc(imgLabel(imgType).toLowerCase()) })}">` : t('<span class="muted">Ingen bild</span>')}</div>
       <div><p><b>${esc(imgLabel(imgType))}</b><br><span class="muted small">${esc(status)}</span></p>
-      <div class="row"><label class="btn ghost small mefile">Ladda upp egen…<input type="file" id="me-file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
-      ${cur.lock ? '<button type="button" class="ghost small" id="me-reset">Återställ till automatisk</button>' : ''}</div>
-      <p class="muted small">JPEG, PNG eller WebP, högst ${Math.round(m.uploadMax / 1048576)} MB. ${imgType === 'logo' ? 'Logotypen sparas som PNG med genomskinlighet.' : 'Sparas som JPEG.'}</p></div>`;
+      <div class="row"><label class="btn ghost small mefile">${t('Ladda upp egen…')}<input type="file" id="me-file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
+      ${cur.lock ? t('<button type="button" class="ghost small" id="me-reset">Återställ till automatisk</button>') : ''}</div>
+      <p class="muted small">${t('JPEG, PNG eller WebP, högst {v} MB. {v2}', { v: Math.round(m.uploadMax / 1048576), v2: imgType === 'logo' ? t('Logotypen sparas som PNG med genomskinlighet.') : t('Sparas som JPEG.') })}</p></div>`;
     q('#me-file').onchange = (e) => upload(e.target.files[0]);
     if (q('#me-reset')) q('#me-reset').onclick = reset;
   }
   const done = (r, msg) => { m.images = r.images; imgChanged = true; renderCurrent(); markOn(); toast(msg); };
   async function upload(file) {
     if (!file) return;
-    if (file.size > m.uploadMax) return toast(`Bilden är för stor (högst ${Math.round(m.uploadMax / 1048576)} MB)`, { error: true });
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return toast('Bara JPEG, PNG och WebP', { error: true });
-    q('#me-cur .meprev').innerHTML = loadingState({ kind: 'inline', label: 'Laddar upp…' });
-    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'PUT', body: file, headers: { 'Content-Type': file.type }, bg: true }), 'Bilden är uppladdad'); }
+    if (file.size > m.uploadMax) return toast(t('Bilden är för stor (högst {v} MB)', { v: Math.round(m.uploadMax / 1048576) }), { error: true });
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return toast(t('Bara JPEG, PNG och WebP'), { error: true });
+    q('#me-cur .meprev').innerHTML = loadingState({ kind: 'inline', label: t('Laddar upp…') });
+    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'PUT', body: file, headers: { 'Content-Type': file.type }, bg: true }), t('Bilden är uppladdad')); }
     catch (e) { toastErr(e); renderCurrent(); }
   }
   async function reset() {
-    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'DELETE', bg: true }), 'Automatisk bild igen'); } catch (e) { toastErr(e); }
+    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'DELETE', bg: true }), t('Automatisk bild igen')); } catch (e) { toastErr(e); }
   }
   let opts = [];
   const markOn = () => { const lock = m.images[imgType].lock; for (const b of $$('[data-opt]', d)) b.setAttribute('aria-pressed', String(lock === 'tmdb' && b.dataset.path === m.images[imgType].path)); };
   async function showImages() {
     renderCurrent();
     const box = q('#me-opts');
-    box.innerHTML = loadingState({ kind: 'inline', label: 'Hämtar bilder från TMDB…' });
+    box.innerHTML = loadingState({ kind: 'inline', label: t('Hämtar bilder från TMDB…') });
     let r;
     try { r = await api(`/items/${m.id}/images/${imgType}`, { bg: true }); }
     catch (e) { if (d.isConnected) box.innerHTML = errorState(e, { compact: true }); return; }
@@ -182,9 +182,9 @@ export async function openEditor(it, tab = 'general') {
     opts = r.options;
     const shape = imgType === 'logo' ? 'logo' : imgType === 'backdrop' || imgType === 'thumb' ? 'land' : 'port';
     box.innerHTML = r.error ? errorState(new Error(r.error), { compact: true })
-      : !opts.length ? emptyState({ compact: true, title: 'Inga bilder från TMDB', text: m.tmdb ? 'TMDB har inga bilder av den här typen. Ladda upp en egen.' : 'Titeln är inte matchad mot TMDB (eller TMDB-nyckel saknas). Ladda upp en egen bild.' })
-      : `<p class="muted small">${opts.length} ${opts.length === 1 ? 'bild' : 'bilder'} från TMDB – välj en.</p><div class="megallery ${shape}">${opts.map((o, i) => `<button type="button" class="meopt" data-opt="${i}" data-path="${esc(o.path)}" aria-pressed="false"
-          aria-label="${esc(imgLabel(imgType))} ${i + 1} av ${opts.length}, ${esc(langName(o.lang))}${o.width ? `, ${+o.width}×${+o.height}` : ''}">
+      : !opts.length ? emptyState({ compact: true, title: t('Inga bilder från TMDB'), text: m.tmdb ? t('TMDB har inga bilder av den här typen. Ladda upp en egen.') : t('Titeln är inte matchad mot TMDB (eller TMDB-nyckel saknas). Ladda upp en egen bild.') })
+      : `<p class="muted small">${t('{optsN} {v} från TMDB – välj en.', { optsN: opts.length, v: opts.length === 1 ? t('bild') : t('bilder') })}</p><div class="megallery ${shape}">${opts.map((o, i) => `<button type="button" class="meopt" data-opt="${i}" data-path="${esc(o.path)}" aria-pressed="false"
+          aria-label="${t('{v} {v2} av {optsN}, {v3}{v4}', { v: esc(imgLabel(imgType)), v2: i + 1, optsN: opts.length, v3: esc(langName(o.lang)), v4: o.width ? `, ${+o.width}×${+o.height}` : '' })}">
           <img src="https://image.tmdb.org/t/p/${shape === 'land' ? 'w300' : 'w185'}${esc(o.path)}" alt="" loading="lazy" decoding="async">
           <span class="melang">${esc(o.lang ? o.lang.toUpperCase() : '–')}</span></button>`).join('')}</div>`;
     markOn();
@@ -193,7 +193,7 @@ export async function openEditor(it, tab = 'general') {
     const b = e.target.closest('[data-opt]'); if (!b) return;
     const o = opts[+b.dataset.opt];
     b.disabled = true; b.classList.add('busy');
-    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'POST', body: { tmdbPath: o.path }, bg: true }), 'Bilden är vald'); }
+    try { done(await api(`/items/${m.id}/images/${imgType}`, { method: 'POST', body: { tmdbPath: o.path }, bg: true }), t('Bilden är vald')); }
     catch (err) { toastErr(err); }
     finally { b.disabled = false; b.classList.remove('busy'); }
   });

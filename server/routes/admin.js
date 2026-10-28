@@ -338,42 +338,46 @@ route('GET', '/api/audit', admin, (c) => {
   const ev = c.q.get('event');
   send(c.res, 200, ev ? all('SELECT * FROM audit WHERE event LIKE ? ORDER BY id DESC LIMIT ?', ev + '%', lim) : all('SELECT * FROM audit ORDER BY id DESC LIMIT ?', lim));
 });
+// Texterna följer webbens språk för profilen (users.lang): svenska, eller engelska när webben är på engelska
 route('GET', '/api/security-check', admin, (c) => {
   const items = [];
   const add = (level, title, detail) => items.push({ level, title, detail });
+  const en = c.user.lang === 'en';
+  const L = (sv, eng) => en ? eng : sv;
   const pub = getSetting('public_url', process.env.PUBLIC_URL || '');
   const https = isHttps(c.req);
   // Programfilernas integritet (jämförs med integrity.json som skapas vid Docker-bygget)
   const integ = integrity();
-  if (integ === null) add('info', 'Ingen integritetsmanifest', 'Servern körs utan integrity.json (t.ex. vid utveckling). Docker-imagen har alltid en.');
-  else if (integ.ok) add('ok', 'Programfilerna är oförändrade', `${integ.files} filer stämmer med checksummorna från bygget.`);
-  else add('bad', 'Programfiler har ändrats', `Ändrade: ${[...integ.changed, ...integ.added].slice(0, 10).join(', ')}. Om du inte ändrat något själv: hämta om imagen (Check for updates → Apply update).`);
-  if (pub && !pub.startsWith('https://')) add('bad', 'Publik adress använder inte HTTPS', 'Lösenord och strömmar skickas okrypterat över internet. Använd en omvänd proxy med Let\'s Encrypt eller inbyggd HTTPS.');
-  else if (pub) add('ok', 'Publik adress använder HTTPS', pub);
-  else add('info', 'Ingen publik adress angiven', 'Servern verkar bara användas på hemnätet/VPN. Ange publik adress om den nås från internet.');
-  if (!isLocalReq(c.req) && !https) add('bad', 'Du är ansluten utifrån utan HTTPS', 'Den här anslutningen är okrypterad.');
+  if (integ === null) add('info', L('Ingen integritetsmanifest', 'No integrity manifest'), L('Servern körs utan integrity.json (t.ex. vid utveckling). Docker-imagen har alltid en.', 'The server runs without integrity.json (e.g. during development). The Docker image always has one.'));
+  else if (integ.ok) add('ok', L('Programfilerna är oförändrade', 'The program files are unchanged'), L(`${integ.files} filer stämmer med checksummorna från bygget.`, `${integ.files} files match the checksums from the build.`));
+  else add('bad', L('Programfiler har ändrats', 'Program files have changed'), L(`Ändrade: ${[...integ.changed, ...integ.added].slice(0, 10).join(', ')}. Om du inte ändrat något själv: hämta om imagen (Check for updates → Apply update).`, `Changed: ${[...integ.changed, ...integ.added].slice(0, 10).join(', ')}. If you have not changed anything yourself: pull the image again (Check for updates → Apply update).`));
+  if (pub && !pub.startsWith('https://')) add('bad', L('Publik adress använder inte HTTPS', 'The public address does not use HTTPS'), L('Lösenord och strömmar skickas okrypterat över internet. Använd en omvänd proxy med Let\'s Encrypt eller inbyggd HTTPS.', 'Passwords and streams are sent unencrypted over the internet. Use a reverse proxy with Let\'s Encrypt or the built-in HTTPS.'));
+  else if (pub) add('ok', L('Publik adress använder HTTPS', 'The public address uses HTTPS'), pub);
+  else add('info', L('Ingen publik adress angiven', 'No public address set'), L('Servern verkar bara användas på hemnätet/VPN. Ange publik adress om den nås från internet.', 'The server seems to be used only on the home network/VPN. Set a public address if it is reached from the internet.'));
+  if (!isLocalReq(c.req) && !https) add('bad', L('Du är ansluten utifrån utan HTTPS', 'You are connected from outside without HTTPS'), L('Den här anslutningen är okrypterad.', 'This connection is unencrypted.'));
   const cip = clientIp(c.req), pip = peerIp(c.req);
-  add('info', `Din adress enligt servern: ${cip}`, pip !== cip ? `Via proxy ${pip}. Stämmer inte adressen? Kontrollera att proxyn skickar X-Forwarded-For.` :
-    (isPrivate(pip) && pub ? 'Om du ansluter utifrån och ändå ser en lokal adress här skickar proxyn/NAT inte klientens adress – då räknas alla som "hemma". Se README.' : ''));
+  add('info', L(`Din adress enligt servern: ${cip}`, `Your address according to the server: ${cip}`), pip !== cip ? L(`Via proxy ${pip}. Stämmer inte adressen? Kontrollera att proxyn skickar X-Forwarded-For.`, `Via proxy ${pip}. Is the address wrong? Check that the proxy sends X-Forwarded-For.`) :
+    (isPrivate(pip) && pub ? L('Om du ansluter utifrån och ändå ser en lokal adress här skickar proxyn/NAT inte klientens adress – då räknas alla som "hemma". Se README.', 'If you connect from outside and still see a local address here, the proxy/NAT does not pass on the client\'s address – then everyone counts as "at home". See README.') : ''));
   const admins = all('SELECT name, totp_enabled FROM users WHERE is_admin=1');
   const no2fa = admins.filter(a => !a.totp_enabled).map(a => a.name);
-  if (no2fa.length) add(pub ? 'bad' : 'warn', 'Administratörer utan tvåstegsverifiering', no2fa.join(', ') + ' – aktivera under Mitt konto.');
-  else add('ok', 'Alla administratörer har tvåstegsverifiering', '');
+  if (no2fa.length) add(pub ? 'bad' : 'warn', L('Administratörer utan tvåstegsverifiering', 'Administrators without two-step verification'), no2fa.join(', ') + L(' – aktivera under Mitt konto.', ' – enable it under My account.'));
+  else add('ok', L('Alla administratörer har tvåstegsverifiering', 'All administrators have two-step verification'), '');
   const users = all('SELECT name, totp_enabled, remote_allowed FROM users WHERE is_admin=0');
   const uNo = users.filter(u => !u.totp_enabled && u.remote_allowed).map(u => u.name);
-  if (uNo.length) add(require2faRemote() ? 'ok' : 'warn', 'Användare med fjärråtkomst utan tvåstegsverifiering', uNo.join(', ') + (require2faRemote() ? ' – de kan bara logga in på hemnätet tills 2FA aktiverats.' : ' – överväg "Kräv tvåstegsverifiering utanför hemmet".'));
-  add(adminAnywhere() ? 'warn' : 'ok', adminAnywhere() ? 'Administration tillåten från internet' : 'Administration endast från hemnät/VPN', adminAnywhere() ? 'Slå av om du inte behöver administrera utifrån.' : '');
-  add(require2faRemote() ? 'ok' : 'warn', require2faRemote() ? 'Tvåstegsverifiering krävs utanför hemmet' : 'Tvåstegsverifiering krävs inte utanför hemmet', '');
+  if (uNo.length) add(require2faRemote() ? 'ok' : 'warn', L('Användare med fjärråtkomst utan tvåstegsverifiering', 'Users with remote access without two-step verification'), uNo.join(', ') + (require2faRemote() ? L(' – de kan bara logga in på hemnätet tills 2FA aktiverats.', ' – they can only sign in on the home network until 2FA is enabled.') : L(' – överväg "Kräv tvåstegsverifiering utanför hemmet".', ' – consider "Require two-step verification away from home".')));
+  add(adminAnywhere() ? 'warn' : 'ok', adminAnywhere() ? L('Administration tillåten från internet', 'Administration allowed from the internet') : L('Administration endast från hemnät/VPN', 'Administration only from the home network/VPN'), adminAnywhere() ? L('Slå av om du inte behöver administrera utifrån.', 'Turn off if you do not need to administer from outside.') : '');
+  add(require2faRemote() ? 'ok' : 'warn', require2faRemote() ? L('Tvåstegsverifiering krävs utanför hemmet', 'Two-step verification is required away from home') : L('Tvåstegsverifiering krävs inte utanför hemmet', 'Two-step verification is not required away from home'), '');
   const fails = get(`SELECT COUNT(*) AS n FROM audit WHERE event IN ('login_fail','login_locked','login_denied') AND ts > ?`, now() - 86400).n;
-  add(fails > 50 ? 'bad' : fails > 10 ? 'warn' : 'ok', `${fails} misslyckade inloggningar senaste dygnet`, fails > 10 ? 'Se säkerhetsloggen. Överväg geoblockering eller CrowdSec i OPNsense.' : '');
-  if (typeof process.getuid === 'function' && process.getuid() === 0) add('warn', 'Servern körs som root', 'Kör containern med PUID/PGID (standard i Unraid-mallen).');
-  else add('ok', 'Servern körs utan root-rättigheter', '');
+  add(fails > 50 ? 'bad' : fails > 10 ? 'warn' : 'ok', L(`${fails} misslyckade inloggningar senaste dygnet`, `${fails} failed sign-ins in the last 24 hours`), fails > 10 ? L('Se säkerhetsloggen. Överväg geoblockering eller CrowdSec i OPNsense.', 'See the security log. Consider geoblocking or CrowdSec in OPNsense.') : '');
+  if (typeof process.getuid === 'function' && process.getuid() === 0) add('warn', L('Servern körs som root', 'The server runs as root'), L('Kör containern med PUID/PGID (standard i Unraid-mallen).', 'Run the container with PUID/PGID (default in the Unraid template).'));
+  else add('ok', L('Servern körs utan root-rättigheter', 'The server runs without root privileges'), '');
   const old = all(`SELECT name FROM users WHERE pass NOT LIKE 's2:%'`).map(u => u.name);
-  if (st.hwStatus.error) add('warn', `Hårdvaruomkodning (${st.hwStatus.wanted}) fungerar inte – processorn används`,
-    `Fel: ${st.hwStatus.error}. ${st.hwStatus.hint ? 'Åtgärd: ' + st.hwStatus.hint : 'För NVIDIA krävs pluginen Nvidia-Driver och --runtime=nvidia i Extra Parameters; för Intel/AMD enheten /dev/dri.'} Annars: sätt HWACCEL=none.`);
-  if (old.length) add('warn', 'Konton med äldre lösenordsformat', old.join(', ') + ' – uppgraderas automatiskt vid nästa lösenordsbyte.');
-  items.push(...diskmon.checkItems());
-  if (dlna.enabled()) add('info', 'DLNA är påslaget', 'Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning' + (dlna.maxAge() != null ? ` (titlar upp till ${dlna.maxAge()} år).` : '.'));
+  if (st.hwStatus.error) add('warn', L(`Hårdvaruomkodning (${st.hwStatus.wanted}) fungerar inte – processorn används`, `Hardware transcoding (${st.hwStatus.wanted}) does not work – the processor is used`),
+    L(`Fel: ${st.hwStatus.error}. ${st.hwStatus.hint ? 'Åtgärd: ' + st.hwStatus.hint : 'För NVIDIA krävs pluginen Nvidia-Driver och --runtime=nvidia i Extra Parameters; för Intel/AMD enheten /dev/dri.'} Annars: sätt HWACCEL=none.`,
+      `Error: ${st.hwStatus.error}. ${st.hwStatus.hint ? 'Action: ' + st.hwStatus.hint : 'NVIDIA requires the Nvidia-Driver plugin and --runtime=nvidia in Extra Parameters; Intel/AMD requires the device /dev/dri.'} Otherwise: set HWACCEL=none.`));
+  if (old.length) add('warn', L('Konton med äldre lösenordsformat', 'Accounts with an older password format'), old.join(', ') + L(' – uppgraderas automatiskt vid nästa lösenordsbyte.', ' – upgraded automatically at the next password change.'));
+  items.push(...diskmon.checkItems(en ? 'en' : 'sv'));
+  if (dlna.enabled()) add('info', L('DLNA är påslaget', 'DLNA is on'), L('Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning', 'All devices on the home network can see and play what DLNA shows, without signing in') + (dlna.maxAge() != null ? L(` (titlar upp till ${dlna.maxAge()} år).`, ` (titles up to ${dlna.maxAge()} years).`) : '.'));
   send(c.res, 200, items);
 });
 

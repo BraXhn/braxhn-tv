@@ -2,7 +2,7 @@
 // @lazy – laddas av views/search.js när fliken Repliker väljs (need()), aldrig vid start
 // sammanhang före/efter och en förhandsbild från spolningsbilderna. Klick spelar titeln från scenen (två sekunder före
 // repliken) via fasaden i lazy.js.
-import { $$, api, esc } from '../core.js';
+import { $$, api, esc, t } from '../core.js';
 import { startPlay } from '../lazy.js';
 import { emptyState } from '../ui/states.js';
 
@@ -27,10 +27,10 @@ function thumbHtml(l) {
 }
 const rowHtml = (l, i) => {
   const name = l.kind === 'episode' ? `${l.title}${sxe(l) ? ' · ' + sxe(l) : ''}${l.episodeTitle ? ' · ' + l.episodeTitle : ''}` : `${l.title}${l.year ? ` (${+l.year})` : ''}`;
-  return `<button type="button" class="srow lrow" data-li="${i}" aria-label="${esc(`Spela ${name} från ${clock(l.t)}: ${l.line}`)}">
+  return `<button type="button" class="srow lrow" data-li="${i}" aria-label="${esc(t('Spela {name} från {v}: {line}', { name, v: clock(l.t), line: l.line }))}">
     ${thumbHtml(l)}<span class="lbody"><span class="lhead"><b>${esc(name)}</b><span class="ltime">${clock(l.t)}</span></span>
     ${l.before ? `<span class="lctx">${esc(l.before)}</span>` : ''}<span class="lline">${markLine(l.line, l.marks)}</span>${l.after ? `<span class="lctx">${esc(l.after)}</span>` : ''}
-    ${l.label || l.lang ? `<span class="lsrc">Undertext: ${esc(l.label || l.lang)}</span>` : ''}</span></button>`;
+    ${l.label || l.lang ? `<span class="lsrc">${t('Undertext: {v}', { v: esc(l.label || l.lang) })}</span>` : ''}</span></button>`;
 };
 
 /** Sök repliker och rita dem i el. Ger antalet träffar. api() kastar (aborted) om en nyare sökning startat. */
@@ -39,14 +39,14 @@ export async function renderLines(el, q) {
   const L = d.lines || [], st = d.status || {};
   if (!L.length) {
     // titles finns bara i svaret till administratören
-    const text = !st.enabled ? 'Repliksökningen är avstängd på servern.'
-      : st.indexing ? 'Undertexterna indexeras fortfarande – fler repliker blir sökbara efter hand.'
-      : st.titles === 0 ? 'Inga undertexter är indexerade än. Filmer och avsnitt med textundertexter (inbäddade eller .srt/.ass/.vtt bredvid filen) indexeras i bakgrunden efter skanningen.'
-      : 'Prova med färre ord eller en annan del av repliken. Bara titlar med textundertexter går att söka i.';
-    el.innerHTML = emptyState({ icon: '💬', title: 'Inga repliker hittades', text });
+    const text = !st.enabled ? t('Repliksökningen är avstängd på servern.')
+      : st.indexing ? t('Undertexterna indexeras fortfarande – fler repliker blir sökbara efter hand.')
+      : st.titles === 0 ? t('Inga undertexter är indexerade än. Filmer och avsnitt med textundertexter (inbäddade eller .srt/.ass/.vtt bredvid filen) indexeras i bakgrunden efter skanningen.')
+      : t('Prova med färre ord eller en annan del av repliken. Bara titlar med textundertexter går att söka i.');
+    el.innerHTML = emptyState({ icon: '💬', title: t('Inga repliker hittades'), text });
     return 0;
   }
-  el.innerHTML = `<section class="section"><h2 class="sr-only">Repliker</h2>${st.indexing ? '<p class="muted small">Undertexterna indexeras fortfarande – fler träffar kan tillkomma.</p>' : ''}
+  el.innerHTML = `<section class="section"><h2 class="sr-only">${t('Repliker')}</h2>${st.indexing ? t('<p class="muted small">Undertexterna indexeras fortfarande – fler träffar kan tillkomma.</p>') : ''}
     <div class="slist llist">${L.map(rowHtml).join('')}</div></section>`;
   $$('[data-li]', el).forEach(b => b.onclick = () => {
     const l = L[+b.dataset.li];

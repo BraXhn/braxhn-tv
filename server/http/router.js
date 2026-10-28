@@ -18,6 +18,28 @@ import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import { serveStatic } from './static.js';
 
+// ---------- webbklientens språk ----------
+// index.html finns på svenska (standard) och engelska (med översättningskatalogen web/i18n/en.js). Inloggad: profilens
+// val (inget val = svenska). Utloggad (inloggningssidan, installationen): kakan bxlang som webben sätter, annars
+// webbläsarens språk (Accept-Language; nordiska språk → svenska, okänt → svenska).
+export function acceptLang(h) {
+  const list = String(h || '').split(',').map((p, i) => { const [tag, ...o] = p.trim().toLowerCase().split(';'); const q = o.map(x => /^\s*q=([\d.]+)/.exec(x)?.[1]).find(Boolean); return { tag, q: q ? +q : 1, i }; })
+    .filter(x => x.tag).sort((a, b) => b.q - a.q || a.i - b.i);
+  for (const { tag } of list) {
+    if (/^(sv|nb|nn|no|da)\b/.test(tag)) return 'sv';
+    if (/^en\b/.test(tag)) return 'en';
+  }
+  return 'sv';
+}
+export function pageLang(req) {
+  try {
+    const u = userFromReq(req, new URLSearchParams(), false);
+    if (u && u.kind === 'web') return u.lang === 'en' ? 'en' : 'sv';
+  } catch {}
+  const ck = /(?:^|;\s*)bxlang=(sv|en)(?:;|$)/.exec(req.headers.cookie || '')?.[1];
+  return ck || acceptLang(req.headers['accept-language']);
+}
+
 // ---------- routing ----------
 // :namn i mönstret blir en parameter i c.p (matchar aldrig ett snedstreck)
 const routes = [];
@@ -114,7 +136,7 @@ export async function handle(req, res) {
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS', 'Access-Control-Max-Age': '86400' }); return res.end(); }
   }
   // Allt annat utanför /api/ är webbappens statiska filer (se static.js)
-  if (!rest && !url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname, url.search);
+  if (!rest && !url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname, url.search, () => pageLang(req));
   // Chromecast-mottagare och andra enheter hämtar media från annan origin
   if (url.pathname.startsWith('/api/stream/')) {
     res.setHeader('Access-Control-Allow-Origin', '*');

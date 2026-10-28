@@ -16,7 +16,7 @@
 //
 // Tittarposition offline sparas lokalt (pending) och skickas med "at" (när den sparades) när servern svarar igen –
 // servern behåller ett senare framsteg från en annan enhet.
-import { api, esc, fmtSize, me, store, toast, toastErr } from './core.js';
+import { api, esc, fmtSize, me, store, toast, toastErr, t } from './core.js';
 import { audioCaps, capsQuery } from './player/caps.js';
 import { confirmDialog, openDialog } from './ui/dialog.js';
 
@@ -64,7 +64,7 @@ export async function storageInfo() {
 async function persist() { try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch {} }
 
 // ---------- köa ----------
-const QLABEL = { src: 'Original', orig: 'Full upplösning', '1080': '1080p', '720': '720p', '480': '480p' };
+const QLABEL = { src: 'Original', orig: t('Full upplösning'), '1080': '1080p', '720': '720p', '480': '480p' };
 const QKBPS = { '1080': 6000, '720': 3000, '480': 1200 };
 const estimate = (q, dur) => QKBPS[q] && dur ? Math.round((QKBPS[q] + 160) * 1000 / 8 * dur) : 0;
 const posterOf = (kind, id, it = {}) => kind === 'album' ? `/api/music/cover/${id}?w=320` : kind === 'book' ? `/api/audiobooks/cover/${id}?w=320`
@@ -73,8 +73,8 @@ const posterOf = (kind, id, it = {}) => kind === 'album' ? `/api/music/cover/${i
 /** Lägger till en post i kön (eller låter den vara om den redan finns) och startar nedladdningen */
 async function enqueue(e, poster) {
   const uid = me?.id;
-  if (uid == null) throw new Error('Logga in för att spara offline');
-  if (!supported()) throw new Error('Den här webbläsaren kan inte spara offline (kräver HTTPS)');
+  if (uid == null) throw new Error(t('Logga in för att spara offline'));
+  if (!supported()) throw new Error(t('Den här webbläsaren kan inte spara offline (kräver HTTPS)'));
   store.set('dl.last', { id: uid, name: me.name, kid: !!me.kid });
   const l = list(uid);
   if (l.some(x => x.key === e.key)) return false;
@@ -91,16 +91,16 @@ async function enqueue(e, poster) {
 function qualityDialog(title, { src, size, duration, height, many }) {
   const last = store.get('dlq', '720');
   const opts = [
-    ...(src ? [{ q: 'src', label: 'Original', hint: `filen som den är${size ? ' · ' + fmtSize(size) : ''}` }] : []),
-    ...(many ? [{ q: 'src?', label: 'Original när det går', hint: 'annars 1080p' }] : []),
+    ...(src ? [{ q: 'src', label: 'Original', hint: t('filen som den är{v}', { v: size ? ' · ' + fmtSize(size) : '' }) }] : []),
+    ...(many ? [{ q: 'src?', label: t('Original när det går'), hint: t('annars 1080p') }] : []),
     ...['1080', '720', '480'].filter(q => !height || +q <= Math.max(480, height) || q === '480')
-      .map(q => ({ q, label: QLABEL[q], hint: `omkodas på servern${estimate(q, duration) ? ' · ≈ ' + fmtSize(estimate(q, duration)) : ''}` }))];
+      .map(q => ({ q, label: QLABEL[q], hint: t('omkodas på servern{v}', { v: estimate(q, duration) ? ' · ≈ ' + fmtSize(estimate(q, duration)) : '' }) }))];
   const pick = opts.some(o => o.q === last) ? last : opts.find(o => o.q === '720')?.q || opts[0].q;
-  const d = openDialog({ title, body: `<fieldset class="dlq"><legend class="muted small">Kvalitet</legend>${opts.map(o => `<label class="dlqopt"><input type="radio" name="dlq" value="${esc(o.q)}"${o.q === pick ? ' checked' : ''}>
+  const d = openDialog({ title, body: `<fieldset class="dlq"><legend class="muted small">${t('Kvalitet')}</legend>${opts.map(o => `<label class="dlqopt"><input type="radio" name="dlq" value="${esc(o.q)}"${o.q === pick ? ' checked' : ''}>
     <span><b>${esc(o.label)}</b> <span class="muted small">${esc(o.hint)}</span></span></label>`).join('')}</fieldset>
     <p class="muted small" id="dlqspace"></p>`,
-  actions: [{ label: 'Avbryt', value: null }, { label: 'Spara offline', kind: 'primary', onClick: (h) => h.$('input[name=dlq]:checked')?.value || null }] });
-  storageInfo().then(s => { const el = d.$('#dlqspace'); if (el && s.quota) el.textContent = `Ledigt i webbläsaren: ${fmtSize(Math.max(0, s.quota - s.usage))}`; }).catch(() => {});
+  actions: [{ label: t('Avbryt'), value: null }, { label: t('Spara offline'), kind: 'primary', onClick: (h) => h.$('input[name=dlq]:checked')?.value || null }] });
+  storageInfo().then(s => { const el = d.$('#dlqspace'); if (el && s.quota) el.textContent = t('Ledigt i webbläsaren: {v}', { v: fmtSize(Math.max(0, s.quota - s.usage)) }); }).catch(() => {});
   return d.closed.then(v => { if (typeof v === 'string') store.set('dlq', v === 'src?' ? '1080' : v); return typeof v === 'string' ? v : null; });
 }
 
@@ -117,25 +117,25 @@ const videoEntry = (it, p, q) => ({
 /** "Spara offline" för en film eller ett avsnitt (it = titeln från ett kort eller titelsidan) */
 export async function downloadItem(it) {
   try {
-    if (me?.canDownload === false) return toast('Ditt konto får inte ladda ner', { error: true });
+    if (me?.canDownload === false) return toast(t('Ditt konto får inte ladda ner'), { error: true });
     const key = keyOf(it.kind, it.id), had = find(key);
     if (had) return alreadyThere(had);
     const p = await decision(it.version || it.id);
-    const q = await qualityDialog(`Spara offline – ${it.kind === 'episode' && it.showTitle ? it.showTitle + ' · ' : ''}${it.title}`,
+    const q = await qualityDialog(t('Spara offline – {v}{title}', { v: it.kind === 'episode' && it.showTitle ? it.showTitle + ' · ' : '', title: it.title }),
       { src: p?.mode === 'direct', size: it.size, duration: it.duration || p?.duration, height: it.height });
     if (!q) return;
     await enqueue(videoEntry(it, p, q), posterOf(it.kind, it.id, it));
-    toast(`${it.title} sparas offline – se Nedladdat`, { action: { label: 'Visa', onClick: () => { location.hash = '#/downloads'; } } });
+    toast(t('{title} sparas offline – se Nedladdat', { title: it.title }), { action: { label: t('Visa'), onClick: () => { location.hash = '#/downloads'; } } });
   } catch (e) { toastErr(e); }
 }
 /** "Spara säsongen offline": alla avsnitt i listan (seriens titelsida) */
 export async function downloadEpisodes(show, eps) {
   try {
-    if (me?.canDownload === false) return toast('Ditt konto får inte ladda ner', { error: true });
+    if (me?.canDownload === false) return toast(t('Ditt konto får inte ladda ner'), { error: true });
     const todo = eps.filter(e => !find(keyOf('episode', e.id)));
-    if (!todo.length) return toast('Avsnitten finns redan i Nedladdat');
+    if (!todo.length) return toast(t('Avsnitten finns redan i Nedladdat'));
     const dur = todo.reduce((s, e) => s + (e.duration || 0), 0);
-    const q = await qualityDialog(`Spara ${todo.length} avsnitt offline – ${show.title}`, { many: true, duration: dur });
+    const q = await qualityDialog(t('Spara {todoN} avsnitt offline – {title}', { todoN: todo.length, title: show.title }), { many: true, duration: dur });
     if (!q) return;
     for (const e of todo) {
       const it = { ...e, kind: 'episode', show: show.id, showTitle: show.title };
@@ -143,37 +143,37 @@ export async function downloadEpisodes(show, eps) {
       const eq = q === 'src?' ? (p?.mode === 'direct' ? 'src' : '1080') : q;
       await enqueue(videoEntry(it, p, eq), posterOf('episode', e.id, it));
     }
-    toast(`${todo.length} avsnitt sparas offline – se Nedladdat`, { action: { label: 'Visa', onClick: () => { location.hash = '#/downloads'; } } });
+    toast(t('{todoN} avsnitt sparas offline – se Nedladdat', { todoN: todo.length }), { action: { label: t('Visa'), onClick: () => { location.hash = '#/downloads'; } } });
   } catch (e) { toastErr(e); }
 }
 /** "Spara offline" för ett album */
 export async function downloadAlbum(id) {
   try {
-    if (me?.canDownload === false) return toast('Ditt konto får inte ladda ner', { error: true });
+    if (me?.canDownload === false) return toast(t('Ditt konto får inte ladda ner'), { error: true });
     const key = keyOf('album', id); if (find(key)) return alreadyThere(find(key));
     const a = await api(`/music/albums/${+id}/offline?a=${audioCaps()}`, { bg: true });
     await enqueue({ key, kind: 'album', id: a.id, title: a.title, sub: a.artist || '', year: a.year, duration: a.duration,
       parts: a.tracks.map(t => ({ id: t.id, title: t.title, track: t.track, disc: t.disc, artist: t.artist, duration: t.duration, gain: t.gain ?? null, peak: t.peak ?? null })) },
     a.cover ? posterOf('album', a.id) : null);
-    toast(`${a.title} sparas offline – se Nedladdat`, { action: { label: 'Visa', onClick: () => { location.hash = '#/downloads'; } } });
+    toast(t('{title} sparas offline – se Nedladdat', { title: a.title }), { action: { label: t('Visa'), onClick: () => { location.hash = '#/downloads'; } } });
   } catch (e) { toastErr(e); }
 }
 /** "Spara offline" för en ljudbok */
 export async function downloadBook(id) {
   try {
-    if (me?.canDownload === false) return toast('Ditt konto får inte ladda ner', { error: true });
+    if (me?.canDownload === false) return toast(t('Ditt konto får inte ladda ner'), { error: true });
     const key = keyOf('book', id); if (find(key)) return alreadyThere(find(key));
     const b = await api(`/audiobooks/book/${+id}/offline?a=${audioCaps()}`, { bg: true });
     await enqueue({ key, kind: 'book', id: b.id, title: b.title, sub: b.author || '', duration: b.duration, position: b.position || 0, speed: b.speed || 1,
       chapters: (b.chapters || []).slice(0, 500).map(c => ({ title: c.title, start: c.start, end: c.end })),
       parts: b.files.map(f => ({ id: f.id, offset: f.offset, duration: f.duration })) }, b.cover ? posterOf('book', b.id) : null);
-    toast(`${b.title} sparas offline – se Nedladdat`, { action: { label: 'Visa', onClick: () => { location.hash = '#/downloads'; } } });
+    toast(t('{title} sparas offline – se Nedladdat', { title: b.title }), { action: { label: t('Visa'), onClick: () => { location.hash = '#/downloads'; } } });
   } catch (e) { toastErr(e); }
 }
 async function alreadyThere(e) {
   const done = e.state === 'done';
-  const d = openDialog({ title: e.title, body: `<p>${done ? 'Finns redan i Nedladdat.' : 'Ligger redan i kön för Nedladdat.'}</p>`,
-    actions: [{ label: 'Ta bort', kind: 'danger', value: 'del' }, { label: 'Stäng' }, { label: 'Visa Nedladdat', kind: 'primary', value: 'show' }] });
+  const d = openDialog({ title: e.title, body: `<p>${done ? t('Finns redan i Nedladdat.') : t('Ligger redan i kön för Nedladdat.')}</p>`,
+    actions: [{ label: t('Ta bort'), kind: 'danger', value: 'del' }, { label: t('Stäng') }, { label: t('Visa Nedladdat'), kind: 'primary', value: 'show' }] });
   const v = await d.closed;
   if (v === 'show') location.hash = '#/downloads';
   if (v === 'del') await removeEntry(e.key, true);
@@ -188,7 +188,7 @@ export function resumeEntry(key) { update(key, e => { if (e.state === 'paused' |
 export async function removeEntry(key, ask = false) {
   const uid = profileId(), e = find(key, uid);
   if (!e) return;
-  if (ask && !await confirmDialog(`Ta bort ${e.title} från Nedladdat?`, { okLabel: 'Ta bort', danger: true })) return false;
+  if (ask && !await confirmDialog(t('Ta bort {title} från Nedladdat?', { title: e.title }), { okLabel: t('Ta bort'), danger: true })) return false;
   if (cur?.key === key) cur.ctrl.abort();
   // Avbryt serverns omkodning om den bara gjordes för den här nedladdningen
   if (e.state === 'preparing' && me) api(`/items/${e.file}/offline?q=${encodeURIComponent(e.q)}`, { method: 'DELETE', bg: true }).catch(() => {});
@@ -230,14 +230,14 @@ async function loop() {
     const todo = list(uid).filter(e => ACTIVE.includes(e.state));
     if (!todo.length) return;
     let moved = false, waiting = false;
-    for (const t of todo) {
-      const e = find(t.key, uid);
+    for (const tm of todo) {
+      const e = find(tm.key, uid);
       if (!e || !ACTIVE.includes(e.state)) continue;
       try { const r = await work(uid, e); if (r === 'wait') waiting = true; else moved = true; }
       catch (err) {
         if (err.name === 'AbortError') { moved = true; continue; } // pausad eller borttagen
         if (netErr(err)) { clearTimeout(retry); retry = setTimeout(pump, 30000); return; } // ingen kontakt: igen om en stund eller när nätet kommer tillbaka
-        const msg = err.name === 'QuotaExceededError' ? 'Inte tillräckligt med utrymme i webbläsaren – ta bort något i Nedladdat' : err.message || String(err);
+        const msg = err.name === 'QuotaExceededError' ? t('Inte tillräckligt med utrymme i webbläsaren – ta bort något i Nedladdat') : err.message || String(err);
         update(e.key, x => { x.state = 'error'; x.error = msg; }, uid);
         moved = true;
       }
@@ -252,7 +252,7 @@ async function work(uid, e) {
     const q = encodeURIComponent(e.q);
     let st = await api(`/items/${e.file}/offline?q=${q}&subs=1`, { bg: true });
     if (st.status === 'none' || (st.status === 'error' && e.state !== 'preparing')) st = await api(`/items/${e.file}/offline`, { method: 'POST', body: { q: e.q }, bg: true });
-    if (st.status === 'error') throw new Error(st.error || 'Servern kunde inte förbereda filen');
+    if (st.status === 'error') throw new Error(st.error || t('Servern kunde inte förbereda filen'));
     if (st.status !== 'ready') { update(e.key, x => { if (ACTIVE.includes(x.state)) { x.state = 'preparing'; x.prep = st.progress || 0; } }, uid); return 'wait'; }
     if (st.status === 'ready' && !st.url) st = await api(`/items/${e.file}/offline?q=${q}&subs=1`, { bg: true });
     files = [{ url: st.url, size: st.size || 0 }];
@@ -266,7 +266,7 @@ async function work(uid, e) {
     const byId = new Map(b.files.map(f => [f.id, f]));
     files = e.parts.map(p => ({ url: byId.get(p.id)?.url, size: 0 }));
   }
-  if (files.some(f => !f.url)) throw new Error('Innehållet har ändrats på servern – ta bort och ladda ned igen');
+  if (files.some(f => !f.url)) throw new Error(t('Innehållet har ändrats på servern – ta bort och ladda ned igen'));
   const size = files.reduce((s, f) => s + f.size, 0);
   update(e.key, x => {
     if (!ACTIVE.includes(x.state)) return;
@@ -278,7 +278,7 @@ async function work(uid, e) {
   if (size) {
     const s = await storageInfo();
     const left = size - (find(e.key, uid)?.got || 0);
-    if (s.quota && s.quota - s.usage < left + 50e6) throw Object.assign(new Error(`Inte tillräckligt med utrymme i webbläsaren (${fmtSize(left)} behövs, ${fmtSize(Math.max(0, s.quota - s.usage))} ledigt)`), { name: 'SpaceError' });
+    if (s.quota && s.quota - s.usage < left + 50e6) throw Object.assign(new Error(t('Inte tillräckligt med utrymme i webbläsaren ({left} behövs, {v} ledigt)', { left: fmtSize(left), v: fmtSize(Math.max(0, s.quota - s.usage)) })), { name: 'SpaceError' });
   }
   const ctrl = new AbortController();
   cur = { key: e.key, ctrl };
@@ -307,7 +307,7 @@ async function fetchPart(uid, key, i, url, signal) {
   let from = p0.got || 0, chunks = p0.chunks || 0;
   const res = await fetch(url, { headers: from ? { Range: `bytes=${from}-` } : {}, signal, cache: 'no-store' });
   if (res.status === 416 && from) { update(key, x => { x.parts[i].done = true; }, uid); return; }
-  if (!res.ok) throw new Error(res.status === 403 ? 'Nedladdningen nekades av servern' : res.status === 404 ? 'Filen finns inte längre på servern' : `Servern svarade ${res.status}`);
+  if (!res.ok) throw new Error(res.status === 403 ? t('Nedladdningen nekades av servern') : res.status === 404 ? t('Filen finns inte längre på servern') : t('Servern svarade {status}', { status: res.status }));
   const total = +(/\/(\d+)$/.exec(res.headers.get('content-range') || '')?.[1] || 0) || (+res.headers.get('content-length') ? +res.headers.get('content-length') + (res.status === 206 ? from : 0) : 0);
   // Servern skickade hela filen (ingen Range) eller filen har bytts sedan förra gången: börja om delen
   if (from && (res.status !== 206 || (p0.size && total && total !== p0.size))) {
@@ -347,7 +347,7 @@ export async function partBlob(e, i, uid = profileId()) {
   const c = await openCache(), p = e.parts[i], blobs = [];
   for (let n = 0; n < (p.chunks || 0); n++) {
     const r = await c.match(chunkUrl(uid, e.key, i, n));
-    if (!r) throw new Error('Delar av filen saknas i webbläsaren – ta bort och ladda ned igen');
+    if (!r) throw new Error(t('Delar av filen saknas i webbläsaren – ta bort och ladda ned igen'));
     blobs.push(await r.blob());
   }
   return new Blob(blobs, { type: p.mime || (VIDEO.includes(e.kind) ? 'video/mp4' : 'audio/mpeg') });

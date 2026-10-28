@@ -1,15 +1,15 @@
 // Hyllor och kortstorlek: ‹ › på varje vågrät rad (bläddrar en sida, inaktiva vid ändarna), piltangenter/D-pad
 // mellan korten (i sidled inom en rad, upp/ner till närmaste kort i raden ovanför/under) och reglaget för
 // kortstorlek i menyraden (sparas i webbläsaren).
-import { $, esc, main, store } from '../core.js';
+import { $, esc, main, store, t } from '../core.js';
 
 const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('reduce-motion');
 const SIZE = { min: 90, max: 220, def: 125 };
 
 /** Rubriken för en hylla (texten i h2 utan länkarna efter) – för knapparnas namn */
 function shelfName(h2) {
-  const t = h2?.childNodes[0]?.textContent?.trim();
-  return t || h2?.textContent?.trim() || 'raden';
+  const tt = h2?.childNodes[0]?.textContent?.trim();
+  return tt || h2?.textContent?.trim() || t('raden');
 }
 function update(sh) {
   const nav = sh._nav; if (!nav) return;
@@ -39,8 +39,8 @@ function enhance() {
     const name = shelfName(h2);
     const nav = document.createElement('div');
     nav.className = 'shelf-nav';
-    nav.innerHTML = `<button type="button" class="snav" aria-label="Bläddra bakåt i ${esc(name)}" title="Föregående"><span aria-hidden="true">‹</span></button>`
-      + `<button type="button" class="snav" aria-label="Bläddra framåt i ${esc(name)}" title="Nästa"><span aria-hidden="true">›</span></button>`;
+    nav.innerHTML = `<button type="button" class="snav" aria-label="${t('Bläddra bakåt i {name}', { name: esc(name) })}" title="${t('Föregående')}"><span aria-hidden="true">‹</span></button>`
+      + `<button type="button" class="snav" aria-label="${t('Bläddra framåt i {name}', { name: esc(name) })}" title="${t('Nästa')}"><span aria-hidden="true">›</span></button>`;
     nav.children[0].onclick = () => page(sh, -1);
     nav.children[1].onclick = () => page(sh, 1);
     h2.after(nav);
@@ -115,7 +115,7 @@ export function initCardSize() {
   applySize(v);
   const r = $('#cardsize'); if (!r) return;
   r.min = SIZE.min; r.max = SIZE.max; r.value = v;
-  r.setAttribute('aria-valuetext', `${v} pixlar`);
-  r.oninput = () => { applySize(r.value); r.setAttribute('aria-valuetext', `${clampSize(r.value)} pixlar`); };
+  r.setAttribute('aria-valuetext', t('{v} pixlar', { v }));
+  r.oninput = () => { applySize(r.value); r.setAttribute('aria-valuetext', t('{value} pixlar', { value: clampSize(r.value) })); };
   r.onchange = () => { store.set('cardw', clampSize(r.value)); main.querySelectorAll('.shelf[data-nav]').forEach(update); };
 }

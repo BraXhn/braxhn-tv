@@ -2,12 +2,12 @@
 // skanning, analys, omkodning, inspelning m.m. – med en ring runt ikonen medan något pågår.
 // Klick öppnar en panel med jobben. Hämtar /api/jobs var 3:e sekund när något pågår eller panelen är öppen,
 // annars var 20:e; pausar när fliken är dold och har aldrig mer än ett anrop i luften.
-import { $, esc } from '../core.js';
+import { $, esc, t } from '../core.js';
 import { openPopover } from './menu.js';
 import { emptyState } from './states.js';
 
-const KIND = { scan: 'Skanning', analysis: 'Analys', transcode: 'Omkodning', remux: 'Remux', keyframes: 'Nyckelbilder',
-  subtitle: 'Undertexter', subindex: 'Repliker', health: 'Hälsokontroll', record: 'Inspelning', download: 'Nedladdning' };
+const KIND = { scan: t('Skanning'), analysis: t('Analys'), transcode: t('Omkodning'), remux: 'Remux', keyframes: t('Nyckelbilder'),
+  subtitle: t('Undertexter'), subindex: t('Repliker'), health: t('Hälsokontroll'), record: t('Inspelning'), download: t('Nedladdning') };
 const S = { on: false, jobs: [], timer: null, busy: false, pop: null };
 const R = 11, C = 2 * Math.PI * R;
 
@@ -33,7 +33,7 @@ function ensureButton() {
   if ($('#actbtn')) return;
   const b = document.createElement('button');
   b.type = 'button'; b.id = 'actbtn'; b.className = 'actbtn';
-  b.setAttribute('aria-label', 'Aktivitet'); b.title = 'Aktivitet';
+  b.setAttribute('aria-label', t('Aktivitet')); b.title = t('Aktivitet');
   b.setAttribute('aria-haspopup', 'dialog'); b.setAttribute('aria-expanded', 'false');
   b.innerHTML = `<svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
     <circle class="act-track" cx="14" cy="14" r="${R}"/><circle class="act-arc" cx="14" cy="14" r="${R}" stroke-dasharray="0 ${C}"/>
@@ -69,7 +69,7 @@ function render() {
   b.classList.toggle('indet', n > 0 && one == null);
   arc.setAttribute('stroke-dasharray', n === 0 ? `0 ${C}` : one != null ? `${(one * C).toFixed(1)} ${C}` : `${(C * 0.28).toFixed(1)} ${C}`);
   cnt.hidden = n === 0; cnt.textContent = n > 9 ? '9+' : String(n);
-  const label = n ? `Aktivitet: ${n} ${'pågår'}` : 'Aktivitet';
+  const label = n ? t('Aktivitet: {n} {v}', { n, v: t('pågår') }) : t('Aktivitet');
   b.setAttribute('aria-label', label); b.title = label;
   if (S.pop) fillPanel(S.pop.body);
 }
@@ -78,10 +78,10 @@ const elapsed = (started) => {
   if (!started) return '';
   const ms = started < 1e12 ? started * 1000 : started; // sekunder eller millisekunder
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min`;
+  return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min` : t('{v} h {v2} min', { v: Math.floor(s / 3600), v2: Math.floor(s % 3600 / 60) });
 };
 function fillPanel(body) {
-  if (!S.jobs.length) { body.innerHTML = emptyState({ icon: '✓', title: 'Inget pågår just nu', text: 'Skanning, omkodning och inspelningar visas här medan de pågår.', compact: true }); return; }
+  if (!S.jobs.length) { body.innerHTML = emptyState({ icon: '✓', title: t('Inget pågår just nu'), text: t('Skanning, omkodning och inspelningar visas här medan de pågår.'), compact: true }); return; }
   const groups = new Map();
   for (const j of S.jobs) { const k = j.kind || 'other'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(j); }
   const top = body.scrollTop;
@@ -96,7 +96,7 @@ function fillPanel(body) {
   body.scrollTop = top;
 }
 function openPanel(b) {
-  S.pop = openPopover(b, { label: 'Aktivitet', title: 'Aktivitet', cls: 'actpanel', onClose: () => { S.pop = null; } });
+  S.pop = openPopover(b, { label: t('Aktivitet'), title: t('Aktivitet'), cls: 'actpanel', onClose: () => { S.pop = null; } });
   fillPanel(S.pop.body);
   S.pop.place();
   // Snabbare uppdatering medan panelen är öppen

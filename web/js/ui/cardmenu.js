@@ -1,7 +1,7 @@
 // Snabbåtgärder på affischkorten (⋮, högerklick, långtryck, Menu-tangenten): spela, sedd/osedd, Min lista,
 // ta bort från Fortsätt titta, följ, eget betyg, titta tillsammans och – för administratörer – metadataverktygen.
 // Kortet uppdateras direkt (optimistiskt) och ändringar som går att ångra får "Ångra" i toasten.
-import { $$, act, api, fmtTime, me, sxe, toast, toastErr } from '../core.js';
+import { $$, act, api, fmtTime, me, sxe, toast, toastErr, t } from '../core.js';
 import { need, play, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
@@ -41,7 +41,7 @@ function removeCard(el) {
   return () => { parent.insertBefore(el, next && next.parentNode === parent ? next : null); if (section) section.hidden = false; };
 }
 const rowOf = (el) => el.closest('[data-row]')?.dataset.row || '';
-const undoToast = (msg, undo) => toast(msg, { action: { label: 'Ångra', onClick: act(undo) } });
+const undoToast = (msg, undo) => toast(msg, { action: { label: t('Ångra'), onClick: act(undo) } });
 
 async function setWatched(it, watched) {
   const prev = { watched: it.watched, position: it.position, watchedEpisodes: it.watchedEpisodes };
@@ -49,7 +49,7 @@ async function setWatched(it, watched) {
   apply(it.kind === 'show' ? { watched, watchedEpisodes: watched ? it.episodes : 0 } : { watched, position: 0 });
   try { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched }, bg: true }); }
   catch (e) { apply(prev); return toastErr(e); }
-  const msg = watched ? 'Markerad som sedd' : 'Markerad som osedd';
+  const msg = watched ? t('Markerad som sedd') : t('Markerad som osedd');
   // En serie som var delvis sedd går inte att återställa avsnitt för avsnitt – då ingen Ångra
   const exact = it.kind !== 'show' || !prev.watchedEpisodes || prev.watched;
   if (!exact) return toast(msg);
@@ -63,8 +63,8 @@ async function setWatchlist(it, el, add) {
   const restore = !add && rowOf(el) === 'watchlist' ? removeCard(el) : null;
   try { await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add }, bg: true }); }
   catch (e) { restore?.(); return toastErr(e); }
-  const what = it.kind === 'episode' ? 'Serien' : 'Titeln';
-  undoToast(add ? `${what} ligger nu i Min lista` : `${what} är borttagen från Min lista`, async () => {
+  const what = it.kind === 'episode' ? t('Serien') : t('Titeln');
+  undoToast(add ? t('{what} ligger nu i Min lista', { what }) : t('{what} är borttagen från Min lista', { what }), async () => {
     restore?.();
     await api(`/items/${it.id}/watchlist`, { method: 'POST', body: { add: !add }, bg: true });
   });
@@ -76,7 +76,7 @@ async function hideContinue(it, el) {
   catch (e) { restore(); return toastErr(e); }
   const pos = r.position;
   if (pos !== it.position) redraw(Object.assign(it, { position: 0 }));
-  undoToast('Borttagen från Fortsätt titta', async () => {
+  undoToast(t('Borttagen från Fortsätt titta'), async () => {
     restore();
     await api(`/items/${it.id}/continue`, { method: 'POST', body: { hide: false, position: pos }, bg: true });
     if (pos) redraw(Object.assign(it, { position: pos }));
@@ -88,19 +88,19 @@ async function removeFromCollection(it, el) {
   const cid = ucolOf(el), restore = removeCard(el);
   try { await api(`/custom-collections/${cid}/items/${it.id}`, { method: 'DELETE', bg: true }); }
   catch (e) { restore(); return toastErr(e); }
-  undoToast('Borttagen från samlingen', async () => {
+  undoToast(t('Borttagen från samlingen'), async () => {
     await api(`/custom-collections/${cid}/items`, { method: 'POST', body: { id: it.id }, bg: true });
     route(); // tillbaka på sin plats i ordningen
   });
 }
 async function setFollow(it, follow) {
   const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow }, bg: true });
-  const name = it.kind === 'episode' ? it.showTitle || 'serien' : it.title;
-  toast(r.following ? `Du följer ${name} – nya avsnitt visas under Nytt för dig` : `Du följer inte längre ${name}`);
+  const name = it.kind === 'episode' ? it.showTitle || t('serien') : it.title;
+  toast(r.following ? t('Du följer {name} – nya avsnitt visas under Nytt för dig', { name }) : t('Du följer inte längre {name}', { name }));
 }
 async function seasonWatched(it) {
   await api(`/items/${it.show}/watched?season=${it.season}`, { method: 'POST', body: { watched: true }, bg: true });
-  toast(`Säsong ${it.season} är markerad som sedd`);
+  toast(t('Säsong {season} är markerad som sedd', { season: it.season }));
   if (location.hash === `#/item/${it.show}`) route();
 }
 
@@ -110,58 +110,58 @@ export function cardActions(it, st, el) {
   const pos = media && it.position > 30 ? it.position : 0;
   const admin = !!me?.adminHere;
   return [
-    { icon: '▶', label: `Fortsätt från ${fmtTime(pos)}`, hidden: !pos, onSelect: () => startPlay(null, it.id, pos) },
-    { icon: pos ? '↺' : '▶', label: pos ? 'Spela från början' : 'Spela', hidden: !media, onSelect: () => startPlay(null, it.id, 0) },
-    { icon: '▶', label: st.next ? `${st.next.position > 0 ? 'Fortsätt' : 'Spela'} ${sxe(st.next)}` : '', hidden: !show || !st.next,
+    { icon: '▶', label: t('Fortsätt från {pos}', { pos: fmtTime(pos) }), hidden: !pos, onSelect: () => startPlay(null, it.id, pos) },
+    { icon: pos ? '↺' : '▶', label: pos ? t('Spela från början') : t('Spela'), hidden: !media, onSelect: () => startPlay(null, it.id, 0) },
+    { icon: '▶', label: st.next ? `${st.next.position > 0 ? t('Fortsätt') : t('Spela')} ${sxe(st.next)}` : '', hidden: !show || !st.next,
       onSelect: () => startPlay(null, st.next.id, st.next.position || 0) },
     'separator',
-    { icon: '✓', label: it.watched ? 'Markera som osedd' : (show ? 'Markera serien som sedd' : 'Markera som sedd'), onSelect: () => setWatched(it, !it.watched) },
-    { icon: '✓', label: `Markera säsong ${it.season} som sedd`, hidden: !ep, onSelect: act(() => seasonWatched(it)) },
-    { icon: st.inWatchlist ? '−' : '+', label: st.inWatchlist ? 'Ta bort från Min lista' : (ep ? 'Lägg serien i Min lista' : 'Lägg till i Min lista'),
+    { icon: '✓', label: it.watched ? t('Markera som osedd') : (show ? t('Markera serien som sedd') : t('Markera som sedd')), onSelect: () => setWatched(it, !it.watched) },
+    { icon: '✓', label: t('Markera säsong {season} som sedd', { season: it.season }), hidden: !ep, onSelect: act(() => seasonWatched(it)) },
+    { icon: st.inWatchlist ? '−' : '+', label: st.inWatchlist ? t('Ta bort från Min lista') : (ep ? t('Lägg serien i Min lista') : t('Lägg till i Min lista')),
       onSelect: () => setWatchlist(it, el, !st.inWatchlist) },
-    { icon: '▤', label: ep ? 'Lägg serien i en samling…' : 'Lägg till i samling…', onSelect: () => addToCollection(it) },
-    { icon: '★', label: it.userRating ? `Mitt betyg: ${fmtStars(it.userRating)} – ändra…` : 'Betygsätt…',
+    { icon: '▤', label: ep ? t('Lägg serien i en samling…') : t('Lägg till i samling…'), onSelect: () => addToCollection(it) },
+    { icon: '★', label: it.userRating ? t('Mitt betyg: {userRating} – ändra…', { userRating: fmtStars(it.userRating) }) : t('Betygsätt…'),
       onSelect: () => rateDialog({ kind: 'item', id: it.id, title: it.title, value: it.userRating, onSaved: (v) => redraw(Object.assign(it, { userRating: v ?? undefined })) }) },
-    { icon: '−', label: 'Ta bort från samlingen', hidden: !ucolOf(el), onSelect: () => removeFromCollection(it, el) },
-    { icon: '✕', label: 'Ta bort från Fortsätt titta', hidden: rowOf(el) !== 'continue' || !media, onSelect: () => hideContinue(it, el) },
-    { icon: st.following ? '🔕' : '🔔', label: st.following ? 'Sluta följa serien' : 'Följ serien', hidden: st.following == null,
+    { icon: '−', label: t('Ta bort från samlingen'), hidden: !ucolOf(el), onSelect: () => removeFromCollection(it, el) },
+    { icon: '✕', label: t('Ta bort från Fortsätt titta'), hidden: rowOf(el) !== 'continue' || !media, onSelect: () => hideContinue(it, el) },
+    { icon: st.following ? '🔕' : '🔔', label: st.following ? t('Sluta följa serien') : t('Följ serien'), hidden: st.following == null,
       onSelect: act(() => setFollow(it, !st.following)) },
-    { icon: '👥', label: 'Titta tillsammans…', hidden: !media || !!me?.kid, onSelect: () => play(it.id, pos, { startParty: true }).catch(toastErr) },
-    { icon: '⤓', label: 'Spara offline…', hidden: !media || me?.canDownload === false || !window.caches, onSelect: () => saveOffline(it) },
-    { icon: '⤓', label: 'Ladda ner filen', hidden: !media || me?.canDownload === false, href: `/api/stream/${+it.id}/download`, download: true },
+    { icon: '👥', label: t('Titta tillsammans…'), hidden: !media || !!me?.kid, onSelect: () => play(it.id, pos, { startParty: true }).catch(toastErr) },
+    { icon: '⤓', label: t('Spara offline…'), hidden: !media || me?.canDownload === false || !window.caches, onSelect: () => saveOffline(it) },
+    { icon: '⤓', label: t('Ladda ner filen'), hidden: !media || me?.canDownload === false, href: `/api/stream/${+it.id}/download`, download: true },
     'separator',
-    { icon: 'ℹ', label: 'Visa information', href: `#/item/${+it.id}` },
-    { icon: '↗', label: 'Gå till serien', hidden: !ep, href: `#/item/${+it.show}` },
+    { icon: 'ℹ', label: t('Visa information'), href: `#/item/${+it.id}` },
+    { icon: '↗', label: t('Gå till serien'), hidden: !ep, href: `#/item/${+it.show}` },
     'separator',
-    { icon: '⟳', label: 'Uppdatera metadata', hidden: !admin, onSelect: () => refreshMeta(it) },
-    { icon: '?', label: 'Fel titel?', hidden: !admin || ep, onSelect: () => matchItem(it) },
+    { icon: '⟳', label: t('Uppdatera metadata'), hidden: !admin, onSelect: () => refreshMeta(it) },
+    { icon: '?', label: t('Fel titel?'), hidden: !admin || ep, onSelect: () => matchItem(it) },
     // Listorna saknar beskrivningen – hämta hela titeln så att Redigera inte tömmer den
-    { icon: '✎', label: 'Redigera…', hidden: !admin, onSelect: () => editItem(it) },
-    { icon: '🖼', label: 'Byt bild…', hidden: !admin, onSelect: () => editItem(it, 'images') },
-    { icon: '⟲', label: 'Analysera intro och eftertexter igen', hidden: !admin || !ep,
-      onSelect: act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast('Analyserar i bakgrunden'); }) },
+    { icon: '✎', label: t('Redigera…'), hidden: !admin, onSelect: () => editItem(it) },
+    { icon: '🖼', label: t('Byt bild…'), hidden: !admin, onSelect: () => editItem(it, 'images') },
+    { icon: '⟲', label: t('Analysera intro och eftertexter igen'), hidden: !admin || !ep,
+      onSelect: act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast(t('Analyserar i bakgrunden')); }) },
   ];
 }
 
 /** Menyns val för ett säsongskort (nya avsnitt i en säsong) */
 export function seasonActions(g, el) {
-  const admin = !!me?.adminHere, sn = g.season === 0 ? 'specialavsnitten' : `säsong ${g.season}`;
+  const admin = !!me?.adminHere, sn = g.season === 0 ? t('specialavsnitten') : t('säsong {season}', { season: g.season });
   return [
-    { icon: '▶', label: g.next ? `${g.next.position > 0 ? 'Fortsätt' : 'Spela'} S${g.season} · A${g.next.episode}` : '', hidden: !g.next,
+    { icon: '▶', label: g.next ? `${g.next.position > 0 ? t('Fortsätt') : t('Spela')} S${g.season} · A${g.next.episode}` : '', hidden: !g.next,
       onSelect: () => startPlay(null, g.next.id, g.next.position || 0) },
     'separator',
-    { icon: '✓', label: `Markera ${sn} som sedd`, hidden: !g.unwatched, onSelect: act(async () => {
+    { icon: '✓', label: t('Markera {sn} som sedd', { sn }), hidden: !g.unwatched, onSelect: act(async () => {
       await api(`/items/${g.show}/watched?season=${g.season}`, { method: 'POST', body: { watched: true }, bg: true });
       Object.assign(g, { unwatched: 0, next: null });
       const tmp = document.createElement('div'); tmp.innerHTML = seasonCard(g);
       const had = el.contains(document.activeElement); const n = tmp.firstElementChild; el.replaceWith(n);
       if (had) n.querySelector('.clink')?.focus({ preventScroll: true });
-      toast(`${g.showTitle}: ${sn} är markerad som sedd`);
+      toast(t('{showTitle}: {sn} är markerad som sedd', { showTitle: g.showTitle, sn }));
     }) },
-    { icon: '☰', label: `Visa ${sn}`, href: `#/item/${+g.show}/${+g.season}` },
-    { icon: 'ℹ', label: 'Gå till serien', href: `#/item/${+g.show}` },
+    { icon: '☰', label: t('Visa {sn}', { sn }), href: `#/item/${+g.show}/${+g.season}` },
+    { icon: 'ℹ', label: t('Gå till serien'), href: `#/item/${+g.show}` },
     'separator',
-    { icon: '✎', label: 'Redigera serien…', hidden: !admin, onSelect: act(async () => editItem(await api('/items/' + g.show, { bg: true }))) },
+    { icon: '✎', label: t('Redigera serien…'), hidden: !admin, onSelect: act(async () => editItem(await api('/items/' + g.show, { bg: true }))) },
   ];
 }
 
@@ -173,8 +173,8 @@ export async function openCardMenu(el, point = null) {
   if (el.dataset.season != null) {
     const g = seasonItem(el.dataset.show, el.dataset.season);
     if (!g) return;
-    const name = `${g.showTitle} – ${g.season === 0 ? 'Specialavsnitt' : 'Säsong ' + g.season}`;
-    return openMenu(btn, seasonActions(g, el), { point, title: name, label: `Åtgärder för ${name}` });
+    const name = `${g.showTitle} – ${g.season === 0 ? t('Specialavsnitt') : t('Säsong ') + g.season}`;
+    return openMenu(btn, seasonActions(g, el), { point, title: name, label: t('Åtgärder för {name}', { name }) });
   }
   const it = cardItem(el.dataset.id);
   if (!it) return;
@@ -184,7 +184,7 @@ export async function openCardMenu(el, point = null) {
   catch (e) { return toastErr(e); }
   if (seq !== opening || !btn.isConnected) return;
   const name = it.kind === 'episode' ? `${it.showTitle ? it.showTitle + ' ' : ''}${sxe(it)}` : it.title;
-  openMenu(btn, cardActions(it, st, el), { point, title: name, label: `Åtgärder för ${name}` });
+  openMenu(btn, cardActions(it, st, el), { point, title: name, label: t('Åtgärder för {name}', { name }) });
 }
 
 /** ▶ på kortet: spelar direkt – filmer och avsnitt där man slutade, serier nästa avsnitt */
@@ -195,7 +195,7 @@ async function playCard(b) {
   b.disabled = true;
   try {
     const st = await api(`/items/${it.id}/state`, { bg: true });
-    if (!st.next) return toast('Inga avsnitt att spela');
+    if (!st.next) return toast(t('Inga avsnitt att spela'));
     await play(st.next.id, st.next.position || 0);
   } catch (e) { toastErr(e); } finally { b.disabled = false; }
 }

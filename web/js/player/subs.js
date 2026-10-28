@@ -1,5 +1,5 @@
 // Undertexter i videospelaren, inklusive bildundertexter (PGS)
-import { $, $$, esc, toast } from '../core.js';
+import { $, $$, esc, toast, t } from '../core.js';
 import { P } from './video.js';
 import { subScale, subStyle } from './comfort.js';
 import { need } from '../lazy.js';
@@ -187,7 +187,7 @@ function pgsShow(sub) {
       const d = await r.json();
       if (!live()) return;
       g.data = d; g.shown = null; g.draw();
-      if (d.error) toast('Undertexten kunde inte läsas');
+      if (d.error) toast(t('Undertexten kunde inte läsas'));
       else if (!d.done) g.timer = setTimeout(poll, 3000);
     } catch { if (live()) g.timer = setTimeout(poll, 10000); }
   };

@@ -4,7 +4,7 @@
 // "roving tabindex": ←/→ föregående/nästa program, ↑/↓ samma tid i kanalen ovanför/under, Page Up/Down en skärm,
 // Home = nu, Enter = programmet, ← från första programmet = kanalen) och med touch/mus (vanlig skrollning i båda led).
 // @lazy – laddas vid behov (LAZY i js/router.js)
-import { $, $$, act, api, dayName, esc, hhmm, main, me, onLeave, store, toast, toastErr, views } from '../core.js';
+import { $, $$, act, api, dayName, esc, hhmm, main, me, onLeave, store, toast, toastErr, views, t } from '../core.js';
 import { playLive } from '../player/live.js';
 import { playCatchup, setZapList } from '../player/iptv.js';
 import { openDialog, choiceDialog } from '../ui/dialog.js';
@@ -22,9 +22,9 @@ const dayStart = (off) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setD
 views.epg = async () => {
   const D = await api('/iptv/channels');
   if (!D.channels.length) {
-    main.innerHTML = `<div class="toolbar"><h1>TV-guide</h1></div>` + emptyState({ icon: '📺', title: 'Inga kanaler ännu',
-      text: me.adminHere ? 'Lägg till en IPTV-lista, ett Xtream-konto eller en HDHomeRun under Administration.' : 'En administratör behöver lägga till en TV-källa.',
-      action: me.adminHere ? { label: 'Lägg till källa', href: '#/iptvadmin' } : null });
+    main.innerHTML = `<div class="toolbar"><h1>${t('TV-guide')}</h1></div>` + emptyState({ icon: '📺', title: t('Inga kanaler ännu'),
+      text: me.adminHere ? t('Lägg till en IPTV-lista, ett Xtream-konto eller en HDHomeRun under Administration.') : t('En administratör behöver lägga till en TV-källa.'),
+      action: me.adminHere ? { label: t('Lägg till källa'), href: '#/iptvadmin' } : null });
     return;
   }
   const maxBack = Math.min(7, Math.max(0, ...D.channels.map(c => c.catchup || 0)));
@@ -36,15 +36,15 @@ views.epg = async () => {
   if (S.group && S.group !== '★' && !groups.some(g => g.name === S.group)) S.group = '';
   const days = [];
   for (let d = -maxBack; d <= 6; d++) days.push(d);
-  main.innerHTML = `<div class="toolbar epgbar"><h1>TV-guide</h1>
-      <select id="eday" aria-label="Dag">${days.map(d => `<option value="${d}"${d === 0 ? ' selected' : ''}>${esc(d === -1 ? 'Igår' : dayName(dayStart(d) + 43200))}</option>`).join('')}</select>
-      <button class="ghost small" id="enow">Nu</button>
-      <form id="esearch" role="search" class="row"><input id="eq" type="search" placeholder="Sök program…" aria-label="Sök program" autocomplete="off"></form>
-      <span class="row epglinks"><a class="btn ghost small" href="#/live">Kanaler</a><a class="btn ghost small" href="#/dvr">⏺ Inspelningar</a>${D.vod ? '<a class="btn ghost small" href="#/vod">🎬 Filmer &amp; serier</a>' : ''}${me.adminHere ? '<a class="btn ghost small" href="#/iptvadmin">Hantera</a>' : ''}</span></div>
-    <div id="egroups" class="epggroups">${tabsHtml({ id: 'egtabs', label: 'Kanalgrupper', current: S.group, items: [{ key: '', label: `Alla (${D.channels.length})` },
-      ...(favs ? [{ key: '★', label: `★ Favoriter (${favs})` }] : []), ...groups.map(g => ({ key: g.name, label: `${g.name} (${g.count})` }))] })}</div>
+  main.innerHTML = `<div class="toolbar epgbar"><h1>${t('TV-guide')}</h1>
+      <select id="eday" aria-label="${t('Dag')}">${days.map(d => `<option value="${d}"${d === 0 ? ' selected' : ''}>${esc(d === -1 ? t('Igår') : dayName(dayStart(d) + 43200))}</option>`).join('')}</select>
+      <button class="ghost small" id="enow">${t('Nu')}</button>
+      <form id="esearch" role="search" class="row"><input id="eq" type="search" placeholder="${t('Sök program…')}" aria-label="${t('Sök program')}" autocomplete="off"></form>
+      <span class="row epglinks"><a class="btn ghost small" href="#/live">${t('Kanaler')}</a><a class="btn ghost small" href="#/dvr">${t('⏺ Inspelningar')}</a>${D.vod ? t('<a class="btn ghost small" href="#/vod">🎬 Filmer &amp; serier</a>') : ''}${me.adminHere ? t('<a class="btn ghost small" href="#/iptvadmin">Hantera</a>') : ''}</span></div>
+    <div id="egroups" class="epggroups">${tabsHtml({ id: 'egtabs', label: t('Kanalgrupper'), current: S.group, items: [{ key: '', label: t('Alla ({channelsN})', { channelsN: D.channels.length }) },
+      ...(favs ? [{ key: '★', label: t('★ Favoriter ({favs})', { favs }) }] : []), ...groups.map(g => ({ key: g.name, label: `${g.name} (${g.count})` }))] })}</div>
     <div class="epginfo" id="einfo" aria-live="polite"></div>
-    <div class="epg" id="egrid" role="grid" aria-label="TV-guide" tabindex="-1"><div class="epgcanvas" id="ecanvas"></div></div>
+    <div class="epg" id="egrid" role="grid" aria-label="${t('TV-guide')}" tabindex="-1"><div class="epgcanvas" id="ecanvas"></div></div>
 `;
   const grid = $('#egrid'), canvas = $('#ecanvas'), info = $('#einfo');
   // Rutnätet fyller fönstret ner till flikraden (telefon) – det skrollar själv i båda led
@@ -88,7 +88,7 @@ views.epg = async () => {
     canvas.innerHTML = `<div class="epghead" role="row"><div class="epgcorner" role="columnheader">${esc(dayName(S.from + 43200))}</div>
       <div class="epgtimes" style="width:${W()}px">${ticks.map(t => `<span style="left:${x(t)}px"${new Date(t * 1000).getMinutes() ? ' class="half"' : ''}>${hhmm(t)}</span>`).join('')}</div></div>
       <div class="epgbody" id="ebody" style="height:${n * S.rowH}px"></div><div class="epgnow" id="enowl" hidden></div>`;
-    if (!n) $('#ebody').innerHTML = `<div class="epgempty">${S.group === '★' ? 'Inga favoriter – håll inne (eller högerklicka) på en kanal för att lägga till den.' : 'Inga kanaler i gruppen.'}</div>`;
+    if (!n) $('#ebody').innerHTML = `<div class="epgempty">${S.group === '★' ? t('Inga favoriter – håll inne (eller högerklicka) på en kanal för att lägga till den.') : t('Inga kanaler i gruppen.')}</div>`;
     nowLine();
     draw();
   }
@@ -100,21 +100,21 @@ views.epg = async () => {
   }
   function rowHtml(c, i) {
     return `<div class="epgch-wrap"><button type="button" class="epgch" role="rowheader" tabindex="-1" data-row="${i}" title="${esc(c.name)}">${chLogo(c, 'small')}
-      <span class="epgchn">${c.logo && c.number ? `<b>${esc(c.number)}</b> ` : ''}${esc(c.name)}</span>${c.favorite ? '<i class="epgfav" aria-label="Favorit">★</i>' : ''}${c.catchup ? '<i class="epgcu" title="Catch-up">⟲</i>' : ''}</button></div>
+      <span class="epgchn">${c.logo && c.number ? `<b>${esc(c.number)}</b> ` : ''}${esc(c.name)}</span>${c.favorite ? t('<i class="epgfav" aria-label="Favorit">★</i>') : ''}${c.catchup ? '<i class="epgcu" title="Catch-up">⟲</i>' : ''}</button></div>
       <div class="epgtrack" style="width:${W()}px"></div>`;
   }
   function fillRow(r, i) {
     const c = S.list[i], track = r.lastElementChild;
     const progs = S.prog.get(c.id);
     if (!progs) { track.innerHTML = '<span class="epgload"></span>'; return; }
-    const t = nowS();
+    const tt = nowS();
     track.innerHTML = progs.length ? progs.map(p => {
       const l = Math.max(0, x(p.start)), w = Math.max(3, Math.min(W(), x(p.stop)) - l - 2);
-      const on = p.start <= t && p.stop > t, past = p.stop <= t;
+      const on = p.start <= tt && p.stop > tt, past = p.stop <= tt;
       return `<button type="button" class="epgp${on ? ' on' : ''}${past ? ' past' : ''}${p.catchup ? ' cu' : ''}" role="gridcell" tabindex="-1" data-pid="${p.id}" data-row="${i}"
-        style="left:${l}px;width:${w}px" aria-label="${esc(`${p.title}, ${hhmm(p.start)}–${hhmm(p.stop)}${p.catchup ? ', finns i arkivet' : ''}${p.reminder ? ', påminnelse' : ''}`)}">
-        <b>${p.reminder ? '🔔 ' : ''}${esc(p.title)}</b><span>${hhmm(p.start)}${p.subtitle ? ' · ' + esc(p.subtitle) : p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}</span>${on ? `<i class="epgpr" style="width:${Math.round((t - p.start) / (p.stop - p.start) * 100)}%"></i>` : ''}</button>`;
-    }).join('') : '<span class="epgnone">Ingen guide</span>';
+        style="left:${l}px;width:${w}px" aria-label="${esc(`${p.title}, ${hhmm(p.start)}–${hhmm(p.stop)}${p.catchup ? t(', finns i arkivet') : ''}${p.reminder ? t(', påminnelse') : ''}`)}">
+        <b>${p.reminder ? '🔔 ' : ''}${esc(p.title)}</b><span>${hhmm(p.start)}${p.subtitle ? ' · ' + esc(p.subtitle) : p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}</span>${on ? `<i class="epgpr" style="width:${Math.round((tt - p.start) / (p.stop - p.start) * 100)}%"></i>` : ''}</button>`;
+    }).join('') : t('<span class="epgnone">Ingen guide</span>');
     padTitles(track);
   }
   // Långa program som börjat till vänster om det synliga: titeln flyttas in så att den syns
@@ -205,8 +205,8 @@ views.epg = async () => {
     showInfo(c, p);
   }
   function showInfo(c, p) {
-    info.innerHTML = p ? `<b>${esc(p.title)}</b> <span class="muted">${esc(c.name)} · ${esc(dayName(p.start))} ${hhmm(p.start)}–${hhmm(p.stop)}${p.subtitle ? ' · ' + esc(p.subtitle) : ''}${p.category ? ' · ' + esc(p.category) : ''}${p.catchup ? (p.stop > nowS() ? ' · ⟲ kan ses från början' : ' · ⟲ i arkivet') : ''}</span>`
-      : `<b>${esc(c.number ? c.number + ' · ' : '')}${esc(c.name)}</b> <span class="muted">${c.now ? 'Nu: ' + esc(c.now.title) : ''} – Enter för att titta</span>`;
+    info.innerHTML = p ? `<b>${esc(p.title)}</b> <span class="muted">${esc(c.name)} · ${esc(dayName(p.start))} ${hhmm(p.start)}–${hhmm(p.stop)}${p.subtitle ? ' · ' + esc(p.subtitle) : ''}${p.category ? ' · ' + esc(p.category) : ''}${p.catchup ? (p.stop > nowS() ? t(' · ⟲ kan ses från början') : t(' · ⟲ i arkivet')) : ''}</span>`
+      : `<b>${esc(c.number ? c.number + ' · ' : '')}${esc(c.name)}</b> <span class="muted">${t('{v} – Enter för att titta', { v: c.now ? t('Nu: ') + esc(c.now.title) : '' })}</span>`;
   }
   grid.addEventListener('focusin', (e) => {
     const b = e.target.closest('[data-row]'); if (!b) return;
@@ -244,15 +244,15 @@ views.epg = async () => {
   contextMenu(grid, '.epgch', (el, point) => {
     const c = S.list[+el.dataset.row]; if (!c) return;
     openMenu(el, [
-      { icon: '▶', label: 'Titta', onSelect: () => playLive(c) },
-      { icon: c.favorite ? '☆' : '★', label: c.favorite ? 'Ta bort från favoriter' : 'Lägg till i favoriter', onSelect: () => toggleFav(c) },
+      { icon: '▶', label: t('Titta'), onSelect: () => playLive(c) },
+      { icon: c.favorite ? '☆' : '★', label: c.favorite ? t('Ta bort från favoriter') : t('Lägg till i favoriter'), onSelect: () => toggleFav(c) },
     ], { point, title: c.name });
   });
   async function toggleFav(c) {
     try {
       await api('/iptv/favorites/' + c.id, { method: 'PUT', body: { on: !c.favorite } });
       c.favorite = !c.favorite;
-      toast(c.favorite ? `${c.name} är en favorit` : `${c.name} är inte längre en favorit`);
+      toast(c.favorite ? t('{name} är en favorit', { name: c.name }) : t('{name} är inte längre en favorit', { name: c.name }));
       const i = S.list.indexOf(c), r = S.rows.get(i);
       if (S.group === '★') layout(); else if (r) { r.innerHTML = rowHtml(c, i); fillRow(r, i); }
     } catch (e) { toastErr(e); }
@@ -277,8 +277,8 @@ views.epg = async () => {
     e.preventDefault();
     const q = $('#eq').value.trim(); if (!q) return;
     const r = await api('/iptv/search?q=' + encodeURIComponent(q));
-    const h = openDialog({ title: `Sök: ${q}`, actions: [{ label: 'Stäng' }], body: r.length ? `<div class="srows">${r.map(p => `<button type="button" class="srow" data-sp="${p.id}">
-        <b>${esc(p.title)}${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</b><span class="muted small">${esc(dayName(p.start))} ${hhmm(p.start)} · ${esc(p.channel)}</span></button>`).join('')}</div>` : '<p class="muted">Inga program hittades.</p>' });
+    const h = openDialog({ title: t('Sök: {q}', { q }), actions: [{ label: t('Stäng') }], body: r.length ? `<div class="srows">${r.map(p => `<button type="button" class="srow" data-sp="${p.id}">
+        <b>${esc(p.title)}${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</b><span class="muted small">${esc(dayName(p.start))} ${hhmm(p.start)} · ${esc(p.channel)}</span></button>`).join('')}</div>` : t('<p class="muted">Inga program hittades.</p>') });
     for (const b of $$('[data-sp]', h.el)) b.onclick = () => { h.close(); programDialog(+b.dataset.sp); };
   });
 
@@ -293,23 +293,23 @@ views.epg = async () => {
     let p;
     try { p = await api('/iptv/programs/' + pid); } catch (e) { toastErr(e); return; }
     const ch = S.all.find(c => c.id === p.channelId) || chHint || p.channel;
-    const t = nowS(), future = p.start > t, past = p.stop <= t;
-    const status = { scheduled: 'Inspelning bokad', recording: 'Spelas in nu', processing: 'Bearbetas', done: 'Inspelad' }[p.recording?.status];
+    const tt = nowS(), future = p.start > tt, past = p.stop <= tt;
+    const status = { scheduled: t('Inspelning bokad'), recording: t('Spelas in nu'), processing: t('Bearbetas'), done: t('Inspelad') }[p.recording?.status];
     const btns = [];
-    if (p.live) btns.push('<button class="primary" id="pdw">▶ Titta</button>');
-    if (p.catchup) btns.push(`<button class="${p.live ? 'ghost' : 'primary'}" id="pdc">${p.live ? '⏮ Från början' : '▶ Spela'}</button>`);
-    if (future) btns.push(`<button class="ghost" id="pdrem">${p.reminder ? '🔕 Ta bort påminnelsen' : '🔔 Påminn mig'}</button>`);
+    if (p.live) btns.push(t('<button class="primary" id="pdw">▶ Titta</button>'));
+    if (p.catchup) btns.push(`<button class="${p.live ? 'ghost' : 'primary'}" id="pdc">${p.live ? t('⏮ Från början') : t('▶ Spela')}</button>`);
+    if (future) btns.push(`<button class="ghost" id="pdrem">${p.reminder ? t('🔕 Ta bort påminnelsen') : t('🔔 Påminn mig')}</button>`);
     if (!past) {
-      if (!p.recording) btns.push('<button class="ghost" id="pdr">⏺ Spela in</button>');
-      else if (p.recording.status === 'scheduled') btns.push('<button class="ghost" id="pdx">Avboka inspelningen</button>');
-      if (!p.rule) btns.push('<button class="ghost" id="pds">⏺⏺ Spela in serien</button>');
+      if (!p.recording) btns.push(t('<button class="ghost" id="pdr">⏺ Spela in</button>'));
+      else if (p.recording.status === 'scheduled') btns.push(t('<button class="ghost" id="pdx">Avboka inspelningen</button>'));
+      if (!p.rule) btns.push(t('<button class="ghost" id="pds">⏺⏺ Spela in serien</button>'));
     }
-    const h = openDialog({ title: p.title, actions: [{ label: 'Stäng' }], body: `
-      <p class="muted">${esc(ch?.name || '')} · ${esc(dayName(p.start))} ${hhmm(p.start)}–${hhmm(p.stop)}${p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}${p.isNew ? ' · Nytt' : ''}${p.category ? ' · ' + esc(p.category) : ''}</p>
+    const h = openDialog({ title: p.title, actions: [{ label: t('Stäng') }], body: `
+      <p class="muted">${esc(ch?.name || '')} · ${esc(dayName(p.start))} ${hhmm(p.start)}–${hhmm(p.stop)}${p.season ? ` · S${p.season}${p.episode ? 'E' + p.episode : ''}` : ''}${p.isNew ? t(' · Nytt') : ''}${p.category ? ' · ' + esc(p.category) : ''}</p>
       ${p.subtitle ? `<p><b>${esc(p.subtitle)}</b></p>` : ''}${p.description ? `<p>${esc(p.description)}</p>` : ''}
-      ${status ? `<p class="ok-badge" style="display:inline-block">${status}</p>` : ''}${p.rule ? ' <span class="muted small">Serieinspelning aktiv</span>' : ''}
-      ${past && !p.catchup ? '<p class="muted small">Programmet har sänts och finns inte i kanalens arkiv.</p>' : ''}
-      ${p.airings.length ? `<details><summary class="muted small">Fler sändningar (${p.airings.length})</summary><table>${p.airings.map(a => `<tr><td>${esc(dayName(a.start))} ${hhmm(a.start)}</td><td class="muted">${esc(a.channel)}</td></tr>`).join('')}</table></details>` : ''}
+      ${status ? `<p class="ok-badge" style="display:inline-block">${status}</p>` : ''}${p.rule ? t(' <span class="muted small">Serieinspelning aktiv</span>') : ''}
+      ${past && !p.catchup ? t('<p class="muted small">Programmet har sänts och finns inte i kanalens arkiv.</p>') : ''}
+      ${p.airings.length ? `<details><summary class="muted small">${t('Fler sändningar ({airingsN})', { airingsN: p.airings.length })}</summary><table>${p.airings.map(a => `<tr><td>${esc(dayName(a.start))} ${hhmm(a.start)}</td><td class="muted">${esc(a.channel)}</td></tr>`).join('')}</table></details>` : ''}
       <div class="row" style="margin-top:16px;flex-wrap:wrap">${btns.join('')}</div>` });
     const d = h.el, $d = (s) => $(s, d);
     ($d('#pdw') || $d('#pdc') || $d('#pdrem'))?.focus();
@@ -317,19 +317,19 @@ views.epg = async () => {
     if ($d('#pdc')) $d('#pdc').onclick = () => { h.close(); playCatchup(p); };
     if ($d('#pdrem')) $d('#pdrem').onclick = act(async () => {
       await api(`/iptv/programs/${p.id}/reminder`, { method: p.reminder ? 'DELETE' : 'POST' });
-      toast(p.reminder ? 'Påminnelsen är borttagen' : `Du får en påminnelse när ${p.title} börjar`);
+      toast(p.reminder ? t('Påminnelsen är borttagen') : t('Du får en påminnelse när {title} börjar', { title: p.title }));
       const l = S.prog.get(p.channelId)?.find(x => x.id === p.id); if (l) l.reminder = !p.reminder;
       const i = S.list.findIndex(c => c.id === p.channelId), r = S.rows.get(i); if (r) fillRow(r, i);
       h.close();
     });
-    if ($d('#pdr')) $d('#pdr').onclick = act(async () => { const r = await api('/dvr/program', { method: 'POST', body: { programId: p.id } }); toast(r.conflict ? 'Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.' : 'Inspelning bokad'); h.close(); });
-    if ($d('#pdx')) $d('#pdx').onclick = act(async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast('Avbokad'); h.close(); });
+    if ($d('#pdr')) $d('#pdr').onclick = act(async () => { const r = await api('/dvr/program', { method: 'POST', body: { programId: p.id } }); toast(r.conflict ? t('Bokad – men alla tuners är upptagna då. Inspelningen väntar på en ledig tuner.') : t('Inspelning bokad')); h.close(); });
+    if ($d('#pdx')) $d('#pdx').onclick = act(async () => { await api('/dvr/recordings/' + p.recording.id, { method: 'DELETE' }); toast(t('Avbokad')); h.close(); });
     if ($d('#pds')) $d('#pds').onclick = act(async () => {
-      const any = await choiceDialog('Spela in serien', [{ label: `Bara ${ch?.name || 'den här kanalen'}`, value: false }, { label: 'Alla kanaler', value: true }],
-        { text: `Nya avsnitt av ${p.title} spelas in automatiskt. Från vilka kanaler?` });
+      const any = await choiceDialog(t('Spela in serien'), [{ label: t('Bara {v}', { v: ch?.name || t('den här kanalen') }), value: false }, { label: t('Alla kanaler'), value: true }],
+        { text: t('Nya avsnitt av {title} spelas in automatiskt. Från vilka kanaler?', { title: p.title }) });
       if (any === null) return;
       await api('/dvr/program' + (any ? '?anyChannel=1' : ''), { method: 'POST', body: { programId: p.id, series: true, newOnly: true } });
-      toast('Serieinspelning skapad – bara nya avsnitt spelas in'); h.close();
+      toast(t('Serieinspelning skapad – bara nya avsnitt spelas in')); h.close();
     });
   }
 };

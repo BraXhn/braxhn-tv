@@ -22,7 +22,7 @@ addEventListener('error', (e) => { if (e.filename?.startsWith(location.origin)) 
 addEventListener('unhandledrejection', (e) => {
   const r = e.reason;
   // Avbrutna anrop (navigering) och nätverksfel är inga programfel
-  if (!r || r.name === 'AbortError' || r.aborted || r.offline || r.code || (typeof r === 'object' && 'data' in r) || /^Fel \d|Inte inloggad/.test(r.message || '')) return;
+  if (!r || r.name === 'AbortError' || r.aborted || r.offline || r.code || (typeof r === 'object' && 'data' in r) || /^(Fel|Error) \d|Inte inloggad|Not signed in/.test(r.message || '')) return;
   if (r instanceof Error && !(r.stack || '').includes(location.origin)) return;
   report(r.message || r, r.stack);
 });

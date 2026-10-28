@@ -2,7 +2,7 @@
 // osedda titlar (fältet featured i /api/home). Bläddrar långsamt av sig själv, men aldrig med prefers-reduced-motion,
 // och står still medan muspekaren är över eller fokus är inuti, eller när användaren pausat (WCAG 2.2.2).
 // Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit, data-nav-up).
-import { api, esc, fmtDur, heroUrl, later, toast } from '../core.js';
+import { api, esc, fmtDur, heroUrl, later, toast, t } from '../core.js';
 import { startPlay } from '../lazy.js';
 
 const INTERVAL = 9000;
@@ -12,10 +12,10 @@ const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches || d
 function meta(it) {
   const p = [];
   if (it.year) p.push(esc(String(it.year)));
-  if (it.kind === 'show') { if (it.seasons) p.push(it.seasons === 1 ? '1 säsong' : `${+it.seasons} säsonger`); }
+  if (it.kind === 'show') { if (it.seasons) p.push(it.seasons === 1 ? t('1 säsong') : t('{seasons} säsonger', { seasons: +it.seasons })); }
   else if (it.duration) p.push(esc(fmtDur(it.duration)));
   if (it.cert) p.push(esc(it.cert));
-  if (it.rating) p.push(`<span class="star" aria-hidden="true">★</span> ${(+it.rating).toFixed(1)}<span class="sr-only"> i betyg</span>`);
+  if (it.rating) p.push(`<span class="star" aria-hidden="true">★</span> ${(+it.rating).toFixed(1)}<span class="sr-only"> ${t('i betyg')}</span>`);
   return p.map(x => `<span>${x}</span>`).join('');
 }
 
@@ -25,17 +25,17 @@ export function featuredHtml(items) {
   const slides = items.map((it, i) => {
     const ph = HEX.test(it.phBackdrop || '') ? ` style="background:${it.phBackdrop}"` : '';
     const genres = (it.genres || []).slice(0, 3).join(' · ');
-    return `<div class="feat-slide${i ? '' : ' on'}" role="group" aria-roledescription="bild" aria-label="${i + 1} av ${n}: ${esc(it.title)}"${i ? ' inert aria-hidden="true"' : ''} data-i="${i}">
+    return `<div class="feat-slide${i ? '' : ' on'}" role="group" aria-roledescription="${t('bild')}" aria-label="${t('{v} av {n}: {title}', { v: i + 1, n, title: esc(it.title) })}"${i ? ' inert aria-hidden="true"' : ''} data-i="${i}">
       <div class="feat-bd"${ph}><img ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async" src="${heroUrl(`/api/image/${+it.id}/backdrop`)}" alt="" data-fb="1"></div>
-      <div class="feat-in"><div class="feat-kicker">Utvalt för dig${genres ? ` · ${esc(genres)}` : ''}</div>
+      <div class="feat-in"><div class="feat-kicker">${t('Utvalt för dig{v}', { v: genres ? ` · ${esc(genres)}` : '' })}</div>
         <h2 class="feat-title">${esc(it.title)}</h2><div class="meta">${meta(it)}</div>
         ${it.overview ? `<p class="feat-ov">${esc(it.overview)}</p>` : ''}
-        <div class="feat-acts"><button type="button" class="primary" data-fplay="${i}"><span aria-hidden="true">▶</span> Spela</button>
-          <a class="btn" href="#/item/${+it.id}">Mer info</a></div></div></div>`;
+        <div class="feat-acts"><button type="button" class="primary" data-fplay="${i}"><span aria-hidden="true">▶</span> ${t('Spela')}</button>
+          ${t('<a class="btn" href="#/item/{id}">Mer info</a>', { id: +it.id })}</div></div></div>`;
   }).join('');
   const dots = n > 1 ? `<div class="feat-nav"><button type="button" class="feat-pause ghost small" aria-pressed="false"></button>
-    <div class="feat-dots">${items.map((it, i) => `<button type="button" class="feat-dot" data-dot="${i}" aria-label="Visa ${esc(it.title)}"${i ? '' : ' aria-current="true"'}></button>`).join('')}</div></div>` : '';
-  return `<section class="feat" aria-roledescription="karusell" aria-label="Utvalt" data-nav-up="1"><div class="feat-slides" aria-live="off">${slides}</div>${dots}</section>`;
+    <div class="feat-dots">${items.map((it, i) => `<button type="button" class="feat-dot" data-dot="${i}" aria-label="${t('Visa {title}', { title: esc(it.title) })}"${i ? '' : ' aria-current="true"'}></button>`).join('')}</div></div>` : '';
+  return `<section class="feat" aria-roledescription="karusell" aria-label="${t('Utvalt')}" data-nav-up="1"><div class="feat-slides" aria-live="off">${slides}</div>${dots}</section>`;
 }
 
 /** Spela: filmer där man slutade (eller från början), serier nästa avsnitt */
@@ -44,7 +44,7 @@ async function playTitle(b, it) {
   b.disabled = true;
   try {
     const st = await api(`/items/${it.id}/state`, { bg: true });
-    if (!st.next) return toast('Inga avsnitt att spela');
+    if (!st.next) return toast(t('Inga avsnitt att spela'));
     b.disabled = false;
     await startPlay(b, st.next.id, st.next.position || 0);
   } finally { b.disabled = false; }
@@ -61,7 +61,7 @@ export function bindFeatured(el, items) {
     if (!pauseBtn) return;
     // Pausad av användaren (eller rörelse avstängd i systemet): knappen startar visningen
     pauseBtn.setAttribute('aria-pressed', String(user));
-    pauseBtn.setAttribute('aria-label', user ? 'Starta bildspelet' : 'Pausa bildspelet');
+    pauseBtn.setAttribute('aria-label', user ? t('Starta bildspelet') : t('Pausa bildspelet'));
     pauseBtn.title = pauseBtn.getAttribute('aria-label');
     pauseBtn.innerHTML = `<span aria-hidden="true">${user ? '▶' : '❚❚'}</span>`;
     // Skärmläsare får höra bytet bara när bildspelet står still (annars avbryts de var nionde sekund)

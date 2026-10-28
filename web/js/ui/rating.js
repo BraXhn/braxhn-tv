@@ -2,12 +2,12 @@
 // starsHtml() ritar en reglage-kontroll (role="slider"), bindStars() gör den klickbar och styrbar med tangentbordet
 // (←/→ halva steg, 1–5 hela stjärnor, 0/Delete tar bort), rateDialog() är dialogen som kortmenyn och låtarnas ⋮ öppnar.
 // Klicka på vänstra halvan av en stjärna = halv stjärna. Samma stjärna igen tar bort betyget.
-import { act, api, esc, toast } from '../core.js';
+import { act, api, esc, toast, t } from '../core.js';
 import { openDialog } from './dialog.js';
 
 /** "4,5" – stjärnor med svenskt decimaltecken */
 export const fmtStars = (v) => String(v).replace('.', ',');
-const valueText = (v) => v ? `${fmtStars(v)} av 5 stjärnor` : 'Inget betyg';
+const valueText = (v) => v ? t('{v} av 5 stjärnor', { v: fmtStars(v) }) : t('Inget betyg');
 const fills = (v) => [1, 2, 3, 4, 5].map(n => v >= n ? 100 : v >= n - 0.5 ? 50 : 0);
 
 /**
@@ -15,7 +15,7 @@ const fills = (v) => [1, 2, 3, 4, 5].map(n => v >= n ? 100 : v >= n - 0.5 ? 50 :
  * @param {number|null|undefined} value  stjärnor (1–5 i halva steg) eller inget
  * @param {{ label?: string, id?: string, cls?: string, readonly?: boolean }} [o]
  */
-export function starsHtml(value, { label = 'Mitt betyg', id = '', cls = '', readonly = false } = {}) {
+export function starsHtml(value, { label = t('Mitt betyg'), id = '', cls = '', readonly = false } = {}) {
   const v = +value || 0;
   const stars = fills(v).map(f => `<span class="st" style="--f:${f}%" aria-hidden="true">★</span>`).join('');
   if (readonly) return `<span class="stars ro ${esc(cls)}" role="img" aria-label="${esc(`${label}: ${valueText(v)}`)}">${stars}</span>`;
@@ -79,7 +79,7 @@ export function bindStars(el, onChange) {
 export async function saveRating(kind, id, v) {
   const url = kind === 'item' ? `/items/${+id}/rating` : kind === 'album' ? `/music/albums/${+id}/rating` : `/music/tracks/${+id}/rating`;
   const r = await api(url, { method: 'PUT', body: { rating: v || 0 }, bg: true });
-  toast(r.rating ? `Ditt betyg: ${fmtStars(r.rating)} ★` : 'Betyget är borttaget');
+  toast(r.rating ? t('Ditt betyg: {rating} ★', { rating: fmtStars(r.rating) }) : t('Betyget är borttaget'));
   return r.rating;
 }
 /**
@@ -87,11 +87,11 @@ export async function saveRating(kind, id, v) {
  * @param {{ kind: 'item'|'album'|'track', id: number, title: string, value?: number|null, onSaved?: (v: number|null) => void }} o
  */
 export function rateDialog({ kind, id, title, value = null, onSaved }) {
-  const h = openDialog({ title: `Betygsätt ${title}`, className: 'ratedlg',
-    body: `<p class="muted small">Klicka på en stjärna (vänstra halvan ger en halv) eller använd piltangenterna och 1–5.</p>
-      <div class="ratebig">${starsHtml(value, { label: `Mitt betyg för ${title}`, cls: 'big' })}</div>`,
-    actions: [{ label: 'Ta bort betyg', id: 'rclear', onClick: async () => { if (+el.dataset.v) { await save(0); setStars(el, 0); } } },
-      { label: 'Klar', kind: 'primary' }] });
+  const h = openDialog({ title: t('Betygsätt {title}', { title }), className: 'ratedlg',
+    body: `<p class="muted small">${t('Klicka på en stjärna (vänstra halvan ger en halv) eller använd piltangenterna och 1–5.')}</p>
+      <div class="ratebig">${starsHtml(value, { label: t('Mitt betyg för {title}', { title }), cls: 'big' })}</div>`,
+    actions: [{ label: t('Ta bort betyg'), id: 'rclear', onClick: async () => { if (+el.dataset.v) { await save(0); setStars(el, 0); } } },
+      { label: t('Klar'), kind: 'primary' }] });
   const el = h.$('.stars');
   const save = async (v) => { const r = await saveRating(kind, id, v); onSaved?.(r); };
   bindStars(el, save);

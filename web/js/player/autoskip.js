@@ -1,6 +1,7 @@
 // Intro, sammanfattning och eftertexter i videospelaren: vilken knapp som visas och om den trycks automatiskt
 // (kontots uppspelningsval, /api/items/:id/playback → autoSkip/autoNext). Rena funktioner utan import – testas i
 // test/playprefs.test.js och används av video.js.
+import { t } from '../core.js';
 
 /** Sekunder som "Hoppar över intro… Avbryt" visas innan spelaren hoppar */
 export const SKIP_DELAY = 3;
@@ -50,12 +51,12 @@ export function adPlan(ads, t, { auto = false, done = null } = {}) {
 export function adChapters(ads, duration = null) {
   const list = (Array.isArray(ads) ? ads : []).filter(a => a.end > a.start).sort((a, b) => a.start - b.start);
   const out = [];
-  let t = 0, n = 0;
+  let tt = 0, n = 0;
   for (const a of list) {
-    if (a.start - t >= 5) out.push({ start: t, end: a.start, ad: false, label: `Del ${++n}` });
-    out.push({ start: a.start, end: a.end, ad: true, label: 'Reklam' });
-    t = a.end;
+    if (a.start - tt >= 5) out.push({ start: tt, end: a.start, ad: false, label: t('Del {v}', { v: ++n }) });
+    out.push({ start: a.start, end: a.end, ad: true, label: t('Reklam') });
+    tt = a.end;
   }
-  if (duration == null || duration - t >= 5) out.push({ start: t, end: duration ?? null, ad: false, label: `Del ${++n}` });
+  if (duration == null || duration - tt >= 5) out.push({ start: tt, end: duration ?? null, ad: false, label: t('Del {v}', { v: ++n }) });
   return out;
 }

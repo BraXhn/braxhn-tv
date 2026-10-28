@@ -1,6 +1,6 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, me, routeGen, store, toast, views } from '../core.js';
+import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, me, routeGen, store, toast, views, t } from '../core.js';
 import { M, playQueue, startRadio } from '../audio.js';
 import { route } from '../router.js';
 import { emptyState, noLib } from '../ui/states.js';
@@ -18,13 +18,13 @@ export const cover = (albumId, has, cls = '') => {
 };
 const albumCard = (a) => `<a class="card mcard" href="#/album/${a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + a.year : ''}</div></a>`;
 export function trackRows(tracks, opts = {}) {
-  return `<table class="tracks">${tracks.map((t, i) => `<tr data-ti="${i}" data-tid="${t.id}" class="${M.cur && M.cur.id === t.id ? 'playing' : ''}">
-    <td class="muted num">${opts.showCover ? cover(t.albumId, t.cover, 'tiny') : (t.track || i + 1)}</td>
-    <td><b>${esc(t.title)}</b>${t.userRating ? ` <span class="muted small trate" title="Mitt betyg" aria-label="Mitt betyg ${fmtStars(t.userRating)} av 5">★${fmtStars(t.userRating)}</span>` : ''}${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(t.artist || '')}${opts.showCover && t.album ? ' · ' + esc(t.album) : ''}</div>` : ''}</td>
-    <td class="r muted">${fmtTime(t.duration)}</td>
-    <td class="r">${iconButton({ icon: t.favorite ? '♥' : '♡', label: `Favorit: ${t.title}`, cls: 'ghost small fav', data: { fav: t.id }, pressed: !!t.favorite })}
-    ${iconButton({ icon: '+', label: `Lägg till ${t.title} i en spellista`, data: { addpl: t.id }, haspopup: 'dialog' })}
-    ${iconButton({ icon: '⋮', label: `Mer för ${t.title}`, data: { tmenu: i }, haspopup: 'menu' })}</td></tr>`).join('')}</table>`;
+  return `<table class="tracks">${tracks.map((tt, i) => `<tr data-ti="${i}" data-tid="${tt.id}" class="${M.cur && M.cur.id === tt.id ? 'playing' : ''}">
+    <td class="muted num">${opts.showCover ? cover(tt.albumId, tt.cover, 'tiny') : (tt.track || i + 1)}</td>
+    <td><b>${esc(tt.title)}</b>${tt.userRating ? ` <span class="muted small trate" title="${t('Mitt betyg')}" aria-label="${t('Mitt betyg {userRating} av 5', { userRating: fmtStars(tt.userRating) })}">★${fmtStars(tt.userRating)}</span>` : ''}${opts.showArtist || opts.showCover ? `<div class="muted small">${esc(tt.artist || '')}${opts.showCover && tt.album ? ' · ' + esc(tt.album) : ''}</div>` : ''}</td>
+    <td class="r muted">${fmtTime(tt.duration)}</td>
+    <td class="r">${iconButton({ icon: tt.favorite ? '♥' : '♡', label: t('Favorit: {title}', { title: tt.title }), cls: 'ghost small fav', data: { fav: tt.id }, pressed: !!tt.favorite })}
+    ${iconButton({ icon: '+', label: t('Lägg till {title} i en spellista', { title: tt.title }), data: { addpl: tt.id }, haspopup: 'dialog' })}
+    ${iconButton({ icon: '⋮', label: t('Mer för {title}', { title: tt.title }), data: { tmenu: i }, haspopup: 'menu' })}</td></tr>`).join('')}</table>`;
 }
 export function bindTracks(tracks, root = main) {
   $$('[data-ti]', root).forEach(r => keyClick(r).onclick = (e) => { if (e.target.closest('button')) return; playQueue(tracks, +r.dataset.ti); });
@@ -40,32 +40,32 @@ export function bindTracks(tracks, root = main) {
 }
 export async function addToPlaylist(ids) {
   const pls = await api('/music/playlists', { bg: true });
-  const h = openDialog({ title: 'Lägg till i spellista', closeOnRoute: false,
-    body: `<div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${p.tracks} låtar</span></button>`).join('')}</div>
-    <div class="row" style="margin-top:12px"><input id="newpl" placeholder="Ny spellista…" aria-label="Namn på ny spellista"><button class="primary" id="mkpl">Skapa</button></div>` });
+  const h = openDialog({ title: t('Lägg till i spellista'), closeOnRoute: false,
+    body: `<div class="plpick">${pls.map(p => `<button class="ghost" data-pl="${p.id}">${esc(p.name)} <span class="muted small">${t('{tracks} låtar', { tracks: p.tracks })}</span></button>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><input id="newpl" placeholder="${t('Ny spellista…')}" aria-label="${t('Namn på ny spellista')}"><button class="primary" id="mkpl">${t('Skapa')}</button></div>` });
   const d = h.el;
   // Fokus på första spellistan (inte på fältet för en ny)
   $('[data-pl]', d)?.focus();
-  $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast('Tillagd'); h.close(); }));
-  $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return $('#newpl', d).focus(); await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast('Spellista skapad'); h.close(); });
+  $$('[data-pl]', d).forEach(b => b.onclick = act(async () => { await api(`/music/playlists/${b.dataset.pl}/tracks`, { method: 'POST', body: { trackIds: ids }, bg: true }); toast(t('Tillagd')); h.close(); }));
+  $('#mkpl', d).onclick = act(async () => { const n = $('#newpl', d).value.trim(); if (!n) return $('#newpl', d).focus(); await api('/music/playlists', { method: 'POST', body: { name: n, trackIds: ids }, bg: true }); toast(t('Spellista skapad')); h.close(); });
   $('#newpl', d).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#mkpl', d).click(); } };
 }
 
 views.music = async (lid, tab) => {
-  if (!lid) { const l = libs.find(x => x.type === 'music'); if (!l) return noLib('musik', 'Musik'); location.hash = `#/music/${l.id}`; return; }
+  if (!lid) { const l = libs.find(x => x.type === 'music'); if (!l) return noLib(t('musik'), t('Musik')); location.hash = `#/music/${l.id}`; return; }
   tab = tab || store.get('mtab.' + lid, 'home');
   store.set('mtab.' + lid, tab);
-  const tabs = [['home', 'Översikt'], ['albums', 'Album'], ['artists', 'Artister'], ['playlists', 'Spellistor']];
+  const tabs = [['home', t('Översikt')], ['albums', 'Album'], ['artists', t('Artister')], ['playlists', t('Spellistor')]];
   let body = '';
   if (tab === 'home') {
     const d = await api(`/music/${lid}/home`);
     const smartOnly = (d.smart || []).filter(x => !x.station); // stationerna har en egen hylla
-    body = `<p class="muted">${d.stats.artists} artister · ${d.stats.albums} album · ${d.stats.tracks} låtar</p>
-      ${d.recentlyPlayed.length ? `<section class="section"><h2>Spelat nyligen</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
+    body = `<p class="muted">${t('{artists} artister · {albums} album · {tracks} låtar', { artists: d.stats.artists, albums: d.stats.albums, tracks: d.stats.tracks })}</p>
+      ${d.recentlyPlayed.length ? `<section class="section"><h2>${t('Spelat nyligen')}</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
       ${stationsHtml(lid, d.smart || [], d.sonic)}
-      <section class="section"><h2>Smarta listor <a class="btn ghost small" href="#/smartedit/${+lid}/new">+ Ny smart spellista</a></h2>${smartOnly.length ? `<div class="shelf">${smartOnly.map(x => smartCard(lid, x)).join('')}</div>` : '<p class="muted">Inga smarta listor med låtar ännu.</p>'}</section>
-      <section class="section"><h2>Nytt i biblioteket</h2><div class="shelf">${d.recentAlbums.map(albumCard).join('') || '<p class="muted">Inga album ännu.</p>'}</div></section>
-      ${d.favorites.length ? `<section class="section"><h2>Favoriter <button class="ghost small" id="playfav">▶ Spela</button> <button class="ghost small" id="shufav">⤨ Blanda</button></h2>${trackRows(d.favorites, { showCover: true })}</section>` : ''}`;
+      <section class="section"><h2>${t('Smarta listor <a class="btn ghost small" href="#/smartedit/{lid}/new">+ Ny smart spellista</a>', { lid: +lid })}</h2>${smartOnly.length ? `<div class="shelf">${smartOnly.map(x => smartCard(lid, x)).join('')}</div>` : t('<p class="muted">Inga smarta listor med låtar ännu.</p>')}</section>
+      <section class="section"><h2>${t('Nytt i biblioteket')}</h2><div class="shelf">${d.recentAlbums.map(albumCard).join('') || t('<p class="muted">Inga album ännu.</p>')}</div></section>
+      ${d.favorites.length ? `<section class="section"><h2>${t('Favoriter')} <button class="ghost small" id="playfav">${t('▶ Spela')}</button> <button class="ghost small" id="shufav">${t('⤨ Blanda')}</button></h2>${trackRows(d.favorites, { showCover: true })}</section>` : ''}`;
     main.innerHTML = musicHeader(lid, tabs, tab) + body;
     if (d.favorites.length) { bindTracks(d.favorites); $('#playfav').onclick = () => playQueue(d.favorites, 0); $('#shufav').onclick = () => playQueue(shuffle(d.favorites), 0); }
     return;
@@ -73,7 +73,7 @@ views.music = async (lid, tab) => {
   if (tab === 'albums') {
     const sort = store.get('msort', 'artist');
     const a = await api(`/music/${lid}/albums?sort=${sort}`);
-    body = `<div class="toolbar"><select id="msort"><option value="artist">Artist</option><option value="title">Titel</option><option value="added">Senast tillagda</option><option value="year">År</option></select></div>
+    body = `<div class="toolbar"><select id="msort"><option value="artist">Artist</option><option value="title">${t('Titel')}</option><option value="added">${t('Senast tillagda')}</option><option value="year">${t('År')}</option></select></div>
       <div class="grid">${a.map(albumCard).join('')}</div>`;
     main.innerHTML = musicHeader(lid, tabs, tab) + body;
     $('#msort').value = sort; $('#msort').onchange = (e) => { store.set('msort', e.target.value); route(); };
@@ -85,21 +85,21 @@ views.music = async (lid, tab) => {
   }
   if (tab === 'playlists') {
     const [p, sm] = await Promise.all([api('/music/playlists'), api('/music/smartlists')]);
-    body = `<div class="row" style="margin-bottom:14px"><input id="npl" placeholder="Ny spellista" aria-label="Namn på ny spellista" style="max-width:260px"><button class="primary" id="mknpl">Skapa</button></div>
-      <table>${p.map(x => `<tr><td><a href="#/playlist/${x.id}"><b>${esc(x.name)}</b></a></td><td class="muted">${x.tracks} låtar · ${fmtDur(x.duration || 0)}</td></tr>`).join('') || '<tr><td class="muted">Inga spellistor ännu.</td></tr>'}</table>
-      <section class="section"><h2>Smarta spellistor <a class="btn primary small" href="#/smartedit/${+lid}/new">+ Ny smart spellista</a></h2>
-      <p class="muted small">Fylls på automatiskt efter dina regler, t.ex. genre, år eller hur ofta du spelat låtarna.</p>
+    body = `<div class="row" style="margin-bottom:14px"><input id="npl" placeholder="${t('Ny spellista')}" aria-label="${t('Namn på ny spellista')}" style="max-width:260px"><button class="primary" id="mknpl">${t('Skapa')}</button></div>
+      <table>${p.map(x => `<tr><td><a href="#/playlist/${x.id}"><b>${esc(x.name)}</b></a></td><td class="muted">${t('{tracks} låtar · {v}', { tracks: x.tracks, v: fmtDur(x.duration || 0) })}</td></tr>`).join('') || t('<tr><td class="muted">Inga spellistor ännu.</td></tr>')}</table>
+      <section class="section"><h2>${t('Smarta spellistor <a class="btn primary small" href="#/smartedit/{lid}/new">+ Ny smart spellista</a>', { lid: +lid })}</h2>
+      <p class="muted small">${t('Fylls på automatiskt efter dina regler, t.ex. genre, år eller hur ofta du spelat låtarna.')}</p>
       <table>${sm.lists.map(x => `<tr><td><a href="#/smart/${+lid}/u${+x.id}"><b>${esc(x.name)}</b></a></td>
-        <td class="muted">${x.mine ? (x.shared ? 'Delad med alla' : 'Privat') : `Delad av ${esc(x.owner || 'någon')}`}</td>
-        <td class="r">${x.mine ? `<a class="btn ghost small" href="#/smartedit/${+lid}/${+x.id}" aria-label="Redigera ${esc(x.name)}">Redigera</a>` : ''}</td></tr>`).join('') || '<tr><td class="muted">Inga egna smarta spellistor ännu.</td></tr>'}</table></section>`;
+        <td class="muted">${x.mine ? (x.shared ? t('Delad med alla') : t('Privat')) : t('Delad av {v}', { v: esc(x.owner || t('någon')) })}</td>
+        <td class="r">${x.mine ? `<a class="btn ghost small" href="#/smartedit/${+lid}/${+x.id}" aria-label="${t('Redigera {name}', { name: esc(x.name) })}">${t('Redigera</a>')}` : ''}</td></tr>`).join('') || t('<tr><td class="muted">Inga egna smarta spellistor ännu.</td></tr>')}</table></section>`;
   }
   main.innerHTML = musicHeader(lid, tabs, tab) + body;
   if ($('#mknpl')) $('#mknpl').onclick = act(async () => { const n = $('#npl').value.trim(); if (!n) return; await api('/music/playlists', { method: 'POST', body: { name: n } }); route(); });
 };
 function musicHeader(lid, tabs, tab) {
   const lib = libs.find(l => l.id === +lid);
-  return `<div class="toolbar"><h1>${esc(lib?.name || 'Musik')}</h1><input id="msearch" aria-label="Sök i musiken" placeholder="Sök artist, album, låt (Enter)" style="max-width:280px"></div>
-    ${tabsHtml({ label: 'Musik', current: tab, items: tabs.map(([k, n]) => ({ key: k, label: n, href: `#/music/${lid}/${k}` })) })}`;
+  return `<div class="toolbar"><h1>${esc(lib?.name || t('Musik'))}</h1><input id="msearch" aria-label="${t('Sök i musiken')}" placeholder="${t('Sök artist, album, låt (Enter)')}" style="max-width:280px"></div>
+    ${tabsHtml({ label: t('Musik'), current: tab, items: tabs.map(([k, n]) => ({ key: k, label: n, href: `#/music/${lid}/${k}` })) })}`;
 }
 let msearchSeq = 0;
 document.addEventListener('keydown', act(async (e) => {
@@ -111,10 +111,10 @@ document.addEventListener('keydown', act(async (e) => {
   const tabs = $('.tabs');
   if (gen !== routeGen || seq !== msearchSeq || !tabs || !$('#msearch')) return;
   const box = document.createElement('div');
-  box.innerHTML = `<section class="section"><h2>Sökresultat för ”${esc(q)}”</h2>
+  box.innerHTML = `<section class="section"><h2>${t('Sökresultat för ”{q}”', { q: esc(q) })}</h2>
     ${r.artists.length ? `<div class="row" style="margin-bottom:10px">${r.artists.map(a => `<a class="btn small" href="#/artist/${a.id}">${esc(a.name)}</a>`).join('')}</div>` : ''}
     ${r.albums.length ? `<div class="shelf" style="margin-bottom:14px">${r.albums.map(albumCard).join('')}</div>` : ''}
-    ${r.tracks.length ? trackRows(r.tracks, { showCover: true }) : ''}${!r.artists.length && !r.albums.length && !r.tracks.length ? '<p class="muted">Inga träffar.</p>' : ''}</section>`;
+    ${r.tracks.length ? trackRows(r.tracks, { showCover: true }) : ''}${!r.artists.length && !r.albums.length && !r.tracks.length ? t('<p class="muted">Inga träffar.</p>') : ''}</section>`;
   $$('.msearchres').forEach(x => x.remove()); box.className = 'msearchres';
   tabs.after(box); bindTracks(r.tracks, box);
 }));
@@ -124,12 +124,12 @@ views.album = async (id) => {
   const kind = a.type && a.type !== 'album' ? KIND_LABEL[a.type] : null;
   const released = a.info?.released && /^\d{4}-\d{2}-\d{2}$/.test(a.info.released) ? a.info.released : null;
   main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">${esc((kind || 'Album').toUpperCase())}</div><h1>${esc(a.title)}</h1>
-    <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${a.tracks} låtar · ${fmtDur(a.duration)}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
-    <div class="row"><button class="primary" id="pa">▶ Spela</button><button class="ghost" id="sa">⤨ Blanda</button><button class="ghost" id="aa">+ Spellista</button><button class="ghost" id="ar">📻 Låtradio</button>${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="aoff" title="Spara i webbläsaren och lyssna utan nät">${stateOf('album', a.id) === 'done' ? '✓ Sparat offline' : '⤓ Spara offline'}</button>`}</div>
-    <div class="myrating"><span class="muted small">Mitt betyg</span>${starsHtml(a.userRating, { id: 'albrate', label: 'Mitt betyg för albumet' })}</div></div></div>
+    <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${t('{tracks} låtar · {duration}', { tracks: a.tracks, duration: fmtDur(a.duration) })}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
+    <div class="row"><button class="primary" id="pa">${t('▶ Spela')}</button><button class="ghost" id="sa">${t('⤨ Blanda')}</button><button class="ghost" id="aa">${t('+ Spellista')}</button><button class="ghost" id="ar">${t('📻 Låtradio')}</button>${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="aoff" title="${t('Spara i webbläsaren och lyssna utan nät')}">${stateOf('album', a.id) === 'done' ? t('✓ Sparat offline') : t('⤓ Spara offline')}</button>`}</div>
+    <div class="myrating"><span class="muted small">${t('Mitt betyg')}</span>${starsHtml(a.userRating, { id: 'albrate', label: t('Mitt betyg för albumet') })}</div></div></div>
     ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
-    ${released || a.info?.mbid ? `<p class="muted small" style="margin-top:14px">${released ? `Utgivet ${esc(released)}` : ''}${a.info?.mbid ? `${released ? ' · ' : ''}<a href="https://musicbrainz.org/release-group/${esc(a.info.mbid)}" target="_blank" rel="noopener noreferrer">MusicBrainz ↗</a>` : ''}</p>` : ''}`;
+    ${released || a.info?.mbid ? `<p class="muted small" style="margin-top:14px">${released ? t('Utgivet {released}', { released: esc(released) }) : ''}${a.info?.mbid ? `${released ? ' · ' : ''}<a href="https://musicbrainz.org/release-group/${esc(a.info.mbid)}" target="_blank" rel="noopener noreferrer">MusicBrainz ↗</a>` : ''}</p>` : ''}`;
   bindTracks(a.trackList);
   bindBio('albio');
   $('#pa').onclick = () => playQueue(a.trackList, 0);
@@ -148,9 +148,9 @@ views.artist = async (id) => {
   const allTracks = () => a.popular;
   main.innerHTML = `<div class="arhero${a.backdrop ? ' hasbg' : ''}">${heroBg(a)}<div class="mhero">${artistArt({ ...a, cover_album: a.albums.find(x => x.cover)?.id }, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
     ${f.length || i?.genres?.length ? `<div class="meta">${f.map(x => `<span>${esc(x)}</span>`).join('')}${(i?.genres || []).slice(0, 4).map(g => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
-    <div class="row"><button class="primary" id="pp">▶ Spela populära</button><button class="ghost" id="arr">📻 Låtradio</button>${a.albums.length > 1 ? '<button class="ghost" id="ash">⤨ Blanda allt</button>' : ''}${isAdmin() ? '<button class="ghost" id="amatch">Fel artist?</button>' : ''}</div></div></div></div>
+    <div class="row"><button class="primary" id="pp">${t('▶ Spela populära')}</button><button class="ghost" id="arr">${t('📻 Låtradio')}</button>${a.albums.length > 1 ? t('<button class="ghost" id="ash">⤨ Blanda allt</button>') : ''}${isAdmin() ? t('<button class="ghost" id="amatch">Fel artist?</button>') : ''}</div></div></div></div>
     ${i?.bio ? bioHtml(i.bio, i.bioLang, i.bioUrl) : ''}
-    ${a.popular.length ? `<section class="section"><h2>Populärt</h2><div id="poprows">${trackRows(a.popular.slice(0, POP), { showCover: true })}</div>${a.popular.length > POP ? '<button class="ghost small" id="popmore" aria-expanded="false">Visa fler</button>' : ''}</section>` : ''}
+    ${a.popular.length ? `<section class="section"><h2>${t('Populärt')}</h2><div id="poprows">${trackRows(a.popular.slice(0, POP), { showCover: true })}</div>${a.popular.length > POP ? t('<button class="ghost small" id="popmore" aria-expanded="false">Visa fler</button>') : ''}</section>` : ''}
     ${albumGroups(a.albums, albumCard)}
     <div id="simart"></div>${relatedHtml(a.related)}${linksHtml(i?.links)}`;
   bindTracks(a.popular.slice(0, POP), $('#poprows') || main);
@@ -159,7 +159,7 @@ views.artist = async (id) => {
     const open = e.currentTarget.getAttribute('aria-expanded') !== 'true';
     const list = open ? a.popular : a.popular.slice(0, POP);
     $('#poprows').innerHTML = trackRows(list, { showCover: true }); bindTracks(list, $('#poprows'));
-    e.currentTarget.textContent = open ? 'Visa färre' : 'Visa fler'; e.currentTarget.setAttribute('aria-expanded', String(open));
+    e.currentTarget.textContent = open ? t('Visa färre') : t('Visa fler'); e.currentTarget.setAttribute('aria-expanded', String(open));
   };
   $('#pp').onclick = () => playQueue(allTracks(), 0);
   $('#arr').onclick = act(() => startRadio({ artistId: a.id }, a.name));
@@ -172,36 +172,38 @@ views.artist = async (id) => {
 };
 views.playlist = async (id) => {
   const p = await api('/music/playlists/' + id);
-  main.innerHTML = `<div class="mhero"><div class="cover big plcover">♫</div><div><div class="muted small">SPELLISTA</div><h1>${esc(p.name)}</h1>
-    <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span></div>
-    <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="rn">Byt namn</button><button class="danger" id="dl">Ta bort</button></div></div></div>
+  main.innerHTML = `<div class="mhero"><div class="cover big plcover">♫</div><div><div class="muted small">${t('SPELLISTA')}</div><h1>${esc(p.name)}</h1>
+    <div class="meta"><span>${t('{trackListN} låtar · {v}', { trackListN: p.trackList.length, v: fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0)) })}</span></div>
+    <div class="row"><button class="primary" id="pp">${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="rn">${t('Byt namn')}</button><button class="danger" id="dl">${t('Ta bort')}</button></div></div></div>
     <div id="pltracks">${trackRows(p.trackList, { showCover: true })}</div>`;
   bindTracks(p.trackList);
   // Ta bort enskilda låtar
-  $$('#pltracks tr').forEach((r, i) => { const t = document.createElement('template'); t.innerHTML = iconButton({ icon: '✕', label: `Ta bort ${p.trackList[i]?.title || 'låten'} ur listan` }); const b = t.content.firstElementChild;
+  $$('#pltracks tr').forEach((r, i) => { const tt = document.createElement('template'); tt.innerHTML = iconButton({ icon: '✕', label: t('Ta bort {v} ur listan', { v: p.trackList[i]?.title || t('låten') }) }); const b = tt.content.firstElementChild;
     b.onclick = act(async () => { const ids = p.trackList.map(t => t.id); ids.splice(i, 1); await api('/music/playlists/' + id, { method: 'PUT', body: { trackIds: ids } }); route(); });
     r.lastElementChild.append(b); });
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
-  $('#rn').onclick = act(async () => { const n = (await promptDialog('Nytt namn', { title: 'Byt namn på spellistan', value: p.name, required: true, maxlength: 100, okLabel: 'Spara' }))?.trim(); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } });
-  $('#dl').onclick = act(async () => { if (await confirmDialog(`Ta bort spellistan ${p.name}?`, { okLabel: 'Ta bort', danger: true })) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } });
+  $('#rn').onclick = act(async () => { const n = (await promptDialog(t('Nytt namn'), { title: t('Byt namn på spellistan'), value: p.name, required: true, maxlength: 100, okLabel: t('Spara') }))?.trim(); if (n) { await api('/music/playlists/' + id, { method: 'PUT', body: { name: n } }); route(); } });
+  $('#dl').onclick = act(async () => { if (await confirmDialog(t('Ta bort spellistan {name}?', { name: p.name }), { okLabel: t('Ta bort'), danger: true })) { await api('/music/playlists/' + id, { method: 'DELETE' }); history.back(); } });
 };
 const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 // ---------- smarta spellistor ----------
+// De fasta smarta listorna (server/listening.js SMART) har svenska namn från servern; egna (id u…) visas som de heter
+const smartName = (x) => /^u\d/.test(String(x.id)) ? x.name : t(x.name);
 function smartCard(lid, x) {
   const c = x.covers || [];
   const art = c.length >= 4 ? `<div class="cover smartmosaic">${c.slice(0, 4).map(id => `<img loading="lazy" decoding="async" ${imgSrc(`/api/music/cover/${+id}`, cardW() * 0.6)} alt="" width="300" height="300" data-fb="1">`).join('')}</div>`
     : cover(c[0] || x.id, !!c.length);
-  return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(x.name)}</div><div class="s">${x.count} låtar</div></a>`;
+  return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(smartName(x))}</div><div class="s">${t('{count} låtar', { count: x.count })}</div></a>`;
 }
 views.smart = async (lid, sid) => {
   const p = await api(`/music/${encodeURIComponent(lid)}/smart/${encodeURIComponent(sid)}`);
   const station = /^sonic-/.test(String(sid)); // stämningsstation eller låtradio från ljudanalysen
-  main.innerHTML = `<div class="mhero"><div class="cover big plcover">${station ? '📻' : '✦'}</div><div><div class="muted small">${station ? 'STATION' : 'SMART LISTA'}</div><h1>${esc(p.name)}</h1>
-    <div class="meta"><span>${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0))}</span><span>Uppdateras automatiskt</span>${p.custom && !p.mine ? `<span>Delad av ${esc(p.owner || 'någon')}</span>` : p.shared ? '<span>Delad</span>' : ''}</div>
-    <div class="row"><button class="primary" id="pp">▶ Spela</button><button class="ghost" id="sp">⤨ Blanda</button><button class="ghost" id="ap">+ Spellista</button>${p.custom && p.mine ? `<a class="btn ghost" href="#/smartedit/${+lid}/${+p.listId}">Redigera regler</a>` : ''}</div></div></div>
-    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: 'Listan är tom just nu', text: p.custom ? 'Inga låtar matchar reglerna just nu.' : station ? 'Stationen fylls på när ljudanalysen hunnit längre.' : 'Den fylls på automatiskt när du lyssnar.' })}`;
+  main.innerHTML = `<div class="mhero"><div class="cover big plcover">${station ? '📻' : '✦'}</div><div><div class="muted small">${station ? 'STATION' : t('SMART LISTA')}</div><h1>${esc(smartName({ id: sid, name: p.name }))}</h1>
+    <div class="meta"><span>${t('{trackListN} låtar · {v}', { trackListN: p.trackList.length, v: fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0)) })}</span><span>${t('Uppdateras automatiskt')}</span>${p.custom && !p.mine ? `<span>${t('Delad av {v}', { v: esc(p.owner || t('någon')) })}</span>` : p.shared ? t('<span>Delad</span>') : ''}</div>
+    <div class="row"><button class="primary" id="pp">${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="ap">${t('+ Spellista')}</button>${p.custom && p.mine ? `${t('<a class="btn ghost" href="#/smartedit/{lid}/{listId}">Redigera regler</a>', { lid: +lid, listId: +p.listId })}` : ''}</div></div></div>
+    ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: t('Listan är tom just nu'), text: p.custom ? t('Inga låtar matchar reglerna just nu.') : station ? t('Stationen fylls på när ljudanalysen hunnit längre.') : t('Den fylls på automatiskt när du lyssnar.') })}`;
   bindTracks(p.trackList);
   $('#pp').onclick = () => playQueue(p.trackList, 0);
   $('#sp').onclick = () => playQueue(shuffle(p.trackList), 0);
@@ -221,33 +223,33 @@ const countRules = (st) => st.rules.reduce((a, r) => a + (r.rules ? r.rules.leng
 const valueShape = (op) => op === 'between' ? 'b' : op === 'inLast' || op === 'notInLast' ? 'd' : 'v';
 
 function ruleValueHtml(r, f, k, n) {
-  const lab = (x) => `aria-label="${esc(x)} för regel ${n}"`;
-  if (f.type === 'bool') return `<select data-k="${k}.value" data-t="bool" ${lab('Värde')}>${opt('true', 'Ja', String(r.value))}${opt('false', 'Nej', String(r.value))}</select>`;
-  if (f.type === 'library') return `<select data-k="${k}.value" data-t="int" ${lab('Bibliotek')}>${libs.filter(l => l.type === 'music').map(l => opt(l.id, l.name, r.value)).join('')}</select>`;
-  if (valueShape(r.op) === 'd') return `<input type="number" min="1" max="36500" step="1" inputmode="numeric" data-k="${k}.value" data-t="int" value="${esc(r.value)}" ${lab('Antal dagar')}><span class="muted small">dagar</span>`;
+  const lab = (x) => t('aria-label="{x} för regel {n}"', { x: esc(x), n });
+  if (f.type === 'bool') return `<select data-k="${k}.value" data-t="bool" ${lab(t('Värde'))}>${opt('true', t('Ja'), String(r.value))}${opt('false', 'Nej', String(r.value))}</select>`;
+  if (f.type === 'library') return `<select data-k="${k}.value" data-t="int" ${lab(t('Bibliotek'))}>${libs.filter(l => l.type === 'music').map(l => opt(l.id, l.name, r.value)).join('')}</select>`;
+  if (valueShape(r.op) === 'd') return `<input type="number" min="1" max="36500" step="1" inputmode="numeric" data-k="${k}.value" data-t="int" value="${esc(r.value)}" ${lab(t('Antal dagar'))}><span class="muted small">${t('dagar')}</span>`;
   const one = (v, key, what) => f.type === 'date' ? `<input type="date" data-k="${key}" value="${esc(v)}" ${lab(what)}>`
     : f.type === 'number' ? `<input type="number" step="any" data-k="${key}" data-t="num" value="${esc(v)}" ${lab(what)}>`
     : `<input type="text" maxlength="200" data-k="${key}" value="${esc(v)}" ${lab(what)}>`;
-  if (r.op === 'between') return `${one(r.value[0], `${k}.value.0`, 'Från')}<span class="muted small">och</span>${one(r.value[1], `${k}.value.1`, 'Till')}`;
-  return one(r.value, `${k}.value`, 'Värde');
+  if (r.op === 'between') return `${one(r.value[0], `${k}.value.0`, t('Från'))}<span class="muted small">${t('och')}</span>${one(r.value[1], `${k}.value.1`, t('Till'))}`;
+  return one(r.value, `${k}.value`, t('Värde'));
 }
 function ruleHtml(r, k, n) {
   const f = smartCat.fields.find(x => x.id === r.field) || smartCat.fields[0];
-  return `<div class="smartrule" role="group" aria-label="Regel ${n}">
-    <select data-k="${k}.field" data-act="field" aria-label="Fält för regel ${n}">${smartCat.fields.map(x => opt(x.id, x.label, r.field)).join('')}</select>
-    <select data-k="${k}.op" data-act="op" aria-label="Villkor för regel ${n}">${f.ops.map(o => opt(o, smartCat.ops[o], r.op)).join('')}</select>
+  return `<div class="smartrule" role="group" aria-label="${t('Regel {n}', { n })}">
+    <select data-k="${k}.field" data-act="field" aria-label="${t('Fält för regel {n}', { n })}">${smartCat.fields.map(x => opt(x.id, x.label, r.field)).join('')}</select>
+    <select data-k="${k}.op" data-act="op" aria-label="${t('Villkor för regel {n}', { n })}">${f.ops.map(o => opt(o, smartCat.ops[o], r.op)).join('')}</select>
     <span class="smartval">${ruleValueHtml(r, f, k, n)}</span>
-    ${iconButton({ icon: '✕', label: `Ta bort regel ${n}`, data: { del: k } })}</div>`;
+    ${iconButton({ icon: '✕', label: t('Ta bort regel {n}', { n }), data: { del: k } })}</div>`;
 }
-const matchSel = (m, k, label) => `<select data-k="${k}" class="smartmatch" aria-label="${esc(label)}">${opt('all', 'alla', m)}${opt('any', 'någon', m)}</select>`;
+const matchSel = (m, k, label) => `<select data-k="${k}" class="smartmatch" aria-label="${esc(label)}">${opt('all', t('alla'), m)}${opt('any', t('någon'), m)}</select>`;
 function rulesHtml(st) {
   let n = 0;
   return st.rules.map((r, i) => {
     if (!r.rules) return ruleHtml(r, `r.${i}`, ++n);
-    return `<fieldset class="smartgroup"><legend>Grupp ${i + 1}: matcha ${matchSel(r.match, `r.${i}.match`, `Matcha alla eller någon regel i grupp ${i + 1}`)} av reglerna</legend>
-      ${r.rules.map((x, j) => ruleHtml(x, `r.${i}.rules.${j}`, ++n)).join('') || '<p class="muted small">Tom grupp – lägg till en regel.</p>'}
-      <div class="row"><button type="button" class="ghost small" data-addin="${i}">+ Regel i gruppen</button>${iconButton({ icon: '✕', label: `Ta bort grupp ${i + 1}`, data: { del: `r.${i}` } })}</div></fieldset>`;
-  }).join('') || '<p class="muted small">Inga regler – listan innehåller alla låtar.</p>';
+    return `<fieldset class="smartgroup"><legend>${t('Grupp {v}: matcha {v2} av reglerna', { v: i + 1, v2: matchSel(r.match, `r.${i}.match`, t('Matcha alla eller någon regel i grupp {v}', { v: i + 1 })) })}</legend>
+      ${r.rules.map((x, j) => ruleHtml(x, `r.${i}.rules.${j}`, ++n)).join('') || t('<p class="muted small">Tom grupp – lägg till en regel.</p>')}
+      <div class="row"><button type="button" class="ghost small" data-addin="${i}">${t('+ Regel i gruppen')}</button>${iconButton({ icon: '✕', label: t('Ta bort grupp {v}', { v: i + 1 }), data: { del: `r.${i}` } })}</div></fieldset>`;
+  }).join('') || t('<p class="muted small">Inga regler – listan innehåller alla låtar.</p>');
 }
 // Nyckel som "r.2.rules.0.value.1" → [objektet som äger värdet, nyckeln]
 function locate(st, k) {
@@ -267,21 +269,21 @@ views.smartedit = async (lid, id) => {
   const limKind = () => st.limit ? 'count' : st.limitMinutes ? 'minutes' : 'none';
   const back = existing ? `#/smart/${+lid}/u${+existing.id}` : `#/music/${+lid}/playlists`;
   main.innerHTML = `<form id="smartform" class="panel smartedit" novalidate>
-    <h1>${existing ? 'Redigera smart spellista' : 'Ny smart spellista'}</h1>
-    <label for="smname">Namn</label><input id="smname" maxlength="100" required value="${esc(existing?.name || '')}" placeholder="T.ex. Svensk pop från 80-talet">
-    <div class="row smarthead"><span>Matcha</span>${matchSel(st.match, 'match', 'Matcha alla eller någon av reglerna')}<span>av följande regler</span></div>
+    <h1>${existing ? t('Redigera smart spellista') : t('Ny smart spellista')}</h1>
+    <label for="smname">${t('Namn')}</label><input id="smname" maxlength="100" required value="${esc(existing?.name || '')}" placeholder="${t('T.ex. Svensk pop från 80-talet')}">
+    <div class="row smarthead"><span>${t('Matcha')}</span>${matchSel(st.match, 'match', t('Matcha alla eller någon av reglerna'))}<span>${t('av följande regler')}</span></div>
     <div id="smrules"></div>
-    <div class="row"><button type="button" class="ghost" id="smaddrule">+ Regel</button><button type="button" class="ghost" id="smaddgrp">+ Grupp</button></div>
+    <div class="row"><button type="button" class="ghost" id="smaddrule">${t('+ Regel')}</button><button type="button" class="ghost" id="smaddgrp">${t('+ Grupp')}</button></div>
     <div class="row smartopts">
-      <div><label for="smsort">Sortera efter</label><select id="smsort">${cat.sorts.map(s => opt(s.id, s.label, st.sort)).join('')}</select></div>
-      <div><label for="smorder">Ordning</label><select id="smorder">${opt('desc', 'Fallande', st.order)}${opt('asc', 'Stigande', st.order)}</select></div>
-      <div><label for="smlimk">Gräns</label><select id="smlimk">${opt('none', 'Ingen gräns', limKind())}${opt('count', 'Antal låtar', limKind())}${opt('minutes', 'Minuter', limKind())}</select></div>
-      <div><label for="smlimv">Högst</label><input id="smlimv" type="number" min="1" step="1" inputmode="numeric" value="${esc(st.limit || st.limitMinutes || '')}"></div>
+      <div><label for="smsort">${t('Sortera efter')}</label><select id="smsort">${cat.sorts.map(s => opt(s.id, s.label, st.sort)).join('')}</select></div>
+      <div><label for="smorder">${t('Ordning')}</label><select id="smorder">${opt('desc', t('Fallande'), st.order)}${opt('asc', t('Stigande'), st.order)}</select></div>
+      <div><label for="smlimk">${t('Gräns')}</label><select id="smlimk">${opt('none', t('Ingen gräns'), limKind())}${opt('count', t('Antal låtar'), limKind())}${opt('minutes', t('Minuter'), limKind())}</select></div>
+      <div><label for="smlimv">${t('Högst')}</label><input id="smlimv" type="number" min="1" step="1" inputmode="numeric" value="${esc(st.limit || st.limitMinutes || '')}"></div>
     </div>
-    <label class="smartshare"><input type="checkbox" id="smshared"${existing?.shared ? ' checked' : ''}> Dela med andra på servern – de ser listan med sina egna spelningar och favoriter</label>
-    <p id="smprev" class="smartprev" role="status" aria-live="polite">Räknar…</p>
-    <div class="row"><button type="submit" class="primary">Spara</button><button type="button" class="ghost" id="smplay">▶ Spela</button><button type="button" class="ghost" id="smshuf">⤨ Blanda</button>
-      <a class="btn ghost" href="${back}">Avbryt</a>${existing ? '<button type="button" class="danger" id="smdel">Ta bort</button>' : ''}</div>
+    <label class="smartshare"><input type="checkbox" id="smshared"${existing?.shared ? ' checked' : ''}> ${t('Dela med andra på servern – de ser listan med sina egna spelningar och favoriter')}</label>
+    <p id="smprev" class="smartprev" role="status" aria-live="polite">${t('Räknar…')}</p>
+    <div class="row"><button type="submit" class="primary">${t('Spara')}</button><button type="button" class="ghost" id="smplay">${t('▶ Spela')}</button><button type="button" class="ghost" id="smshuf">${t('⤨ Blanda')}</button>
+      ${t('<a class="btn ghost" href="{back}">Avbryt</a>{v}', { back, v: existing ? t('<button type="button" class="danger" id="smdel">Ta bort</button>') : '' })}</div>
     <div id="smsample"></div></form>`;
   const form = $('#smartform');
   const body = () => ({ name: $('#smname').value, shared: $('#smshared').checked, ...st });
@@ -295,8 +297,8 @@ views.smartedit = async (lid, id) => {
         const r = await api('/music/smartlists/preview', { method: 'POST', body: body() });
         if (my !== seq) return;
         $('#smprev').classList.remove('err');
-        $('#smprev').textContent = `${r.count} låtar${r.duration ? ' · ' + fmtDur(r.duration) : ''}${r.matches > r.count ? ` (av ${r.matches} som matchar)` : ''}`;
-        $('#smsample').innerHTML = r.trackList.length ? `<h2 class="small muted">Först i listan</h2>${trackRows(r.trackList, { showCover: true })}` : '';
+        $('#smprev').textContent = t('{count} låtar{v}{v2}', { count: r.count, v: r.duration ? ' · ' + fmtDur(r.duration) : '', v2: r.matches > r.count ? ` ${t('(av {matches} som matchar)', { matches: r.matches })}` : '' });
+        $('#smsample').innerHTML = r.trackList.length ? `<h2 class="small muted">${t('Först i listan')}</h2>${trackRows(r.trackList, { showCover: true })}` : '';
         bindTracks(r.trackList, $('#smsample'));
       } catch (e) {
         if (my !== seq || e?.aborted) return;
@@ -359,24 +361,24 @@ views.smartedit = async (lid, id) => {
   $('#smlimk').onchange = setLim; $('#smlimv').oninput = setLim;
   const playAll = (mix) => act(async () => {
     const r = await api('/music/smartlists/preview?tracks=1', { method: 'POST', body: body() });
-    if (!r.trackList.length) return toast('Inga låtar matchar reglerna');
+    if (!r.trackList.length) return toast(t('Inga låtar matchar reglerna'));
     playQueue(mix ? shuffle(r.trackList) : r.trackList, 0);
   });
   $('#smplay').onclick = playAll(false);
   $('#smshuf').onclick = playAll(true);
   form.onsubmit = act(async (e) => {
     e.preventDefault();
-    if (!$('#smname').value.trim()) { toast('Ge listan ett namn', { error: true }); $('#smname').focus(); return; }
+    if (!$('#smname').value.trim()) { toast(t('Ge listan ett namn'), { error: true }); $('#smname').focus(); return; }
     let nid = existing?.id;
     if (existing) await api('/music/smartlists/' + existing.id, { method: 'PUT', body: body() });
     else nid = (await api('/music/smartlists', { method: 'POST', body: body() })).id;
-    toast('Smart spellista sparad');
+    toast(t('Smart spellista sparad'));
     location.hash = `#/smart/${+lid}/u${+nid}`;
   });
   if ($('#smdel')) $('#smdel').onclick = act(async () => {
-    if (!await confirmDialog(`Ta bort den smarta spellistan ${existing.name}?`, { okLabel: 'Ta bort', danger: true })) return;
+    if (!await confirmDialog(t('Ta bort den smarta spellistan {name}?', { name: existing.name }), { okLabel: t('Ta bort'), danger: true })) return;
     await api('/music/smartlists/' + existing.id, { method: 'DELETE' });
-    toast('Den smarta spellistan togs bort');
+    toast(t('Den smarta spellistan togs bort'));
     location.hash = `#/music/${+lid}/playlists`;
   });
   render();

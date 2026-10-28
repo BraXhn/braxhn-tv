@@ -36,6 +36,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
+    // Webbklientens språk (nytt fält): 'sv' | 'en', null = inte valt (svenska; sätts från webbläsaren vid första inloggningen)
+    lang: c.user.lang || null,
     // Rättigheter per användare (perms.js): webben döljer nedladdning när den inte är tillåten (nytt fält)
     canDownload: canDownload(c.user.id),
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
@@ -46,6 +48,13 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     liveTv: c.user.max_age == null ? !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') : kidsHaveChannels(c.user),
     iptvVod: !!get("SELECT 1 FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id WHERE t.enabled=1 LIMIT 1") && vodAllowed(c.user) } : null
 }));
+// Webbklientens språk för profilen (Mitt konto → Språk). Sidan (index.html) väljs efter det, se pageLang i http/router.js.
+route('PUT', '/api/me/lang', user, async (c) => {
+  const { lang } = await readJson(c.req);
+  if (!['sv', 'en'].includes(lang)) return fail(c.res, 400, 'Okänt språk');
+  run('UPDATE users SET lang=? WHERE id=?', lang, c.user.id);
+  send(c.res, 200, { ok: true, lang });
+});
 route('POST', '/api/setup', pub, async (c) => {
   // Förhindra att någon utifrån hinner skapa adminkontot på en nyinstallerad server
   if (!isTrusted(c.req)) return fail(c.res, 403, 'Det första kontot kan bara skapas från hemnätverket');

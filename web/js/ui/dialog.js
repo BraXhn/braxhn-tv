@@ -2,7 +2,7 @@
 // webbläsarens confirm()/prompt()/alert() (som fungerar dåligt på TV, i installerad app och med skärmläsare).
 // Alla dialoger är modala <dialog> med rubrik (aria-labelledby), beskrivning (aria-describedby), fokus på
 // första vettiga kontroll, Escape stänger och fokus går tillbaka till knappen som öppnade dialogen.
-import { esc, leaveFns, onLeave, toastErr } from '../core.js';
+import { esc, leaveFns, onLeave, toastErr, t } from '../core.js';
 
 let seq = 0;
 const FIELD = 'input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled])';
@@ -44,7 +44,7 @@ export function openDialog({ title, body = '', actions, onClose, size = 'normal'
   d.className = ['dlg', size === 'wide' ? 'wide' : '', className].filter(Boolean).join(' ');
   d.setAttribute('aria-labelledby', id + 't');
   d.setAttribute('aria-describedby', id + 'b');
-  const acts = actions || [{ label: 'Stäng', kind: 'ghost' }];
+  const acts = actions || [{ label: t('Stäng'), kind: 'ghost' }];
   const wrap = form ? 'form' : 'div';
   d.innerHTML = `<${wrap} class="dlg-in"${form ? ' novalidate' : ''}><h2 class="dlg-title" id="${id}t">${esc(title)}</h2><div class="dlg-body" id="${id}b"></div>
     <div class="dlg-actions">${acts.map((a, i) => `<button type="${a.submit ? 'submit' : 'button'}" class="${a.kind || 'ghost'}" data-act="${i}"${a.id ? ` id="${esc(a.id)}"` : ''}>${esc(a.label)}</button>`).join('')}</div></${wrap}>`;
@@ -111,7 +111,7 @@ export function openDialog({ title, body = '', actions, onClose, size = 'normal'
  * @param {{ title?: string, okLabel?: string, cancelLabel?: string, danger?: boolean }} [o]
  * @returns {Promise<boolean>}
  */
-export function confirmDialog(text, { title, okLabel = 'OK', cancelLabel = 'Avbryt', danger = false } = {}) {
+export function confirmDialog(text, { title, okLabel = 'OK', cancelLabel = t('Avbryt'), danger = false } = {}) {
   const d = openDialog({
     title: title || text, body: title ? `<p>${esc(text)}</p>` : '',
     actions: [{ label: cancelLabel, value: false }, { label: okLabel, kind: danger ? 'danger' : 'primary', value: true }]
@@ -153,7 +153,7 @@ export const fieldHtml = (f, id) => {
  * @param {{ title: string, text?: string, fields: Field[], okLabel?: string, cancelLabel?: string, danger?: boolean }} o
  * @returns {Promise<Record<string,string>|null>} Fältens värden, eller null om man avbröt
  */
-export function formDialog({ title, text = '', fields, okLabel = 'OK', cancelLabel = 'Avbryt', danger = false }) {
+export function formDialog({ title, text = '', fields, okLabel = 'OK', cancelLabel = t('Avbryt'), danger = false }) {
   const base = 'f' + (++seq);
   const d = openDialog({
     title, form: true,
@@ -182,7 +182,7 @@ export async function promptDialog(label, { title, text, okLabel = 'OK', ...fiel
  * @param {{ text?: string, cancelLabel?: string }} [o]
  * @returns {Promise<any|null>} Det valda värdet, eller null om man avbröt
  */
-export function choiceDialog(title, choices, { text = '', cancelLabel = 'Avbryt' } = {}) {
+export function choiceDialog(title, choices, { text = '', cancelLabel = t('Avbryt') } = {}) {
   const d = openDialog({
     title, body: text ? `<p class="muted">${esc(text)}</p>` : '',
     actions: [{ label: cancelLabel, value: null }, ...choices.map(c => ({ label: c.label, kind: c.kind || 'ghost', value: { v: c.value } }))]

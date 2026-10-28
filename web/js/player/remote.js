@@ -4,7 +4,7 @@
 //                rapporterar sitt läge till servern (oftare när någon bevakar)
 //   styrande   – "Spela på…" på titelsidan och i spelaren, och fjärrkontrollpanelen längst ner (#rbar)
 // Webbläsare får inte spela upp med ljud utan ett tryck på sidan: nekas play() visas "Tryck för att starta".
-import { $, api, esc, fmtTime, me, store, toast, toastErr } from '../core.js';
+import { $, api, esc, fmtTime, me, store, toast, toastErr, t } from '../core.js';
 import { M, applyVolume, seekTo, spokenPos, stopAudio } from '../audio.js';
 import { P, closePlayer, play } from './video.js';
 import { promptDialog } from '../ui/dialog.js';
@@ -21,10 +21,10 @@ const R = { es: null, uid: null, id: null, name: '', hidden: false, timer: null,
 // ---------- enhetens namn och nyckel ----------
 /** Standardnamn från webbläsare och system (som Mitt konto → Enheter), t.ex. "Chrome på Windows" */
 export function defaultName(ua = navigator.userAgent) {
-  if (/SMART-TV|SmartTV|Tizen|Web0S|webOS|NetCast|BRAVIA|AFT[A-Z]|GoogleTV|Android TV|CrKey|HbbTV/i.test(ua)) return 'TV-webbläsare';
-  const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Webbläsare';
+  if (/SMART-TV|SmartTV|Tizen|Web0S|webOS|NetCast|BRAVIA|AFT[A-Z]|GoogleTV|Android TV|CrKey|HbbTV/i.test(ua)) return t('TV-webbläsare');
+  const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : t('Webbläsare');
   const o = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
-  return `${b}${o ? ' på ' + o : ''}`;
+  return `${b}${o ? t(' på ') + o : ''}`;
 }
 function devKey() {
   let k = store.get('remote.key', '');
@@ -72,7 +72,7 @@ export function stopRemote() {
 window.addEventListener('focus', () => { if (R.replaced && me) { R.replaced = false; R.uid = null; startRemote(); } });
 
 // ---------- mottagare: läget ----------
-const trackLabel = (a) => [a.lang || 'Ljud', a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ');
+const trackLabel = (a) => [a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ');
 function snapshot() {
   if (P) {
     const v = $('#vid', P.el); if (!v) return null;
@@ -127,7 +127,7 @@ function showTap(el) {
   hideTap();
   const b = document.createElement('button');
   b.type = 'button'; b.id = 'rtap'; b.className = 'rtap';
-  b.innerHTML = `${ICON.play}<b>Tryck för att starta</b><span>${esc(R.ctlName ? `Startad från ${R.ctlName}. ` : '')}Webbläsaren kräver ett tryck innan något får spelas upp med ljud.</span>`;
+  b.innerHTML = `${ICON.play}<b>${t('Tryck för att starta')}</b><span>${t('{v}Webbläsaren kräver ett tryck innan något får spelas upp med ljud.', { v: esc(R.ctlName ? `${t('Startad från {ctlName}.', { ctlName: R.ctlName })} ` : '') })}</span>`;
   b.onclick = (e) => { e.stopPropagation(); hideTap(); el.play().catch(() => {}); reportSoon(); };
   (P && el === $('#vid', P.el) ? P.el : document.body).append(b);
   R.tap = b; b.focus({ preventScroll: true });
@@ -139,14 +139,14 @@ function badge() {
   if (!P || !R.ctlName) return;
   let b = $('#rbadge', P.el);
   if (!b) { b = document.createElement('span'); b.id = 'rbadge'; b.className = 'rbadge small'; $('.pbar', P.el)?.append(b); }
-  b.textContent = `Styrs från ${R.ctlName}`;
+  b.textContent = t('Styrs från {ctlName}', { ctlName: R.ctlName });
 }
 function noteController(name, always) {
-  if (always || name !== R.ctlName || Date.now() - R.ctlAt > 600e3) toast(`Styrs från ${name}`);
+  if (always || name !== R.ctlName || Date.now() - R.ctlAt > 600e3) toast(t('Styrs från {name}', { name }));
   R.ctlName = name; R.ctlAt = Date.now();
 }
 async function onCommand(c) {
-  noteController(c.from?.name || 'en annan enhet', c.cmd === 'play');
+  noteController(c.from?.name || t('en annan enhet'), c.cmd === 'play');
   try {
     const el = mediaEl();
     switch (c.cmd) {
@@ -187,7 +187,7 @@ async function onCommand(c) {
 
 // ---------- styrande: välj enhet ----------
 const devLabel = (d) => d.mine ? d.name : `${d.name} (${d.user})`;
-const devHint = (d) => d.playing ? `${d.playing.paused ? 'Pausad' : 'Spelar'}: ${d.playing.title}` : '';
+const devHint = (d) => d.playing ? `${d.playing.paused ? t('Pausad') : t('Spelar')}: ${d.playing.title}` : '';
 /**
  * "Spela på…": lista över hushållets anslutna webbläsare.
  * @param {HTMLElement} anchor
@@ -203,29 +203,29 @@ export async function openRemotePicker(anchor, o = {}) {
   const items = others.map(d => {
     const go = () => o.item ? sendPlay(d, o) : controlDevice(d);
     if (o.item && d.playing) return { label: devLabel(d), hint: devHint(d), icon: '📺', submenu: [
-      { label: 'Spela här i stället', icon: '▶', onSelect: go }, { label: 'Visa fjärrkontrollen', icon: '⏯', onSelect: () => controlDevice(d) }] };
+      { label: t('Spela här i stället'), icon: '▶', onSelect: go }, { label: t('Visa fjärrkontrollen'), icon: '⏯', onSelect: () => controlDevice(d) }] };
     return { label: devLabel(d), hint: devHint(d), icon: '📺', onSelect: go };
   });
-  if (!items.length) items.push({ label: 'Inga andra enheter är anslutna', hint: 'Öppna BraXhn TV i webbläsaren på TV:n eller datorn', disabled: true });
+  if (!items.length) items.push({ label: t('Inga andra enheter är anslutna'), hint: t('Öppna BraXhn TV i webbläsaren på TV:n eller datorn'), disabled: true });
   items.push('separator',
-    { label: `Den här enheten: ${R.name || defaultName()}`, hint: 'Byt namn', icon: '✎', onSelect: rename },
-    { label: R.hidden ? 'Låt andra enheter spela här' : 'Dölj den här enheten för andra', icon: R.hidden ? '👁' : '⊘', onSelect: toggleHidden });
-  openMenu(anchor, items, { title: o.item ? 'Spela på…' : 'Styr en annan enhet', label: 'Spela på en annan enhet' });
+    { label: t('Den här enheten: {v}', { v: R.name || defaultName() }), hint: t('Byt namn'), icon: '✎', onSelect: rename },
+    { label: R.hidden ? t('Låt andra enheter spela här') : t('Dölj den här enheten för andra'), icon: R.hidden ? '👁' : '⊘', onSelect: toggleHidden });
+  openMenu(anchor, items, { title: o.item ? t('Spela på…') : t('Styr en annan enhet'), label: t('Spela på en annan enhet') });
 }
 async function rename() {
-  const n = await promptDialog('Namn på den här enheten', { title: 'Byt namn', value: R.name || defaultName(), maxlength: 40, hint: 'T.ex. "Vardagsrums-TV" eller "Jobbdatorn". Syns för de andra i hushållet.' });
+  const n = await promptDialog(t('Namn på den här enheten'), { title: t('Byt namn'), value: R.name || defaultName(), maxlength: 40, hint: t('T.ex. "Vardagsrums-TV" eller "Jobbdatorn". Syns för de andra i hushållet.') });
   if (n == null || !String(n).trim()) return;
   store.set('remote.name', String(n).trim());
   if (R.id) { try { const r = await api('/remote/devices/' + encodeURIComponent(R.id), { method: 'PUT', body: { name: String(n).trim() }, bg: true }); R.name = r.name; } catch (e) { return toastErr(e); } }
   else R.name = String(n).trim();
-  toast('Namnet är sparat');
+  toast(t('Namnet är sparat'));
 }
 async function toggleHidden() {
   const h = !R.hidden;
   store.set('remote.hidden', h);
   if (R.id) { try { await api('/remote/devices/' + encodeURIComponent(R.id), { method: 'PUT', body: { hidden: h }, bg: true }); } catch (e) { return toastErr(e); } }
   R.hidden = h;
-  toast(h ? 'Den här enheten syns inte längre för andra' : 'Andra enheter kan nu spela här');
+  toast(h ? t('Den här enheten syns inte längre för andra') : t('Andra enheter kan nu spela här'));
 }
 const sendCmd = (id, body) => api(`/remote/devices/${encodeURIComponent(id)}/command`, { method: 'POST', body: { ...body, from: R.id }, bg: true });
 async function sendPlay(d, o) {
@@ -233,7 +233,7 @@ async function sendPlay(d, o) {
   if (o.audio) pl.audio = String(o.audio);
   if (o.sub != null) pl.sub = String(o.sub);
   try { await sendCmd(d.id, { play: pl }); } catch (e) { return toastErr(e); }
-  toast(`Spelas på ${d.name}`);
+  toast(t('Spelas på {name}', { name: d.name }));
   if (o.fromPlayer && P) closePlayer(false);
   controlDevice(d);
 }
@@ -264,20 +264,20 @@ const ctlPos = () => {
 function ensurePanel() {
   let bar = $('#rbar');
   if (bar) return bar;
-  bar = document.createElement('div'); bar.id = 'rbar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Fjärrkontroll');
+  bar = document.createElement('div'); bar.id = 'rbar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', t('Fjärrkontroll'));
   bar.innerHTML = `<div class="rleft"><span class="ricon">${ICON.remote}</span><div class="rtxt"><b id="rtitle"></b><span class="rsub" id="rdev"></span></div></div>
     <div class="rmid"><div class="row rctl">
-        ${iconButton({ icon: 'back10', label: '10 s bakåt', id: 'rback' })}
-        ${iconButton({ icon: 'play', label: 'Spela', id: 'rplay', cls: 'primary' })}
-        ${iconButton({ icon: 'fwd10', label: '10 s framåt', id: 'rfwd' })}
-        ${iconButton({ icon: 'next', label: 'Nästa', id: 'rnext' })}
-        ${iconButton({ icon: 'stop', label: 'Stoppa', id: 'rstop' })}</div>
+        ${iconButton({ icon: 'back10', label: t('10 s bakåt'), id: 'rback' })}
+        ${iconButton({ icon: 'play', label: t('Spela'), id: 'rplay', cls: 'primary' })}
+        ${iconButton({ icon: 'fwd10', label: t('10 s framåt'), id: 'rfwd' })}
+        ${iconButton({ icon: 'next', label: t('Nästa'), id: 'rnext' })}
+        ${iconButton({ icon: 'stop', label: t('Stoppa'), id: 'rstop' })}</div>
       <div class="rseek"><span id="rcur" class="rsub">0:00</span><div class="track" id="rtrack" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0"><i id="rfill"></i></div><span id="rdur" class="rsub">0:00</span></div></div>
-    <div class="rright"><select id="ra" aria-label="Ljudspår" hidden></select><select id="rs" aria-label="Undertexter" hidden></select>
-      <input type="range" id="rvol" min="0" max="1" step="0.05" aria-label="Volym">
-      <button type="button" class="ghost small" id="rhere" title="Fortsätt här på den här enheten från samma position">Flytta hit</button>
+    <div class="rright"><select id="ra" aria-label="${t('Ljudspår')}" hidden></select><select id="rs" aria-label="${t('Undertexter')}" hidden></select>
+      <input type="range" id="rvol" min="0" max="1" step="0.05" aria-label="${t('Volym')}">
+      <button type="button" class="ghost small" id="rhere" title="${t('Fortsätt här på den här enheten från samma position')}">${t('Flytta hit')}</button>
 </div>
-    ${iconButton({ icon: '✕', label: 'Stäng fjärrkontrollen', id: 'rx' })}`;
+    ${iconButton({ icon: '✕', label: t('Stäng fjärrkontrollen'), id: 'rx' })}`;
   document.body.append(bar); document.body.classList.add('hasrbar');
   const q = (s) => $(s, bar);
   const send = (body) => R.ctl && sendCmd(R.ctl.id, body).catch(toastErr);
@@ -308,12 +308,12 @@ function renderPanel() {
   const c = R.ctl; if (!c) return;
   const bar = ensurePanel(), q = (s) => $(s, bar);
   const s = c.status, st = s?.state, online = !s || s.online;
-  q('#rtitle').textContent = !online ? `${c.name} är inte ansluten` : st ? (st.title || 'Spelar') + (st.artist ? ` – ${st.artist}` : '') : s ? 'Inget spelas' : 'Ansluter…';
-  q('#rdev').textContent = !online ? 'Öppna BraXhn TV på enheten igen' : st?.blocked ? `Väntar – tryck på skärmen på ${c.name}` : `På ${c.name}${st?.paused ? ' · pausad' : ''}`;
+  q('#rtitle').textContent = !online ? t('{name} är inte ansluten', { name: c.name }) : st ? (st.title || t('Spelar')) + (st.artist ? ` – ${st.artist}` : '') : s ? t('Inget spelas') : t('Ansluter…');
+  q('#rdev').textContent = !online ? t('Öppna BraXhn TV på enheten igen') : st?.blocked ? t('Väntar – tryck på skärmen på {name}', { name: c.name }) : t('På {name}{v}', { name: c.name, v: st?.paused ? t(' · pausad') : '' });
   const has = online && !!st;
   for (const id of ['#rback', '#rfwd', '#rplay', '#rstop', '#rvol', '#ra', '#rs']) q(id).disabled = !has;
   q('#rnext').disabled = !has || !st.hasNext;
-  setIconButton(q('#rplay'), has && !st.paused && !st.blocked ? 'pause' : 'play', has && !st.paused && !st.blocked ? 'Pausa' : 'Spela');
+  setIconButton(q('#rplay'), has && !st.paused && !st.blocked ? 'pause' : 'play', has && !st.paused && !st.blocked ? t('Pausa') : t('Spela'));
   q('#rhere').hidden = !(has && st.media === 'video' && st.itemId);
   if (has && document.activeElement !== q('#rvol')) q('#rvol').value = st.muted ? 0 : st.volume;
   // Spårlistorna byggs bara om när de ändras (annars hoppar valet medan man väljer)
@@ -323,7 +323,7 @@ function renderPanel() {
     const auds = has ? st.audios || [] : [], subs = has ? st.subs || [] : [];
     q('#ra').innerHTML = auds.map(a => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('');
     q('#ra').hidden = auds.length < 2;
-    q('#rs').innerHTML = `<option value="">Inga undertexter</option>` + subs.map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');
+    q('#rs').innerHTML = `<option value="">${t('Inga undertexter')}</option>` + subs.map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');
     q('#rs').hidden = !subs.length;
   }
   if (has && st.media === 'video') { if (document.activeElement !== q('#ra')) q('#ra').value = st.audio; if (document.activeElement !== q('#rs')) q('#rs').value = st.sub; }

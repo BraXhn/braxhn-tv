@@ -3,7 +3,7 @@
 // skriver, piltangenter från sökrutan till träffarna, senaste sökningar (bara i den här webbläsaren) och förslag
 // när rutan är tom. Sökrutan i menyraden (#q) kopplas här. Fliken Repliker (#/search/<fråga>?t=lines) söker i
 // undertexterna – den delen laddas först när fliken väljs (views/searchlines.js).
-import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views } from '../core.js';
+import { $, $$, api, dayName, esc, fmtDur, hhmm, libs, main, me, nextRoute, store, views, t, locale } from '../core.js';
 import { bookCard, card, chLogo, personArt, personCard, podCover, shelfHtml } from '../ui/cards.js';
 import { bindRetry, emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTracks, cover, trackRows } from './music.js';
@@ -29,22 +29,22 @@ export function rememberSearch(q) {
 const LIB_PATH = { music: 'music', audiobook: 'books', movie: 'lib', show: 'lib' };
 const albumCard = (a) => `<a class="card mcard" href="#/album/${+a.id}">${cover(a.id, a.cover)}<div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist || '')}${a.year ? ' · ' + +a.year : ''}</div></a>`;
 const artistCard = (a) => `<a class="card pcard" href="#/artist/${+a.id}">${personArt({ id: a.id, name: a.name, image: false })}<div class="t">${esc(a.name)}</div><div class="s">Artist</div></a>`;
-const titles = (n) => `${n} ${n === 1 ? 'titel' : 'titlar'}`;
+const titles = (n) => `${n} ${n === 1 ? t('titel') : t('titlar')}`;
 const list = (rows) => `<div class="slist">${rows.join('')}</div>`;
 const GROUPS = {
-  movies: { name: 'Filmer', html: (r) => shelfHtml('Filmer', r.map(i => card(i)).join('')) },
-  shows: { name: 'Serier', html: (r) => shelfHtml('Serier', r.map(i => card(i)).join('')) },
-  episodes: { name: 'Avsnitt', html: (r) => shelfHtml('Avsnitt', r.map(i => card(i, true)).join(''), { land: true }) },
-  people: { name: 'Personer', html: (r) => `<section class="section"><h2>Personer</h2><div class="shelf people">${r.map(p => personCard(p, titles(p.titles))).join('')}</div></section>` },
-  artists: { name: 'Artister', html: (r) => `<section class="section"><h2>Artister</h2><div class="shelf people">${r.map(artistCard).join('')}</div></section>` },
+  movies: { name: t('Filmer'), html: (r) => shelfHtml(t('Filmer'), r.map(i => card(i)).join('')) },
+  shows: { name: t('Serier'), html: (r) => shelfHtml(t('Serier'), r.map(i => card(i)).join('')) },
+  episodes: { name: t('Avsnitt'), html: (r) => shelfHtml(t('Avsnitt'), r.map(i => card(i, true)).join(''), { land: true }) },
+  people: { name: t('Personer'), html: (r) => `<section class="section"><h2>${t('Personer')}</h2><div class="shelf people">${r.map(p => personCard(p, titles(p.titles))).join('')}</div></section>` },
+  artists: { name: t('Artister'), html: (r) => `<section class="section"><h2>${t('Artister')}</h2><div class="shelf people">${r.map(artistCard).join('')}</div></section>` },
   albums: { name: 'Album', html: (r) => `<section class="section"><h2>Album</h2><div class="shelf">${r.map(albumCard).join('')}</div></section>` },
-  tracks: { name: 'Låtar', html: (r) => `<section class="section"><h2>Låtar</h2><div data-tracks>${trackRows(r, { showCover: true })}</div></section>` },
-  books: { name: 'Ljudböcker', html: (r) => `<section class="section"><h2>Ljudböcker</h2><div class="shelf">${r.map(bookCard).join('')}</div></section>` },
-  podcasts: { name: 'Poddar', html: (r) => `<section class="section"><h2>Poddar</h2><div class="shelf">${r.map(p => `<a class="card mcard" href="#/podcast/${+p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${esc(p.author || '')}</div></a>`).join('')}</div></section>` },
-  podcastEpisodes: { name: 'Poddavsnitt', html: (r) => `<section class="section"><h2>Poddavsnitt</h2>${list(r.map(e => `<a class="srow" href="#/podcast/${+e.podcast}">
-    <b>${esc(e.title || '')}</b><span class="muted small">${esc(e.podcastTitle || '')}${e.published ? ' · ' + new Date(e.published * 1000).toLocaleDateString('sv-SE') : ''}${e.duration ? ' · ' + fmtDur(e.duration) : ''}</span></a>`))}</section>` },
-  channels: { name: 'Kanaler', html: (r) => `<section class="section"><h2>Kanaler</h2><div class="row">${r.map((c, i) => `<button type="button" class="srow chrow" data-ch="${i}">${chLogo(c, 'small')}<b>${esc(c.name)}</b></button>`).join('')}</div></section>` },
-  programs: { name: 'På TV', html: (r) => `<section class="section"><h2>På TV</h2>${list(r.map(p => `<button type="button" class="srow" data-pid="${+p.id}">
+  tracks: { name: t('Låtar'), html: (r) => `<section class="section"><h2>${t('Låtar')}</h2><div data-tracks>${trackRows(r, { showCover: true })}</div></section>` },
+  books: { name: t('Ljudböcker'), html: (r) => `<section class="section"><h2>${t('Ljudböcker')}</h2><div class="shelf">${r.map(bookCard).join('')}</div></section>` },
+  podcasts: { name: t('Poddar'), html: (r) => `<section class="section"><h2>${t('Poddar')}</h2><div class="shelf">${r.map(p => `<a class="card mcard" href="#/podcast/${+p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${esc(p.author || '')}</div></a>`).join('')}</div></section>` },
+  podcastEpisodes: { name: t('Poddavsnitt'), html: (r) => `<section class="section"><h2>${t('Poddavsnitt')}</h2>${list(r.map(e => `<a class="srow" href="#/podcast/${+e.podcast}">
+    <b>${esc(e.title || '')}</b><span class="muted small">${esc(e.podcastTitle || '')}${e.published ? ' · ' + new Date(e.published * 1000).toLocaleDateString(locale) : ''}${e.duration ? ' · ' + fmtDur(e.duration) : ''}</span></a>`))}</section>` },
+  channels: { name: t('Kanaler'), html: (r) => `<section class="section"><h2>${t('Kanaler')}</h2><div class="row">${r.map((c, i) => `<button type="button" class="srow chrow" data-ch="${i}">${chLogo(c, 'small')}<b>${esc(c.name)}</b></button>`).join('')}</div></section>` },
+  programs: { name: t('På TV'), html: (r) => `<section class="section"><h2>${t('På TV')}</h2>${list(r.map(p => `<button type="button" class="srow" data-pid="${+p.id}">
     <b>${esc(p.title)}${p.subtitle ? ' – ' + esc(p.subtitle) : ''}</b><span class="muted small">${esc(dayName(p.start))} ${hhmm(p.start)} · ${esc(p.channel)}</span></button>`))}</section>` }
 };
 
@@ -52,21 +52,21 @@ const GROUPS = {
 function emptyView() {
   const recent = recentSearches();
   const places = [...libs.map(l => ({ href: `#/${LIB_PATH[l.type] || 'lib'}/${+l.id}`, label: l.name })),
-    ...(me?.liveTv ? [{ href: '#/guide', label: 'TV-guiden' }] : []), ...(!me?.kid ? [{ href: '#/podcasts', label: 'Poddar' }] : [])];
-  return `<div class="toolbar"><h1>Sök</h1></div>
-    ${recent.length ? `<section class="section"><h2>Senaste sökningar <button type="button" class="ghost small" data-srclear aria-label="Rensa senaste sökningar">Rensa</button></h2>
+    ...(me?.liveTv ? [{ href: '#/guide', label: t('TV-guiden') }] : []), ...(!me?.kid ? [{ href: '#/podcasts', label: t('Poddar') }] : [])];
+  return `<div class="toolbar"><h1>${t('Sök')}</h1></div>
+    ${recent.length ? `<section class="section"><h2>${t('Senaste sökningar')} <button type="button" class="ghost small" data-srclear aria-label="${t('Rensa senaste sökningar')}">${t('Rensa')}</button></h2>
       <div class="row">${recent.map(r => `<a class="btn small" data-snav href="#/search/${encodeURIComponent(r)}">${esc(r)}</a>`).join('')}</div></section>` : ''}
-    ${emptyState({ icon: '🔍', title: 'Sök i hela biblioteket', text: me?.kid ? 'Filmer, serier, personer, musik och ljudböcker. Stavfel gör inget.'
-      : 'Filmer, serier, avsnitt, personer, musik, ljudböcker, poddar och TV. Stavfel gör inget – och du kan lägga till året, t.ex. ”matrix 1999”.' })}
-    ${places.length ? `<section class="section"><h2>Bläddra i stället</h2><div class="row">${places.map(p => `<a class="btn ghost small" data-snav href="${p.href}">${esc(p.label)}</a>`).join('')}</div></section>` : ''}`;
+    ${emptyState({ icon: '🔍', title: t('Sök i hela biblioteket'), text: me?.kid ? t('Filmer, serier, personer, musik och ljudböcker. Stavfel gör inget.')
+      : t('Filmer, serier, avsnitt, personer, musik, ljudböcker, poddar och TV. Stavfel gör inget – och du kan lägga till året, t.ex. ”matrix 1999”.') })}
+    ${places.length ? `<section class="section"><h2>${t('Bläddra i stället')}</h2><div class="row">${places.map(p => `<a class="btn ghost small" data-snav href="${p.href}">${esc(p.label)}</a>`).join('')}</div></section>` : ''}`;
 }
 
 // ---------- flikarna: Allt | Repliker ----------
 let tab = 'all';
 const tabOf = () => /[?&]t=lines(&|$)/.test(location.hash) ? 'lines' : 'all';
 const hrefOf = (q) => (q ? '#/search/' + encodeURIComponent(q) : '#/search') + (tab === 'lines' ? '?t=lines' : '');
-const tabsBar = () => tabsHtml({ id: 'stabs', label: 'Sök i', panel: 'sres', current: tab,
-  items: [{ key: 'all', label: 'Allt' }, { key: 'lines', label: 'Repliker' }] });
+const tabsBar = () => tabsHtml({ id: 'stabs', label: t('Sök i'), panel: 'sres', current: tab,
+  items: [{ key: 'all', label: t('Allt') }, { key: 'lines', label: t('Repliker') }] });
 function bindSearchTabs() {
   bindTabs($('#stabs'), (key) => {
     if (key === tab) return;
@@ -77,18 +77,18 @@ function bindSearchTabs() {
 /** Repliker: träffarna står kvar medan nästa sökning görs; modulen laddas vid första användningen */
 async function renderLines(q) {
   if (!$('#sres[data-tab="lines"]')) {
-    main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1><span class="muted" id="sstatus"></span></div>${tabsBar()}
-      <div id="sres" role="tabpanel" data-tab="lines">${loadingState({ label: 'Söker i repliker…' })}</div>`;
+    main.innerHTML = `<div class="toolbar"><h1>${t('Sök: ”{q}”', { q: esc(q) })}</h1><span class="muted" id="sstatus"></span></div>${tabsBar()}
+      <div id="sres" role="tabpanel" data-tab="lines">${loadingState({ label: t('Söker i repliker…') })}</div>`;
     bindSearchTabs();
   } else {
-    $('.toolbar h1', main).textContent = `Sök: ”${q}”`;
-    $('#sstatus').innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
+    $('.toolbar h1', main).textContent = t('Sök: ”{q}”', { q });
+    $('#sstatus').innerHTML = loadingState({ kind: 'inline', label: t('Söker…') });
   }
   main.removeAttribute('aria-busy');
   const m = await need('views/searchlines.js');
   if (cur !== q) return;
   const n = await m.renderLines($('#sres'), q); // kastar (aborted) om en nyare sökning startat
-  $('#sstatus').textContent = n ? `${n} ${n === 1 ? 'replik' : 'repliker'}` : '';
+  $('#sstatus').textContent = n ? `${n} ${n === 1 ? t('replik') : t('repliker')}` : '';
 }
 
 // ---------- rendering ----------
@@ -105,12 +105,12 @@ async function render(q) {
   }
   // Vid sökning medan man skriver står de förra träffarna kvar tills de nya kommer (ingen blinkande sida)
   const status = $('#sstatus');
-  if (status) status.innerHTML = loadingState({ kind: 'inline', label: 'Söker…' });
+  if (status) status.innerHTML = loadingState({ kind: 'inline', label: t('Söker…') });
   const d = await api(`/search/all?q=${encodeURIComponent(q)}&limit=${LIMIT}`); // avbryts (kastar) om en nyare sökning startat
   const n = d.order.reduce((a, g) => a + d[g].length, 0);
-  main.innerHTML = `<div class="toolbar"><h1>Sök: ”${esc(q)}”</h1><span class="muted" id="sstatus">${n ? `${n} ${n === 1 ? 'träff' : 'träffar'}` : ''}</span></div>
+  main.innerHTML = `<div class="toolbar"><h1>${t('Sök: ”{q}”', { q: esc(q) })}</h1><span class="muted" id="sstatus">${n ? `${n} ${n === 1 ? t('träff') : t('träffar')}` : ''}</span></div>
     ${tabsBar()}<div id="sres" role="tabpanel" data-tab="all">${n ? d.order.map(g => GROUPS[g]?.html(d[g]) || '').join('')
-      : emptyState({ icon: '🔍', title: 'Inga träffar', text: 'Prova en annan stavning, en del av titeln, originaltiteln eller ett namn – eller sök efter en replik under Repliker.' })}</div>`;
+      : emptyState({ icon: '🔍', title: t('Inga träffar'), text: t('Prova en annan stavning, en del av titeln, originaltiteln eller ett namn – eller sök efter en replik under Repliker.') })}</div>`;
   main.removeAttribute('aria-busy');
   bindSearchTabs();
   const res = $('#sres');
@@ -138,7 +138,7 @@ views.search = async (q) => {
 export function liveSearch(q, redraw = false) {
   history.replaceState(history.state, '', hrefOf(q));
   nextRoute();
-  if (redraw) main.innerHTML = loadingState({ label: 'Söker…' }); // fliken byttes: inga kvarstående träffar från den andra fliken
+  if (redraw) main.innerHTML = loadingState({ label: t('Söker…') }); // fliken byttes: inga kvarstående träffar från den andra fliken
   return render(q).catch(e => showError(e, q));
 }
 

@@ -1,5 +1,5 @@
 // Passkeys (WebAuthn): inloggning och registrering
-import { api } from './core.js';
+import { api, t } from './core.js';
 
 // ---------- passkeys (WebAuthn) ----------
 const b64uEnc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -13,7 +13,7 @@ export async function passkeyLogin(remember = true) {
     id: cred.id, response: { clientDataJSON: b64uEnc(cred.response.clientDataJSON), authenticatorData: b64uEnc(cred.response.authenticatorData),
       signature: b64uEnc(cred.response.signature) }, remember }) });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || 'Fel ' + r.status);
+  if (!r.ok) throw new Error(d.error ? t(d.error) : t('Fel {status}', { status: r.status }));
 }
 export async function passkeyRegister(password, name, code) {
   const o = await api('/me/passkeys/options', { method: 'POST', body: { password, code } });
