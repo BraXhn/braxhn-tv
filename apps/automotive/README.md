@@ -20,6 +20,13 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - automatiskt nästa avsnitt
 - tittarstatus
 - **live-TV och inspelningar** (HDHomeRun/IPTV)
+- **TV-guide i rutnät** (D-pad: upp/ned mellan kanaler, vänster/höger mellan program – vid kanten bläddrar guiden en timme), filter för favoriter och kanalgrupper, programrutan med *Titta live*, *Från början*, *Spela (catch-up)*, *Spela in* och *Lägg till i favoriter* (per profil)
+- **kanalbyte** i live-spelaren med upp/ned (när spelarens knappar är dolda), CH+/CH− och **sifferknapparna** (kanalnumret väljs 1,5 s efter sista siffran)
+- **IPTV-filmer och serier** (Xtream) som hyllor under Live-TV, med Fortsätt titta
+- **inspelningar** i flikarna *Kommande*, *Pågår* (titta medan den spelas in) och *Inspelat* med **Hoppa över reklam**
+- **egna betyg** (tryck på en stjärna, igen för en halv, en gång till för att ta bort), **extramaterial** och **temamusik** (enligt *Mitt konto* i webben, låg volym, tonas ut) på titelsidan
+- **repliksökning**: fliken *Repliker* i sökningen spelar från strax före repliken
+- **familjefiltret** och **syntolkning** visas i spelaren; markerade scener hoppas över. *Synka automatiskt* i undertextmenyn för undertextfiler
 - byte av ljudspår och undertexter under uppspelning, kapitel
 - musik, **ljudböcker och poddar i bilens mediaspelare** (får användas under körning)
 - offline-nedladdning

@@ -140,6 +140,10 @@ before(async () => {
   // Serie med tre avsnitt
   const ser = dir('Serier', 'Serien', 'Season 1');
   for (const n of [1, 2, 3]) ff('-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-f', 'lavfi', '-i', `sine=frequency=${200 * n}`, '-t', '8', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(ser, `Serien S01E0${n}.mkv`));
+  // Seriens temamusik och extramaterial (Android läser theme och extras på titelsidan)
+  ff('-f', 'lavfi', '-i', 'sine=frequency=330:duration=6', path.join(MEDIA, 'Serier', 'Serien', 'theme.mp3'));
+  ff('-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    path.join(dir('Serier', 'Serien', 'Featurettes'), 'Bakom kulisserna.mp4'));
   // Musik: ett album med omslag
   const alb = dir('Musik', 'Artisten', 'Albumet');
   for (const n of [1, 2]) ff('-f', 'lavfi', '-i', `sine=frequency=${300 * n}:duration=5`, '-metadata', `title=Låt ${n}`, '-metadata', 'artist=Artisten', '-metadata', 'album=Albumet',
@@ -272,19 +276,38 @@ before(async () => {
   S.rec3 = ok(await call('ios', 'POST', '/api/dvr/manual', { body: { channelId: S.channel, start: T + 10800, stop: T + 11400, title: 'Bokad i iOS' } }), 'inspelning').id;
   // Programmet som iOS bokar från guiden: nästa program på kanalen som sänder nu (börjar om 30 minuter)
   S.program = chans.find(c => c.now && c.next).next.id;
+  // IPTV-filmer och en serie som en Xtream-källa skulle ge (Android: hyllor och detaljer; bilderna från den lokala servern)
+  const vdb = new DatabaseSync(path.join(ROOT, 'config', 'braxhn-tv.db'));
+  vdb.exec('PRAGMA busy_timeout=5000');
+  const tunerId = vdb.prepare('SELECT id FROM tuners ORDER BY id LIMIT 1').get().id;
+  const insV = vdb.prepare('INSERT INTO iptv_vod(tuner_id,kind,ext_id,name,category,cover,plot,year,rating,duration,added,info) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)');
+  S.vodMovie = Number(insV.run(tunerId, 'movie', 'm1', 'IPTV-filmen', 'Action', feedBase + '/bild.jpg', 'Handling', 2020, 7.1, 5400, T).lastInsertRowid);
+  S.vodSeries = Number(insV.run(tunerId, 'series', 's1', 'IPTV-serien', 'Drama', feedBase + '/bild.jpg', 'Om serien', 2019, 6.5, null, T).lastInsertRowid);
+  S.vodEp = Number(vdb.prepare('INSERT INTO iptv_episodes(vod_id,ext_id,season,episode,title,plot,duration,ext,image) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(S.vodSeries, 'e1', 1, 1, 'Första', 'Avsnittet', 2700, 'mp4', feedBase + '/bild.jpg').lastInsertRowid);
+  const insP = vdb.prepare('INSERT INTO iptv_vod_progress(user_id,kind,ref_id,position,duration,watched,updated) VALUES(?,?,?,?,?,0,?)');
+  insP.run(S.admin, 'movie', S.vodMovie, 120, 5400, T);
+  insP.run(S.admin, 'episode', S.vodEp, 300, 2700, T);
+  vdb.close();
   // Min lista och en egen samling på startsidan (iOS visar dem som hyllor)
   ok(await call('ios', 'POST', `/api/items/${S.remux}/watchlist`, { body: { add: true } }), 'Min lista');
   ok(await call('ios', 'POST', '/api/custom-collections', { body: { name: 'Favoriter', home: true, item: S.film } }), 'egen samling');
   // Offline-fil för den korta filmen (480p) – klar på några sekunder
   ok(await call('ios', 'POST', `/api/items/${S.film}/offline`, { body: { q: '480' } }), 'offline');
   for (let i = 0; i < 120; i++) { if ((await call('ios', 'GET', `/api/items/${S.film}/offline?q=480`)).data.status === 'ready') break; await sleep(500); }
+  // Eget betyg, familjefiltret i läget "hoppa över scener" med en markerad scen (Playback.filter) och repliksökningens index
+  ok(await call('android', 'PUT', `/api/items/${S.remux}/rating`, { body: { rating: 3.5 } }), 'betyg');
+  ok(await call('android', 'PUT', '/api/me/family-filter', { body: { mode: 'skip' } }), 'familjefilter');
+  ok(await call('android', 'POST', `/api/items/${S.film}/skips`, { body: { start: 2, end: 3, label: 'Testscen', scope: 'me' } }), 'markerad scen');
+  for (let i = 0; i < 120; i++) { if ((await call('android', 'GET', '/api/search/lines?q=Hej')).data.lines?.length) break; await sleep(500); }
 });
 after(async () => { await srv?.stop(); feed?.close(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
 // ---------------- vilka konkreta anrop varje endpoint provas med ----------------
 // p = sökvägsparametrar, url = färdig adress (från ett tidigare svar, som apparna gör), auth: false = ingen
 // Bearer-header (AVPlayer/bildladdning använder token i adressen), token = annan apptoken
-const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', get $har() { return `${S.ep3},99999999`; },
+const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', $replik: 'Hej', get $kanaler() { return String(S.channel); },
+  get $från() { return String(Math.floor(Date.now() / 1000) - 3600); }, get $till() { return String(Math.floor(Date.now() / 1000) + 3 * 3600); }, get $har() { return `${S.ep3},99999999`; },
   get $program() { return S.program; }, get $profil() { return S.admin; }, get $artist() { return S.artist; } };
 const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
 const playbackQ = (app, i = 0) => new URLSearchParams([C.endpoints['GET /api/items/:id/playback'][app].query].flat()[i]).toString();
@@ -307,6 +330,13 @@ const imageCases = async (app) => {
   }
   return out;
 };
+// Undertextfilen som kan synkas mot ljudet (Remux Film har en extern .srt)
+async function syncCases(app) {
+  const pb = await json(app, `/api/items/${S.remux}/playback?${playbackQ(app)}`);
+  const s = pb.subtitles.find(x => x.syncable);
+  assert.ok(s, 'ingen undertext som kan synkas: ' + JSON.stringify(pb.subtitles));
+  return [{ p: { id: S.remux, sid: s.id } }];
+}
 const CASES = {
   'GET /api/status': () => [{}, { auth: false }],
   'POST /api/login': () => [{ auth: false }],
@@ -395,6 +425,26 @@ const CASES = {
   'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
   'GET /api/me/cinema': () => [{}],
+  // Android: betyg, temamusik, extramaterial, repliksökning och undertextsynk
+  'PUT /api/items/:id/rating': () => [{ p: { id: S.film } }],
+  'GET /api/items/:id/theme': () => [{ p: { id: S.show } }],
+  'GET /api/trailers/:tid/play': async (app) => [{ p: { tid: (await json(app, `/api/items/${S.show}`)).extras[0].id } }],
+  'GET /api/trailers/:tid/stream': async (app) => {
+    const x = (await json(app, `/api/items/${S.show}`)).extras[0];
+    return [{ url: (await json(app, `/api/trailers/${x.id}/play`)).url, auth: false }];
+  },
+  'GET /api/search/lines': () => [{}],
+  'POST /api/items/:id/subs/:sid/sync': (app) => syncCases(app),
+  'GET /api/items/:id/subs/:sid/sync': (app) => syncCases(app),
+  // Android: IPTV-guiden, favoriter, snabbt kanalbyte, filmer och serier
+  'GET /api/iptv/channels': () => [{}],
+  'GET /api/iptv/epg': () => [{}],
+  'PUT /api/iptv/favorites/:cid': () => [{ p: { cid: S.channel } }],
+  'POST /api/iptv/channels/:cid/prestart': () => [{ p: { cid: S.channel } }],
+  'GET /api/iptv/vod': () => [{}],
+  'GET /api/iptv/vod/:id': () => [{ p: { id: S.vodMovie } }, { p: { id: S.vodSeries } }],
+  'GET /api/iptv/vod/:id/:kind.jpg': (app) => [{ url: `/api/iptv/vod/${S.vodMovie}/cover.jpg?t=${TOK[app + 'Img']}`, auth: false }],
+  'GET /api/iptv/episodes/:eid/image.jpg': (app) => [{ url: `/api/iptv/episodes/${S.vodEp}/image.jpg?t=${TOK[app + 'Img']}`, auth: false }],
   // Utloggning med en egen inloggning, så att apparnas token gäller för resten av testet
   'POST /api/logout': async (app) => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }]
 };
