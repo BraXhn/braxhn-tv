@@ -10,7 +10,9 @@
 // (det är de som motsvarar talet), annars alla.
 //
 // Var tystnaden görs (se /playback i routes/playback.js och stream.js):
-//   - Webbspelaren tystar själv (ffc=1): video.muted på exakt tid – direktuppspelningen behålls.
+//   - Webbspelaren tystar själv (ffc=1): video.muted på exakt tid – direktuppspelningen behålls. Gäller bara profiler
+//     som valt filtret själva; för barnprofiler (påtvingat, enforced) tystar servern alltid, och direktfilen,
+//     nedladdning och offline nekas för titlar med svordomar.
 //   - Alla andra (apparna, Chromecast, AirPlay): servern lägger ett volymfilter (volume=0 med enable='between(t,a,b)')
 //     i ljudet. Det kräver att ljudet kodas om (AAC), bilden kopieras när det går. Det fungerar utan klientstöd.
 // Undertexterna maskeras alltid av servern (/api/stream/:id/subs/:sid) när profilen har filtret på.
@@ -33,6 +35,14 @@ export function modeFor(uid) {
   const u = typeof uid === 'object' ? uid : get('SELECT id, max_age, family_filter FROM users WHERE id=?', uid);
   if (!u) return 'off';
   return settingOf(u) || (u.max_age != null ? kidsDefault() : 'off');
+}
+/**
+ * Påtvingat filter: en barnprofil vars läge bestäms av huvudkontot eller administratörens standard (profilen kan inte
+ * stänga av det själv). Då tystar servern ljudet oavsett vad klienten skickar (ffc=1, ff=1 i adressen, direktfilen).
+ */
+export function enforced(uid) {
+  const u = typeof uid === 'object' ? uid : get('SELECT id, max_age, family_filter FROM users WHERE id=?', uid);
+  return !!u && u.max_age != null && modeFor(u) !== 'off';
 }
 export function setMode(uid, v) {
   if (v !== '' && v != null && !MODES.includes(v)) throw new Error('Ogiltigt läge');

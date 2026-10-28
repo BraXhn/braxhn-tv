@@ -125,6 +125,12 @@ st.setMuteHook((it, uid, audio, off) => {
   const a = audio !== '' ? st.streamsOf(it).find(x => x.type === 'audio' && String(x.index) === String(audio)) : null;
   return family.modeFor(uid) === 'off' ? [] : family.muteFilters(family.muteIntervals(it, a?.lang), off);
 });
+// Påtvingat familjefilter (barnprofiler): HLS-sessionen tystas även om ff=1 tagits bort ur adressen
+st.setFamilyForce((uid, it, audio) => {
+  if (!family.enforced(uid)) return false;
+  const a = audio !== '' ? st.streamsOf(it).find(x => x.type === 'audio' && String(x.index) === String(audio)) : null;
+  return family.muteIntervals(it, a?.lang).length > 0;
+});
 health.setBusyCheck(() => st.activeTranscodes().length > 0 || act.listActive().length > 0);
 health.kick(+(process.env.HEALTH_START_DELAY ?? 120000));
 

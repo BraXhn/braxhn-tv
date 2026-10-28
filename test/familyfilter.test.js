@@ -177,12 +177,25 @@ t('förberedelse: bibliotek, indexerade repliker och barnprofil', async () => {
   // Replikerna indexeras efter skanningen – därefter har planen intervallen
   S.plan = await until(async () => { const f = (await req(`/api/items/${S.film}/playback?info=1&ffc=1`, { tok: S.lill })).data.filter; return f?.ready && f.mute.length && f; }, 'planen');
   assert.deepEqual(S.plan.mute, MUTE);
-  assert.deepEqual([S.plan.mode, S.plan.item, S.plan.server, S.plan.skip], ['mute', S.film, false, []]);
+  // Barnprofil (påtvingat filter): servern tystar även när klienten säger att den tystar själv (ffc=1)
+  assert.deepEqual([S.plan.mode, S.plan.item, S.plan.server, S.plan.skip], ['mute', S.film, true, []]);
 });
 
-t('planen: webbspelaren (ffc=1) spelar direkt, appar och Chromecast får ljudet tystat av servern', async () => {
+t('planen: webbspelaren (ffc=1) spelar direkt för vuxna som valt filtret, barnprofiler och appar får ljudet tystat av servern', async () => {
+  // Barnprofilen: ffc=1 ändrar inget – servern tystar (remux), och originalfilen nekas
   const web = (await req(`/api/items/${S.film}/playback?ffc=1`, { tok: S.lill })).data;
-  assert.equal(web.mode, 'direct'); assert.equal(web.filter.server, false);
+  assert.equal(web.mode, 'remux', JSON.stringify(web.reasons)); assert.equal(web.filter.server, true); assert.ok(web.url.includes('ff=1'));
+  const direct = await req(`/api/stream/${S.film}/direct`, { tok: S.lill });
+  assert.equal(direct.status, 403); assert.match(direct.data.error, /Familjefiltret/);
+  assert.equal((await req(`/api/stream/${S.film}/download`, { tok: S.lill })).status, 403);
+  assert.equal((await req(`/api/stream/${S.film}/offline-file?q=720`, { tok: S.lill })).status, 403);
+  assert.equal((await req(`/api/stream/${S.film}/direct`, { method: 'HEAD' })).status, 200, 'vuxna får filen');
+  // En vuxen som själv valt filtret: webbspelaren tystar själv och spelar direkt
+  assert.equal((await req('/api/users', { method: 'POST', body: { name: 'valt', password: PW } })).status, 200);
+  S.valt = await login('valt');
+  assert.equal((await req('/api/me/family-filter', { method: 'PUT', body: { mode: 'mute' }, tok: S.valt })).status, 200);
+  const own = (await req(`/api/items/${S.film}/playback?ffc=1`, { tok: S.valt })).data;
+  assert.equal(own.mode, 'direct'); assert.equal(own.filter.server, false);
   const app = (await req(`/api/items/${S.film}/playback`, { tok: S.lill })).data;
   assert.equal(app.mode, 'remux', JSON.stringify(app.reasons));
   assert.ok(app.reasons.includes('familjefiltret tystar svordomar'));
@@ -229,6 +242,22 @@ t('servern tystar ljudet i HLS-strömmen: remux från början, remux och omkodni
   const s4 = await hlsFile(tc.url, path.join(ROOT, 'tc-seg4.ts'), 4);
   assertMuted(s4, [[12.5, 15.4, false], [16.0, 17.6, true]]);
   await req(`/api/stream/${S.film}/stop`, { method: 'POST', tok: S.lill });
+});
+
+t('barnprofilen kan inte välja bort tystnaden i HLS-adressen (ff=1 bort, am=copy, audio tomt) eller flytta den med undertextsynken', async () => {
+  const app = (await req(`/api/items/${S.film}/playback`, { tok: S.lill })).data;
+  assert.ok(app.url.includes('ff=1') && app.url.includes('am=aac'), app.url);
+  const u = new URL(B + app.url);
+  u.searchParams.delete('ff'); u.searchParams.set('am', 'copy'); u.searchParams.set('audio', ''); u.searchParams.set('pid', 'abcdef12');
+  const f = await hlsFile(u.pathname + u.search, path.join(ROOT, 'utan-ff.ts'));
+  assertMuted(f, [[0.3, 2.5, false], [3.0, 4.6, true], [5.2, 15.4, false], [16.0, 17.6, true]]);
+  await req(`/api/stream/${S.film}/stop`, { method: 'POST', tok: S.lill });
+  // Undertextsynken: bara vuxna profiler ändrar justeringen (den flyttar familjefiltrets intervall)
+  const sid = app.subtitles[0].id;
+  assert.equal((await req(`/api/items/${S.film}/subs/${sid}/sync`, { method: 'PUT', body: { offset: 30, ratio: 1 }, tok: S.lill })).status, 403);
+  assert.equal((await req(`/api/items/${S.film}/subs/${sid}/sync`, { method: 'POST', body: { force: true }, tok: S.lill })).status, 403);
+  assert.equal((await req(`/api/items/${S.film}/subs/${sid}/sync`, { tok: S.lill })).status, 200, 'läsa går bra');
+  assert.deepEqual((await req(`/api/items/${S.film}/playback?info=1`, { tok: S.lill })).data.filter.mute, MUTE);
 });
 
 t('scener att hoppa över: vuxna markerar, barnet ser hushållets i läget Tysta + hoppa över', async () => {

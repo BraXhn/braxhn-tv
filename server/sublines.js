@@ -146,9 +146,12 @@ export function marksOf(text, words) {
   for (const m of String(text).matchAll(re)) out.push([m.index, m.index + m[0].length]);
   return out;
 }
-/** FTS5-frågan för orden: en fras där sista ordet får vara början av ett ord ("i ll be ba"*) */
+/** FTS5-frågan för orden: en fras där sista ordet får vara början av ett ord ("i ll be ba"*). Orden är bara bokstäver
+ *  och siffror (wordsOf) – ingen FTS5-syntax når frågan. Ett sista ord kortare än tre tecken söks som helt ord: "th"*
+ *  slår ihop doclistorna för alla ord som börjar så (1,8 s per fråga med en miljon repliker, servern stilla). */
 const TOP = 3000; // FTS-träffar som behörighetsfiltret får välja bland
-const ftsQuery = (words) => `"${words.join(' ')}"*`;
+const CAND = 20000; // högst så många träffar rankas – ett vanligt ord ("the") ska inte sortera hela indexet
+export const ftsQuery = (words) => `"${words.join(' ')}"${words[words.length - 1].length >= 3 ? '*' : ''}`;
 // Titeln, avsnittet och åldersgränsen: s = serien (avsnitt) eller huvudraden (filmversioner) – samma arv som allowedFor
 const SELECT = `SELECT l.id AS lid, l.item_id, l.sub, l.s, l.e, l.text, si.lang, si.label, ss.shift, ss.ratio,
   i.kind, i.title, i.season, i.episode, i.year, i.parent_id, i.version_of, i.library_id, i.age, i.mtime, s.title AS s_title, s.year AS s_year
@@ -175,8 +178,8 @@ export function search(q, { age, allowed, limit = 30, perTitle = 5 }) {
   if (!words.length || words.join('').length < 2) return [];
   const pool = Math.min(1000, limit * 10);
   const rows = FTS5
-    // FTS5 sorterar de bästa träffarna själv (ORDER BY rank LIMIT) – ett vanligt ord ger annars hela indexet att sortera
-    ? all(`WITH m AS (SELECT rowid AS rid, rank FROM sub_fts WHERE sub_fts MATCH ? ORDER BY rank LIMIT ${TOP})
+    // De första CAND träffarna rankas och de bästa TOP väljs – ett vanligt ord ger annars hela indexet att ranka och sortera
+    ? all(`WITH c AS (SELECT rowid AS rid, rank FROM sub_fts WHERE sub_fts MATCH ? LIMIT ${CAND}), m AS (SELECT rid, rank FROM c ORDER BY rank LIMIT ${TOP})
       ${SELECT.replace('FROM sub_lines l', 'FROM m JOIN sub_lines l ON l.id=m.rid')} WHERE 1${age.sql} ORDER BY m.rank LIMIT ?`, ftsQuery(words), ...age.params, pool)
     : all(`${SELECT} WHERE l.norm LIKE ? ESCAPE '\\'${age.sql} ORDER BY length(l.text) LIMIT ?`, `% ${words.join(' ').replace(/[%_\\]/g, '\\$&')}%`, ...age.params, pool);
   const out = [], seen = new Set(), per = new Map(), thumbs = new Map();

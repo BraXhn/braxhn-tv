@@ -6,8 +6,9 @@
 //  - Allt annat – strömadresser och guider i listan, omdirigeringar, logotyper, catch-up-adresser – är innehåll från
 //    leverantören och får bara gå till publika adresser, hemnätet (om källan tillåter det, standard) eller en betrodd värd.
 //    Loopback, länklokalt (169.254.169.254 = molnens metadatatjänst) och multicast spärras alltid för dem.
-// Uppslaget kontrolleras i samma anslutning som görs (skydd mot DNS-rebinding). ffmpeg gör egna uppslag: där
-// kontrolleras adressen strax före start (assertStream) – rimligt skydd, men inte mot ett namn som byter adress emellan.
+// Uppslaget kontrolleras i samma anslutning som görs (skydd mot DNS-rebinding). ffmpeg gör egna uppslag, följer
+// omdirigeringar och hämtar HLS-segment: dess http/https går därför genom vakten nedan (ffGuard), som kontrollerar varje
+// anslutning på samma sätt. rtsp går inte genom vakten – där kontrolleras adressen strax före start (assertStream).
 // Alla hämtningar har tidsgränser och storleksgränser (även uppackad gzip).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { CONFIG } from '../db.js';
@@ -91,6 +93,102 @@ export async function iptvFetch(u, { pol = openPolicy(), headers = {}, timeout =
   }
   throw new Error('För många omdirigeringar');
 }
+
+// ---------- vakt för ffmpeg (proxy på 127.0.0.1) ----------
+// ffmpeg gör egna DNS-uppslag, följer omdirigeringar och hämtar segmenten i en HLS-spellista från vilka värdar som helst.
+// Därför går ffmpegs http/https genom en liten proxy i servern (-http_proxy): varje anslutning – även omdirigeringar,
+// segment och nycklar – slås upp och kontrolleras mot källans policy i samma anslutning som görs (skydd mot DNS-rebinding).
+// Varje ffmpeg får en egen engångsnyckel (proxyns inloggning) som pekar ut policyn och tas bort när processen avslutas.
+const guardPols = new Map(); // nyckel → policy
+let guardSrv = null, guardPort = 0;
+const HOP = new Set(['connection', 'keep-alive', 'proxy-authorization', 'proxy-connection', 'proxy-authenticate', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
+function guardPolicy(h) {
+  const m = /^Basic\s+([A-Za-z0-9+/=]+)$/i.exec(String(h || '').trim());
+  if (!m) return null;
+  const s = Buffer.from(m[1], 'base64').toString('latin1');
+  return guardPols.get(s.slice(s.indexOf(':') + 1)) || null;
+}
+const ipAllowed = (host, addrs, pol) => allowAll() || pol.trusted.has(host) || (addrs.length > 0 && addrs.every(a => ipOk(a.address, pol)));
+function guardHttp(req, res) {
+  const pol = guardPolicy(req.headers['proxy-authorization']);
+  if (!pol) { res.writeHead(407, { 'Proxy-Authenticate': 'Basic realm="braxhn"', 'Content-Length': '0' }); return res.end(); }
+  let u;
+  try { u = new URL(req.url); } catch { res.writeHead(400, { 'Content-Length': '0' }); return res.end(); }
+  if (u.protocol !== 'http:' || u.username || u.password) { res.writeHead(400, { 'Content-Length': '0' }); return res.end(); }
+  const host = hostOf(u.hostname);
+  if (net.isIP(host) && !ipAllowed(host, [{ address: host }], pol)) { res.writeHead(403, { 'Content-Length': '0' }); return res.end(); }
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k)) headers[k] = v;
+  const up = http.request({ hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search, method: req.method, headers, lookup: lookupFor(pol), timeout: 60000 }, (r) => {
+    const out = {};
+    for (const [k, v] of Object.entries(r.headers)) if (!HOP.has(k)) out[k] = v;
+    res.writeHead(r.statusCode, out);
+    r.pipe(res);
+    r.on('error', () => res.destroy());
+  });
+  up.on('timeout', () => up.destroy(new Error('Tidsgränsen överskreds')));
+  up.on('error', (e) => { if (!res.headersSent) { res.writeHead(e.code === 'EBLOCKED' ? 403 : 502, { 'Content-Length': '0' }); res.end(); } else res.destroy(); });
+  res.on('close', () => up.destroy());
+  req.pipe(up);
+}
+async function guardConnect(req, sock, head) {
+  sock.on('error', () => {});
+  const pol = guardPolicy(req.headers['proxy-authorization']);
+  if (!pol) return sock.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="braxhn"\r\nContent-Length: 0\r\n\r\n');
+  const m = /^\[?([^\]\s]+?)\]?:(\d{1,5})$/.exec(String(req.url || ''));
+  if (!m || !(+m[2] > 0 && +m[2] < 65536)) return sock.end('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
+  const host = hostOf(m[1]);
+  let addrs;
+  try { addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }); } catch { addrs = []; }
+  if (!addrs.length) return sock.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n');
+  if (!ipAllowed(host, addrs, pol)) return sock.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+  // Anslutningen görs till den adress som just kontrollerades – inget nytt uppslag
+  const up = net.connect({ host: addrs[0].address, port: +m[2] });
+  up.setTimeout(60000, () => up.destroy());
+  up.on('error', () => { if (!sock.destroyed) sock.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n'); });
+  up.on('connect', () => {
+    up.setTimeout(0);
+    sock.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    if (head?.length) up.write(head);
+    up.pipe(sock); sock.pipe(up);
+    sock.on('close', () => up.destroy()); up.on('close', () => sock.destroy());
+  });
+}
+/** Startar vakten (anropas när modulen laddas; idempotent). Ger porten när den lyssnar. */
+export function startGuard() {
+  if (guardSrv) return guardSrv.ready;
+  guardSrv = http.createServer(guardHttp);
+  guardSrv.on('connect', (req, sock, head) => { guardConnect(req, sock, head).catch(() => sock.destroy()); });
+  guardSrv.on('clientError', (_e, sock) => sock.destroy());
+  guardSrv.ready = new Promise((resolve) => {
+    guardSrv.once('error', (e) => { console.warn('[iptv] strömvakten kunde inte startas:', e.message); resolve(0); });
+    guardSrv.listen(0, '127.0.0.1', () => { guardPort = guardSrv.address().port; resolve(guardPort); });
+  });
+  guardSrv.unref();
+  return guardSrv.ready;
+}
+startGuard();
+/**
+ * ffmpeg-argument som tvingar strömmens http/https genom vakten. Ger { args, env, release } – release() när processen
+ * avslutats. env tar bort no_proxy (som annars kunde låta ffmpeg gå förbi vakten). Kastar om vakten inte lyssnar eller
+ * om adressen är en spärrad IP-adress (rtsp och andra protokoll som inte går genom vakten).
+ */
+export function ffGuard(u, pol) {
+  let url = null;
+  try { url = new URL(u); } catch {}
+  if (url && !/^(udp|rtp):$/i.test(url.protocol)) {
+    const host = hostOf(url.hostname);
+    if (net.isIP(host) && !ipAllowed(host, [{ address: host }], pol)) throw Object.assign(new Error(BLOCK_MSG), { status: 403 });
+  }
+  if (!guardPort) throw Object.assign(new Error('Strömvakten har inte startat än – försök igen om en stund'), { status: 503 });
+  const key = crypto.randomBytes(18).toString('hex');
+  guardPols.set(key, pol);
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (/^(no_proxy|http_proxy|https_proxy|all_proxy)$/i.test(k)) delete env[k];
+  let done = false;
+  return { args: ['-http_proxy', `http://bx:${key}@127.0.0.1:${guardPort}`], env, release: () => { if (!done) { done = true; guardPols.delete(key); } } };
+}
+export const guardActive = () => guardPols.size;
 
 // ---------- lokala filer (/config) ----------
 /** Den verkliga sökvägen (symlänkar följda) måste ligga i /config – inte bara börja likadant (/config2/…) */

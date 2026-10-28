@@ -49,7 +49,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const at = (d, h, m = 0) => { const x = new Date(); x.setDate(x.getDate() + d); x.setHours(h, m, 0, 0); return Math.floor(x.getTime() / 1000); };
 let tunerN = 0;
 function source(tuners = 1, chans = 2) {
-  const tid = Number(run("INSERT INTO tuners(kind,name,url,tuner_count) VALUES('m3u',?,?,?)", 'Källa ' + (++tunerN), 'http://x/' + tunerN, tuners).lastInsertRowid);
+  // Listan på samma värd som strömmarna: administratörens adress är betrodd (strömvakten, iptv/net.js)
+  const tid = Number(run("INSERT INTO tuners(kind,name,url,tuner_count) VALUES('m3u',?,?,?)", 'Källa ' + (++tunerN), `${base || 'http://x'}/list${tunerN}.m3u`, tuners).lastInsertRowid);
   return { tid, ch: Array.from({ length: chans }, (_, i) => Number(run('INSERT INTO channels(tuner_id,name,stream_url) VALUES(?,?,?)', tid, `K${tunerN}-${i}`, `${base || 'http://s'}/ch${tunerN}-${i}`).lastInsertRowid)) };
 }
 const prog = (ch, start, len, title, extra = {}) => Number(run('INSERT INTO programs(channel_id,start,stop,title,subtitle,season,episode,is_new) VALUES(?,?,?,?,?,?,?,?)',

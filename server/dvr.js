@@ -11,6 +11,8 @@ import { spawn } from 'node:child_process';
 import { get, all, run, now, getSetting, CONFIG } from './db.js';
 import { liveEncoder, activeTranscodes } from './stream.js';
 import { acquireTuner, releaseTuner, SAFE_LIVE, httpOpts, activeLive } from './livetv.js';
+import { guardFor } from './iptv/live.js';
+import { redact } from './iptv/net.js';
 import * as comskip from './comskip.js';
 import * as growing from './dvrlive.js';
 import { simulate, inWindow, episodeKey, outcomeText, worse } from './dvrplan.js';
@@ -29,7 +31,9 @@ export function dvrDir() {
 const globalPad = () => ({ before: Math.max(0, +getSetting('dvr_pad_before', '60') || 0), after: Math.max(0, +getSetting('dvr_pad_after', '180') || 0) });
 /** Marginaler för en inspelning: egna (från regeln eller bokningen) eller serverns inställning */
 export const padOf = (r) => { const g = globalPad(); return { before: r?.pad_before ?? g.before, after: r?.pad_after ?? g.after }; };
-const safeName = (s) => String(s || 'Inspelning').replace(/[\/\\:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 100).trim() || 'Inspelning';
+// Namn ur guiden (leverantörens text) blir mappar och filer: inga avgränsare, och inga punkter eller mellanslag först eller
+// sist – ". .." blev annars ".." (mappen ovanför inspelningsmappen)
+export const safeName = (s) => String(s || 'Inspelning').replace(/[\/\\:*?"<>|\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').slice(0, 100).replace(/^[\s.]+|[\s.]+$/g, '') || 'Inspelning';
 export const FORMATS = ['mp4', 'mkv', 'ts'], TRANSCODES = ['auto', 'always', 'never'];
 const fmtOf = (r) => FORMATS.includes(r?.format) ? r.format : (FORMATS.includes(getSetting('dvr_format', 'mp4')) ? getSetting('dvr_format', 'mp4') : 'mp4');
 const tcOf = (r) => TRANSCODES.includes(r?.transcode) ? r.transcode : (TRANSCODES.includes(getSetting('dvr_transcode', 'auto')) ? getSetting('dvr_transcode', 'auto') : 'auto');
@@ -302,8 +306,11 @@ export function swapRecording(id, programId, user) {
   if (!r || r.status !== 'scheduled') throw new Error('Bara bokade inspelningar kan flyttas');
   const p = get('SELECT * FROM programs WHERE id=?', programId);
   if (!p || p.title.toLowerCase() !== r.title.toLowerCase()) throw new Error('Sändningen är inte samma program');
+  // Finns sändningen redan bokad/inspelad (av någon annan) återanvänds den raden – den får inte flyttas in i regeln,
+  // annars kunde regelns "Behåll senaste N" ta bort en annan användares inspelning
+  const existed = get("SELECT id FROM recordings WHERE channel_id=? AND start=? AND status IN ('scheduled','recording','processing','done')", p.channel_id, p.start);
   const nid = scheduleProgram(p.id, user, null, { priority: r.priority, pad_before: r.pad_before, pad_after: r.pad_after, format: r.format, transcode: r.transcode });
-  if (r.rule_id) run('UPDATE recordings SET rule_id=? WHERE id=?', r.rule_id, nid);
+  if (r.rule_id && !existed) run('UPDATE recordings SET rule_id=? WHERE id=? AND rule_id IS NULL', r.rule_id, nid);
   cancel(id);
   return nid;
 }
@@ -353,7 +360,8 @@ jobs.addSource(() => [
   ...[...converting.keys()].map(id => ({ id: 'conv-' + id, kind: 'record', title: `Bearbetar inspelning: ${get('SELECT title FROM recordings WHERE id=?', id)?.title || ''}`, detail: '', done: 0, total: null }))
 ]);
 let shuttingDown = false;
-const lastLine = (s, def) => s.trim().split('\n').pop() || def;
+// ffmpegs sista felrad – adresser i den kan innehålla inloggningen (Xtream): bara värden visas (iptv/net.js redact)
+export const lastLine = (s, def) => redact(s.trim().split('\n').pop() || def);
 const p2 = (n) => String(n).padStart(2, '0');
 
 /** Mapp och filnamn (utan filändelse) som skannern känner igen: Serie/Season 01/Serie - S01E02 - Titel, annars
@@ -384,11 +392,13 @@ function preemptFor(rec, tunerId) {
 }
 
 function startRecording(rec) {
-  let ch = null, key = null, acquired = false;
+  let ch = null, key = null, acquired = false, g = null;
   try {
     ch = get('SELECT * FROM channels WHERE id=?', rec.channel_id);
     if (!ch) { run("UPDATE recordings SET status='failed', error='Kanalen finns inte längre' WHERE id=?", rec.id); return; }
     key = `rec-${rec.id}`;
+    // IPTV: samma kontroll som live-TV – ffmpegs anslutningar går genom strömvakten (iptv/net.js)
+    g = guardFor(ch);
     if (!acquireTuner(ch.tuner_id, key)) {
       // Ingen ledig tuner just nu: en inspelning med lägre prioritet får ge plats, annars väntar den kvar som schemalagd
       // och försöker igen vid nästa kontroll (tills programmet är slut)
@@ -407,8 +417,8 @@ function startRecording(rec) {
     const ts = path.join(dir, '.' + base + '.ts');
     const until = rec.stop + padOf(rec).after;
     const dur = Math.max(10, until - now());
-    const proc = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, ...httpOpts(ch.stream_url), '-fflags', '+genpts+discardcorrupt',
-      '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a?', '-map', '0:s?', '-c', 'copy', '-t', String(dur), '-f', 'mpegts', ts], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_LIVE, ...g.args, ...httpOpts(ch.stream_url), '-fflags', '+genpts+discardcorrupt',
+      '-i', ch.stream_url, '-map', '0:v:0?', '-map', '0:a?', '-map', '0:s?', '-c', 'copy', '-t', String(dur), '-f', 'mpegts', ts], { stdio: ['ignore', 'ignore', 'pipe'], env: g.env });
     let err = '', ended = false;
     proc.stderr.on('data', x => { err = (err + x).slice(-800); });
     active.set(rec.id, { proc, key, tuner: ch.tuner_id, ts, priority: rec.priority || 0 });
@@ -417,6 +427,7 @@ function startRecording(rec) {
     const tunerId = ch.tuner_id;
     const finish = (code, spawnErr) => {
       if (ended) return; ended = true;
+      g.release();
       active.delete(rec.id);
       releaseTuner(tunerId, key);
       try {
@@ -439,6 +450,7 @@ function startRecording(rec) {
     proc.on('close', (code) => finish(code));
   } catch (e) {
     console.warn('[dvr] kunde inte starta inspelning:', e.message);
+    if (!active.has(rec.id)) g?.release();
     const a = active.get(rec.id);
     if (a) { active.delete(rec.id); try { a.proc.kill('SIGKILL'); } catch {} }
     if (acquired) releaseTuner(ch.tuner_id, key);

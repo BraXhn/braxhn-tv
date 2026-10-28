@@ -130,7 +130,12 @@ indexerade (annars tom lista tills repliksökningens jobb läst dem), `server` =
   kopieras (`mode` blir `remux`/`transcode` i stället för `direct`, `reasons` innehåller *familjefiltret tystar
   svordomar*, HLS-adressen har `ff=1`). Inga nya fält behöver läsas.
 - **Klienter som tystar själva** skickar `ffc=1` (webbspelaren): beslutet är då som utan filter (direktuppspelning
-  behålls) och `server` är `false`; klienten tystar i `mute` och hoppar över `skip`.
+  behålls) och `server` är `false`; klienten tystar i `mute` och hoppar över `skip`. Gäller bara profiler som valt filtret
+  själva: för **barnprofiler** (läget bestäms av huvudkontot/administratören) tystar servern alltid (`server: true`, även
+  med `ffc=1`), HLS-sessionen tystas även om `ff=1` tas bort ur adressen, och för titlar med svordomar nekas
+  `/api/stream/:id/direct`, `/download`, `/offline-file` och `/api/items/:id/offline` (**403**).
+- **Undertextsynken** (`POST`/`PUT /api/items/:id/subs/:sid/sync`) flyttar även intervallen och ändras därför bara av vuxna
+  profiler (barnprofiler **403**; `GET` går bra).
 - **Undertexterna** (`subtitles[].url`, `/api/stream/:id/subs/:sid`) maskeras av servern efter profilen (`***` i
   stället för ordet, tiderna orörda); adressen får `ff=1` så att cachen skiljer profilerna åt. Repliksökningen
   (`/api/search/lines`) maskerar `line`/`before`/`after` på samma sätt.

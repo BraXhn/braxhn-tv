@@ -255,7 +255,7 @@ route('GET', '/api/items/:id', user, (c) => {
   const file = versions.find(v => v.id === wanted) || it;
   if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
   // Snabbstart: titelsidan öppnas – väck filmens/avsnittets disk i förväg (serier: nästa avsnitt, nedan)
-  if (it.kind !== 'show') prestart.wake(file);
+  if (it.kind !== 'show') prestart.wake(file, uid);
   // Nya fält (bara när de finns): tagline, logotyp (/api/image/:id/logo, PNG) och originaltitel
   if (it.tagline) out.tagline = it.tagline;
   if (it.logo) out.logo = true;
@@ -274,7 +274,7 @@ route('GET', '/api/items/:id', user, (c) => {
     const sp = seasonPosters(it);
     if (sp.length) out.seasonPosters = sp;
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
-    if (out.next) prestart.wake(get('SELECT * FROM items WHERE id=?', out.next.id));
+    if (out.next) prestart.wake(get('SELECT * FROM items WHERE id=?', out.next.id), uid);
   } else {
     Object.assign(out, {
       file: path.basename(file.path), size: file.size, container: file.container, vcodec: file.vcodec, acodec: file.acodec,

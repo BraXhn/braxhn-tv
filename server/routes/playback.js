@@ -26,12 +26,20 @@ import * as family from '../familyfilter.js';
 import * as sublines from '../sublines.js';
 import crypto from 'node:crypto';
 
+// Familjefiltret påtvingat (barnprofil) och titeln har svordomar: originalfilen (direkt, nedladdning, offline) skulle ge
+// ljudet otystat – bara HLS-strömmen från /playback (där servern tystar) är tillåten
+const familyBlock = (c, it) => {
+  if (!family.enforced(c.user.id) || !family.muteIntervals(it).length) return false;
+  fail(c.res, 403, 'Familjefiltret är på för profilen – titeln spelas med tystade svordomar via vanlig uppspelning');
+  return true;
+};
+
 // ---------- Offline-nedladdning (appar) ----------
 // Offline (appar) räknas som nedladdning: kräver rättigheten (perms.js)
 const noDownload = (c) => { if (canDownload(c.user.id)) return false; fail(c.res, 403, 'Ditt konto får inte ladda ner'); return true; };
 route('GET', '/api/items/:id/offline', user, (c) => {
   if (noDownload(c)) return;
-  const it = mediaItem(c); if (!it) return;
+  const it = mediaItem(c); if (!it || familyBlock(c, it)) return;
   const q = c.q.get('q') || '720';
   const st = offline.status(it, q);
   if (st.status === 'missing') return fail(c.res, 404, st.error);
@@ -48,15 +56,15 @@ const stSubs = (it, t) => st.subtitlesOf(it).filter(s => !s.bitmap && !s.comment
   .map(s => ({ id: s.id, lang: s.lang || null, label: s.label, forced: !!s.forced, url: `/api/stream/${it.id}/subs/${encodeURIComponent(s.id)}?t=${t}` }));
 route('POST', '/api/items/:id/offline', user, async (c) => {
   if (noDownload(c)) return;
-  const it = mediaItem(c); if (!it) return;
+  const it = mediaItem(c); if (!it || familyBlock(c, it)) return;
   const { q } = await readJson(c.req);
   const st = offline.start(it, q || '720');
   if (st.status === 'missing') return fail(c.res, 404, st.error);
   send(c.res, 200, st);
 });
 route('DELETE', '/api/items/:id/offline', user, (c) => { const it = mediaItem(c); if (!it) return; offline.cancel(it, c.q.get('q') || '720'); send(c.res, 200, { ok: true }); });
-route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
-route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
+route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
+route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
 // ---------- Uppspelning ----------
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
 // Högsta kvalitetssteg som ryms i den uppmätta bandbredden (med marginal för variationer i mobilnätet),
@@ -133,7 +141,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (fmode !== 'off') {
     const aSel = audios.find(a => String(a.index) === o.audio) || audios.find(a => a.default) || audios[0];
     fmute = family.muteIntervals(it, aSel?.lang);
-    if (c.q.get('ffc') !== '1') o.mute = fmute;
+    // Påtvingat (barnprofil): servern tystar alltid – ffc=1 från klienten räcker inte för att få originalljudet
+    if (c.q.get('ffc') !== '1' || family.enforced(c.user.id)) o.mute = fmute;
     if (!family.indexed(it)) sublines.kick(5000); // undertexterna har inte lästs än – nästa uppspelning har planen
   }
   const d = st.decide(it, o);
@@ -260,11 +269,11 @@ route('POST', '/api/items/:id/wake', user, (c) => {
       AND COALESCE(p.watched,0)=0 ORDER BY (COALESCE(p.position,0)>0) DESC, i.season, i.episode LIMIT 1`, c.user.id, row.id);
     if (!row || !allowedFor(c.user.id, row)) return send(c.res, 200, { ok: true, woke: false });
   }
-  send(c.res, 200, { ok: true, woke: prestart.wake(row) });
+  send(c.res, 200, { ok: true, woke: prestart.wake(row, c.user.id) });
 });
-route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
-route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it) st.serveDirect(c.req, c.res, it); });
-route('GET', '/api/stream/:id/download', user, (c) => { const it = mediaItem(c); if (it) st.serveDownload(c.req, c.res, it); });
+route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDirect(c.req, c.res, it); });
+route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDirect(c.req, c.res, it); });
+route('GET', '/api/stream/:id/download', user, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDownload(c.req, c.res, it); });
 route('GET', '/api/stream/:id/hls/master.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveMaster(c.res, it, c.q); });
 route('GET', '/api/stream/:id/hls/index.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.servePlaylist(c.res, it, c.q); });
 route('GET', '/api/stream/:id/hls/init.mp4', media, async (c) => { const it = mediaItem(c); if (it) await st.serveInit(c.req, c.res, it, c.q, c.user.id); });
@@ -332,7 +341,11 @@ route('GET', '/api/items/:id/subs/:sid/sync', user, (c) => {
   const it = mediaItem(c); if (!it) return;
   const sub = syncSub(c, it); if (sub) send(c.res, 200, subsync.status(it, sub));
 });
+// Justeringen gäller undertextfilen för alla profiler – och familjefiltrets tysta intervall räknas efter den:
+// bara vuxna profiler får ändra den (en barnprofil kunde annars flytta tystnaden bort från svordomarna)
+const kidSync = (c) => { if (c.user.max_age == null) return false; fail(c.res, 403, 'Barnprofiler kan inte ändra undertextsynken'); return true; };
 route('POST', '/api/items/:id/subs/:sid/sync', user, async (c) => {
+  if (kidSync(c)) return;
   const it = mediaItem(c); if (!it) return;
   const sub = syncSub(c, it); if (!sub) return;
   const b = await readJson(c.req);
@@ -340,6 +353,7 @@ route('POST', '/api/items/:id/subs/:sid/sync', user, async (c) => {
   send(c.res, 200, startSync(it, sub, audio, !!b?.force));
 });
 route('PUT', '/api/items/:id/subs/:sid/sync', user, async (c) => {
+  if (kidSync(c)) return;
   const it = mediaItem(c); if (!it) return;
   const sub = syncSub(c, it); if (!sub) return;
   const b = await readJson(c.req);
