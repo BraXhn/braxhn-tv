@@ -477,6 +477,40 @@ profiler får 404. Används inte av apparna än.
   `#html:false`, `#columns:Ord…`) och fälten Ord, Mening, Översättning, Källa. `zip` (kräver nedladdningsrätt) innehåller
   `ordlista.txt` (TSV med fältet Ljud: `[sound:braxhn-<id>.mp3]`) och ljudklippen (högst 100).
 
+## Ögonblick: `/api/moments*` och delade länkar `/api/share/*`
+
+Klipp som hushållet sparar ur webbspelaren (`server/moments.js`, `server/routes/moments.js`; webben
+`web/js/player/moments.js` och `#/moments`). Vanlig inloggning (kaka eller apptoken). Ett ögonblick syns bara inom
+hushållet (huvudkontot och dess profiler) och bara för profiler som får se titeln (åldersgräns, bibliotek) – annars 404.
+Används inte av apparna än.
+
+- `POST /api/items/:id/moments` `{ start, end, title, sub?, audio?, watermark? }` → `202` med ögonblicket (`state:
+  'pending'`). `start`/`end` i sekunder (filmens tid), minst 1 s och högst `MOMENTS_MAX_SECONDS` (400), `sub` = en
+  textundertexts id (`e3`, `x0` …) att bränna in (bildundertext 400), `audio` = ljudspårets strömindex. 409 när
+  lagringen (`MOMENTS_MAX_MB`) eller profilens 200 ögonblick är fulla, 429 när kön är full.
+- `GET /api/moments[?before=<id>&item=<id>]` → `{ moments: [Moment], more, storage: { used, max }, maxLength, emoji,
+  shareHours, canShare }` – nyast först, 30 åt gången.
+- `Moment` = `{ id, title, itemId, source, start, end, duration, state: 'pending'|'ready'|'failed', error?, mode:
+  'copy'|'encode'|null, subs, watermark, width, height, by: { id, name }, mine, created, reactions: [{ emoji, n, mine }],
+  comments, canDelete, canShare }`. `start` är nyckelbildens tid när bilden kopierades (`mode: 'copy'`).
+- `GET /api/moments/:id` → `Moment` + `commentList: [{ id, text, created, by, mine, canDelete }]` och (för den som får
+  dela) `shares: [{ id, expires, revoked, expired, views, created }]`. `DELETE /api/moments/:id` (skaparen, huvudkontot
+  eller administratören; annars 403).
+- `GET /api/moments/:id/video` → `video/mp4` (Range). Profiler med familjefiltret på får den tystade varianten när
+  klippet innehåller svordomar; klipp med inbrända svordomar visas inte alls för profiler med påtvingat filter.
+  `GET /api/moments/:id/thumb` → `image/jpeg`.
+- `POST /api/moments/:id/reactions` `{ emoji }` (av/på; `emoji` ur `❤️ 😂 😮 👍 😢 🔥`, annars 400) → `Moment`.
+- `POST /api/moments/:id/comments` `{ text }` (högst 500 tecken) → `Moment` med `commentList`;
+  `DELETE /api/moments/:id/comments/:cid` (egen kommentar, eller den som får ta bort ögonblicket).
+- `POST /api/moments/:id/shares` `{ hours: 1|24|168|720 }` → `{ id, expires, url, path }` – adressen visas bara nu.
+  Inte för barnprofiler eller konton utan nedladdningsrätt (403), bara skaparen eller huvudkontot, högst tio giltiga
+  länkar per ögonblick. `DELETE /api/moments/:id/shares/:sid` återkallar direkt.
+- **Delad länk** `/api/share/<id>.<utgång>.<signatur>` (routealternativet `share` – ingen inloggning, routern sätter
+  aldrig `c.user`, och `/api/share/*` når bara de här routes): sidan (HTML med Open Graph `og:video`/`og:image`, egen
+  CSP, `noindex`), `…/clip.mp4` (Range) och `…/thumb.jpg`. Signaturen är HMAC-SHA256 med `moments_share_key` över id och
+  utgång; förfalskad eller okänd = 404, utgången, återkallad eller borttaget ögonblick = 410. Länken fungerar inte som
+  inloggning (Bearer, `?t=` eller kaka) någon annanstans.
+
 ## E-böcker och serietidningar: `/api/ebooks/*` och OPDS `/api/opds/*`
 
 Bara webben (apparna får inte bibliotekstypen `ebook` i `/api/libraries`, och `reading` i `/api/home` samt `ebooks` i `/api/search/all` är tomma för apptoken). Allt kontrolleras mot profilens behörighet: biblioteket, barnprofiler bara när `libraries.kids` = 1 och då bara böcker utan högre `age` – annars 404.

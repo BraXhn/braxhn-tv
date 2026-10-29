@@ -202,6 +202,10 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   // Kvällsvalet: en lobby där administratören är värd (filterformuläret, koden och QR-koden)
   S.tonight = (await srv.req('/api/tonight', { method: 'POST', body: {} })).data.id;
   assert.ok(S.tonight);
+  // Ögonblick: ett klipp ur filmen (flödet och ögonblickets sida med kort, reaktioner och kommentarer)
+  S.moment = (await srv.req(`/api/items/${S.alfa}/moments`, { method: 'POST', body: { start: 0, end: 2, title: 'Clip one' } })).data.id;
+  for (let i = 0; i < 240 && (await srv.req('/api/moments/' + S.moment)).data.state === 'pending'; i++) await new Promise(r => setTimeout(r, 250));
+  assert.equal((await srv.req('/api/moments/' + S.moment)).data.state, 'ready');
 });
 
 const VIEWS = () => [
@@ -214,7 +218,7 @@ const VIEWS = () => [
   ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['setup/libraries', 'Installation: bibliotek'],
   ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier'],
   ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar'],
-  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'],
+  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet'],
   ['sso', 'Enkel inloggning'], ['sso/new-oidc', 'Enkel inloggning: OIDC'], ['sso/new-ldap', 'Enkel inloggning: LDAP']
 ];
 const MODES = {

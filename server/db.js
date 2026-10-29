@@ -668,6 +668,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS vocab(id INTEGER PRIMARY KEY, user_id INTEGE
   created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS vocab_user ON vocab(user_id, created);
 CREATE INDEX IF NOT EXISTS vocab_item ON vocab(item_id);`);
+// Ögonblick (server/moments.js): klipp som hushållet delar. household = huvudkontots id. s/e = klippets tider i filmen
+// (s = nyckelbilden vid stream copy), state 0 väntar/görs, 1 klar, 2 misslyckad. mute = tysta intervall (JSON, relativt
+// klippet), muted = tystat i själva filen (skaparen hade påtvingat filter), ff_size = den tystade varianten <id>.ff.mp4,
+// burn_prof = inbränd undertext med omaskerade svordomar. moment_shares = externa länkar (signerade, utgång, återkallas).
+db.exec(`CREATE TABLE IF NOT EXISTS moments(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  household INTEGER NOT NULL, item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, title TEXT NOT NULL, source TEXT NOT NULL DEFAULT '',
+  s REAL NOT NULL, e REAL NOT NULL, audio INTEGER, sub TEXT, watermark INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL DEFAULT 0,
+  mode TEXT, error TEXT, size INTEGER NOT NULL DEFAULT 0, ff_size INTEGER NOT NULL DEFAULT 0, dur REAL, width INTEGER, height INTEGER,
+  mute TEXT, muted INTEGER NOT NULL DEFAULT 0, burn_prof INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS moments_house ON moments(household, id);
+CREATE INDEX IF NOT EXISTS moments_item ON moments(item_id);
+CREATE INDEX IF NOT EXISTS moments_user ON moments(user_id);
+CREATE TABLE IF NOT EXISTS moment_reactions(moment_id INTEGER NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, emoji TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(moment_id, user_id, emoji));
+CREATE TABLE IF NOT EXISTS moment_comments(id INTEGER PRIMARY KEY, moment_id INTEGER NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, text TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS moment_comments_m ON moment_comments(moment_id, id);
+CREATE TABLE IF NOT EXISTS moment_shares(id INTEGER PRIMARY KEY, moment_id INTEGER NOT NULL REFERENCES moments(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS moment_shares_m ON moment_shares(moment_id);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 7;

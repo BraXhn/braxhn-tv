@@ -1613,3 +1613,34 @@ body.rd-open{overflow:hidden}
 .vocab .vtools input{flex:1 1 200px;min-width:0}
 @media (max-width:600px){.vocab .vrow{grid-template-columns:1fr}.vocab .vacts{justify-content:flex-start}}
 .vocab .vhelp{margin-top:16px}.vocab .vhelp summary{padding:12px 0;cursor:pointer}
+
+/* ---------- Ögonblick (views/moments.js, player/moments.js) ---------- */
+.moments{max-width:1200px}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--sp-4)}
+.mcard{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+.mthumb{position:relative;display:block;aspect-ratio:16/9;background:#000}
+.mthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.mthumb:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}
+.mdur{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.75);color:#fff;border-radius:var(--r-sm);padding:2px 8px;font-size:.8125rem}
+.minfo{padding:var(--sp-2) var(--sp-3) var(--sp-3);display:flex;flex-direction:column;gap:6px}
+.minfo .mtitle{font-size:1rem;margin:0}
+.minfo .mtitle a{color:inherit;text-decoration:none}
+.minfo p{margin:0}
+.mreacts{display:flex;flex-wrap:wrap;gap:6px;margin:var(--sp-2) 0}
+.mreact{min-height:var(--touch);min-width:var(--touch);padding:4px 10px;border-radius:var(--r-pill);background:var(--bg3,var(--bg2));border:1px solid var(--line);display:inline-flex;align-items:center;gap:4px;font-size:1rem}
+.mreact.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.mreact .n{font-size:.8125rem}
+.mdetail video{width:100%;max-height:70vh;background:#000;border-radius:var(--r)}
+.mdetail h2{font-size:1.125rem;margin-top:var(--sp-5)}
+.mactions{flex-wrap:wrap;gap:var(--sp-2);margin:var(--sp-3) 0}
+.mcomments,.mshares{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:var(--sp-2)}
+.mcomments li p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.mcomments li button{float:right}
+.mcform{display:flex;gap:var(--sp-2);align-items:flex-end;margin-top:var(--sp-3)}
+.mcform textarea{flex:1}
+.mpending{padding:var(--sp-5);background:var(--bg2);border-radius:var(--r);text-align:center}
+.mrange{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
+.mbtns{flex-wrap:wrap;gap:6px}
+@media (max-width:600px){#player .pbar .pmlabel{display:none}.mgrid{grid-template-columns:1fr}.mcform{flex-direction:column;align-items:stretch}}
+.mcard .mreacts{gap:4px}
+.mcard .mreact{min-width:36px;min-height:36px;padding:2px 6px}

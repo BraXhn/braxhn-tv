@@ -68,6 +68,9 @@ export const route = (method, pattern, opts, fn) => {
 //   feed     – privata RSS-flöden för ljudböcker (/api/feeds/*, server/routes/books.js): routern sätter ALDRIG c.user där.
 //              Routen slår själv upp flödets nyckel i adressen (server/bookfeeds.js, tabellen book_feeds) och kontrollerar
 //              fjärrreglerna med remoteDenied(). /api/feeds/* matchar bara feed-routes och tvärtom, så nyckeln gäller inget annat.
+//   share    – delade ögonblick utanför hemmet (/api/share/*, server/routes/moments.js): routern sätter ALDRIG c.user där.
+//              Routen kontrollerar själv länkens signatur, utgång och återkallelse (server/moments.js). /api/share/* matchar
+//              bara share-routes och tvärtom, så länken ger ingen åtkomst till något annat än klippet.
 // Routefilerna kan lägga till scope(p) (ljudböcker, poddar, live-TV, inspelningar, trailers): den räknar ut
 // vilket id en mediatoken måste vara utfärdad för, utifrån routens parametrar.
 export const pub = { auth: false }, user = { auth: true }, admin = { auth: true, admin: true };
@@ -78,6 +81,7 @@ export const calendar = { auth: true, calendar: true };          // iCal: bara k
 export const subsonic = { auth: false, subsonic: true };         // musikappar: egen inloggning i routen (app-lösenord)
 export const opds = { auth: false, opds: true };                 // läsappar: egen Basic-inloggning i routen (lösenord för läsappar)
 export const feed = { auth: false, feed: true };                 // poddappar: flödets egen nyckel i adressen (ljudböcker som RSS)
+export const share = { auth: false, share: true };               // delade ögonblick: signerad länk i adressen (bara klippet)
 
 // ---------- betrodda nätverk ----------
 // Hemnät (RFC1918), VPN/CGNAT (100.64.0.0/10, t.ex. NetBird/Tailscale) och egna nät i inställningarna
@@ -156,11 +160,13 @@ export async function handle(req, res) {
   }
   const opdsPath = url.pathname === '/api/opds' || url.pathname.startsWith('/api/opds/');
   const feedPath = url.pathname.startsWith('/api/feeds/');
+  const sharePath = url.pathname.startsWith('/api/share/');
   for (const r of routes) {
     if (r.method !== req.method) continue;
     if (rest !== !!r.subsonic) continue; // /rest/* når bara musikappens routes och tvärtom
     if (opdsPath !== !!r.opds) continue; // /api/opds/* når bara läsappens routes och tvärtom
     if (feedPath !== !!r.feed) continue; // /api/feeds/* når bara RSS-flödenas routes och tvärtom
+    if (sharePath !== !!r.share) continue; // /api/share/* når bara delade ögonblick och tvärtom
     const m = r.re.exec(url.pathname);
     if (!m) continue;
     let p;
@@ -168,7 +174,7 @@ export async function handle(req, res) {
     // Token i adressen (?t=) tas bara emot på routes som tillåter media- eller bildtoken
     // Kalenderroutes slår bara upp kalendertoken – ingen annan inloggning används där
     // Musikappens routes får ingen inloggning härifrån (de loggar in själva med app-lösenordet)
-    const c = { req, res, q: url.searchParams, p, user: r.subsonic || r.opds || r.feed ? null : r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
+    const c = { req, res, q: url.searchParams, p, user: r.subsonic || r.opds || r.feed || r.share ? null : r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
     // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
     if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;
