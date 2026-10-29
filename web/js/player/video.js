@@ -242,12 +242,20 @@ export async function play(id, start = 0, opts = {}) {
     else if (P === cur && h264Fallback(cur)) return;
     else if (P === cur && v.error) toast(t('Kunde inte spela upp ({v}) – prova en lägre kvalitet under ⚙', { v: ['', t('avbrutet'), t('nätverksfel'), t('avkodningsfel'), t('formatet stöds inte')][v.error.code] || 'fel' }));
   });
-  // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s
-  let idle; const wake = () => {
-    el.classList.remove('idle'); clearTimeout(idle);
-    idle = setTimeout(() => P === cur && !cur.mini && !v.paused && q('#setp').hidden && q('#chlist').hidden && !el.matches(':has(.ctl:hover)') && el.classList.add('idle'), 3000);
+  // Kontrollerna syns när filmen är pausad eller musen rör sig, och döljs (med muspekaren) efter 3 s.
+  // Går de inte att dölja just då (inställningspanelen öppen, pekaren över knapparna) provas det igen varje sekund –
+  // förut gavs det upp, och kontrollerna låg kvar tills man pausade och startade igen. Efter ett tryck på pekskärm
+  // räknas inte :hover (den "fastnar" på knappen man tryckte på).
+  let idle, touch = false;
+  const tryIdle = () => {
+    if (P !== cur || cur.mini || v.paused) return;
+    if (q('#setp').hidden && q('#chlist').hidden && (touch || !el.matches(':has(.ctl:hover)'))) el.classList.add('idle');
+    else idle = setTimeout(tryIdle, 1000);
   };
-  el.onmousemove = wake; el.ontouchstart = wake; el.onkeydown = wake; wake();
+  const wake = () => { el.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(tryIdle, 3000); };
+  el.addEventListener('pointerdown', (e) => { touch = e.pointerType === 'touch'; });
+  el.onmousemove = (e) => { if (!e.sourceCapabilities?.firesTouchEvents) touch = false; wake(); };
+  el.ontouchstart = wake; el.onkeydown = wake; wake();
   v.addEventListener('pause', wake); v.addEventListener('play', wake);
   videoSession(v);
   document.addEventListener('keydown', keys);
