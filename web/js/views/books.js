@@ -1,6 +1,6 @@
 // Vyer: ljudböcker och poddar
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, libs, main, me, store, toast, views, toastErr, t } from '../core.js';
+import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, later, libs, main, me, store, toast, views, toastErr, t } from '../core.js';
 import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { audioCaps } from '../player/caps.js';
 import { downloadBook, stateOf, supported as offlineOk } from '../offline.js';
@@ -9,6 +9,7 @@ import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
 import { iconButton } from '../ui/buttons.js';
 import { bookCard, bookCover, podCover, shelfHtml } from '../ui/cards.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
+import { chapterEditor, feedDialog, mergeBook, restoreBook, statsDialog, toolsStatus } from './booktools.js';
 
 // ---------- ljudböcker ----------
 const seriesLabel = (b) => b.series ? `${b.series}${b.seriesNo ? ` #${b.seriesNo}` : ''}` : '';
@@ -39,12 +40,15 @@ views.books = async (lid, filter) => {
     : group ? grouped(list, group).map(([k, bs]) => shelfHtml(k || (group === 'series' ? t('Utan serie') : t('Okänd författare')), bs.map(b => bookCard(group === 'series' && k ? withNo(b) : b)).join(''),
       { more: k ? `${t('<a href="{v}">{bsN} – visa alla</a>', { v: filterHash(lid, group === 'series' ? 'serie' : 'forfattare', k), bsN: count(bs.length) })}` : `<span class="muted small">${count(bs.length)}</span>` })).join('')
     : `<div class="grid">${list.map(b => bookCard(f?.kind === 'serie' ? withNo(b) : b)).join('')}</div>`;
-  main.innerHTML = `<div class="toolbar">${f ? `<a class="ghost" href="#/books/${+lid}">← ${esc(B.library.name)}</a><h1>${esc(f.name)}</h1><span class="muted">${f.kind === 'serie' ? t('Serie') : t('Författare')} · ${count(list.length)}</span>`
+  main.innerHTML = `<div class="toolbar">${f ? `<a class="ghost" href="#/books/${+lid}">← ${esc(B.library.name)}</a><h1>${esc(f.name)}</h1><span class="muted">${f.kind === 'serie' ? t('Serie') : t('Författare')} · ${count(list.length)}</span>
+    ${f.kind === 'serie' && list.length ? `<button class="ghost" id="bsfeed" style="margin-left:auto" aria-haspopup="dialog">${t('Lyssna i poddapp')}</button>` : ''}`
     : `<h1>${esc(B.library.name)}</h1><span class="muted">${count(B.books.length)}</span>
-    <div class="row" style="margin-left:auto"><label class="sr-only" for="bgroup">${t('Gruppera')}</label><select id="bgroup">${GROUPS.map(([v, n]) => `<option value="${v}" ${v === group ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <div class="row" style="margin-left:auto"><button class="ghost" id="bstats" aria-haspopup="dialog">${t('Statistik')}</button><label class="sr-only" for="bgroup">${t('Gruppera')}</label><select id="bgroup">${GROUPS.map(([v, n]) => `<option value="${v}" ${v === group ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <label class="sr-only" for="bsort">${t('Sortera')}</label><select id="bsort">${[['title', t('Titel')], ['author', t('Författare')], ['series', t('Serie')], ['added', t('Senast tillagda')], ['recent', t('Senast lyssnade')]].map(([v, n]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${n}</option>`).join('')}</select></div>`}</div>
     ${!f && B.continue.length ? `<section class="section"><h2>${t('Fortsätt lyssna')}</h2><div class="shelf">${B.continue.map(bookCard).join('')}</div></section>` : ''}
     ${body}`;
+  if ($('#bstats')) $('#bstats').onclick = () => statsDialog();
+  if ($('#bsfeed')) $('#bsfeed').onclick = () => feedDialog({ library: +lid, series: list[0].series || f.name });
   if ($('#bsort')) $('#bsort').onchange = (e) => { store.set('booksort', e.target.value); route(); };
   if ($('#bgroup')) $('#bgroup').onchange = (e) => { store.set('bookgroup', e.target.value); route(); };
 };
@@ -61,15 +65,16 @@ views.book = async (id) => {
   main.innerHTML = `<div class="mhero">${bookCover(b, 'big')}<div><div class="muted small">${t('LJUDBOK')}</div><h1>${esc(b.title)}</h1>
     ${b.subtitle ? `<div class="muted">${esc(b.subtitle)}</div>` : ''}
     <div class="meta">${b.author ? `<a href="${filterHash(lid, 'forfattare', b.author)}">${esc(b.author)}</a>` : ''}${b.narrator ? `<span>${t('Uppläsare: {narrator}', { narrator: esc(b.narrator) })}</span>` : ''}${b.year ? `<span>${+b.year}</span>` : ''}<span>${fmtDur(b.duration)}</span>
-      ${b.position > 30 ? `<span>${t('{left} kvar', { left: fmtDur(left) })}</span>` : ''}${b.finished ? t('<span>✓ Utläst</span>') : ''}</div>
+      ${b.position > 30 ? `<span>${t('{left} kvar', { left: fmtDur(left) })}</span>` : ''}${b.finished ? t('<span>✓ Utläst</span>') : ''}${b.listened >= 60 ? `<span>${t('Du har lyssnat {v}', { v: fmtDur(b.listened) })}</span>` : ''}</div>
     ${b.series ? `<div class="meta"><span>${t('Serie: <a href="{v}">{v2}</a>', { v: filterHash(lid, 'serie', b.series), v2: esc(seriesLabel(b)) })}</span></div>` : ''}
     <div class="row"><button class="primary" id="bp">${b.position > 30 ? t('▶ Fortsätt') : t('▶ Lyssna')}</button>${b.position > 30 || b.finished ? t('<button class="ghost" id="bstart">Börja om</button>') : ''}
-      <button class="ghost" id="bmark">${t('🔖 Bokmärke')}</button>${b.finished ? '' : t('<button class="ghost" id="bdone">Markera som utläst</button>')}${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="boff" title="${t('Spara i webbläsaren och lyssna utan nät')}">${stateOf('book', b.id) === 'done' ? t('✓ Sparad offline') : t('⤓ Spara offline')}</button>`}
-      ${me?.is_admin ? t('<button class="ghost" id="bmatch">Fel bok?</button><button class="ghost" id="bedit">Redigera</button>') : ''}</div>
+      <button class="ghost" id="bmark">${t('🔖 Bokmärke')}</button>${b.finished ? t('<button class="ghost" id="bundone">Markera som oläst</button>') : t('<button class="ghost" id="bdone">Markera som utläst</button>')}${b.feedsAllowed ? `<button class="ghost" id="bfeed" aria-haspopup="dialog">${t('Lyssna i poddapp')}</button>` : ''}${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="boff" title="${t('Spara i webbläsaren och lyssna utan nät')}">${stateOf('book', b.id) === 'done' ? t('✓ Sparad offline') : t('⤓ Spara offline')}</button>`}
+      ${me?.is_admin ? t('<button class="ghost" id="bmatch">Fel bok?</button><button class="ghost" id="bedit">Redigera</button>') : ''}${me?.is_admin && b.tools ? `<button class="ghost" id="bchap" aria-haspopup="dialog">${t('Redigera kapitel')}</button>${b.tools.canMerge && !b.tools.state?.running ? `<button class="ghost" id="bmerge">${t('Slå ihop till M4B')}</button>` : ''}` : ''}</div>
+    ${me?.is_admin ? toolsStatus(b) : ''}
     ${b.description ? `<p class="overview">${esc(b.description)}</p>` : ''}
     ${facts ? `<p class="muted small">${esc(facts)}</p>` : ''}</div></div>
     ${b.bookmarks.length ? `<section class="section"><h2>${t('Bokmärken')}</h2><table>${b.bookmarks.map(m => `<tr><td><button class="ghost small" data-bm="${m.position}">${fmtTime(m.position)}</button></td><td>${esc(m.note || '')}</td><td class="muted small">${fmtDate(m.created)}</td><td class="r">${iconButton({ icon: '✕', label: t('Ta bort bokmärket vid {position}', { position: fmtTime(m.position) }), data: { bmdel: m.id } })}</td></tr>`).join('')}</table></section>` : ''}
-    <section class="section"><h2>${t('Kapitel{v}', { v: b.chapterSource === 'audnexus' ? t(' <span class="muted small">från Audnexus</span>') : '' })}</h2><table class="tracks">${b.chapters.map((c, i) => `<tr data-chs="${c.start}" class="${c.start <= b.position && b.position < c.end ? 'playing' : ''}"><td class="muted" style="width:40px">${i + 1}</td><td>${esc(c.title)}</td><td class="r muted">${fmtTime(c.end - c.start)}</td></tr>`).join('')}</table></section>
+    <section class="section"><h2>${t('Kapitel{v}', { v: b.chapterSource === 'audnexus' ? t(' <span class="muted small">från Audnexus</span>') : b.chapterSource === 'redigerad' ? t(' <span class="muted small">redigerade</span>') : '' })}</h2><table class="tracks">${b.chapters.map((c, i) => `<tr data-chs="${c.start}" class="${c.start <= b.position && b.position < c.end ? 'playing' : ''}"><td class="muted" style="width:40px">${i + 1}</td><td>${esc(c.title)}</td><td class="r muted">${fmtTime(c.end - c.start)}</td></tr>`).join('')}</table></section>
     ${b.sameSeries?.length ? shelfHtml(t('Fler i serien {series}', { series: b.series }), b.sameSeries.map(x => bookCard({ ...x, author: x.seriesNo ? `#${x.seriesNo}` : '' })).join(''), { more: `${t('<a href="{v}">Visa serien</a>', { v: filterHash(lid, 'serie', b.series) })}` }) : ''}
     ${b.sameAuthor.length ? `<section class="section"><h2>${t('Mer av {author}', { author: esc(b.author) })}</h2><div class="shelf">${b.sameAuthor.map(x => bookCard({ ...x, author: b.author })).join('')}</div></section>` : ''}`;
   const sp = bookSpoken(b);
@@ -84,12 +89,21 @@ views.book = async (id) => {
     await api(`/audiobooks/book/${b.id}/bookmarks`, { method: 'POST', body: { position: pos, note } }); route();
   });
   if ($('#bdone')) $('#bdone').onclick = act(async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: b.duration } }); route(); });
+  if ($('#bundone')) $('#bundone').onclick = act(async () => { await api(`/audiobooks/book/${b.id}/progress`, { method: 'POST', body: { position: 0 } }); toast(t('Markerad som oläst')); route(); });
+  if ($('#bfeed')) $('#bfeed').onclick = () => feedDialog({ book: b.id, title: b.title });
+  const playing = () => M.spoken?.kind === 'book' && M.spoken.id === b.id ? spokenPos() : null;
+  if ($('#bchap')) $('#bchap').onclick = () => chapterEditor(b, { pos: playing, onSaved: () => route() });
+  if ($('#bmerge')) $('#bmerge').onclick = act(async () => { if (await mergeBook(b)) route(); });
+  if ($('#brestore')) $('#brestore').onclick = act(async () => { if (await restoreBook(b)) route(); });
+  // Pågående filåtgärd: fråga servern tills den är klar, rita sedan om vyn
+  const poll = () => later(async () => { const x = await api('/audiobooks/book/' + b.id, { bg: true }); if (x.tools?.state?.running) poll(); else route(); }, 3000);
+  if (b.tools?.state?.running) poll();
   if ($('#bmatch')) $('#bmatch').onclick = () => matchBook(b);
   if ($('#boff')) $('#boff').onclick = () => downloadBook(b.id);
   if ($('#bedit')) $('#bedit').onclick = () => editBook(b);
 };
 
-const SOURCES = { google: 'Google Books', openlibrary: 'Open Library', audnexus: 'Audnexus' };
+const SOURCES = { google: 'Google Books', openlibrary: 'Open Library', audnexus: 'Audnexus', audible: 'Audible' };
 /** "Fel bok?": sök på titel och författare (eller ett ASIN) och välj rätt träff – matchningen låses */
 function matchBook(b) {
   const h = openDialog({ title: t('Välj rätt bok'), size: 'wide',

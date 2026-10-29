@@ -132,7 +132,7 @@ export function musicSession() {
 }
 // ---------- tal: ljudböcker och poddar (flera filer, global position, hastighet, sparad position) ----------
 function setBarMode(spoken) {
-  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mset').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
+  $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
   $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
   $('#mprev').title = spoken ? t('{b} sekunder bakåt', { b }) : t('Föregående'); $('#mnext').title = spoken ? t('{f} sekunder framåt', { f }) : t('Nästa');
@@ -146,8 +146,10 @@ export function playSpoken(s) {
   closeAllPlayers();
   if (M.spoken) spokenSave();
   M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++;
-  AE.stop(); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet, utan jämn ljudnivå
+  AE.stop(); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet (musikens jämna ljudnivå gäller inte)
+  if (LPREFS.speechLevel) ensureEngine(); // jämn ljudnivå för tal går genom Web Audio (i användarens klick)
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
+  enginePrefs();
   M.sfile = null;
   setBarMode(true);
   const bar = $('#mbar'); bar.hidden = false; document.body.classList.add('hasbar');
@@ -298,7 +300,7 @@ function showQueue() {
 let LPREFS = { normalize: true, normMode: 'track', gapless: true, crossfade: 0, skipBack: 15, skipForward: 30, skipSilence: false,
   choices: { skipBack: [5, 10, 15, 30, 45, 60], skipForward: [10, 15, 30, 45, 60, 90], crossfade: [0, 2, 4, 6, 8, 10, 12] } };
 const normMode = () => LPREFS.normalize === false ? 'off' : (LPREFS.normMode || 'track');
-function enginePrefs() { AE.setPrefs({ gapless: LPREFS.gapless !== false, crossfade: +LPREFS.crossfade || 0, normMode: M.spoken ? 'off' : normMode() }); }
+function enginePrefs() { AE.setPrefs({ gapless: LPREFS.gapless !== false, crossfade: +LPREFS.crossfade || 0, normMode: M.spoken ? 'off' : normMode() }); AE.setVoice(!!M.spoken && !!LPREFS.speechLevel); }
 // Hämtas när uppspelning startar (kan ha ändrats i en annan app eller profil)
 function loadListenPrefs() {
   return api('/me/listening', { bg: true }).then(p => {
@@ -319,6 +321,7 @@ const fadeLabel = (s) => s ? `${s} s` : t('Av');
 /** Musikspelarens meny med ljudinställningar (jämn ljudnivå, glapplöst, övertoning) – sparas på kontot. */
 function soundMenu(anchor) {
   const save = (body, msg) => act(async () => { await saveListen(body); toast(msg); })();
+  if (M.spoken) return speechMenu(anchor, save);
   const nm = normMode(), cf = +LPREFS.crossfade || 0, noWa = !AE.ready() && AE.E.failed;
   openMenu(anchor, [
     { icon: '⚖', label: t('Jämn ljudnivå'), hint: NORM_LABEL[nm], submenu: [
@@ -331,6 +334,16 @@ function soundMenu(anchor) {
       label: s ? t('{s} sekunder', { s }) : t('Av'), icon: s === cf ? '✓' : '', onSelect: () => save({ crossfade: s }, s ? t('Övertoning {s} sekunder', { s }) : t('Övertoning av')) })) },
     'separator',
     { label: noWa ? t('Webbläsaren saknar Web Audio – bara ljudnivån gäller') : t('Gäller inte vid Chromecast'), disabled: true },
+    { label: t('Fler lyssningsinställningar'), href: '#/account' }
+  ], { title: t('Ljud') });
+}
+/** Ljudmenyn för ljudböcker och poddar: jämn ljudnivå för tal (kompressor i Web Audio) */
+function speechMenu(anchor, save) {
+  const on = !!LPREFS.speechLevel, noWa = !AE.ready() && AE.E.failed;
+  openMenu(anchor, [
+    { icon: on ? '✓' : '', label: t('Jämn ljudnivå för tal'), hint: on ? t('På') : t('Av'), disabled: noWa, onSelect: () => { if (!on) ensureEngine(); save({ speechLevel: !on }, on ? t('Jämn ljudnivå för tal av') : t('Jämn ljudnivå för tal på')); } },
+    'separator',
+    { label: noWa ? t('Webbläsaren saknar Web Audio (t.ex. iPhone/iPad)') : t('Svaga och starka röster spelas jämnare – bra i bilen och med hörlurar'), disabled: true },
     { label: t('Fler lyssningsinställningar'), href: '#/account' }
   ], { title: t('Ljud') });
 }
@@ -348,14 +361,17 @@ export async function renderListenPrefs(box) {
     <p class="muted small" style="margin:4px 0 12px">${t('Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).')}</p>
     <div class="row"><div><label for="lpback">${t('Hopp bakåt (ljudböcker och poddar)')}</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
       <div><label for="lpfwd">${t('Hopp framåt')}</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
+    <label class="row" style="margin-top:12px"><input type="checkbox" id="lpspeech" ${p.speechLevel ? 'checked' : ''} style="width:auto"> ${t('Jämn ljudnivå för tal (ljudböcker och poddar)')}</label>
+    <p class="muted small" style="margin:4px 0 0">${t('Viskningar och höga partier spelas jämnare. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).')}</p>
     <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> ${t('Hoppa över tystnad i poddar')}</label>
     <p class="muted small" style="margin:4px 0 0">${t('Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.')}</p>`;
   const save = act(async () => {
     await saveListen({ normMode: $('#lpnorm').value, crossfade: +$('#lpfade').value, gapless: $('#lpgap').checked,
-      skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked });
+      skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked, speechLevel: $('#lpspeech').checked });
     toast(t('Sparat'));
   });
-  for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil']) $(id, box).onchange = save;
+  for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil', '#lpspeech']) $(id, box).onchange = save;
+  $('#lpspeech', box).addEventListener('change', (e) => { if (e.target.checked) ensureEngine(); });
 }
 
 // ---------- jämn ljudnivå och motorn ----------

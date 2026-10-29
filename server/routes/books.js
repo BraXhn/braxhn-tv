@@ -2,23 +2,47 @@
 import fs from 'node:fs';
 import { pipeline } from 'node:stream';
 import { get, run, now } from '../db.js';
-import { fail, send, readJson, clientIp } from '../util.js';
+import { fail, send, readJson, clientIp, streamFile } from '../util.js';
 import { createSession, audit } from '../auth.js';
 import * as music from '../music.js';
 import * as books from '../audiobooks.js';
 import * as bookmeta from '../bookmeta.js';
+import * as booktools from '../booktools.js';
+import * as feeds from '../bookfeeds.js';
 import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
-import { route, user, img, admin } from '../http/router.js';
+import { route, user, img, admin, feed, remoteDenied } from '../http/router.js';
 import { screenBlock, ctx, libOk, canDownload } from '../http/context.js';
 
 // ---------- Ljudböcker ----------
 // Bibliotek, böcker och filer kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
 const bookLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='audiobook'", +c.p.lib); if (!l || !libOk(c.user.id, l.id)) { fail(c.res, 404, 'Inget ljudboksbibliotek'); return null; } return l; };
 const bookOk = (c, id) => { const b = get('SELECT library_id FROM books WHERE id=?', +id); return !!b && libOk(c.user.id, b.library_id); };
+// Före /api/audiobooks/:lib (första matchande route vinner)
+// Lyssningsstatistik för profilen; administratören ser dessutom hushållets profiler
+route('GET', '/api/audiobooks/stats', user, (c) => send(c.res, 200, { ...books.listeningStats(c.user.id), ...(c.user.is_admin ? { profiles: books.householdStats() } : {}) }));
+// Privata RSS-flöden (poddappar): adressen med nyckeln visas bara när flödet skapas
+route('GET', '/api/audiobooks/feeds', user, (c) => send(c.res, 200, { allowed: !feeds.feedDenied(c.user.id), reason: feeds.feedDenied(c.user.id),
+  feeds: feeds.listFeeds(c.user.id, { book: c.q.get('book'), library: c.q.get('lib'), series: c.q.get('series') }) }));
+route('POST', '/api/audiobooks/feeds', user, async (c) => {
+  const b = await readJson(c.req);
+  const r = feeds.createFeed(c.user.id, b.book != null ? { book: b.book } : { library: b.library, series: b.series });
+  audit('book_feed_created', { ...ctx(c), detail: b.book != null ? `bok ${+b.book}` : `serie ${String(b.series || '').slice(0, 100)}` });
+  send(c.res, 200, { id: r.id, path: `/api/feeds/${r.token}/feed.xml`, url: `${feeds.originOf(c.req)}/api/feeds/${r.token}/feed.xml` });
+});
+route('DELETE', '/api/audiobooks/feeds/:fid', user, (c) => {
+  if (!feeds.revokeFeed(c.user.id, +c.p.fid)) return fail(c.res, 404, 'Finns inte');
+  audit('book_feed_revoked', ctx(c)); send(c.res, 200, { ok: true });
+});
 route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: l, continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
-route('GET', '/api/audiobooks/book/:bid', user, (c) => { const b = books.book(+c.p.bid, c.user.id); b ? send(c.res, 200, b) : fail(c.res, 404, 'Finns inte'); });
+route('GET', '/api/audiobooks/book/:bid', user, (c) => {
+  const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
+  b.feedsAllowed = !feeds.feedDenied(c.user.id);
+  // Administratörens verktyg: vad som går att göra med filen, pågående åtgärd och papperskorgen (Ångra)
+  if (c.user.is_admin) b.tools = { canEmbed: booktools.canEmbed(b), canMerge: booktools.canMerge(b), state: booktools.stateOf(b.id), trash: booktools.trashOf(b.id) };
+  send(c.res, 200, b);
+});
 route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
   const { position, speed, at } = await readJson(c.req);
   const r = books.saveProgress(c.user.id, +c.p.bid, position, speed, at); if (!r) return fail(c.res, 404, 'Finns inte');
@@ -59,7 +83,7 @@ route('POST', '/api/audiobooks/book/:bid/match', admin, async (c) => {
   const b = bookOr404(c); if (!b) return;
   const { source, id, unlock } = await readJson(c.req);
   if (unlock) { bookmeta.unlock(b.id); bookmeta.queue(b.library_id); return send(c.res, 200, { ok: true }); }
-  if (!['google', 'openlibrary', 'audnexus'].includes(source) || !id) return fail(c.res, 400, 'Välj en bok');
+  if (!['google', 'openlibrary', 'audnexus', 'audible'].includes(source) || !id) return fail(c.res, 400, 'Välj en bok');
   try {
     if (!(await bookmeta.matchManual(b.id, source, String(id).slice(0, 60)))) return fail(c.res, 404, 'Boken hittades inte hos källan');
     audit('book_matched', { ...ctx(c), detail: `${b.title} → ${source} ${String(id).slice(0, 60)}` });
@@ -71,6 +95,35 @@ route('PUT', '/api/audiobooks/book/:bid', admin, async (c) => {
   try { await bookmeta.edit(b.id, await readJson(c.req)); send(c.res, 200, books.book(b.id, c.user.id)); }
   catch (e) { fail(c.res, e.status || 502, e.message); }
 });
+// Kapitelredigeraren (administratör): sparas utan att filen skrivs om; "Skriv in i filen" och sammanslagning bara på begäran
+route('PUT', '/api/audiobooks/book/:bid/chapters', admin, async (c) => {
+  const b = bookOr404(c); if (!b) return;
+  const body = await readJson(c.req);
+  if (body.reset) booktools.resetChapters(b.id); else booktools.saveChapters(b.id, body.chapters);
+  audit('book_chapters_edited', { ...ctx(c), detail: b.title });
+  send(c.res, 200, books.book(b.id, c.user.id));
+});
+// Kapitel från Audnexus via bokens ASIN (eller ?asin=) – visas i redigeraren, sparas först när administratören sparar
+route('GET', '/api/audiobooks/book/:bid/chapters/audnexus', admin, async (c) => {
+  const b = bookOr404(c); if (!b) return;
+  const row = books.bookRow(b.id);
+  const asin = String(c.q.get('asin') || row.asin || '').trim().toUpperCase();
+  if (!bookmeta.asinOk(asin)) return fail(c.res, 400, 'Boken saknar ASIN – ange det under Redigera (från Audible)');
+  try {
+    const r = await bookmeta.fetchChapters(asin);
+    if (!r) return fail(c.res, 404, 'Audnexus har inga kapitel för den här boken');
+    send(c.res, 200, { asin, chapters: r.chapters, total: r.total, duration: row.duration, lengthOk: books.lengthMatches(r.total, row.duration) });
+  } catch (e) { fail(c.res, 502, 'Hämtningen misslyckades: ' + e.message); }
+});
+const startTool = (c, fn, what) => {
+  const b = bookOr404(c); if (!b) return;
+  fn(b.id, c.user.id);
+  audit('book_tool', { ...ctx(c), detail: `${what}: ${b.title}` });
+  send(c.res, 202, { started: true, state: booktools.stateOf(b.id) });
+};
+route('POST', '/api/audiobooks/book/:bid/chapters/embed', admin, (c) => startTool(c, booktools.embedChapters, 'kapitel in i filen'));
+route('POST', '/api/audiobooks/book/:bid/merge', admin, (c) => startTool(c, booktools.mergeBook, 'slå ihop till M4B'));
+route('POST', '/api/audiobooks/book/:bid/restore', admin, (c) => startTool(c, booktools.restore, 'ångra'));
 // Omslag i sökträffarna: bara från källornas bildvärdar (webbens CSP tillåter inga externa bilder)
 route('GET', '/api/audiobooks/match/art', admin, async (c) => {
   try { const r = await bookmeta.fetchImage(c.q.get('u') || ''); send(c.res, 200, r.body, { 'Content-Type': r.type, 'Cache-Control': 'private, max-age=86400' }); }
@@ -178,3 +231,44 @@ route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
 });
 route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+
+// ---------- RSS-flöden för poddappar (/api/feeds/<nyckel>/…, routealternativet feed) ----------
+// Ingen kaka, Bearer eller ?t= gäller här – bara flödets nyckel. Fjärrreglerna (konton utan fjärråtkomst) gäller som vanligt.
+const feedOf = (c) => {
+  const r = feeds.resolve(c.p.token);
+  if (!r) { fail(c.res, 404, 'Flödet finns inte eller har återkallats'); return null; }
+  const why = remoteDenied(r.user, c.req, false);
+  if (why) { fail(c.res, 403, why); return null; }
+  return r;
+};
+const feedXml = (c) => {
+  const r = feedOf(c); if (!r) return;
+  const xml = feeds.feedXml(r.feed, r.user.id, c.p.token, feeds.originOf(c.req));
+  if (c.req.method === 'HEAD') { c.res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'private, max-age=300' }); return c.res.end(); }
+  send(c.res, 200, xml, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'private, max-age=300' });
+};
+route('GET', '/api/feeds/:token/feed\\.xml', feed, feedXml);
+route('HEAD', '/api/feeds/:token/feed\\.xml', feed, feedXml);
+const feedAudio = (c) => {
+  const r = feedOf(c); if (!r) return;
+  const f = feeds.feedFile(r.feed, r.user.id, parseInt(c.p.file));
+  if (!f) return fail(c.res, 404, 'Finns inte');
+  let st; try { st = fs.statSync(f.path); } catch { return fail(c.res, 404, 'Filen saknas'); }
+  streamFile(c.req, c.res, f.path, st.size, { 'Content-Type': feeds.mimeOf(f.path), 'Cache-Control': 'private, max-age=3600' });
+};
+route('GET', '/api/feeds/:token/audio/:file', feed, feedAudio);
+route('HEAD', '/api/feeds/:token/audio/:file', feed, feedAudio);
+route('GET', '/api/feeds/:token/chapters/:file', feed, (c) => {
+  const r = feedOf(c); if (!r) return;
+  const f = feeds.feedFile(r.feed, r.user.id, parseInt(c.p.file));
+  const b = f && books.book(f.book_id, r.user.id);
+  if (!b) return fail(c.res, 404, 'Finns inte');
+  send(c.res, 200, JSON.stringify(feeds.chaptersJson(b, b.files.find(x => x.id === f.id))), { 'Content-Type': 'application/json+chapters', 'Cache-Control': 'private, max-age=300' });
+});
+route('GET', '/api/feeds/:token/cover/:file', feed, async (c) => {
+  const r = feedOf(c); if (!r) return;
+  const bid = parseInt(c.p.file);
+  if (!feeds.feedHasBook(r.feed, r.user.id, bid)) return fail(c.res, 404, 'Inget omslag');
+  const f = books.coverPath(bid); if (!f) return fail(c.res, 404, 'Inget omslag');
+  c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(f), c.res, () => {});
+});

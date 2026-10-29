@@ -261,7 +261,8 @@ views.admin = async (sec) => {
     <label class="switch"><input type="checkbox" id="osah" ${S.subAutoHash ? 'checked' : ''}> ${t('Bara exakta träffar (filhash) – rekommenderas, annars kan tiderna vara fel')}</label>
     <p class="muted small" style="margin:4px 0 0">${t('Hämtade hittills: {downloaded}{v}. Gratiskonton får ett begränsat antal nedladdningar per dygn – resten hämtas vid nästa skanning.', { downloaded: S.subAutoStats.downloaded, v: S.subAutoStats.error ? t(' · senaste fel: ') + esc(S.subAutoStats.error) : '' })}</p>
     <h3 style="margin:22px 0 0;font-size:.9375rem">${t('Ljudböcker')}</h3>
-    <label class="switch"><input type="checkbox" id="bmeta" ${S.bookMeta ? 'checked' : ''}> ${t('Hämta beskrivning, omslag, serie och kapitel från nätet (Google Books, Open Library, Audnexus)')}</label>
+    <label class="switch"><input type="checkbox" id="bmeta" ${S.bookMeta ? 'checked' : ''}> ${t('Hämta beskrivning, omslag, serie och kapitel från nätet (Audible, Audnexus, Google Books, Open Library)')}</label>
+    <label for="bmreg">${t('Audible-butik (region)')}</label><select id="bmreg">${(S.bookMetaRegions || ['us']).map(r => `<option value="${esc(r)}" ${r === S.bookMetaRegion ? 'selected' : ''}>${esc(r.toUpperCase())}</option>`).join('')}</select>
     <p class="muted small" style="margin:4px 0 0">${t('Körs i bakgrunden efter skanningen, en bok i taget. Matchade böcker hämtas inte om – använd <i>Fel bok?</i> på bokens sida.{v}{v2}', { v: S.bookMetaStatus?.running ? ` ${t('Pågår: {v} {done}/{total}.', { v: esc(S.bookMetaStatus.library || ''), done: S.bookMetaStatus.done, total: S.bookMetaStatus.total })}` : '', v2: S.bookMetaStatus?.error ? t(' Senaste fel: ') + esc(S.bookMetaStatus.error) : '' })}</p>
     <h3 style="margin:22px 0 0;font-size:.9375rem">${t('Bio-läge')}</h3>
     <p class="muted small" style="margin:4px 0 0">${t('Var och en väljer under <i>Mitt konto</i> om trailers ska spelas före filmer. Här kan du dessutom ange en egen förfilm (t.ex. en "stäng av mobilen"-film) som spelas allra sist före filmen: en videofil eller en mapp att slumpa från, under {mediaRoot}. Lägg den utanför biblioteksmapparna, annars blir den en egen film.', { mediaRoot: esc(S.mediaRoot) })}</p>
@@ -402,7 +403,7 @@ views.admin = async (sec) => {
     e.preventDefault();
     const body = { language: $('#lang').value, scanInterval: $('#si').value, osUser: $('#osu').value, subLangs: $('#osl').value,
       remoteQuality: $('#rq').value, publicUrl: $('#pu').value, transcodeVcodec: $('#tvc').value,
-      subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked, bookMeta: $('#bmeta').checked,
+      subAuto: $('#osa').checked, subAutoLangs: $('#osal').value, subAutoMax: $('#osam').value, subAutoHash: $('#osah').checked, bookMeta: $('#bmeta').checked, bookMetaRegion: $('#bmreg')?.value,
       cinemaPreroll: $('#cpre').value };
     if ($('#tk').value.trim()) body.tmdbKey = $('#tk').value.trim();
     if ($('#osk').value.trim()) body.osKey = $('#osk').value.trim();

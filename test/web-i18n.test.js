@@ -325,6 +325,17 @@ bt('engelska: dialoger, kortmenyn, spelaren och datum/tal med engelsk locale', a
   await page.keyboard.press('k');
   await page.waitForFunction(() => document.querySelector('#pstate').textContent === 'Paused');
   await page.keyboard.press('Escape');
+  // Ljudböckernas dialoger: kapitelredigeraren, RSS-flödet och lyssningsstatistiken
+  for (const [view, opener] of [[`book/${S.book}`, '#bchap'], [`book/${S.book}`, '#bfeed'], [`books/${S.audiobook}`, '#bstats']]) {
+    await open(page, view);
+    await page.click(opener);
+    await page.waitForSelector('dialog[open]');
+    await page.waitForFunction(() => !document.querySelector('dialog[open] [aria-busy="true"]'));
+    assert.deepEqual(swedish(await page.evaluate(visibleText, 'dialog[open]')), [], opener);
+    assert.deepEqual(await page.evaluate(auditPage, { scope: 'dialog[open]', contrast: false }), [], opener);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+  }
   // Datum i engelskt format (Intl med en-GB): veckodag/månad på engelska i historiken
   await open(page, 'history');
   const txt = await page.evaluate(() => document.querySelector('#main').innerText);
