@@ -90,6 +90,7 @@ export function keys(e) {
   if (!P || P.mini || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
   const v = $('#vid', P.el); if (!v) return;
   if (P.pre && preKey(e, P)) return; // trailers före filmen spelas
+  if (P.learn?.key(e)) return; // språkinlärningen (learn.js): a/d, r, x, p, w och pilarna mellan orden
   // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
   if (e.key.startsWith('Arrow') && moveFocus(e)) return;
@@ -138,7 +139,7 @@ function toggleSubs() {
 function moveFocus(e) {
   const t = e.target;
   if (!t?.matches || !t.matches(':focus-visible')) return false;
-  const box = t.closest('#chlist,#setp,.crow,.pbar'); if (!box) return false;
+  const box = t.closest('#chlist,#setp,.crow,.pbar,.learnbar'); if (!box) return false;
   const list = box.matches('#chlist,#setp');
   const fwd = list ? e.key === 'ArrowDown' : e.key === 'ArrowRight', back = list ? e.key === 'ArrowUp' : e.key === 'ArrowLeft';
   if (!fwd && !back) {

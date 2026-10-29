@@ -45,6 +45,7 @@ import './routes/search.js';
 import './routes/music.js';
 import './routes/ratings.js';
 import './routes/playback.js';
+import './routes/vocab.js'; // språkinlärningens ordlista per profil, export till Anki och ljudklipp
 import './routes/familyfilter.js'; // familjefilter: profilens läge, scener att hoppa över, ordlistor (admin)
 import './routes/social.js';
 import './routes/books.js';

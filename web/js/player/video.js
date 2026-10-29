@@ -17,7 +17,7 @@ import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, s
 import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { ICON } from '../ui/icons.js';
-import { provide } from '../lazy.js';
+import { need, provide } from '../lazy.js';
 import * as self from './video.js';
 provide('video', self); // fasaderna i lazy.js når modulen härifrån
 
@@ -93,6 +93,7 @@ export async function play(id, start = 0, opts = {}) {
       ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
       <label>${t('Undertexter')}<select id="ps"><option value="">${t('Inga undertexter')}</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
       ${textSubs.length > 1 ? `<label>${t('Andra undertext')}<select id="ps2"><option value="">${t('Ingen')}</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
+      ${textSubs.length ? `<label class="chk"><input type="checkbox" id="plearn"> ${t('Språkinlärning')} <span class="muted">${t('klickbara ord, översättning och paus efter repliken')}</span></label>` : ''}
       <span id="poff" class="row" hidden>${t('Undertextens tid')} <button class="ghost small" data-off="-0.5" title="${t('Tidigare')}" aria-label="${t('Undertexten 0,5 s tidigare')}">−</button><button class="ghost small" data-off="-0.1" title="${t('0,1 s tidigare')}" aria-label="${t('Undertexten 0,1 s tidigare')}">−0,1</button><span class="small" id="poffv">0,0 s</span><button class="ghost small" data-off="0.1" title="${t('0,1 s senare')}" aria-label="${t('Undertexten 0,1 s senare')}">+0,1</button><button class="ghost small" data-off="0.5" title="${t('Senare')}" aria-label="${t('Undertexten 0,5 s senare')}">+</button></span>
       <div id="psync" class="psync" hidden></div>
       <label>${t('Hastighet')}<select id="prate">${RATES.map(r => `<option value="${r}">${r === 1 ? 'Normal' : String(r).replace('.', ',') + '×'}</option>`).join('')}</select></label>
@@ -101,6 +102,7 @@ export async function play(id, start = 0, opts = {}) {
         <label class="chk"><input type="checkbox" id="pdialog"> ${t('Tydligare dialog')} <span class="muted">${t('rösterna förstärks')}</span></label></div>
       <details class="setgrp"><summary>${t('Undertextens utseende')}</summary>${subStyleFields('pst')}</details></div>
     <div class="ctl" id="ctl">
+      <div class="learnbar" id="plearnbar" role="toolbar" aria-label="${t('Språkinlärning')}" hidden></div>
       <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="${t('Tidslinje')}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
         <div class="track" id="track"><b id="tbuf"></b><i id="tfill"></i>${chaps.slice(1).map(c => it.duration ? `<span class="chap" style="left:${c.start / it.duration * 100}%"></span>` : '').join('')}</div></div>
       <div class="crow">
@@ -153,6 +155,13 @@ export async function play(id, start = 0, opts = {}) {
     if (subBurns(s) || subBurns(prev)) reload(); else setSubs();
   };
   if (q('#ps2')) q('#ps2').onchange = (e) => { cur.sub2 = e.target.value; store.set('sub2lang', it.subtitles.find(x => x.id === cur.sub2)?.lang || ''); setSubs(); };
+  // Språkinlärningen (player/learn.js) laddas först när den slås på; valet gäller även nästa film i webbläsaren
+  const learn = (on) => need('player/learn.js').then(m => { if (P !== cur) return; if (on) m.startLearn(cur); else m.stopLearn(cur); }).catch(toastErr);
+  if (q('#plearn')) {
+    q('#plearn').checked = !!store.get('learn', false);
+    q('#plearn').onchange = (e) => { store.set('learn', e.target.checked); learn(e.target.checked); };
+    if (q('#plearn').checked) learn(true);
+  }
   if (q('#pchap')) q('#pchap').onclick = (e) => {
     e.stopPropagation();
     const l = q('#chlist');

@@ -160,7 +160,7 @@ const VIEWS = () => [
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'], ['shrink', 'Diskrådgivaren'],
-  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby']
+  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista']
 ];
 
 /** Tab genom sidan: varje stopp ska synas på skärmen, ha synlig fokus och inte ligga i något dolt */
@@ -274,6 +274,13 @@ t('spelaren: fokus i spelaren, sidan bakom inert, kortkommandon, tidslinje som r
     assert.ok(await page.evaluate(() => document.querySelector('#main').inert && document.querySelector('#top').inert), 'sidan bakom är inert');
     const a = await page.evaluate(auditPage, { scope: '#player', contrast: false, target: false });
     assert.deepEqual(a, [], fmt(a));
+    // Språkinlärningen (⚙): verktygsraden granskas också, och a/d/r/x/p/w går till läget
+    await page.evaluate(() => { const c = document.querySelector('#plearn'); c.checked = true; c.dispatchEvent(new Event('change')); });
+    await page.waitForSelector('#plearnbar:not([hidden]) #lrep');
+    const la = await page.evaluate(auditPage, { scope: '#player', contrast: false, target: false });
+    assert.deepEqual(la, [], fmt(la));
+    await page.evaluate(() => { const c = document.querySelector('#plearn'); c.checked = false; c.dispatchEvent(new Event('change')); });
+    await page.waitForSelector('#plearnbar[hidden]', { state: 'attached' });
     await press(page, 'k');
     await page.waitForFunction(() => document.querySelector('#vid').paused);
     await page.waitForFunction(() => document.querySelector('#pstate').textContent === 'Pausad');
