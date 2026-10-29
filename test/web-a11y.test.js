@@ -56,6 +56,9 @@ before(async () => {
   const alb = path.join(MEDIA, 'Musik', 'Artisten', 'Albumet'); fs.mkdirSync(alb, { recursive: true });
   for (const n of [1, 2]) ff('-f', 'lavfi', '-i', `sine=frequency=${300 * n}:duration=8`, '-metadata', `title=Låt ${n}`, '-metadata', 'artist=Artisten', '-metadata', 'album=Albumet',
     '-metadata', `track=${n}`, path.join(alb, `0${n} Låt ${n}.mp3`));
+  // Musikvideo (samma namn som låten) och synkad text med ordtider (karaokeläget)
+  clip(path.join(alb, '01 Låt 1.webm'), 3, 520);
+  fs.writeFileSync(path.join(alb, '01 Låt 1.lrc'), '[00:00.00]<00:00.00>Första <00:00.80>raden\n[00:02.00]<00:02.00>Andra <00:02.60>raden\n[00:04.00]Tredje raden\n');
   const bok = path.join(MEDIA, 'Ljudböcker', 'Författaren', 'Boken'); fs.mkdirSync(bok, { recursive: true });
   ff('-f', 'lavfi', '-i', 'sine=frequency=250:duration=10', '-metadata', 'title=Del 1', '-metadata', 'album=Boken', '-metadata', 'artist=Författaren', path.join(bok, '01.mp3'));
   const pics = path.join(MEDIA, 'Foton', '2024', 'Sommar'); fs.mkdirSync(pics, { recursive: true });
@@ -142,6 +145,7 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
   S.show = (await srv.req(`/api/libraries/${S.show}/items`)).data.items[0].id;
   const albums = (await srv.req(`/api/music/${S.music}/albums`)).data;
   S.album = (albums.albums || albums.items || albums)[0]?.id;
+  S.artist = (albums.albums || albums.items || albums)[0]?.artistId;
   const books = (await srv.req(`/api/audiobooks/${S.audiobook}`)).data;
   S.book = (books.books || books.items || books)[0]?.id;
   const ebs = (await srv.req(`/api/ebooks/lib/${S.ebook}`)).data.books;
@@ -155,7 +159,7 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
 // Vyerna som granskas (hash → namn)
 const VIEWS = () => [
   ['', 'Hem'], [`lib/${S.movie}`, 'Filmer'], [`lib/${S.show}`, 'Serier'], [`item/${S.alfa}`, 'Film'], [`item/${S.show}`, 'Serie'],
-  [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
+  [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), ...(S.artist ? [[`artist/${S.artist}`, 'Artist']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
   ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search?q=alfa', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
@@ -216,6 +220,38 @@ t('inloggningssidan och profilval', async () => {
 // ---------- tangentbordsflöden ----------
 const active = (page) => page.evaluate(focusInfo);
 const press = async (page, ...keys) => { for (const k of keys) { await page.keyboard.press(k); await sleep(60); } };
+
+t('låttext, karaokeläget och musikvideospelaren: granskning och tangentbord', async () => {
+  const { page, errors, close } = await newPage('desktop');
+  await open(page, `album/${S.album}`);
+  await page.click('tr[data-ti="0"]');
+  await page.click('#mlyr');
+  await page.waitForSelector('#lybody p.sync');
+  let f = await page.evaluate(auditPage, { scope: '#lyrics' });
+  assert.deepEqual(f, [], fmt(f));
+  await page.focus('#lykar');
+  await press(page, 'Enter');
+  await page.waitForSelector('dialog.karaoke[open] [data-w]');
+  await settled(page);
+  f = await page.evaluate(auditPage, { scope: 'dialog[open]' });
+  assert.deepEqual(f, [], fmt(f));
+  assert.ok((await active(page)).inDialog, 'fokus i karaokedialogen');
+  await press(page, 'Escape');
+  await page.waitForSelector('dialog.karaoke', { state: 'detached' });
+  assert.equal((await active(page)).sel, '#lykar', 'fokus tillbaka till knappen');
+  await page.click('#mx');
+  // Musikvideon från hyllan
+  await page.focus('.mvcard');
+  await press(page, 'Enter');
+  await page.waitForSelector('#player:not([hidden]) #mvvid');
+  await settled(page);
+  f = await page.evaluate(auditPage, { scope: '#player' });
+  assert.deepEqual(f, [], fmt(f));
+  await press(page, 'Escape');
+  await page.waitForSelector('#player', { state: 'hidden' });
+  assert.deepEqual(errors, []);
+  await close();
+});
 
 t('dialoger: ?-dialogen har fokusfälla, Escape stänger och fokus kommer tillbaka', async () => {
   const { page, errors, close } = await newPage('desktop');

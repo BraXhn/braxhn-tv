@@ -9,10 +9,13 @@ import { confirmDialog, openDialog } from './ui/dialog.js';
 import { openMenu } from './ui/menu.js';
 import { fmtStars, rateDialog } from './ui/rating.js';
 import { emptyState, errorState, loadingState } from './ui/states.js';
+import { playVideo } from './player/musicvideo.js';
 
 /** Låtens ⋮-meny (från låtlistorna). t = spåret i musik-API:ts format. */
 export function trackMenu(anchor, tm, point = null) {
   openMenu(anchor, [
+    // Musikvideo till låten (tm.video = videons id, server/musicvideos.js)
+    { icon: '🎬', label: t('Spela videon'), hidden: !tm.video, onSelect: () => playVideo(tm.video) },
     { icon: '📻', label: t('Starta låtradio'), onSelect: act(() => startRadio({ trackId: tm.id }, tm.title)) },
     { icon: '≈', label: t('Liknande låtar'), onSelect: act(() => similarDialog(tm)) },
     { icon: '↝', label: t('Ljudresa härifrån…'), onSelect: () => journeyDialog(tm) },

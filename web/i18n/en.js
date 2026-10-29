@@ -3,6 +3,22 @@
 // är på engelska (server/http/static.js) – inte alls på svenska. {namn} = variabel, HTML i nyckeln behålls i värdet.
 // Ny text i webben: lägg till raden här (test/web-i18n.test.js kontrollerar att alla svenska nycklar finns).
 self.BX_I18N = {
+  // audio-extras.js (karaokeläget), sonic.js och player/musicvideo.js
+  "Karaokeläge (helskärm)": "Karaoke mode (full screen)",
+  "Helskärm stöds inte här": "Full screen isn't supported here",
+  "Spela videon": "Play the video",
+  "Live": "Live",
+  "Textvideo": "Lyric video",
+  "Konsert": "Concert",
+  "Intervju": "Interview",
+  "Bakom kulisserna": "Behind the scenes",
+  "Musikvideo": "Music video",
+  "Musikvideor": "Music videos",
+  "Föregående video": "Previous video",
+  "Nästa video: {title}": "Next video: {title}",
+  "Nästa video": "Next video",
+  "Till albumet": "To the album",
+  "Videon kan inte spelas i webbläsaren (filformatet stöds inte)": "The video can't be played in the browser (the file format isn't supported)",
   // audio-extras.js
   "Sovtimern pausade uppspelningen": "The sleep timer paused playback",
   "☾ slut": "☾ end",

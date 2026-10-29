@@ -45,7 +45,7 @@ test('ebur128-sammanfattning tolkas till gain mot -18 LUFS', () => {
 test('LRC: tidsstämplar, flera per rad, offset, metadata och ordtider', () => {
   const r = L.parseLrc('﻿[ar:Artist]\r\n[ti:Titel]\n[offset:+500]\n[00:12.00][01:02.50]Refräng\n[00:05.5]Första <00:05.80>raden\n[00:20:30]Kolon-variant\nlös rad\n');
   assert.equal(r.synced, true);
-  assert.deepEqual(r.lines, [{ t: 5, text: 'Första raden' }, { t: 11.5, text: 'Refräng' }, { t: 19.8, text: 'Kolon-variant' }, { t: 62, text: 'Refräng' }]);
+  assert.deepEqual(r.lines, [{ t: 5, text: 'Första raden', words: [{ t: 5, text: 'Första ' }, { t: 5.3, text: 'raden' }] }, { t: 11.5, text: 'Refräng' }, { t: 19.8, text: 'Kolon-variant' }, { t: 62, text: 'Refräng' }]);
   const neg = L.parseLrc('[offset:-1000]\n[00:01.00]a');
   assert.deepEqual(neg.lines, [{ t: 2, text: 'a' }]);
   const tom = L.parseLrc('[00:00.00]\n[00:03.00]Text');

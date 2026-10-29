@@ -9,6 +9,7 @@ import { probe, TRACK_SQL, shapeTrack } from './music.js';
 import * as custom from './smartlists.js';
 import * as sonic from './sonic.js';
 import { libOk } from './perms.js';
+import { id3Lyrics } from './lyricstags.js';
 
 // Tabellen listen_prefs skapas i db.js (där får den nya kolumner)
 
@@ -113,12 +114,33 @@ async function loudnessBatch(limit) {
 
 // ---------------- låttexter ----------------
 const TS = /^\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/;
+const WORD_TS = /<(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)>/g;
+const secs = (m, s) => parseInt(m) * 60 + parseFloat(s.replace(':', '.'));
+/** Ord-tidsstämplar (utökad LRC, <mm:ss.xx>) i en rad som börjar vid t → [{ t, text }] eller null */
+function lrcWords(line, t) {
+  if (!/<\d{1,3}:\d/.test(line)) return null;
+  const out = [];
+  let at = t, last = 0, m;
+  WORD_TS.lastIndex = 0;
+  while ((m = WORD_TS.exec(line))) {
+    const seg = line.slice(last, m.index);
+    if (seg.trim()) out.push({ t: at, text: seg });
+    at = secs(m[1], m[2]); last = m.index + m[0].length;
+  }
+  const rest = line.slice(last);
+  if (rest.trim()) out.push({ t: at, text: rest });
+  if (out.length < 2) return null;
+  // Mellanrum mellan orden behålls i texten (stavelser utan mellanrum skrivs ihop), inget i kanterna
+  out[0].text = out[0].text.replace(/^\s+/, ''); out[out.length - 1].text = out[out.length - 1].text.replace(/\s+$/, '');
+  return out.map(w => ({ t: w.t, text: w.text.replace(/\s+/g, ' ') }));
+}
 /**
  * Tolkar LRC (synkade texter, [mm:ss.xx]) eller vanlig text. Flera tidsstämplar per rad, [offset:±ms]
- * och ord-tidsstämplar (<mm:ss.xx>) hanteras. Returnerar { synced, lines: [{ t, text }] } (t i sekunder eller null).
+ * och ord-tidsstämplar (<mm:ss.xx>, utökad LRC) hanteras. Returnerar { synced, lines: [{ t, text, words? }] }
+ * (t i sekunder eller null; words = [{ t, text }] bara när raden har ordtider – karaokeläget i webben).
  */
 export function parseLrc(text) {
-  const src = String(text ?? '').replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  const src = String(text ?? '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   let offset = 0;
   const timed = [], plain = [];
   for (const raw of src.split('\n')) {
@@ -127,40 +149,59 @@ export function parseLrc(text) {
     if (off) { offset = parseInt(off[1]) / 1000; continue; }
     const stamps = [];
     let m;
-    while ((m = line.match(TS))) { stamps.push(parseInt(m[1]) * 60 + parseFloat(m[2].replace(':', '.'))); line = line.slice(m[0].length); }
+    while ((m = line.match(TS))) { stamps.push(secs(m[1], m[2])); line = line.slice(m[0].length); }
     if (!stamps.length && /^\[[a-z#]+:.*\]$/i.test(line)) continue; // metadata som [ar:Artist]
+    const words = stamps.length === 1 ? lrcWords(line.slice(0, 2000), stamps[0]) : null;
     line = line.replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').replace(/\s+/g, ' ').trim().slice(0, 500);
-    if (stamps.length) for (const t of stamps) timed.push({ t, text: line });
+    if (stamps.length) for (const t of stamps) timed.push(words ? { t, text: line, words } : { t, text: line });
     else plain.push(line);
   }
   if (timed.length) {
     timed.sort((a, b) => a.t - b.t);
     // Positiv offset betyder att texten ska visas tidigare
-    return { synced: true, lines: timed.slice(0, 3000).map(l => ({ t: round(Math.max(0, l.t - offset), 3), text: l.text })) };
+    const at = (t) => round(Math.max(0, t - offset), 3);
+    return { synced: true, lines: timed.slice(0, 3000).map(l => l.words ? { t: at(l.t), text: l.text, words: l.words.map(w => ({ t: at(w.t), text: w.text })) } : { t: at(l.t), text: l.text }) };
   }
   while (plain.length && !plain[0]) plain.shift();
   while (plain.length && !plain[plain.length - 1]) plain.pop();
   return { synced: false, lines: plain.slice(0, 3000).map(text => ({ t: null, text })) };
 }
 
-const LYRIC_TAG = (k) => k === 'lyrics' || k.startsWith('lyrics-') || k.startsWith('lyrics_') || k === 'unsyncedlyrics' || k === 'unsynced lyrics' || k === 'uslt' || k === '©lyr';
+const LYRIC_TAG = (k) => k === 'lyrics' || k.startsWith('lyrics-') || k.startsWith('lyrics_') || k === 'unsyncedlyrics' || k === 'unsynced lyrics' || k === 'uslt' || k === '©lyr' || k === 'syncedlyrics';
 const NONE = { source: null, synced: false, lines: [] };
-/** Text till ett spår: .lrc med samma namn bredvid ljudfilen, annars inbäddad tagg. */
+const ID3_EXT = new Set(['.mp3', '.aif', '.aiff', '.wav', '.flac', '.aac']);
+/**
+ * Text till ett spår. Synkad text går före vanlig, i ordningen: .lrc med samma namn bredvid ljudfilen, SYLT i ID3-taggen,
+ * LYRICS/UNSYNCEDLYRICS-taggar (FLAC/Vorbis/MP4, kan innehålla LRC) och USLT. Finns bara osynkad text används den
+ * första av dem (.lrc, tagg, USLT). source: 'lrc' | 'sylt' | 'tag'.
+ */
 export async function lyricsFor(track) {
   const ext = path.extname(track.path);
   const base = track.path.slice(0, track.path.length - ext.length);
+  let plain = null;
+  const keep = (r, source) => { if (!r.lines.length) return null; if (r.synced) return { source, ...r }; plain ??= { source, ...r }; return null; };
   for (const e of ['.lrc', '.LRC', '.Lrc']) {
     try {
       const f = base + e, st = await fs.promises.stat(f);
-      if (st.isFile() && st.size <= 512 * 1024) { const r = parseLrc(await fs.promises.readFile(f, 'utf8')); if (r.lines.length) return { source: 'lrc', ...r }; }
+      if (st.isFile() && st.size <= 512 * 1024) { const hit = keep(parseLrc(await fs.promises.readFile(f, 'utf8')), 'lrc'); if (hit) return hit; break; }
     } catch {}
   }
-  let tags;
-  try { tags = (await probe(track.path)).tags; } catch { return NONE; }
-  const key = Object.keys(tags).find(LYRIC_TAG);
-  if (!key || !String(tags[key]).trim()) return NONE;
-  const r = parseLrc(String(tags[key]).slice(0, 512 * 1024));
-  return r.lines.length ? { source: 'tag', ...r } : NONE;
+  let uslt = '';
+  if (ID3_EXT.has(ext.toLowerCase())) {
+    const id3 = await id3Lyrics(track.path);
+    if (id3.sylt?.length) return { source: 'sylt', synced: true, lines: id3.sylt };
+    uslt = id3.uslt;
+  }
+  let tags = {};
+  try { tags = (await probe(track.path)).tags; } catch { if (!plain && !uslt) return NONE; }
+  // Synkade taggar först (SYNCEDLYRICS, eller LYRICS med LRC-tider), sedan vanlig text
+  const keys = Object.keys(tags).filter(LYRIC_TAG).sort((a, b) => (b === 'syncedlyrics') - (a === 'syncedlyrics'));
+  for (const key of keys) {
+    if (!String(tags[key]).trim()) continue;
+    const hit = keep(parseLrc(String(tags[key]).slice(0, 512 * 1024)), 'tag'); if (hit) return hit;
+  }
+  if (uslt) { const hit = keep(parseLrc(uslt.slice(0, 512 * 1024)), 'tag'); if (hit) return hit; }
+  return plain || NONE;
 }
 
 // ---------------- smarta spellistor ----------------

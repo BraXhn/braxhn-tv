@@ -518,11 +518,18 @@ export async function onlineLyrics(t, { timeout = LYRICS_TIMEOUT } = {}) {
   inflight.set(t.id, p);
   return p;
 }
-/** Låttexten för ett spår: lokal .lrc eller tagg först, sedan LRCLIB (om påslaget). Fel från nätet → ingen text. */
+/**
+ * Låttexten för ett spår: egen synkad text (.lrc, SYLT, taggar) först, sedan LRCLIB (om påslaget). Har filen bara
+ * osynkad text används LRCLIB:s synkade text i stället, annars filens egen. Fel från nätet → filens text.
+ */
 export async function lyrics(t) {
   const local = await lyricsFor(t);
-  if (local.lines.length || !lyricsOnline() || offlineInTests('lrc')) return local;
-  try { return (await onlineLyrics(t)) || local; }
+  if (local.synced || !lyricsOnline() || offlineInTests('lrc')) return local;
+  try {
+    const o = await onlineLyrics(t);
+    if (!local.lines.length) return o || local;
+    return o?.synced ? o : local;
+  }
   catch (e) { console.warn('[låttexter]', e.message); return local; }
 }
 
@@ -582,7 +589,7 @@ async function lyricsLibrary(libId) {
     if (!lyricsBackground()) break;
     try {
       const local = await lyricsFor(t);
-      if (local.lines.length) { run("INSERT OR IGNORE INTO track_lyrics(track_id,state,fetched,source) VALUES(?,2,?,'local')", t.id, now()); continue; }
+      if (local.synced) { run("INSERT OR IGNORE INTO track_lyrics(track_id,state,fetched,source) VALUES(?,2,?,'local')", t.id, now()); continue; }
       if (await onlineLyrics(t, { timeout: TIMEOUT })) status.lyrics++;
       errors = 0;
     } catch (e) { status.error = e.message; if (e.rateLimited || ++errors >= 3) break; }

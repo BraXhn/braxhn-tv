@@ -1,7 +1,8 @@
 // Musik: album, artister, spår, spellistor, smarta listor, låttexter och lyssningsinställningar.
 import fs from 'node:fs';
+import path from 'node:path';
 import { get, run, now, all, tx } from '../db.js';
-import { fail, send, clientIp, readJson } from '../util.js';
+import { fail, send, clientIp, readJson, streamFile, MIME } from '../util.js';
 import { createSession, audit } from '../auth.js';
 import * as music from '../music.js';
 import * as listen from '../listening.js';
@@ -10,6 +11,8 @@ import * as smartl from '../smartlists.js';
 import * as ratings from '../ratings.js';
 import * as sonic from '../sonic.js';
 import * as mmeta from '../musicmeta.js';
+import * as mvideo from '../musicvideos.js';
+import { serveRemux } from '../trailers.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio, admin, pub } from '../http/router.js';
 import { screenBlock, libOk, ctx, canDownload } from '../http/context.js';
@@ -35,7 +38,8 @@ route('GET', '/api/music/albums/:aid', user, (c) => {
   const info = mmeta.albumInfoOf(a.id), k = mmeta.albumKind(a, info ? { kind: info.type } : null);
   // Tillägg: egna betyg (userRating i stjärnor) för albumet och låtarna – bara när de finns
   ratings.annotate(c.user.id, 'track', a.trackList);
-  send(c.res, 200, { ...a, userRating: ratings.toStars(ratings.getOne(c.user.id, 'album', a.id)), type: k.kind, typeGuessed: k.guessed, info });
+  // Tillägg: musikvideor till albumets låtar (videos, tom lista om inga)
+  send(c.res, 200, { ...a, userRating: ratings.toStars(ratings.getOne(c.user.id, 'album', a.id)), type: k.kind, typeGuessed: k.guessed, info, videos: mvideo.albumVideos(a.id) });
 });
 // Offline i webbappen: albumets spår med kortlivade länkar (en mediatoken per spår, scope −spårets id).
 // Räknas som nedladdning (perms.js). a = ljudformat webbläsaren spelar – annat kodas om (då utan Range).
@@ -58,7 +62,42 @@ route('GET', '/api/music/artists/:arid', user, (c) => {
   const info = mmeta.artistInfo(a.id);
   ratings.annotate(c.user.id, 'track', a.popular);
   send(c.res, 200, { ...a, albums: a.albums.map(x => { const k = mmeta.albumKind(x, { kind: kinds.get(x.id) || null }); return { ...x, type: k.kind, typeGuessed: k.guessed }; }),
-    image: !!info?.image, backdrop: !!info?.backdrop, info, related: mmeta.relatedLocal(a.id) });
+    image: !!info?.image, backdrop: !!info?.backdrop, info, related: mmeta.relatedLocal(a.id), videos: mvideo.artistVideos(a.id) });
+});
+// ---------- Musikvideor (server/musicvideos.js) ----------
+// Samma rättigheter som musiken (bibliotek per användare), skärmtid gäller (det är video). Strömmen har mediatoken
+// för just den videon (MV_SCOPE + id) – webben använder kakan, appar och Chromecast /play.
+const mvRow = (c) => { const v = mvideo.videoFor(c.user.id, +c.p.vid); if (!v) fail(c.res, 404, 'Videon finns inte'); return v; };
+route('GET', '/api/music/videos/:vid', user, (c) => {
+  const v = mvRow(c); if (!v) return;
+  const track = v.track_id ? get('SELECT id, title, album_id FROM tracks WHERE id=?', v.track_id) : null;
+  send(c.res, 200, { ...mvideo.shapeVideo(v), track: track ? { id: track.id, title: track.title, albumId: track.album_id } : null,
+    more: v.artist_id ? mvideo.artistVideos(v.artist_id).filter(x => x.id !== v.id).slice(0, 30) : [] });
+});
+const mvStream = { auth: true, media: true, scope: (p) => mvideo.MV_SCOPE + (+p.vid) };
+const serveMv = (c) => {
+  const v = mvRow(c); if (!v) return;
+  if (screenBlock(c)) return;
+  fs.stat(v.path, async (e, s) => {
+    if (e || !s.isFile()) return fail(c.res, 404, 'Filen finns inte längre');
+    if (c.q.get('mp4') === '1') { if (!await serveRemux(c.req, c.res, v.path)) fail(c.res, 503, 'Servern gör redan om andra filer – försök igen om en stund'); return; }
+    streamFile(c.req, c.res, v.path, s.size, { 'Content-Type': MIME[path.extname(v.path).toLowerCase()] || 'video/mp4', 'Cache-Control': 'private, no-transform' });
+  });
+};
+route('GET', '/api/music/videos/:vid/stream', mvStream, serveMv);
+route('HEAD', '/api/music/videos/:vid/stream', mvStream, serveMv);
+route('GET', '/api/music/videos/:vid/play', user, (c) => {
+  const v = mvRow(c); if (!v) return;
+  if (screenBlock(c)) return;
+  const token = c.user.via !== 'cookie' ? createSession(c.user.id, 'media', { item: mvideo.MV_SCOPE + v.id, ip: clientIp(c.req) }) : null;
+  const q = token ? '?t=' + token : '';
+  send(c.res, 200, { url: `/api/music/videos/${v.id}/stream${q}`, mp4: `/api/music/videos/${v.id}/stream${q ? q + '&' : '?'}mp4=1`, mime: MIME[path.extname(v.path).toLowerCase()] || 'video/mp4' });
+});
+route('GET', '/api/music/videos/:vid/thumb', img, async (c) => {
+  const v = mvideo.videoFor(c.user.id, +c.p.vid);
+  if (!v?.thumb) return fail(c.res, 404, 'Ingen bild');
+  const f = mvideo.thumbFile(v.id);
+  fs.readFile(await sized(f, c.q.get('w')), (e, data) => e ? fail(c.res, 404, 'Ingen bild') : send(c.res, 200, data, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }));
 });
 // Artistbild och bakgrund (från nätet eller artist.jpg i mappen)
 const artistImage = (kind) => async (c) => {

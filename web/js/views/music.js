@@ -10,6 +10,7 @@ import { tabsHtml } from '../ui/tabs.js';
 import { bindStars, fmtStars, saveRating, starsHtml } from '../ui/rating.js';
 import { similarArtists, stationsHtml, trackMenu } from '../sonic.js';
 import { downloadAlbum, stateOf, supported as offlineOk } from '../offline.js';
+import { bindVideoCards, videosShelf } from '../player/musicvideo.js';
 import { KIND_LABEL, albumGroups, artistArt, artistCard, bindBio, bioHtml, facts, heroBg, isAdmin, linksHtml, matchArtist, relatedHtml } from '../musicinfo.js';
 
 export const cover = (albumId, has, cls = '') => {
@@ -129,8 +130,10 @@ views.album = async (id) => {
     <div class="myrating"><span class="muted small">${t('Mitt betyg')}</span>${starsHtml(a.userRating, { id: 'albrate', label: t('Mitt betyg för albumet') })}</div></div></div>
     ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
+    ${videosShelf(a.videos, 'almv')}
     ${released || a.info?.mbid ? `<p class="muted small" style="margin-top:14px">${released ? t('Utgivet {released}', { released: esc(released) }) : ''}${a.info?.mbid ? `${released ? ' · ' : ''}<a href="https://musicbrainz.org/release-group/${esc(a.info.mbid)}" target="_blank" rel="noopener noreferrer">MusicBrainz ↗</a>` : ''}</p>` : ''}`;
   bindTracks(a.trackList);
+  bindVideoCards(main, a.videos);
   bindBio('albio');
   $('#pa').onclick = () => playQueue(a.trackList, 0);
   $('#sa').onclick = () => playQueue(shuffle(a.trackList), 0);
@@ -152,8 +155,10 @@ views.artist = async (id) => {
     ${i?.bio ? bioHtml(i.bio, i.bioLang, i.bioUrl) : ''}
     ${a.popular.length ? `<section class="section"><h2>${t('Populärt')}</h2><div id="poprows">${trackRows(a.popular.slice(0, POP), { showCover: true })}</div>${a.popular.length > POP ? t('<button class="ghost small" id="popmore" aria-expanded="false">Visa fler</button>') : ''}</section>` : ''}
     ${albumGroups(a.albums, albumCard)}
+    ${videosShelf(a.videos, 'armv')}
     <div id="simart"></div>${relatedHtml(a.related)}${linksHtml(i?.links)}`;
   bindTracks(a.popular.slice(0, POP), $('#poprows') || main);
+  bindVideoCards(main, a.videos);
   bindBio();
   if ($('#popmore')) $('#popmore').onclick = (e) => {
     const open = e.currentTarget.getAttribute('aria-expanded') !== 'true';
