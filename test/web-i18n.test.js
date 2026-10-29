@@ -134,6 +134,7 @@ before(async () => {
   const alb = path.join(MEDIA, 'Music', 'The Artist', 'The Album'); fs.mkdirSync(alb, { recursive: true });
   for (const n of [1, 2]) ff('-f', 'lavfi', '-i', `sine=frequency=${300 * n}:duration=8`, '-metadata', `title=Song ${n}`, '-metadata', 'artist=The Artist', '-metadata', 'album=The Album',
     '-metadata', `track=${n}`, path.join(alb, `0${n} Song ${n}.mp3`));
+  clip(path.join(alb, '01 Song 1.webm'), 3, 520); // musikvideo till låten
   const bok = path.join(MEDIA, 'Audiobooks', 'The Writer', 'The Book'); fs.mkdirSync(bok, { recursive: true });
   ff('-f', 'lavfi', '-i', 'sine=frequency=250:duration=10', '-metadata', 'title=Part 1', '-metadata', 'album=The Book', '-metadata', 'artist=The Writer', path.join(bok, '01.mp3'));
   const pics = path.join(MEDIA, 'Photos', '2024', 'Summer'); fs.mkdirSync(pics, { recursive: true });
@@ -192,6 +193,7 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   S.show = (await srv.req(`/api/libraries/${S.show}/items`)).data.items[0].id;
   const albums = (await srv.req(`/api/music/${S.music}/albums`)).data;
   S.album = (albums.albums || albums.items || albums)[0]?.id;
+  S.artist = (albums.albums || albums.items || albums)[0]?.artistId;
   const books = (await srv.req(`/api/audiobooks/${S.audiobook}`)).data;
   S.book = (books.books || books.items || books)[0]?.id;
   const ebs = (await srv.req(`/api/ebooks/lib/${S.ebook}`)).data.books;
@@ -204,7 +206,7 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
 
 const VIEWS = () => [
   ['', 'Hem'], [`lib/${S.movie}`, 'Filmer'], [`lib/${S.show}`, 'Serier'], [`item/${S.alfa}`, 'Film'], [`item/${S.show}`, 'Serie'],
-  [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
+  [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), ...(S.artist ? [[`artist/${S.artist}`, 'Artist']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
   ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search?q=alpha', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],

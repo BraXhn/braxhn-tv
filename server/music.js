@@ -12,6 +12,7 @@ import { parseReplayGain, scheduleLoudness, refreshAlbumGains } from './listenin
 import * as gapless from './gapless.js';
 import * as sonic from './sonic.js';
 import { libOk, libFilter } from './perms.js';
+import * as mvideo from './musicvideos.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -87,8 +88,10 @@ const scanWarn = (status, msg) => { console.warn('[music]', msg); if (Array.isAr
 export async function scanMusic(lib, status) {
   status.phase = 'Söker musikfiler'; status.done = 0;
   const roots = lib.roots = rootsOf(lib);
-  const list = await listRoots(roots, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
-  const { files, failed } = list;
+  // Ljudfiler och musikvideor (musicvideos.js) i samma genomgång
+  const list = await listRoots(roots, (n) => { const e = path.extname(n).toLowerCase(); return AUDIO.has(e) || mvideo.VIDEO.has(e); }, (n) => n === '@eaDir');
+  const { failed } = list, allFiles = list.files;
+  const files = allFiles.filter(f => AUDIO.has(path.extname(f).toLowerCase())), videoFiles = allFiles.filter(f => !AUDIO.has(path.extname(f).toLowerCase()));
   // Ingen mapp går att läsa (t.ex. omonterad NAS): rör ingenting
   if (!list.rootOk) return scanWarn(status, deletionBlocked({ name: lib.name, rootOk: false }));
   for (const d of failed) if (!roots.includes(d)) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
@@ -151,6 +154,8 @@ export async function scanMusic(lib, status) {
       AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id=artists.id)`, lib.id);
   });
   for (const id of gone) fs.rmSync(coverFile(id), { force: true });
+  status.phase = 'Musikvideor';
+  try { await mvideo.syncVideos(lib, videoFiles, { list, allFiles, status }); } catch (e) { scanWarn(status, `${lib.name}: musikvideorna kunde inte läsas (${e.message})`); }
 }
 
 // ---------------- API-hjälpare ----------------
@@ -160,7 +165,8 @@ const ALBUM_FROM = 'FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id';
 const ALBUM_SQL = `SELECT ${ALBUM_COLS} ${ALBUM_FROM}`;
 const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
 const TRACK_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
-  t.rg_track, t.rg_album, t.rg_peak, t.rg_album_peak, al.rg_gain AS al_gain, al.rg_peak AS al_peak, t.gl`;
+  t.rg_track, t.rg_album, t.rg_peak, t.rg_album_peak, al.rg_gain AS al_gain, al.rg_peak AS al_peak, t.gl,
+  (SELECT v.id FROM music_videos v WHERE v.track_id=t.id ORDER BY v.kind != 'video', v.id LIMIT 1) AS mv`;
 const TRACK_FROM = 'FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id';
 export const TRACK_SQL = `SELECT ${TRACK_COLS} ${TRACK_FROM}`;
 export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
@@ -168,7 +174,9 @@ export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.tra
   // Jämn ljudnivå: dB mot -18 LUFS (spårets värde, annars albumets) och toppvärde (linjärt) – null om okänt
   gain: t.rg_track ?? t.rg_album ?? null, albumGain: t.rg_album ?? t.al_gain ?? null, peak: t.rg_peak ?? null,
   // Albumläge: albumets toppvärde (tagg, annars högsta spårets). Glapplöst: trim och tystnad i kanterna (gapless.js), null = okänt
-  albumPeak: t.rg_album_peak ?? t.al_peak ?? null, gapless: gapless.shapeGapless(t.gl) });
+  albumPeak: t.rg_album_peak ?? t.al_peak ?? null, gapless: gapless.shapeGapless(t.gl),
+  // Tillägg: musikvideons id när låten har en (musicvideos.js) – fältet saknas annars
+  video: t.mv ?? undefined });
 
 export function albums(libId, sort = 'title', limit = 5000) {
   const order = { title: 'al.sort_title', added: 'al.added DESC', year: 'al.year DESC, al.sort_title', artist: 'ar.sort_name, al.year' }[sort] || 'al.sort_title';

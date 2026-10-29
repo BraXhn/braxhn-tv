@@ -277,6 +277,23 @@ Bara tillägg – apparna kan läsa dem när de vill (alla kan saknas eller vara
 - `GET /api/music/:lib/artists`: `image` (Bool) per artist.
 - `GET /api/music/tracks/:tid/lyrics`: `source` kan nu vara `lrclib` (hämtad från nätet), och `instrumental: true` när låten saknar text.
 
+## Musikvideor och låttexter
+
+Bara tillägg (server/musicvideos.js, server/lyricstags.js, server/listening.js):
+
+- `GET /api/music/albums/:aid` och `GET /api/music/artists/:arid`: `videos: [{ id, title, kind, duration, width, height, thumb, artistId,
+  trackId, artist }]` (tom lista om inga). `kind` = `video`, `live`, `lyrics`, `concert`, `interview`, `behindthescenes` eller `other`;
+  `trackId` är `null` för videor som bara hör till artisten.
+- Spåren i musiklistorna har `video` (videons id) när låten har en musikvideo – fältet saknas annars.
+- `GET /api/music/videos/:vid`: videon som ovan plus `track: { id, title, albumId } | null` och `more` (artistens övriga videor, högst 30).
+- `GET|HEAD /api/music/videos/:vid/stream`: filen med Range; `?mp4=1` = fragmenterad MP4 (H.264/AAC) för klienter som inte klarar
+  formatet. Mediatoken med scope `6e9 + id`. Skärmtid gäller (403 `screen_time`).
+- `GET /api/music/videos/:vid/play`: `{ url, mp4, mime }` – färdiga adresser med kortlivad token för appar och Chromecast (webben använder kakan).
+- `GET /api/music/videos/:vid/thumb?w=`: stillbild (JPEG), bildtoken som för omslag.
+- `GET /api/music/tracks/:tid/lyrics`: `source` kan även vara `sylt` (synkad text ur ID3). Rader kan ha `words: [{ t, text }]` (ordtider från
+  utökad LRC eller SYLT per ord – orden sätts ihop utan extra mellanrum). Synkad text går före osynkad; har filen bara osynkad text
+  och LRCLIB har synkad används LRCLIB:s.
+
 ## Glapplöst, övertoning och jämn ljudnivå
 
 Bara tillägg (server/gapless.js, server/listening.js) – apparna kan använda dem när de vill:

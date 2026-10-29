@@ -354,6 +354,16 @@ CREATE TABLE IF NOT EXISTS album_meta(album_id INTEGER PRIMARY KEY REFERENCES al
 CREATE TABLE IF NOT EXISTS track_lyrics(track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
   state INTEGER NOT NULL, fetched INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0, instrumental INTEGER NOT NULL DEFAULT 0,
   lyrics TEXT, source TEXT, ext_id TEXT);`);
+// Musikvideor i musikbiblioteket (server/musicvideos.js): kopplade till artist och (om titeln matchar) låt.
+// kind = video/live/lyrics/concert/interview/behindthescenes/other (Plex-suffixen); tag_artist/tag_title = filens taggar
+// (matchningen görs om vid varje skanning utan ny ffprobe); thumb = 1 när stillbilden finns (/config/images/mv<id>.jpg).
+db.exec(`CREATE TABLE IF NOT EXISTS music_videos(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  artist_id INTEGER REFERENCES artists(id) ON DELETE SET NULL, track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+  title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'video', path TEXT NOT NULL UNIQUE, size INTEGER, mtime INTEGER, duration REAL,
+  width INTEGER, height INTEGER, vcodec TEXT, tag_artist TEXT, tag_title TEXT, thumb INTEGER NOT NULL DEFAULT 0, added INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS music_videos_artist ON music_videos(artist_id);
+CREATE INDEX IF NOT EXISTS music_videos_track ON music_videos(track_id);
+CREATE INDEX IF NOT EXISTS music_videos_lib ON music_videos(library_id);`);
 // Index för vanliga uppslag (kaskadborttagning, "Fortsätt titta", rensning av sessioner m.m.)
 db.exec(`CREATE INDEX IF NOT EXISTS items_lib_added ON items(library_id, kind, added);
 CREATE INDEX IF NOT EXISTS items_lib_sort ON items(library_id, kind, sort_title);
