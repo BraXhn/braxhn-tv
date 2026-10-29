@@ -154,6 +154,10 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
   // Kvällsvalet: en lobby där administratören är värd (filterformuläret, koden och QR-koden)
   S.tonight = (await srv.req('/api/tonight', { method: 'POST', body: {} })).data.id;
   assert.ok(S.tonight);
+  // Ögonblick: ett klipp ur filmen (flödet och ögonblickets sida med kort, reaktioner och kommentarer)
+  S.moment = (await srv.req(`/api/items/${S.alfa}/moments`, { method: 'POST', body: { start: 0, end: 2, title: 'Clip one' } })).data.id;
+  for (let i = 0; i < 240 && (await srv.req('/api/moments/' + S.moment)).data.state === 'pending'; i++) await new Promise(r => setTimeout(r, 250));
+  assert.equal((await srv.req('/api/moments/' + S.moment)).data.state, 'ready');
 });
 
 // Vyerna som granskas (hash → namn)
@@ -164,7 +168,7 @@ const VIEWS = () => [
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'], ['shrink', 'Diskrådgivaren'],
-  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista']
+  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet']
 ];
 
 /** Tab genom sidan: varje stopp ska synas på skärmen, ha synlig fokus och inte ligga i något dolt */

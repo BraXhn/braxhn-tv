@@ -40,7 +40,7 @@ const CRUMB = { '': t('Hem'), home: t('Hem'), watchlist: t('Min lista'), search:
   account: t('Mitt konto'), admin: t('Administration'), setup: t('Installation'), stats: t('Statistik'), requests: t('Önskningar'), calendar: t('Kommande'), wrapped: t('Årssammanfattning'), collection: t('Samling'), collections: t('Samlingar'), ucollection: t('Samling'), person: 'Person',
   history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'), sso: t('Enkel inloggning'),
   quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker'),
-  ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren'), vocab: t('Ordlista') };
+  ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren'), vocab: t('Ordlista'), moments: t('Ögonblick') };
 // Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
 const PAGE = { login: t('Logga in'), profiles: t('Välj profil'), invite: t('Skapa konto'), timeup: t('Skärmtiden är slut') };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
@@ -113,7 +113,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
   history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight', sso: 'views/sso',
-  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader', vocab: 'views/vocab' }));
+  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader', vocab: 'views/vocab', moments: 'views/moments' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för
@@ -296,6 +296,7 @@ $('#railmore').onclick = (e) => {
     { icon: '🎁', label: t('Årssammanfattning'), href: '#/wrapped' },
     { icon: '🕘', label: t('Min historik'), href: '#/history' },
     { icon: '📒', label: t('Ordlista'), href: '#/vocab' },
+    { icon: '✂', label: t('Ögonblick'), href: '#/moments' },
     { icon: '⤓', label: t('Nedladdat'), href: '#/downloads', hidden: me?.canDownload === false && !store.get('dl.' + me?.id, []).length },
     { icon: '👤', label: t('Mitt konto'), href: '#/account' },
     'separator',

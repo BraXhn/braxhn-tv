@@ -83,6 +83,7 @@ export async function play(id, start = 0, opts = {}) {
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="${t('Casta till Chromecast')}">${t('📺 Casta')}</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
       ${remoteButton('pdevs', 'ghost small')}
+      <button class="ghost small" id="pmoment" title="${t('Spara ett ögonblick (klipp) att dela med hushållet')}" aria-haspopup="dialog">✂ <span class="pmlabel">${t('Ögonblick')}</span></button>
       <button class="ghost small" id="pparty" title="${t('Titta tillsammans med någon annanstans')}">👥 ${partyId ? t('Rummet') : t('Titta tillsammans')}</button></div>
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>${t('Titta tillsammans')}</b><button class="ghost small" id="pbclose" aria-label="${t('Stäng Titta tillsammans')}" title="${t('Stäng')}">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">${t('Kopiera')}</button></div>
@@ -183,6 +184,8 @@ export async function play(id, start = 0, opts = {}) {
   // Skicka till en annan inloggad webbläsare (samma position och spår); den egna spelaren stängs
   q('#pdevs').onclick = (e) => { e.stopPropagation(); openRemotePicker(e.currentTarget, { item: it.id, position: v.currentTime, audio: cur.audio, sub: cur.sub, fromPlayer: true }); };
   if (q('#pnext')) q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
+  // Ögonblick: klipp att spara och dela (player/moments.js laddas först när knappen används)
+  q('#pmoment').onclick = () => need('player/moments.js').then(m => { if (P === cur) m.openMoment(cur, v); }).catch(toastErr);
   q('#pparty').onclick = async () => {
     if (!cur.party) {
       try { const r = await api('/party', { method: 'POST', body: { itemId: it.id }, bg: true }); if (P !== cur) return; cur.party = r.id; pushState(); joinParty(); toast(t('Rum skapat – dela länken')); }
