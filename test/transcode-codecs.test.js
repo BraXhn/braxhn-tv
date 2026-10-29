@@ -29,6 +29,8 @@ test('ffmpeg-sondering: version, kodar-/filterlistor och Vulkan-enhet tolkas', a
   assert.deepEqual([...enc], ['libx265', 'av1_nvenc', 'aac']);
   const flt = fc.parseList('Filters:\n  T.. = Timeline support\n ..C libplacebo        N->V       Apply various GPU filters\n TSC zscale            V->V       Apply resizing');
   assert.deepEqual([...flt], ['libplacebo', 'zscale']);
+  // ffmpeg 8 skriver bara två flaggtecken (" TS scale  V->V …")
+  assert.deepEqual([...fc.parseList('Filters:\n  T. = Timeline support\n  A = Audio input/output\n TS scale             V->V       Scale the input video\n .. anull             A->A       Pass the source')], ['scale', 'anull']);
   assert.deepEqual(fc.parseVulkanDevice('[AVHWDeviceContext @ 0x1] Device 0 selected: llvmpipe (LLVM 19.1.7, 256 bits) (software) (0x0)'), { name: 'llvmpipe (LLVM 19.1.7, 256 bits)', type: 'software' });
   assert.deepEqual(fc.parseVulkanDevice('Device 1 selected: NVIDIA GeForce RTX 4060 (discrete) (0x2882)'), { name: 'NVIDIA GeForce RTX 4060', type: 'discrete' });
   assert.equal(fc.parseVulkanDevice('Failed to create Vulkan device'), null);

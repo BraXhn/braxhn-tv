@@ -98,6 +98,8 @@ test('webben: katalogen är inget startberoende – bara ett vanligt skript i de
   assert.ok(src && /\?h=[0-9a-f]+$/.test(src), 'katalogen med innehållshash');
   assert.ok(en.indexOf(src) < en.indexOf('type="module"'), 'katalogen före modulerna');
   assert.match(fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8'), /'\/i18n\/en\.js'/);
+  // router.js laddar databasen – utan egen mapp skulle den skapa /config (nekas i CI)
+  process.env.CONFIG_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-i18n-cfg-'));
   const { acceptLang } = await import('../server/http/router.js');
   assert.equal(acceptLang('en-US,en;q=0.9'), 'en');
   assert.equal(acceptLang('sv-SE,sv;q=0.9,en;q=0.8'), 'sv');

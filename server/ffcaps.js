@@ -16,11 +16,11 @@ export function parseVersion(text) {
   return dev ? { text: dev[1], major: 99, minor: 0 } : { text: '', major: 0, minor: 0 };
 }
 
-/** Namnen i en lista från -encoders eller -filters (" V....D libx265  …" / " ..C libplacebo  N->V …") */
+/** Namnen i en lista från -encoders eller -filters (" V....D libx265  …" / " ..C libplacebo  N->V …"; ffmpeg 8 har två flaggtecken: " TS scale …") */
 export function parseList(text) {
   const out = new Set();
   for (const line of String(text || '').split('\n')) {
-    const m = /^\s*([A-Z.|]{3,8})\s+(\w+)\s/.exec(line);
+    const m = /^\s*([A-Z.|]{2,8})\s+(\w+)\s/.exec(line);
     if (m && m[2] !== '=') out.add(m[2]);
   }
   return out;
