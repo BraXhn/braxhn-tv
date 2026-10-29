@@ -440,6 +440,26 @@ Regler: varje förslag är tillåtet för **varje** deltagare (`allowedFor` – 
 under röstningen tar bort det som inte är tillåtet för den (eller som den sett, med `unseen`) ur listan för alla.
 Ingen ser vem som sett eller röstat vad – bara hur många förslag var och en svept och, när ingen match blev av, antalet
 gillningar per titel. Match när antalet gillningar når `need` (alla, eller hälften + 1).
+## Språkinlärningens ordlista: `/api/vocab*`
+
+Ord som profilen sparat i webbspelarens språkinlärningsläge (`server/vocab.js`, `server/routes/vocab.js`; webben
+`web/js/player/learn.js` och `#/vocab`). Vanlig inloggning (kaka eller apptoken). Orden är profilens egna – andra
+profiler får 404. Används inte av apparna än.
+
+- `GET /api/vocab[?item=<id>&q=<text>]` → `{ words: [{ id, word, sentence, translation, lang, source, itemId, start, end,
+  position, created, clip }], max }` – nyast först. Ord ur titlar som profilen inte längre får se (åldersgräns,
+  bibliotek) döljs; en borttagen titel ger `itemId: null` (källan finns kvar). `clip` = ljudklipp går att ta fram.
+- `POST /api/vocab` `{ itemId, word, sentence, translation, start, end, position, lang, audio }` → `{ id, dup }` –
+  `itemId` måste vara en film eller ett avsnitt som profilen får se (annars 404). `start`/`end` = replikens tider i
+  sekunder (filens tidslinje), `audio` = ljudspårets strömindex för ljudklippet. Samma ord ur samma replik i samma titel
+  sparas inte igen (`dup: true`). Högst 5000 ord per profil (409).
+- `PUT /api/vocab/:id` `{ word?, translation? }`, `DELETE /api/vocab/:id`.
+- `GET /api/vocab/:id/clip` → `audio/mpeg`: repliken med 0,25 s marginal (högst 15 s), mono. Kräver nedladdningsrätt
+  (403), inte för barnprofiler med påtvingat familjefilter när titeln har svordomar (403), högst två samtidigt (429).
+- `GET /api/vocab/export?format=tsv|csv|zip[&q=]` → nedladdning för Anki. TSV/CSV har Ankis filhuvud (`#separator`,
+  `#html:false`, `#columns:Ord…`) och fälten Ord, Mening, Översättning, Källa. `zip` (kräver nedladdningsrätt) innehåller
+  `ordlista.txt` (TSV med fältet Ljud: `[sound:braxhn-<id>.mp3]`) och ljudklippen (högst 100).
+
 ## E-böcker och serietidningar: `/api/ebooks/*` och OPDS `/api/opds/*`
 
 Bara webben (apparna får inte bibliotekstypen `ebook` i `/api/libraries`, och `reading` i `/api/home` samt `ebooks` i `/api/search/all` är tomma för apptoken). Allt kontrolleras mot profilens behörighet: biblioteket, barnprofiler bara när `libraries.kids` = 1 och då bara böcker utan högre `age` – annars 404.

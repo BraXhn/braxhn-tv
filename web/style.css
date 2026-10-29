@@ -1559,3 +1559,28 @@ body.rd-open{overflow:hidden}
 .cx-s{display:block;width:min(100%,900px);height:auto;min-height:60vh;background:#1a1a1a}
 .cx-s.ok{min-height:0;background:none}
 @media (forced-colors:active){.rd .rdb[aria-pressed=true]{outline:2px solid Highlight}}
+/* Språkinlärning (player/learn.js): verktygsraden över kontrollerna, klickbara ord och översättningen under repliken */
+#player .learnbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px;padding:8px 12px 0}
+#player .learnbar[hidden]{display:none}
+#player .ctl .learnbar button{min-width:var(--touch,44px);min-height:var(--touch,44px);border-radius:var(--r-sm,6px);line-height:1;font-size:1rem}
+#player .ctl .learnbar button[aria-pressed=true]{background:rgba(255,255,255,.18);color:#fff;box-shadow:inset 0 -2px 0 var(--accent,#e5a00d)}
+#player .ctl .learnbar #lvocab{font-size:.8125rem;padding:6px 10px}
+#player .learnbar .lhint{color:#ccd;flex-basis:100%;text-align:center}
+#player .learnbar .lhint:empty{display:none}
+#player.learn .sub2,#player.mini .learnbar,#player.cinema .learnbar{display:none!important}
+#player.learn .subtxt .lw{pointer-events:auto;font:inherit;color:inherit;background:none;border:0;padding:0 .02em;margin:0;cursor:pointer;border-radius:.12em;text-shadow:inherit}
+#player.learn .subtxt .lw:hover,#player.learn .subtxt .lw:focus-visible{background:rgba(255,200,87,.35);outline:2px solid var(--accent,#ffc857);outline-offset:1px}
+#player.learn .subtxt .lw.saved{text-decoration:underline dotted var(--accent,#ffc857);text-underline-offset:.18em}
+#player.learn .subtxt .ltr span{display:inline-block;margin-top:.2em;font-size:.72em;color:#ffe9a8;background:rgba(0,0,0,.6);padding:.04em .4em;border-radius:.15em;white-space:pre-line}
+@media (max-width:600px){#player .learnbar{gap:2px;padding:6px 6px 0}#player .ctl .learnbar button{min-width:40px}}
+@media (forced-colors:active){#player .ctl .learnbar button[aria-pressed=true]{outline:2px solid Highlight}#player.learn .subtxt .lw:focus-visible{outline:2px solid Highlight}}
+/* Ordlistan (#/vocab) */
+.vocab .vrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.vocab .vword{font-size:1.125rem;font-weight:600}
+.vocab .vsent,.vocab .vtr{margin:2px 0}
+.vocab .vtr{color:var(--dim)}
+.vocab .vacts{display:flex;gap:4px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.vocab .vtools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.vocab .vtools input{flex:1 1 200px;min-width:0}
+@media (max-width:600px){.vocab .vrow{grid-template-columns:1fr}.vocab .vacts{justify-content:flex-start}}
+.vocab .vhelp{margin-top:16px}.vocab .vhelp summary{padding:12px 0;cursor:pointer}

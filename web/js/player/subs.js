@@ -13,16 +13,21 @@ export function setSubs() {
   const s2 = P.sub2 && P.sub2 !== P.sub ? P.pb?.subtitles.find(s => s.id === P.sub2) : null;
   const box2 = $('#sub2', el);
   box2.innerHTML = '';
+  P.sub2track = null;
   if (s2) {
     const t2 = document.createElement('track');
     Object.assign(t2, { kind: 'metadata', src: s2.url, label: 'sub2', srclang: s2.lang || 'und' });
     v.append(t2);
-    const on = () => { t2.track.mode = 'hidden'; t2.track.oncuechange = () => {
+    const cur = P;
+    // Språkinlärningen visar översättningen under repliken – rita om när den andra undertexten laddats
+    const on = () => { t2.track.mode = 'hidden'; cur.sub2track = t2.track; if (cur.learn) cur.txt?.render?.(); t2.track.oncuechange = () => {
       const txt = [...(t2.track.activeCues || [])].map(c => c.text.replace(/<[^>]+>/g, '')).join('\n');
       box2.innerHTML = txt ? `<span>${esc(txt)}</span>` : '';
+      if (cur.learn) cur.txt?.render?.();
     }; };
     t2.addEventListener('load', on); setTimeout(on, 50);
   }
+  P.learn?.update(); // språkinlärningen (learn.js) visar vad som saknas
   const img = P.pb?.imageSubs?.find(s => s.id === P.sub);
   pgsShow(img);
   const sub = P.pb?.subtitles.find(s => s.id === P.sub) || img;
@@ -67,11 +72,15 @@ function textShow(sub) {
     box.classList.toggle('top', cues.length > 0 && cues.every(c => typeof c.line === 'number' && (c.snapToLines ? c.line >= 0 : c.line < 40)));
     for (const c of cues) {
       const line = document.createElement('div'), span = document.createElement('span');
-      // getCueAsHTML ger bara textnoder och kursiv/fet/understruken – ingen HTML från filen tolkas
-      try { span.append(c.getCueAsHTML()); } catch { span.textContent = String(c.text || '').replace(/<[^>]+>/g, ''); }
+      // Språkinlärningen (learn.js): orden som knappar. getCueAsHTML ger bara textnoder och kursiv/fet/understruken
+      // – ingen HTML från filen tolkas
+      if (cur.learn) cur.learn.fill(span, c);
+      else try { span.append(c.getCueAsHTML()); } catch { span.textContent = String(c.text || '').replace(/<[^>]+>/g, ''); }
       line.append(span); box.append(line);
     }
+    cur.learn?.after(box, cues); // översättningen (den andra undertextens replik) under repliken
   };
+  g.render = render;
   g.fs = () => { if (g.track) g.track.mode = native() ? 'showing' : 'hidden'; render(); };
   v.addEventListener('webkitbeginfullscreen', g.fs); v.addEventListener('webkitendfullscreen', g.fs);
   // sv = ny synk sparad (servern lägger på den) – en annan adress än den webbläsaren cachat

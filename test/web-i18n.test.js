@@ -212,7 +212,7 @@ const VIEWS = () => [
   ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['setup/libraries', 'Installation: bibliotek'],
   ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier'],
   ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar'],
-  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'],
+  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'],
   ['sso', 'Enkel inloggning'], ['sso/new-oidc', 'Enkel inloggning: OIDC'], ['sso/new-ldap', 'Enkel inloggning: LDAP']
 ];
 const MODES = {
@@ -316,6 +316,12 @@ bt('engelska: dialoger, kortmenyn, spelaren och datum/tal med engelsk locale', a
   await page.waitForFunction(() => document.querySelector('#vid').currentTime > 0.3, null, { timeout: 20000 });
   assert.deepEqual(swedish(await page.evaluate(visibleText, '#player')), []);
   assert.deepEqual(await page.evaluate(auditPage, { scope: '#player', contrast: false, target: false }), []);
+  // Språkinlärningen (⚙): verktygsraden och tipset på engelska
+  await page.evaluate(() => { const c = document.querySelector('#plearn'); c.checked = true; c.dispatchEvent(new Event('change')); });
+  await page.waitForSelector('#plearnbar:not([hidden]) #lrep');
+  assert.deepEqual(swedish(await page.evaluate(visibleText, '#player')), []);
+  assert.deepEqual(await page.evaluate(auditPage, { scope: '#player', contrast: false, target: false }), []);
+  await page.evaluate(() => { const c = document.querySelector('#plearn'); c.checked = false; c.dispatchEvent(new Event('change')); });
   await page.keyboard.press('k');
   await page.waitForFunction(() => document.querySelector('#pstate').textContent === 'Paused');
   await page.keyboard.press('Escape');

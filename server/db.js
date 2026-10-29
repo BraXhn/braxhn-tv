@@ -623,6 +623,16 @@ CREATE TABLE IF NOT EXISTS ebook_fail(path TEXT PRIMARY KEY, size INTEGER, mtime
 CREATE TABLE IF NOT EXISTS opds_passwords(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   key_hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, created_ip TEXT, trusted INTEGER NOT NULL DEFAULT 0,
   last_used INTEGER, last_ip TEXT, client TEXT);`);
+// Språkinlärningens ordlista (server/vocab.js) per profil: ordet, meningen (repliken), översättningen (den andra
+// undertextens replik vid samma tid), undertextens språk, källan (titelns namn när ordet sparades), s/e = replikens
+// tider i sekunder, position = var i filmen ordet klickades, audio = ljudspåret (strömindex) för ljudklippet.
+// Titeln kan tas bort utan att orden försvinner (item_id blir NULL).
+db.exec(`CREATE TABLE IF NOT EXISTS vocab(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL, word TEXT NOT NULL, sentence TEXT NOT NULL DEFAULT '',
+  translation TEXT NOT NULL DEFAULT '', lang TEXT, source TEXT NOT NULL DEFAULT '', s REAL, e REAL, position REAL, audio INTEGER,
+  created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS vocab_user ON vocab(user_id, created);
+CREATE INDEX IF NOT EXISTS vocab_item ON vocab(item_id);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 7;

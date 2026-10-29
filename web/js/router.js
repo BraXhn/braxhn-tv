@@ -40,7 +40,7 @@ const CRUMB = { '': t('Hem'), home: t('Hem'), watchlist: t('Min lista'), search:
   account: t('Mitt konto'), admin: t('Administration'), setup: t('Installation'), stats: t('Statistik'), requests: t('Önskningar'), calendar: t('Kommande'), wrapped: t('Årssammanfattning'), collection: t('Samling'), collections: t('Samlingar'), ucollection: t('Samling'), person: 'Person',
   history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'), sso: t('Enkel inloggning'),
   quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker'),
-  ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren') };
+  ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren'), vocab: t('Ordlista') };
 // Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
 const PAGE = { login: t('Logga in'), profiles: t('Välj profil'), invite: t('Skapa konto'), timeup: t('Skärmtiden är slut') };
 /** Markerar aktivt val i sidomenyn och flikarna i menyraden och sätter rubriken */
@@ -113,7 +113,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
   history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight', sso: 'views/sso',
-  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader' }));
+  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader', vocab: 'views/vocab' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för
@@ -238,6 +238,8 @@ const SHORTCUTS = [[t('Överallt'), [['?', t('Visa den här listan')], ['/', t('
     ['m', t('Ljud av/på')], ['c', t('Undertexter av/på')], ['< >', t('Långsammare/snabbare')], ['f', t('Helskärm')], ['0–9', t('Hoppa till 0 %, 10 % … 90 %')],
     ['Home End', t('Början/slutet (på tidslinjen)')], ['PageUp PageDown', t('En minut framåt/bakåt (på tidslinjen)')],
     ['s', t('Hoppa över intro/eftertexter (när knappen visas)')], ['Esc', t('Litet fönster')]]],
+  [t('Språkinlärning (⚙ i spelaren)'), [['a d', t('Föregående/nästa replik')], ['r', t('Upprepa repliken')], ['x', t('Upprepa repliken långsamt')],
+    ['p', t('Pausa efter varje replik av/på')], ['w', t('Välj ord i repliken (← → mellan orden, Enter sparar)')]]],
   [t('TV-guiden och foton'), [['← → ↑ ↓', t('Flytta mellan program/kanaler och foton')], ['PageUp PageDown', t('En skärm i taget')], ['Enter', t('Öppna programmet eller fotot')], ['Esc', t('Stäng fotovisaren')]]],
   [t('Läsaren'), [[t('→ eller Mellanslag'), t('Nästa sida (manga: ←)')], ['← PageUp', t('Föregående sida')], ['Home End', t('Första/sista sidan')], ['t', t('Innehåll')],
     ['b', t('Bokmärk sidan')], ['+ −', t('Zooma serietidningen')], ['f', t('Helskärm')], ['Esc', t('Tillbaka till boken')]]]];
@@ -293,6 +295,7 @@ $('#railmore').onclick = (e) => {
     { icon: '✋', label: t('Önskningar'), href: '#/requests', hidden: !!me?.kid },
     { icon: '🎁', label: t('Årssammanfattning'), href: '#/wrapped' },
     { icon: '🕘', label: t('Min historik'), href: '#/history' },
+    { icon: '📒', label: t('Ordlista'), href: '#/vocab' },
     { icon: '⤓', label: t('Nedladdat'), href: '#/downloads', hidden: me?.canDownload === false && !store.get('dl.' + me?.id, []).length },
     { icon: '👤', label: t('Mitt konto'), href: '#/account' },
     'separator',
