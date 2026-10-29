@@ -397,6 +397,36 @@ t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
   }
 });
 
+t('spelaren: kontrollerna döljs även när det inte gick vid första försöket (panel öppen, pekaren över knapparna)', async () => {
+  const before = (await req('/api/me/cinema')).data;
+  await req('/api/me/cinema', { method: 'PUT', body: { trailers: 0, preroll: false } });
+  try {
+    const { page, errors, close } = await newPage();
+    await page.goto(B + '/#/item/' + S.main);
+    await page.click('[data-play="0"]');
+    await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 0.5, null, { timeout: 60000, polling: 50 });
+    const idle = () => page.evaluate(() => document.querySelector('#player').classList.contains('idle'));
+    // Inställningspanelen öppen när 3 s har gått: kontrollerna ligger kvar
+    await page.mouse.move(640, 300);
+    await page.evaluate(() => { document.querySelector('#setp').hidden = false; });
+    await sleep(3600);
+    assert.equal(await idle(), false, 'kontrollerna döljs inte medan panelen är öppen');
+    // Panelen stängs utan att musen rör sig – förut låg kontrollerna kvar tills man pausade och startade igen
+    await page.evaluate(() => { document.querySelector('#setp').hidden = true; });
+    await page.waitForFunction(() => document.querySelector('#player').classList.contains('idle'), null, { timeout: 4000, polling: 100 });
+    // Pekaren över en knapp när tiden gått ut, sedan bort från knapparna: döljs igen
+    await page.mouse.move(640, 300);
+    const b = await page.$eval('#ctl button', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await page.mouse.move(b.x, b.y);
+    await sleep(3600);
+    assert.equal(await idle(), false, 'kontrollerna döljs inte medan pekaren är över knapparna');
+    await page.mouse.move(640, 200);
+    await page.waitForFunction(() => document.querySelector('#player').classList.contains('idle'), null, { timeout: 5000, polling: 100 });
+    assert.deepEqual(errors, []);
+    await close();
+  } finally { await req('/api/me/cinema', { method: 'PUT', body: before }); }
+});
+
 t('spelaren: byte av kvalitet fortsätter spela av sig själv, pausad film förblir pausad', async () => {
   const before = (await req('/api/me/cinema')).data;
   await req('/api/me/cinema', { method: 'PUT', body: { trailers: 0, preroll: false } });
