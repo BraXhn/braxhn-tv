@@ -11,11 +11,8 @@ import { rootsOf, listRoots, relOf, under } from './libpaths.js';
 import { libOk, libFilter } from './perms.js';
 
 const pexec = promisify(execFile);
-db.exec(`CREATE TABLE IF NOT EXISTS books(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
-  key TEXT NOT NULL, title TEXT NOT NULL, sort_title TEXT, author TEXT, narrator TEXT, series TEXT, year INTEGER, description TEXT,
-  cover INTEGER NOT NULL DEFAULT 0, duration REAL, chapters TEXT, added INTEGER NOT NULL);
-CREATE UNIQUE INDEX IF NOT EXISTS books_key ON books(library_id, key);
-CREATE TABLE IF NOT EXISTS book_files(id INTEGER PRIMARY KEY, book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+// Tabellen books skapas i db.js (andra tabeller där har främmande nycklar till den)
+db.exec(`CREATE TABLE IF NOT EXISTS book_files(id INTEGER PRIMARY KEY, book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
   path TEXT NOT NULL, idx INTEGER NOT NULL, title TEXT, duration REAL, offset REAL NOT NULL DEFAULT 0, size INTEGER, mtime INTEGER, codec TEXT, bitrate INTEGER);
 CREATE INDEX IF NOT EXISTS book_files_book ON book_files(book_id, idx);
 CREATE TABLE IF NOT EXISTS book_progress(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -158,7 +155,7 @@ export async function scanBooks(lib, status) {
 // (bookmeta.js). Titel och författare kommer alltid från filen om de inte ändrats för hand; beskrivningen från källan om
 // filens egen är kort (ofta "Ripped by …" eller en rad), utgivningsåret från källan före filens år (inspelningen).
 const E = (k) => `json_extract(m.edits,'$.${k}')`;
-const BOOK = `b.id, b.library_id, b.key, b.cover, b.duration, b.added, b.chapters AS file_chapters, m.chapters AS net_chapters,
+const BOOK = `b.id, b.library_id, b.key, b.cover, b.duration, b.added, b.chapters AS file_chapters, m.chapters AS net_chapters, m.chapters_edit AS edit_chapters,
   m.state AS meta_state, m.locked AS meta_locked, m.source AS meta_source, m.source_id AS meta_source_id, m.src_title AS meta_title, m.edits AS meta_edits,
   COALESCE(NULLIF(${E('title')}, ''), b.title) AS title, COALESCE(NULLIF(${E('sort')}, ''), b.sort_title) AS sort_title,
   COALESCE(NULLIF(${E('author')}, ''), b.author) AS author,
@@ -176,8 +173,11 @@ const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : nu
 const shape = (b) => ({ id: b.id, title: b.title, author: b.author, narrator: b.narrator, year: b.year == null ? null : parseInt(b.year) || null, duration: b.duration, cover: !!b.cover,
   position: b.position || 0, finished: !!b.finished, updated: b.updated || null, library: b.library_id,
   series: b.series || null, seriesNo: b.series_no == null ? null : String(b.series_no) });
-/** Kapitel: filens egna, men Audnexus kapitel om filen saknar kapitel och längden stämmer (±2 %) */
+/** Kapitel: administratörens redigerade (kapitelredigeraren) först, annars filens egna, men Audnexus kapitel om filen
+ *  saknar kapitel och längden stämmer (±2 %) */
 export function chaptersFor(b) {
+  const ed = json(b.edit_chapters, null);
+  if (Array.isArray(ed) && ed.length) return { chapters: ed, source: 'redigerad' };
   const own = json(b.file_chapters, []);
   const net = json(b.net_chapters, null);
   if (own.length <= 1 && Array.isArray(net) && net.length > 1 && lengthMatches(net[net.length - 1].end, b.duration)) return { chapters: net, source: 'audnexus' };
@@ -209,6 +209,7 @@ export function book(id, uid) {
   const card = (x) => ({ id: x.id, title: x.title, cover: !!x.cover, year: x.year == null ? null : parseInt(x.year) || null, seriesNo: x.series_no == null ? null : String(x.series_no) });
   const others = (where, ...p) => all(`SELECT * FROM (SELECT ${BOOK} FROM ${FROM} WHERE b.library_id=? AND b.id!=?) WHERE ${where}`, b.library_id, id, ...p);
   return { ...shape(b), description: b.description, speed: b.speed || 1,
+    listened: Math.round(get('SELECT SUM(seconds) AS s FROM book_listen WHERE user_id=? AND book_id=?', uid, id)?.s || 0),
     chapters: ch.chapters, chapterSource: ch.source,
     subtitle: b.subtitle || null, publisher: b.publisher || null, isbn: b.isbn || null, asin: b.asin || null, language: b.language || null,
     genres: json(b.genres, []).filter(x => typeof x === 'string').slice(0, 10),
@@ -226,9 +227,43 @@ export function saveProgress(uid, id, position, speed, at = null) {
   at = Number.isFinite(+at) && +at > 0 ? Math.min(Math.floor(+at), now()) : null;
   if (at) { const p = get('SELECT updated, finished FROM book_progress WHERE user_id=? AND book_id=?', uid, id); if (p && p.updated >= at) return { finished: !!p.finished, stale: true }; }
   const pos = Math.max(0, Math.min(+position || 0, b.duration || 1e9));
+  if (!at) countListening(uid, id, pos, speed);
   const finished = b.duration && b.duration - pos < Math.min(30, b.duration * 0.02) ? 1 : 0;
   run(`INSERT INTO book_progress(user_id,book_id,position,finished,speed,updated) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,book_id) DO UPDATE SET
     position=excluded.position, finished=excluded.finished, speed=COALESCE(excluded.speed, speed), updated=excluded.updated`, uid, id, finished ? 0 : pos, finished, speed ? Math.max(0.5, Math.min(3, +speed)) : null, at || now());
   return { finished: !!finished };
 }
 export const fileRow = (fid) => get('SELECT f.*, b.library_id FROM book_files f JOIN books b ON b.id=f.book_id WHERE f.id=?', fid);
+
+// ---------- lyssningsstatistik ----------
+// Lyssnad tid räknas ur framstegen (webben var 15:e s, apparna oftare): hur långt positionen gått sedan förra sparningen,
+// delat med hastigheten = väggklocka. Bara rimliga steg räknas (framåt, högst 3,2× den tid som gått + 1 s, senaste 15 min) –
+// ett hopp i boken eller en sparning efter en lång paus blir ingen lyssning. Offline-synk (at) räknas inte.
+export function countListening(uid, id, pos, speed) {
+  const p = get('SELECT position, finished, speed, updated FROM book_progress WHERE user_id=? AND book_id=?', uid, id);
+  if (!p || p.finished) return 0;
+  const elapsed = now() - p.updated, delta = pos - p.position;
+  const sp = Math.max(0.5, Math.min(3, +speed || p.speed || 1));
+  if (!(delta > 0) || elapsed <= 0 || elapsed > 900 || delta > elapsed * 3.2 + 1) return 0;
+  const sec = Math.min(delta / sp, elapsed + 1);
+  const d = new Date(), day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  run(`INSERT INTO book_listen(user_id,book_id,day,seconds) VALUES(?,?,?,?) ON CONFLICT(user_id,book_id,day) DO UPDATE SET seconds=seconds+excluded.seconds`, uid, id, day, sec);
+  return sec;
+}
+/** Statistik för en profil: totalt, per dag (senaste 30 dagarna), per bok (mest lyssnade först) och utlästa böcker */
+export function listeningStats(uid, days = 30) {
+  const f = libFilter(uid, 'b.library_id');
+  const d0 = new Date(Date.now() - (days - 1) * 86400e3), from = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')}`;
+  const total = get(`SELECT COALESCE(SUM(l.seconds),0) AS s FROM book_listen l JOIN books b ON b.id=l.book_id WHERE l.user_id=?${f.sql}`, uid, ...f.params).s;
+  const perDay = all(`SELECT l.day, SUM(l.seconds) AS seconds FROM book_listen l JOIN books b ON b.id=l.book_id WHERE l.user_id=? AND l.day >= ?${f.sql} GROUP BY l.day ORDER BY l.day`, uid, from, ...f.params);
+  const perBook = all(`SELECT * FROM (SELECT ${BOOK}, p.position, p.finished, p.updated, s.secs, s.last FROM ${FROM}
+    JOIN (SELECT book_id, SUM(seconds) AS secs, MAX(day) AS last FROM book_listen WHERE user_id=? GROUP BY book_id) s ON s.book_id=b.id
+    LEFT JOIN book_progress p ON p.book_id=b.id AND p.user_id=? WHERE 1${f.sql}) ORDER BY secs DESC LIMIT 100`, uid, uid, ...f.params)
+    .map(b => ({ ...shape(b), seconds: Math.round(b.secs), lastDay: b.last }));
+  const finished = get(`SELECT COUNT(*) AS n FROM book_progress p JOIN books b ON b.id=p.book_id WHERE p.user_id=? AND p.finished=1${f.sql}`, uid, ...f.params).n;
+  return { total: Math.round(total), days: perDay.map(x => ({ day: x.day, seconds: Math.round(x.seconds) })), books: perBook, finished };
+}
+/** Hushållet (administratör): lyssnad tid och utlästa böcker per profil */
+export const householdStats = () => all(`SELECT u.id, u.name, COALESCE((SELECT SUM(seconds) FROM book_listen WHERE user_id=u.id),0) AS seconds,
+  (SELECT COUNT(DISTINCT book_id) FROM book_listen WHERE user_id=u.id) AS books, (SELECT COUNT(*) FROM book_progress WHERE user_id=u.id AND finished=1) AS finished
+  FROM users u ORDER BY seconds DESC, u.name`).map(r => ({ ...r, seconds: Math.round(r.seconds) }));

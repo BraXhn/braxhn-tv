@@ -2,6 +2,7 @@
 //   Google Books  – sökning på titel + författare (svenska titlar först med langRestrict=sv), beskrivning, omslag, år, förlag, ISBN, genrer
 //   Open Library  – reserv när Google inte hittar boken
 //   Audnexus      – bok och kapitel via ASIN (Audibles id): uppläsare, serie och nummer, kapitel med tider
+//   Audible       – katalogsökning per region (som Audiobookshelf) som ger ASIN, uppläsare och serie; detaljerna via Audnexus
 // Körs i bakgrunden efter skanningen, en bok i taget, med paus mellan anrop till samma värd och svar cachade i minnet.
 // Matchade (state=1) och låsta böcker hämtas aldrig om automatiskt; böcker utan träff (state=2) försöker igen efter 30 dagar.
 // Bas-adresserna kan bytas med miljövariabler (testerna kör mot en låtsasserver); värdarna är fasta – inga användaradresser.
@@ -21,6 +22,10 @@ const GB = () => base('GOOGLE_BOOKS_URL', 'https://www.googleapis.com/books/v1')
 const OL = () => base('OPENLIBRARY_URL', 'https://openlibrary.org');
 const OLC = () => base('OPENLIBRARY_COVERS_URL', 'https://covers.openlibrary.org');
 const AX = () => base('AUDNEXUS_URL', 'https://api.audnex.us');
+// Audibles butiker (Sverige saknas – välj den region där böckerna oftast finns). Inställningen book_meta_region.
+export const AUDIBLE_REGIONS = { us: 'com', uk: 'co.uk', de: 'de', fr: 'fr', ca: 'ca', au: 'com.au', it: 'it', es: 'es', in: 'in', jp: 'co.jp' };
+export const audibleRegion = () => { const r = getSetting('book_meta_region', process.env.AUDIBLE_REGION || 'us'); return AUDIBLE_REGIONS[r] ? r : 'us'; };
+const AU = () => base('AUDIBLE_URL', `https://api.audible.${AUDIBLE_REGIONS[audibleRegion()]}`);
 const TIMEOUT = 15000, MAX_JSON = 4 << 20, MAX_IMG = 8 << 20;
 const PER_RUN = 100;            // högst så många böcker per skanning (Google Books utan nyckel tål ungefär 1 000 anrop per dygn)
 const RETRY_DAYS = 30;
@@ -32,7 +37,7 @@ export const status = { running: false, library: null, done: 0, total: 0, matche
 
 // ---------- hämtning: fasta värdar, tidsgräns, storleksgräns, paus per värd och cache ----------
 const COVER_HOSTS = new Set(['books.google.com', 'books.googleusercontent.com', 'covers.openlibrary.org', 'm.media-amazon.com', 'images-na.ssl-images-amazon.com']);
-const baseHosts = () => new Set([GB(), OL(), OLC(), AX()].map(u => { try { return new URL(u).host; } catch { return ''; } }));
+const baseHosts = () => new Set([GB(), OL(), OLC(), AX(), AU()].map(u => { try { return new URL(u).host; } catch { return ''; } }));
 /** Bildadress från en källa: bara kända bildvärdar (https), eller de konfigurerade bas-adressernas värdar */
 export function coverUrlOk(u) {
   let x; try { x = new URL(String(u)); } catch { return null; }
@@ -119,6 +124,15 @@ function fromAudnexus(b) {
     seriesNo: sp?.position ? String(sp.position).replace(/^(book|bok|del|vol\.?)\s*/i, '').trim() || null : null,
     asin: b.asin || null, language: b.language === 'swedish' ? 'sv' : b.language === 'english' ? 'en' : b.language || null, cover: b.image || null };
 }
+function fromAudible(p) {
+  const sp = (p.series || [])[0];
+  return { source: 'audible', id: String(p.asin || ''), title: p.title || '', subtitle: p.subtitle || null, authors: (p.authors || []).map(a => a.name).filter(Boolean),
+    narrators: (p.narrators || []).map(a => a.name).filter(Boolean), description: text(p.publisher_summary || p.merchandising_summary) || null, publisher: p.publisher_name || null,
+    year: yearOf(p.release_date || p.issue_date), isbn: p.isbn || null, genres: [], series: sp?.title || null,
+    seriesNo: sp?.sequence ? String(sp.sequence).trim() || null : null, asin: p.asin || null,
+    language: /swedish/i.test(p.language || '') ? 'sv' : /english/i.test(p.language || '') ? 'en' : p.language || null,
+    cover: p.product_images?.['500'] || p.product_images?.['1024'] || Object.values(p.product_images || {})[0] || null };
+}
 
 // ---------- sökning och matchning ----------
 const SV_WORDS = new Set(['och', 'en', 'ett', 'att', 'det', 'den', 'som', 'på', 'för', 'med', 'av', 'till', 'om', 'jag', 'du', 'vi', 'min', 'mitt', 'när', 'där', 'inte', 'från', 'hos']);
@@ -151,6 +165,13 @@ async function openLibrary(title, author) {
   const j = await getJson(`${OL()}/search.json?${p}`);
   return (j?.docs || []).map(fromOpenLibrary).filter(c => c.id && c.title);
 }
+const AU_GROUPS = 'contributors,product_desc,product_attrs,product_extended_attrs,media,series';
+async function audible(title, author) {
+  const p = new URLSearchParams({ num_results: '10', products_sort_by: 'Relevance', response_groups: AU_GROUPS, title });
+  if (author) p.set('author', author);
+  const j = await getJson(`${AU()}/1.0/catalog/products?${p}`);
+  return (j?.products || []).map(fromAudible).filter(c => asinOk(c.id) && c.title);
+}
 export const asinOk = (a) => /^[A-Z0-9]{10}$/.test(String(a || '').trim().toUpperCase());
 async function audnexus(asin) {
   if (!asinOk(asin)) return null;
@@ -159,22 +180,33 @@ async function audnexus(asin) {
 }
 /** Kapitel från Audnexus – bara om bokens totala längd stämmer (±2 %), annars hamnar kapitlen fel */
 export async function audnexusChapters(asin, duration) {
+  const r = await fetchChapters(asin);
+  return r && lengthMatches(r.total, duration) ? r.chapters : null;
+}
+/** Kapitlen hos Audnexus oavsett längd ({ chapters, total } eller null) – kapitelredigeraren visar skillnaden */
+export async function fetchChapters(asin) {
   if (!asinOk(asin)) return null;
   const j = await getJson(`${AX()}/books/${String(asin).trim().toUpperCase()}/chapters`);
   const list = j?.chapters || [];
   if (list.length < 2) return null;
   const total = (+j.runtimeLengthMs || list.reduce((s, c) => s + (+c.lengthMs || 0), 0)) / 1000;
-  if (!lengthMatches(total, duration)) return null;
-  return list.slice(0, 500).map((c, i) => {
+  return { total, chapters: list.slice(0, 500).map((c, i) => {
     const start = (+c.startOffsetMs || 0) / 1000;
     return { start: +start.toFixed(3), end: +(start + (+c.lengthMs || 0) / 1000).toFixed(3), title: String(c.title || `Kapitel ${i + 1}`).slice(0, 200) };
-  });
+  }) };
 }
 /** Hela posten för en vald träff: Google-volymen (större omslag, hel beskrivning), Open Library-verket (beskrivning) */
 export async function details(source, id) {
   id = String(id || '').trim();
   if (source === 'google' && /^[\w-]{4,40}$/.test(id)) { const v = await getJson(`${GB()}/volumes/${id}`); return v ? fromGoogle(v) : null; }
   if (source === 'audnexus') return audnexus(id);
+  // Audible-träff: Audnexus har mer (genrer, hel beskrivning); annars katalogens egen post
+  if (source === 'audible' && asinOk(id)) {
+    const a = await audnexus(id).catch(() => null);
+    if (a) return { ...a, source: 'audible' };
+    const j = await getJson(`${AU()}/1.0/catalog/products/${id.toUpperCase()}?response_groups=${AU_GROUPS}`);
+    return j?.product ? fromAudible(j.product) : null;
+  }
   if (source === 'openlibrary' && /^OL\d+W$/.test(id)) {
     const w = await getJson(`${OL()}/works/${id}.json`);
     if (!w) return null;
@@ -191,9 +223,13 @@ export async function findMatch(title, author) {
   title = cleanTitle(title); author = authorOf(author);
   if (!title) return null;
   const steps = [];
+  // Audible ger uppläsare, serie och ASIN (kapitel) – först för titlar som inte ser svenska ut. Fel hos Audible stoppar inte matchningen.
+  const au = () => audible(title, author).catch(e => { if (e.rateLimited) throw e; return []; });
   if (looksSwedish(title)) steps.push(() => google(title, author, 'sv'));
+  else steps.push(au);
   steps.push(() => google(title, author));
   if (author) steps.push(() => google(title, null)); // författaren kan vara stavad annorlunda (eller vara uppläsaren)
+  if (looksSwedish(title)) steps.push(au);
   steps.push(() => openLibrary(title, author));
   for (const step of steps) {
     let best = null;
@@ -214,6 +250,7 @@ export async function search(title, author) {
   if (looksSwedish(title)) await tryAdd(() => google(title, author, 'sv'));
   await tryAdd(() => google(title, author));
   if (out.length < 5) await tryAdd(() => google(null, null, null, `${title}${author ? ' ' + author : ''}`));
+  await tryAdd(() => audible(title, author));
   await tryAdd(() => openLibrary(title, author));
   if (!out.length && errors.length) throw errors[0];
   return out.sort((a, b) => b.score - a.score).slice(0, 20);
@@ -256,7 +293,7 @@ function upsert(bookId, f) {
 async function apply(b, c, { locked, tags = {} }) {
   const prev = get('SELECT * FROM book_meta WHERE book_id=?', b.id) || {};
   const edits = (() => { try { return JSON.parse(prev.edits || '{}'); } catch { return {}; } })();
-  const asin = (asinOk(edits.asin) && edits.asin) || tags.asin || c?.asin || (prev.source === 'audnexus' ? null : prev.asin) || null;
+  const asin = (asinOk(edits.asin) && edits.asin) || tags.asin || c?.asin || (['audnexus', 'audible'].includes(prev.source) ? null : prev.asin) || null;
   // ASIN men ingen Audnexus-källa: hämta uppläsare och serie därifrån som komplement
   const ax = asin && c?.source !== 'audnexus' ? await audnexus(asin).catch(() => null) : null;
   const pick = (k) => c?.[k] ?? ax?.[k] ?? null;

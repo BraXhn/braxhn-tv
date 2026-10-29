@@ -14,6 +14,7 @@ import * as music from './music.js';
 import * as arr from './arr.js';
 import * as books from './audiobooks.js';
 import * as bookmeta from './bookmeta.js';
+import * as booktools from './booktools.js';
 import * as musicmeta from './musicmeta.js';
 import * as follows from './follows.js';
 import * as calendar from './calendar.js';
@@ -82,6 +83,8 @@ hooks.afterScan = () => {
 };
 // Metadata och kapitel från nätet hämtas i bakgrunden efter skanningen (väntar inte – skanningskön går vidare)
 hooks.audiobooks = async (lib, status) => { await books.scanBooks(lib, status); bookmeta.queue(lib.id); };
+// Ljudböckernas verktyg (kapitel in i filen, sammanslagning, ångra) skannar om biblioteket efter bytet
+booktools.setRescan((libId) => scan(libId));
 // Fotobibliotek: miniatyrerna görs i bakgrunden efter skanningen (och väntar medan video omkodas)
 hooks.photos = (lib, status) => photos.scanPhotos(lib, status);
 // E-böcker och serietidningar (ebooks.js): metadata och omslag ur filerna

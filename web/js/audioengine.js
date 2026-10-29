@@ -2,7 +2,7 @@
 // (AudioBufferSourceNode) och nästa spår schemaläggs på exakt sampel – trim av kodarfördröjning/utfyllnad enligt servern
 // (server/gapless.js, audiomix.trimFor). Ljudelementet (<audio>) spelar när motorn inte kan: första spåret om bufferten
 // inte hunnit bli klar, långa spår (minnet), ljudböcker/poddar och webbläsare utan Web Audio (Safari på iPhone/iPad).
-// Kedjan: element → elGain ┐
+// Kedjan: element → elGain → (tal: kompressor → lyft) ┐
 //         buffert → fade → norm ┴→ master (volym) → begränsare (mot klippning) → kompensation → högtalarna
 // audio.js äger kön och gränssnittet; motorn frågar efter nästa spår (hooks.upcoming) och meddelar byten (hooks.advance).
 import { fadeCurve, gainFor, planTransition, trimFor } from './audiomix.js';
@@ -45,13 +45,25 @@ export function init(el, hooks, caps) {
     master.connect(lim); lim.connect(comp); comp.connect(ctx.destination);
     const src = ctx.createMediaElementSource(el), elGain = ctx.createGain();
     src.connect(elGain); elGain.connect(master);
-    Object.assign(E, { ctx, master, elGain, limiter: lim });
+    // Jämn ljudnivå för tal (ljudböcker och poddar): en mjuk kompressor jämnar ut viskningar och höga partier och lyftet
+    // tar igen nivån. Begränsaren efter master hindrar att något klipps. Kopplas bara in med setVoice(true).
+    const vc = ctx.createDynamicsCompressor(), vlift = ctx.createGain();
+    vc.threshold.value = -32; vc.knee.value = 12; vc.ratio.value = 4; vc.attack.value = 0.01; vc.release.value = 0.4;
+    vlift.gain.value = 10 ** (6 / 20); // +6 dB
+    vc.connect(vlift); vlift.connect(master);
+    Object.assign(E, { ctx, master, elGain, limiter: lim, voiceIn: vc, voice: false });
     window.__bxAudioTap?.(ctx, comp); // testerna (test/web-gapless.test.js) lyssnar på utgången här
     E.timer = setInterval(tick, 250);
   } catch { E.failed = true; }
   return !!E.ctx;
 }
 export const ready = () => !!E.ctx;
+/** Talets kompressor in (true) eller ur kedjan efter elementet */
+export function setVoice(on) {
+  on = !!on;
+  if (!E.ctx || E.voice === on) return;
+  try { E.elGain.disconnect(); E.elGain.connect(on ? E.voiceIn : E.master); E.voice = on; } catch {}
+}
 /** Spelar motorn (en buffert) just nu? Annars är det elementet. */
 export const on = () => !!E.cur;
 const enabled = () => E.prefs.gapless || E.prefs.crossfade > 0;

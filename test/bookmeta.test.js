@@ -59,6 +59,7 @@ base = `http://127.0.0.1:${srv.address().port}`;
 process.env.GOOGLE_BOOKS_URL = base + '/gb';
 process.env.OPENLIBRARY_URL = base + '/ol';
 process.env.AUDNEXUS_URL = base + '/ax';
+process.env.AUDIBLE_URL = base + '/au'; // svarar 404 = inga träffar hos Audible
 process.env.OPENLIBRARY_COVERS_URL = base + '/olc';
 
 const { run, get, setSetting } = await import('../server/db.js');

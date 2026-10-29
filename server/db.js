@@ -207,6 +207,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS listen_prefs(user_id INTEGER PRIMARY KEY REF
 addCol('listen_prefs', 'norm_mode', "TEXT NOT NULL DEFAULT 'track'");
 addCol('listen_prefs', 'gapless', 'INTEGER NOT NULL DEFAULT 1');
 addCol('listen_prefs', 'crossfade', 'INTEGER NOT NULL DEFAULT 0');
+addCol('listen_prefs', 'speech_level', 'INTEGER NOT NULL DEFAULT 0'); // jämn ljudnivå för tal (ljudböcker/poddar i webben)
 // Skärmtid, notiser om nya avsnitt och automatisk offline-synk (JSON per användare)
 addCol('users', 'screen_time', 'TEXT');
 addCol('users', 'notify_personal', 'TEXT');
@@ -273,6 +274,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS book_meta(book_id INTEGER PRIMARY KEY REFERE
   state INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0, tried INTEGER, source TEXT, source_id TEXT, src_title TEXT,
   subtitle TEXT, narrator TEXT, description TEXT, publisher TEXT, year INTEGER, isbn TEXT, asin TEXT, language TEXT, genres TEXT,
   series TEXT, series_no TEXT, chapters TEXT, cover_net INTEGER NOT NULL DEFAULT 0, edits TEXT);`);
+// chapters_edit = kapitel som administratören redigerat (kapitelredigeraren, server/booktools.js) – går före filens och
+// Audnexus kapitel och skriver aldrig om filen (det gör bara "Skriv in i filen" på begäran).
+addCol('book_meta', 'chapters_edit', 'TEXT');
+// books (skannern i audiobooks.js äger raderna) skapas här: book_feeds och book_listen nedan har främmande nycklar till den,
+// och SQLite behöver tabellen när en användare eller ett bibliotek tas bort (kaskaden) även om audiobooks.js inte laddats
+db.exec(`CREATE TABLE IF NOT EXISTS books(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  key TEXT NOT NULL, title TEXT NOT NULL, sort_title TEXT, author TEXT, narrator TEXT, series TEXT, year INTEGER, description TEXT,
+  cover INTEGER NOT NULL DEFAULT 0, duration REAL, chapters TEXT, added INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS books_key ON books(library_id, key);`);
+// Ljudböckernas verktyg (server/booktools.js, server/bookfeeds.js):
+// book_feeds: privata RSS-flöden per profil för en bok eller en serie (poddappar). token = SHA-256 av nyckeln i adressen
+//   (visas bara när flödet skapas), återkallas genom att raden tas bort. Gäller bara /api/feeds/* (routealternativet feed).
+// book_listen: lyssnad tid (väggklocka, sekunder) per profil, bok och dag (lokal dag YYYY-MM-DD).
+// book_trash: originalfiler som sammanslagning till M4B eller inskrivna kapitel ersatt – i papperskorgen till "until".
+db.exec(`CREATE TABLE IF NOT EXISTS book_feeds(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE, kind TEXT NOT NULL CHECK(kind IN('book','series')), book_id INTEGER REFERENCES books(id) ON DELETE CASCADE,
+  library_id INTEGER REFERENCES libraries(id) ON DELETE CASCADE, series TEXT, created INTEGER NOT NULL, last_used INTEGER);
+CREATE INDEX IF NOT EXISTS book_feeds_user ON book_feeds(user_id);
+CREATE TABLE IF NOT EXISTS book_listen(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, day TEXT NOT NULL, seconds REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, book_id, day));
+CREATE INDEX IF NOT EXISTS book_listen_day ON book_listen(user_id, day);
+CREATE TABLE IF NOT EXISTS book_trash(id INTEGER PRIMARY KEY, book_id INTEGER, path TEXT NOT NULL, trash_path TEXT NOT NULL,
+  reason TEXT, created INTEGER NOT NULL, until INTEGER NOT NULL);`);
 // Musikappar (Subsonic/OpenSubsonic, server/subsonic.js): ett app-lösenord per användare/profil. enc = lösenordet krypterat
 // med AES-256-GCM och nyckeln i /config/subsonic.key (md5-inloggningen behöver klartexten), key_hash = SHA-256 för
 // klartext-/apiKey-inloggning. Stjärnor på album och artister (spår använder favorites som webben).

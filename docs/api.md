@@ -481,6 +481,38 @@ Bara webben (apparna får inte bibliotekstypen `ebook` i `/api/libraries`, och `
 
 **OPDS** (OPDS 1.2/Atom) under `/api/opds`: `/` (navigering), `/continue`, `/recent`, `/search?q=`, `/opensearch.xml`, `/lib/:lib?page=` (50 per sida, `next`/`previous`), `/lib/:lib/series`, `/lib/:lib/series/:name`, `/book/:id/cover`, `/book/:id/file` (kräver nedladdningsrätt) och `/book/:id/page/:n` (OPDS-PSE, `pse:count` i flödet). Inloggning bara med HTTP Basic: profilens namn och lösenordet för läsappar – kaka, Bearer och `?t=` gäller inte där, och lösenordet gäller ingen annanstans (routealternativet `opds`). Utan inloggning 401 med `WWW-Authenticate: Basic`; för många fel ger 429.
 
+## Ljudböckernas verktyg: RSS-flöden, kapitel, statistik och sammanslagning
+
+Bara tillägg – apparna läser inget av det (de nya fälten i `GET /api/audiobooks/book/:id` är valfria).
+
+- `GET /api/audiobooks/book/:id` har nu även `listened` (lyssnad tid för profilen, sekunder), `feedsAllowed` och för
+  administratörer `tools: { canEmbed, canMerge, state: { kind, running, ok, error } | null, trash: { kind, files, bytes, until } | null }`.
+  `chapterSource` kan vara `fil`, `audnexus` eller `redigerad`. `/api/me/listening` har `speechLevel` (jämn ljudnivå för tal i webben).
+- **Lyssningsstatistik:** `GET /api/audiobooks/stats` → `{ total, finished, days: [{ day, seconds }] (30 dagar), books: [{ …bok, seconds,
+  lastDay }] }`, för administratörer även `profiles: [{ id, name, seconds, books, finished }]`. Tiden räknas ur framstegen
+  (`POST …/progress`): steget framåt delat med hastigheten, bara rimliga steg (högst 3,2× den tid som gått + 1 s, inom 15 min).
+  Anrop med `at` (offline) räknas inte. *Markera som oläst* = `POST …/progress { position: 0 }`.
+- **RSS-flöden (privata, per profil):** `GET /api/audiobooks/feeds[?book=|?lib=&series=]` → `{ allowed, reason, feeds: [{ id, kind
+  ('book'|'series'), book, library, title, created, lastUsed }] }`. `POST /api/audiobooks/feeds { book } | { library, series }` →
+  `{ id, path, url }` – adressen med nyckeln visas **bara här** (servern sparar SHA-256). `DELETE /api/audiobooks/feeds/:id` återkallar.
+  Nekas (403) för barnprofiler, profiler med skärmtid och konton utan rätt att ladda ner – även vid varje hämtning.
+- **Flödet** (routealternativet `feed` i `http/router.js`: ingen kaka, Bearer eller `?t=` gäller, och nyckeln gäller inget annat):
+  `GET|HEAD /api/feeds/<nyckel>/feed.xml` (RSS 2.0, `itunes:` och Podcasting 2.0 `podcast:`; en bok i en fil = ett avsnitt,
+  i flera filer = ett avsnitt per fil; en serie = böckerna i nummerordning), `GET|HEAD /api/feeds/<nyckel>/audio/<fil-id>.<ändelse>`
+  (filen som den är, med Range), `GET /api/feeds/<nyckel>/chapters/<fil-id>.json` (`application/json+chapters`, version 1.2.0,
+  tider relativt filen) och `GET /api/feeds/<nyckel>/cover/<bok-id>.jpg`. Länkarna i flödet är absoluta: inställningen
+  `public_url` (`PUBLIC_URL`), annars förfrågans värd.
+- **Kapitelredigeraren (administratör):** `PUT /api/audiobooks/book/:id/chapters { chapters: [{ start, title }] }` (högst 500,
+  starttider inom boken och minst 1 s isär; sluttid = nästa start) eller `{ reset: true }` → boken. Filen skrivs inte om.
+  `GET /api/audiobooks/book/:id/chapters/audnexus[?asin=]` → `{ asin, chapters, total, duration, lengthOk }` (sparas inte).
+- **Filåtgärder (administratör, en i taget, i bakgrunden → 202, 409 när en annan pågår):** `POST /api/audiobooks/book/:id/chapters/embed`
+  (en M4B/M4A-fil: kapitlen in med `ffmpeg -c copy`, atomärt byte, originalet i papperskorgen), `POST /api/audiobooks/book/:id/merge`
+  (flera filer i bokens mapp → `<Titel>.m4b` med kapitel, metadata och omslag; AAC kopieras, annat kodas om till AAC 64–128 kbit/s)
+  och `POST /api/audiobooks/book/:id/restore` (originalen tillbaka). Läget syns i `tools.state`.
+- **Metadatasökning:** `GET /api/audiobooks/book/:id/match` ger även träffar med `source: 'audible'` (Audibles katalog i regionen
+  `book_meta_region`, `PUT /api/settings { bookMetaRegion }`: us, uk, de, fr, ca, au, it, es, in, jp), och `POST …/match` tar
+  `source: 'audible'` (detaljerna hämtas från Audnexus).
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

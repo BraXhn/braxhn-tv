@@ -239,6 +239,28 @@ t('dialoger: ?-dialogen har fokusfälla, Escape stänger och fokus kommer tillba
   await close();
 });
 
+t('ljudböckernas dialoger: kapitelredigeraren, RSS-flödet och lyssningsstatistiken', async () => {
+  const { page, errors, close } = await newPage('desktop');
+  const found = [];
+  const audit = async (name, opener, view) => {
+    await open(page, view);
+    await page.click(opener);
+    await page.waitForSelector('dialog[open]');
+    await page.waitForFunction(() => !document.querySelector('dialog[open] [aria-busy="true"]'));
+    await settled(page);
+    for (const x of await page.evaluate(auditPage, { scope: 'dialog[open]' })) found.push({ ...x, view: name });
+    assert.ok((await active(page)).inDialog, `fokus i dialogen (${name})`);
+    await press(page, 'Escape');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+  };
+  await audit('Kapitelredigeraren', '#bchap', `book/${S.book}`);
+  await audit('RSS-flöde', '#bfeed', `book/${S.book}`);
+  await audit('Lyssningsstatistik', '#bstats', `books/${S.audiobook}`);
+  assert.deepEqual(found, [], fmt(found));
+  assert.deepEqual(errors, []);
+  await close();
+});
+
 t('kortmenyn: öppnas med Shift+F10, piltangenter, Escape lämnar fokus på kortet', async () => {
   const { page, errors, close } = await newPage('tv');
   await open(page, `lib/${S.movie}`);
