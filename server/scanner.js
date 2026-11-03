@@ -9,6 +9,7 @@ import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
 import * as localMeta from './localmeta.js';
 import { AGE } from './nfo.js';
 import * as os from './opensubtitles.js';
+import * as backoff from './backoff.js';
 import * as people from './people.js';
 import { extraOf, isLegacy, syncExtras, syncThemes, THEME, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
@@ -78,10 +79,16 @@ function takenOf(info, st) {
 /** Hemvideons titel: filnamnet (punkter och understreck blir mellanslag) */
 const homeTitle = (f) => { const b = path.basename(f, path.extname(f)); return clean(b) || b; };
 
-const PROBE_FAILED = () => ({ failed: true, hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' });
-export async function probe(file) {
+/** "24000/1001" → 23.976, null om orimlig (0/0, 90000/1 i vissa MKV) */
+export function fpsOf(r) {
+  const [a, b] = String(r || '').split('/').map(Number);
+  const f = b ? a / b : a;
+  return Number.isFinite(f) && f >= 5 && f <= 120 ? Math.round(f * 1000) / 1000 : null;
+}
+const PROBE_FAILED = (error = '') => ({ failed: true, error, hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' });
+export async function probe(file, { quiet = false } = {}) {
   // En tom fil (nedladdning som inte börjat, platshållare) går inte att läsa – inget ffprobe-anrop
-  try { if ((await fs.promises.stat(file)).size === 0) return PROBE_FAILED(); } catch {}
+  try { if ((await fs.promises.stat(file)).size === 0) return PROBE_FAILED('tom fil'); } catch {}
   try {
     const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json',
       '-show_format', '-show_streams', file], { maxBuffer: 16 << 20, timeout: 60000 });
@@ -99,6 +106,8 @@ export async function probe(file) {
       pix: s.pix_fmt || null, transfer: s.color_transfer || null, primaries: s.color_primaries || null,
       // Flätad bild (tt/bb/tb/bt) avflätas vid omkodning (stream.js)
       ...(s.codec_type === 'video' && s.field_order && s.field_order !== 'progressive' && s.field_order !== 'unknown' ? { field: s.field_order } : {}),
+      // Bildfrekvens (omkodningens GOP-längd i stream.js) – bara när den är rimlig
+      ...(s.codec_type === 'video' ? (() => { const f = fpsOf(s.avg_frame_rate) || fpsOf(s.r_frame_rate); return f ? { fps: f } : {}; })() : {}),
       dovi: !!(s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || '')),
       dvProfile: (s.side_data_list || []).find(d => /dovi|dolby vision/i.test(d.side_data_type || ''))?.dv_profile ?? null,
       // Rotation i behållaren (telefoner som filmar stående) – bara när den finns
@@ -118,9 +127,40 @@ export async function probe(file) {
       streams: JSON.stringify(streams)
     };
   } catch (e) {
-    console.warn('[scan] ffprobe misslyckades:', file, e.message);
-    return PROBE_FAILED();
+    if (!quiet) console.warn('[scan] ffprobe misslyckades:', file, e.message);
+    return PROBE_FAILED(probeError(e));
   }
+}
+
+/** ffprobes felmeddelande utan kommandoraden (sista meningsfulla raden, t.ex. "moov atom not found") */
+export function probeError(e) {
+  if (e?.killed || e?.signal) return 'tidsgränsen för ffprobe gick ut';
+  const lines = String(e?.stderr || e?.message || '').split('\n').map(l => l.replace(/^\[[^\]]*\]\s*/, '').trim()).filter(l => l && !/^Command failed:/.test(l));
+  return (lines.find(l => /moov atom|Invalid data|EBML|could not find|End of file|corrupt|truncat/i.test(l)) || lines.pop() || 'okänt fel').slice(0, 300);
+}
+// Filens innehåll går inte att läsa (inte en tillfällig läsning): försöks inte igen förrän filen ändras.
+// Andra fel (tidsgräns – disken vaknade för långsamt, I/O-fel) får PROBE_TRIES försök med samma storlek/tid.
+const PROBE_BROKEN = /moov atom not found|Invalid data found|EBML header|could not find codec|End of file|tom fil|corrupt/i;
+export const PROBE_TRIES = 3;
+/** Ska filen hoppas över (tidigare misslyckad, oförändrad)? */
+function probeSkip(f, size, mtime) {
+  const r = get('SELECT size, mtime, error, tries FROM probe_fail WHERE path=?', f);
+  return !!r && r.size === size && r.mtime === mtime && (PROBE_BROKEN.test(r.error || '') || r.tries >= PROBE_TRIES);
+}
+/** Kom ihåg ett misslyckande. Loggas bara första gången för filen med den här storleken/tiden. */
+function probeFailed(lib, f, size, mtime, error) {
+  const r = get('SELECT size, mtime, tries FROM probe_fail WHERE path=?', f);
+  const same = r && r.size === size && r.mtime === mtime;
+  run(`INSERT INTO probe_fail(path,library_id,size,mtime,error,tries,at) VALUES(?,?,?,?,?,1,?) ON CONFLICT(path) DO UPDATE SET
+    library_id=excluded.library_id, size=excluded.size, mtime=excluded.mtime, error=excluded.error, at=excluded.at, tries=?`,
+  f, lib.id, size, mtime, error, now(), same ? r.tries + 1 : 1);
+  if (!same) console.warn(`[scan] ffprobe misslyckades: ${f} – ${error}${PROBE_BROKEN.test(error) ? ' (filen verkar trasig – försöks igen först när den ändras)' : ''}`);
+  else if (r.tries + 1 === PROBE_TRIES) console.warn(`[scan] ffprobe misslyckades ${PROBE_TRIES} gånger: ${f} – försöks igen först när filen ändras`);
+}
+/** Filer som inte gick att läsa (adminsidans Hälsokontroll) */
+export function unreadableFiles(limit = 500) {
+  return all(`SELECT p.path, p.size, p.error, p.tries, p.at, p.library_id, l.name AS library FROM probe_fail p LEFT JOIN libraries l ON l.id=p.library_id
+    ORDER BY p.at DESC LIMIT ?`, limit).map(r => ({ ...r, skipped: PROBE_BROKEN.test(r.error || '') || r.tries >= PROBE_TRIES }));
 }
 
 // Extras/, Featurettes/ m.fl. läses in som extramaterial (trailers.js extraOf) – bara provklipp och Synologys mappar hoppas över
@@ -152,8 +192,16 @@ function showFor(lib, name, year, yearHint = null) {
   const same = showIndex(lib).get(nkey(key));
   if (same && get(`SELECT 1 FROM items WHERE id=? AND kind='show'`, same)) return same;
   // Tidigare versioner sparade namnet utan årtal: ta över en sådan serie om årtalet inte talar emot
-  const old = year && get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE AND (year IS NULL OR year=?)`, lib.id, name, year);
-  if (old) { run('UPDATE items SET src_name=? WHERE id=?', key, old.id); return old.id; }
+  // Det gamla namnet blir ett alias: avsnitt i en annan mapp utan årtal ("Alfons Åberg/" bredvid "Alfons Åberg (2013)/")
+  // hör fortfarande till serien – annars flyttade regroupShows dem till en ny serie vid nästa skanning, mergeShows
+  // slog ihop dem igen och loggen visade samma "delades upp eller slogs ihop" varje gång
+  const old = year && get(`SELECT id, src_name, src_alias FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE AND (year IS NULL OR year=?)`, lib.id, name, year);
+  if (old) {
+    const alias = new Set(aliasesOf(old)); alias.add(old.src_name); alias.delete(key);
+    run('UPDATE items SET src_name=?, src_alias=? WHERE id=?', key, JSON.stringify([...alias]), old.id);
+    if (lib._shows) lib._shows.set(nkey(key), old.id);
+    return old.id;
+  }
   const t = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IS NULL AND title=? COLLATE NOCASE`, lib.id, name);
   if (t) { run('UPDATE items SET src_name=? WHERE id=?', key, t.id); return t.id; }
   // yearHint: årtalet i filnamnet ("Doctor.Who.2005.S01E01") – hjälper matchningen men ingår inte i nyckeln
@@ -170,20 +218,20 @@ async function regroupShows(lib) {
   const keyOf = new Map(all(`SELECT id, src_name, src_alias FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, new Set(keysOf(r).map(nkey))]));
   const has = (id, k) => !!keyOf.get(id)?.has(nkey(k));
   const eps = all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL`, lib.id);
-  const touched = new Set(), years = new Map();
-  // Filnamnen tolkas en gång, i omgångar med paus emellan: 60 000 avsnitt tog annars ~2 s i ett svep varje skanning
-  // (händelseslingan stod still – strömmar och API-anrop fick vänta). Inget skrivs förrän allt är tolkat.
-  const parsed = new Map();
+  // Tolkningen av alla avsnitt (ren strängbehandling, ~0,1 ms styck) görs en gång och i omgångar: ett bibliotek med
+  // tiotusentals avsnitt höll annars händelseslingan i sekunder varje timskanning (strömmar och webben stod still)
   for (let i = 0; i < eps.length; i++) {
-    if (i && i % 2000 === 0) await new Promise(r => setImmediate(r));
-    parsed.set(eps[i].id, parseEpisode(rel(lib, eps[i].path)));
+    const p = parseEpisode(rel(lib, eps[i].path));
+    eps[i].p = p ? { show: p.show, year: p.year } : null;
+    if (i % 500 === 499) await new Promise(r => setImmediate(r));
   }
+  const touched = new Set(), years = new Map();
   // Ny tolkning av mappnamnen (t.ex. "Barn/Bluey" → "Bluey", "Paw Patrol (Svenskt tal)" → "Paw Patrol"): flyttar alla en
   // series avsnitt till samma nya nyckel som ingen annan serie har byter serien bara namn – raden behåller metadata,
   // låsning ("Fel titel?") och Min lista
   const moves = new Map();
   for (const e of eps) {
-    const p = parsed.get(e.id);
+    const p = e.p;
     const k = p ? showKey(p.show, p.year) : null;
     if (!moves.has(e.parent_id)) moves.set(e.parent_id, new Set());
     moves.get(e.parent_id).add(k && !has(e.parent_id, k) ? k : '');
@@ -199,7 +247,7 @@ async function regroupShows(lib) {
       keyOf.set(sid, new Set([nkey(k)])); taken.add(nkey(k));
     }
     for (const e of eps) {
-      const p = parsed.get(e.id);
+      const p = e.p;
       if (!p) continue;
       const key = showKey(p.show, p.year);
       if (has(e.parent_id, key)) continue;
@@ -430,9 +478,13 @@ async function scanLibrary(lib) {
           p.title, sortTitle(p.title), p.year, k.id, raw));
       }
       if (k && k.size === st.size && k.mtime === mtime) continue;
+      // Tidigare misslyckad läsning av en oförändrad fil (trasig, "moov atom not found"): inte varje skanning
+      if (probeSkip(f, st.size, mtime)) continue;
       // Medan någon tittar: en kort paus mellan filerna (nya titlar kommer ändå med, bara långsammare)
       await jobs.yieldToPlayback({ gap: 50 });
-      const info = await probe(f);
+      const info = await probe(f, { quiet: true });
+      if (info.failed) probeFailed(lib, f, st.size, mtime, info.error || 'okänt fel');
+      else run('DELETE FROM probe_fail WHERE path=?', f);
       touched.add(f);
       // Misslyckad probe (t.ex. disken vaknade för långsamt): spara mtime 0 så att filen läses om vid nästa skanning
       const saveMtime = info.failed ? 0 : mtime;
@@ -478,6 +530,8 @@ async function scanLibrary(lib) {
       }
     }
   } finally { flush(); }
+  // Misslyckade läsningar av filer som inte längre finns glöms (en saknad disk: filen finns kvar på disken → raden kvar)
+  for (const r of all('SELECT path FROM probe_fail WHERE library_id=?', lib.id)) if (!seen.has(r.path) && !fs.existsSync(r.path)) run('DELETE FROM probe_fail WHERE path=?', r.path);
   // Ta bort försvunna filer och tomma serier – men aldrig om det ser ut som att disken saknas. Skyddet gäller
   // varje mapp för sig: en saknad disk tar aldrig bort något, inte heller från bibliotekets andra mappar.
   const missing = removable({ name: lib.name, list, rows: [...known.values()], seen, found: files,
@@ -1046,7 +1100,13 @@ async function chapters(lib, st = status) {
   const todo = all(`SELECT id,path FROM items WHERE library_id=? AND kind IN('movie','episode') AND chapters IS NULL AND path IS NOT NULL`, lib.id);
   if (!todo.length) return;
   st.phase = 'Läser kapitel'; st.done = 0; st.total = todo.length;
-  for (const it of todo) { st.done++; await jobs.yieldToPlayback({ pause: true }); run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
+  for (const it of todo) {
+    st.done++;
+    // Filer som inte gick att läsa (probe_fail: tom eller trasig) har inga kapitel – ingen ffprobe till
+    if (get('SELECT 1 FROM probe_fail WHERE path=?', it.path)) { run("UPDATE items SET chapters='[]' WHERE id=?", it.id); continue; }
+    await jobs.yieldToPlayback({ pause: true });
+    run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id);
+  }
 }
 export async function readChapters(file) {
   try {
@@ -1070,6 +1130,8 @@ async function autoSubtitles(lib, st = status) {
   // Försök igen efter en vecka för titlar där inget hittades
   const todo = all(`SELECT * FROM items WHERE library_id=? AND kind IN('movie','episode') AND path IS NOT NULL AND sub_auto < ? ORDER BY added DESC LIMIT 200`, lib.id, now() - 7 * 86400);
   if (!todo.length) return;
+  // OpenSubtitles har svarat 429 nyligen: inga anrop förrän pausen är slut (backoff.js loggar när den börjar och slutar)
+  if (backoff.waitMs(os.SVC)) return;
   st.phase = 'Hämtar undertexter'; st.done = 0; st.total = todo.length;
   let n = 0;
   for (const it of todo) {
@@ -1080,14 +1142,21 @@ async function autoSubtitles(lib, st = status) {
     if (missing.length) {
       try {
         const res = await os.search(it, missing);
+        backoff.ok(os.SVC, { label: 'OpenSubtitles', tag: 'subs' });
         for (const l of missing) {
           const best = res.find(r => langMatches(r.lang, l) && (r.hashMatch || !onlyHash) && !r.hi) || res.find(r => langMatches(r.lang, l) && (r.hashMatch || !onlyHash));
           if (best && n < maxRun) { await os.download(it, best.fileId, l); n++; autoSubs.downloaded++; console.log(`[subs] ${it.title}: ${l}${best.hashMatch ? ' (exakt)' : ''}`); }
         }
       } catch (e) {
         autoSubs.error = e.message;
-        console.warn('[subs]', e.message);
-        if (/quota|limit|406|429|allowed/i.test(e.message)) break; // dygnskvoten slut – fortsätt nästa skanning
+        // För många anrop eller dygnskvoten slut (406): pausa tjänsten (exponentiellt, en loggrad) och flytta titeln
+        // bakåt i kön till efter pausen – nästa skanning börjar inte med samma titel och samma 429
+        if (e.rateLimited || e.status === 406 || /quota|limit|allowed/i.test(e.message)) {
+          const ms = backoff.limited(os.SVC, { retryAfter: e.retryAfter, label: 'OpenSubtitles', tag: 'subs', why: e.message });
+          run('UPDATE items SET sub_auto=? WHERE id=?', now() - 7 * 86400 + Math.ceil(ms / 1000), it.id);
+          break;
+        }
+        console.warn('[subs]', it.title, '–', e.message);
         continue;
       }
     }

@@ -28,6 +28,8 @@ try {
     try { fs.rmSync(path.join(TRANSCODE, f), { recursive: true, force: true }); } catch (e) { console.warn('[hls] kunde inte rensa', f, e.message); }
   }
 } catch (e) { console.warn('[hls] kunde inte läsa omkodningsmappen', TRANSCODE, e.message); }
+// Grafikkortet behöver mer än så här många sekunder till första kodade bilden = något är fel (se slowStart)
+const SLOW_START = 4;
 const HW_WANTED = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi | nvenc | qsv
 // Hårdvaruomkodning som inte fungerar (t.ex. nvenc utan NVIDIA-drivrutin i containern: "Cannot load libcuda.so.1")
 // får aldrig stoppa uppspelningen – då används processorn i stället och adminsidan visar varför.
@@ -159,26 +161,37 @@ export const vEnc = { hw: { hevc: null, av1: null }, cpu: { hevc: null, av1: nul
 // så extra nyckelbilder från en kodare (scenbyten) aldrig ger extra segment.
 const FMP4_SEG = ['-f', 'segment', '-segment_format', 'mp4', '-segment_format_options',
   'movflags=+frag_keyframe+empty_moov+delay_moov+default_base_moof+frag_discont+skip_trailer:use_editlist=0:avoid_negative_ts=disabled'];
-/** Kodarens argument. kind = nvenc/vaapi/qsv/none (processorn), br = bithastighetstak (kbit/s) eller null = kvalitetsstyrd. */
-export function encArgs(kind, vc, br, big) {
+// Grafikkortens kodare har egna GOP-längder (h264_nvenc 250 bilder ≈ 10,4 s vid 23,976 bilder/s) och scenbyten. Med de
+// tvingade nyckelbilderna (forcedKeys) som IDR blir segmenten ändå rätt – men en drivrutin/ffmpeg som inte tar
+// emot tvingade bilder gav då nyckelbilder (och därmed segmentgränser) bara var 250:e bild: segment-muxern väntade
+// ~10 s på nästa fil. GOP_SEC delar alla segmentgränser (0, 2, 4, 6, 12 … – HEAD och SEG), så även kodarens egna
+// nyckelbilder hamnar på gränserna.
+export const GOP_SEC = 2;
+/** GOP-längd i bilder för källans bildfrekvens (okänd: 25) */
+export const gopFrames = (fps) => Math.max(2, Math.round(GOP_SEC * (Number(fps) > 0 ? Number(fps) : 25)));
+/** Kodarens argument. kind = nvenc/vaapi/qsv/none (processorn), br = bithastighetstak (kbit/s) eller null = kvalitetsstyrd.
+ *  fps = källans bildfrekvens (GOP-längden för grafikkortets kodare). */
+export function encArgs(kind, vc, br, big, fps = null) {
   const cap = br ? ['-maxrate', br + 'k', '-bufsize', br * 2 + 'k'] : [];
   const cbr = br ? ['-b:v', br + 'k', ...cap] : null;
   const nv = (cq) => br ? ['-rc', 'vbr', '-cq', String(cq + 3), '-b:v', Math.round(br * 0.6) + 'k', ...cap] : ['-cq', String(cq)];
-  // HEVC/AV1: inga nyckelbilder utöver de tvingade (scenbyten) – och de tvingade blir IDR
+  // Processorns HEVC/AV1: inga nyckelbilder utöver de tvingade. Grafikkortet: GOP = GOP_SEC (se ovan), inga scenbyten,
+  // och de tvingade blir IDR (-forced-idr/-forced_idr; VA-API gör tvingade I-bilder till IDR själv)
   const keys = ['-g', '1000'];
+  const hwKeys = ['-g', String(gopFrames(fps))];
   const tag = vc === 'hevc' ? ['-tag:v', 'hvc1'] : [];
   if (kind === 'nvenc') {
-    if (vc === 'h264') return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', ...nv(22)];
-    return ['-c:v', `${vc}_nvenc`, '-preset', 'p4', '-forced-idr', '1', '-no-scenecut', '1', ...keys, ...nv(vc === 'av1' ? 30 : 24), ...tag];
+    if (vc === 'h264') return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-forced-idr', '1', '-no-scenecut', '1', ...hwKeys, ...nv(22)];
+    return ['-c:v', `${vc}_nvenc`, '-preset', 'p4', '-forced-idr', '1', '-no-scenecut', '1', ...hwKeys, ...nv(vc === 'av1' ? 30 : 24), ...tag];
   }
   if (kind === 'vaapi') {
-    if (vc === 'h264') return ['-c:v', 'h264_vaapi', ...(cbr || ['-qp', '22'])];
+    if (vc === 'h264') return ['-c:v', 'h264_vaapi', ...hwKeys, ...(cbr || ['-qp', '22'])];
     // av1_vaapi: qp är AV1:s qindex (0–255)
-    return ['-c:v', `${vc}_vaapi`, ...keys, ...(cbr || ['-qp', vc === 'av1' ? '120' : '24']), ...tag];
+    return ['-c:v', `${vc}_vaapi`, ...hwKeys, ...(cbr || ['-qp', vc === 'av1' ? '120' : '24']), ...tag];
   }
   if (kind === 'qsv') {
-    if (vc === 'h264') return ['-c:v', 'h264_qsv', '-forced_idr', '1', ...(cbr || ['-global_quality', '22'])];
-    return ['-c:v', `${vc}_qsv`, ...(vc === 'hevc' ? ['-forced_idr', '1'] : []), ...keys, ...(cbr || ['-global_quality', vc === 'av1' ? '28' : '24']), ...tag];
+    if (vc === 'h264') return ['-c:v', 'h264_qsv', '-forced_idr', '1', ...hwKeys, ...(cbr || ['-global_quality', '22'])];
+    return ['-c:v', `${vc}_qsv`, ...(vc === 'hevc' ? ['-forced_idr', '1'] : []), ...hwKeys, ...(cbr || ['-global_quality', vc === 'av1' ? '28' : '24']), ...tag];
   }
   // x265/SVT-AV1: bufferten lika stor som taket – med dubbel buffert låg första segmentet över BANDWIDTH
   const tight = br ? ['-maxrate', br + 'k', '-bufsize', br + 'k'] : [];
@@ -245,8 +258,14 @@ const hwReady = new Promise(done => {
   if (HW === 'none') return done();
   const enc = hwTestArgs(HW);
   if (!enc) { disableHw(`okänt värde HWACCEL=${HW}`); return done(); }
+  const t0 = Date.now();
   execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...enc, '-frames:v', '2', '-f', 'null', '-'], { ...PROBE, timeout: 20000 }, (e, _o, stderr) => {
     if (e) { disableHw(stderr || e.message); return done(); }
+    // Testet kodar två bilder: tar det flera sekunder tar varje omkodning lika lång tid innan första segmentet kommer
+    const ms = Date.now() - t0;
+    hwStatus.startMs = ms;
+    if (ms > SLOW_START * 1000) console.warn(`[hårdvara] ${HW}: testkodningen vid start tog ${(ms / 1000).toFixed(1)} s (normalt under 1 s) – varje omkodning får lika lång väntan innan första segmentet.`
+      + (HW === 'nvenc' ? ' Slå på persistence mode på värden (nvidia-smi -pm 1).' : ''));
     if (process.env.GPU_FILTERS === '0') { console.log(`[hårdvara] ${HW} fungerar (filter på processorn: GPU_FILTERS=0)`); return done(); }
     probeGpuPipe().then(probeTonemap).catch(() => {}).then(() => {
       const tm = transcodeInfo().tonemap;
@@ -934,7 +953,7 @@ function videoArgs(it, d, fromStart) {
   // 4K med processorn: snabbare skalning (skillnaden syns inte vid nedskalning) och snabbare kodarläge
   const big = K === 'none' && (v?.height || 0) > 1100;
   if (h) sw.push(big ? `scale=-2:${h}:flags=bilinear` : `scale=-2:${h}`);
-  const enc = [...encArgs(K, vc, br, big), ...sdr, ...gop];
+  const enc = [...encArgs(K, vc, br, big, v?.fps), ...sdr, ...gop];
   // Hela kedjan på grafikkortet: inte vid inbränning eller avflätning (görs med processorn), bara för format som
   // grafikkortet avkodar (H.264/HEVC i 4:2:0, 8 eller 10 bitar). Bredden räknas ut här (jämn, samma bildformat).
   const gpuOk = K === HW && !d.burn && !sw.some(f => f.startsWith('yadif')) && ['h264', 'hevc'].includes(v?.codec)
@@ -1030,6 +1049,7 @@ function audioArgs(d) {
 
 // ---------------- HLS-sessioner ----------------
 const sessions = new Map();
+const restarts = { n: 0, at: 0 };
 const segExt = (s) => s.d.fmt === 'fmp4' ? 'm4s' : 'ts';
 const segFile = (s, n) => path.join(s.dir, `seg_${String(n).padStart(5, '0')}.${segExt(s)}`);
 const initFile = (s) => { try { const f = fs.readdirSync(s.dir).find(x => /^init_\d+\.mp4$/.test(x)); return f ? path.join(s.dir, f) : null; } catch { return null; } };
@@ -1121,7 +1141,7 @@ function startFfmpeg(s, it, n) {
   // Strömmens ffmpeg något under serverns egen prioritet (nice 3, bakgrundsjobben har 19): en omkodning som tar alla
   // kärnor trängde annars undan Node-tråden som skickar segmenten (händelseslingan stod still upp till 0,24 s)
   if (STREAM_NICE) { try { os.setPriority(p.pid, Math.min(19, os.getPriority(process.pid) + STREAM_NICE)); } catch {} }
-  s.prog = { at: null, out: null, speed: null };
+  s.prog = { at: null, out: null, speed: null, t0: performance.now() / 1000, first: null, hw: d.mode === 'transcode' && HW !== 'none' ? HW : null };
   let pbuf = '';
   p.stdout?.on('data', (c) => {
     pbuf += c;
@@ -1196,11 +1216,27 @@ function resume(s) {
 function noteProgress(s, p, out) {
   if (s.proc !== p || !Number.isFinite(out) || out < 0) return;
   const now = performance.now() / 1000, g = s.prog;
+  if (g.first == null && out > 0) { g.first = now - g.t0; if (g.hw) slowStart(s, g.first, g.hw); }
   if (g.at != null && !s.paused && out > g.out && now - g.at < 5) {
     const inst = (out - g.out) / Math.max(0.05, now - g.at);
     g.speed = g.speed == null ? inst : g.speed * 0.7 + inst * 0.3;
   }
   g.at = now; g.out = out;
+}
+// Tiden från start till första kodade bilden. Grafikkortet startar normalt på under en sekund; flera sekunder i varje
+// körning (sett: ~10 s med NVENC) betyder att drivrutinen initieras på nytt varje gång (NVIDIA utan persistence mode)
+// eller att enheten är upptagen – spelare med kort tidsgräns (Media3: 8 s) ger då upp och startar om. Loggas högst var 10:e minut.
+let slowStartAt = 0;
+export const hwStartStats = { last: null, slow: 0 };
+function slowStart(s, sec, hw) {
+  hwStartStats.last = Math.round(sec * 10) / 10;
+  if (sec < SLOW_START) return;
+  hwStartStats.slow++;
+  if (Date.now() - slowStartAt < 600e3) return;
+  slowStartAt = Date.now();
+  console.warn(`[hårdvara] ${s.title || ''}: omkodningen (${hw}) tog ${sec.toFixed(1)} s innan första bilden var kodad – `
+    + (hw === 'nvenc' ? 'NVIDIA-drivrutinen startas troligen om för varje omkodning. Slå på persistence mode på Unraid-värden (nvidia-smi -pm 1, t.ex. i ett användarskript vid start) och kontrollera att inget annat använder kortet.'
+      : 'grafikkortet svarar långsamt (upptaget eller strömsparläge).'));
 }
 // Segment långt bakom uppspelningen tas bort – annars hamnar en hel film i omkodningsmappen
 // (ofta /tmp = RAM i Unraid). Spolar man tillbaka skapas de igen.
@@ -1292,6 +1328,17 @@ function sessionFor(it, query, userId) {
   const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}`;
   let s = sessions.get(key);
   if (!s) {
+    // Diagnos: en ny session för samma titel och profil medan en annan ännu inte levererat något första segment =
+    // spelaren gav upp (tidsgräns) och startade om – omkodningen börjar då om från noll och filmen kommer aldrig igång
+    const t = Date.now();
+    const prev = [...sessions.values()].find(x => x.user === userId && x.item === it.id && !x.firstLogged && t - x.created < 60e3);
+    if (prev && d.mode === 'transcode') {
+      restarts.n++;
+      if (t - restarts.at > 60e3) {
+        restarts.at = t;
+        console.warn(`[hls] ${it.title}: ny omkodning ${((t - prev.created) / 1000).toFixed(1)} s efter förra innan något segment hunnit levereras (${prev.d.q}/${prev.d.vc} → ${d.q}/${d.vc}${prev.d.pid !== d.pid ? ', ny uppspelning' : ''}) – spelaren gav troligen upp i väntan på första segmentet`);
+      }
+    }
     s = { key, d, dir: path.join(TRANSCODE, key), proc: null, start: -1, done: false, total: 0, last: Date.now(), user: userId, item: it.id, waiting: 0,
       created: Date.now(), title: it.title, slowLogged: false, firstLogged: false };
     fs.mkdirSync(s.dir, { recursive: true });

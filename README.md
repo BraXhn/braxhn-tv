@@ -451,6 +451,8 @@ wget -O /boot/config/plugins/dockerMan/templates-user/my-braxhn-tv-nvidia.xml ht
 ```
 Har du redan containern från den vanliga mallen: välj **Edit**, sätt *Hårdvaruomkodning* till `nvenc`, slå på *Avancerad vy*, lägg till ` --runtime=nvidia` sist under *Extra Parameters* och fyll i *NVIDIA: grafikkort* (`all`).
 
+Tar varje omkodning flera sekunder innan första bilden kommer (loggen: `[hårdvara] … tog 9.8 s innan första bilden var kodad`) startas NVIDIA-drivrutinen om för varje ffmpeg. Slå då på *persistence mode* på Unraid-värden, t.ex. med `nvidia-smi -pm 1` i ett användarskript (User Scripts) som körs när arrayen startar.
+
 Videon avkodas också på grafikkortet (nvenc/vaapi), vilket gör 4K-HEVC mycket lättare. Fungerar hårdvaran inte går servern automatiskt över till processorn, och *Administration → Säkerhet* visar felet.
 
 Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av 4K HDR med processor är tungt, så använd en GPU om du har mycket HDR-material.

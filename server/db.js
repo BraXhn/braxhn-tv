@@ -277,6 +277,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS book_meta(book_id INTEGER PRIMARY KEY REFERE
 // chapters_edit = kapitel som administratören redigerat (kapitelredigeraren, server/booktools.js) – går före filens och
 // Audnexus kapitel och skriver aldrig om filen (det gör bara "Skriv in i filen" på begäran).
 addCol('book_meta', 'chapters_edit', 'TEXT');
+// rl_tries/next_try: automatiska försök som stoppats av "för många anrop" (429) i rad – boken försöks igen först vid
+// next_try (1 h, 4 h, 16 h … backoff.nextTrySec), så att samma bok inte står först i kön och får samma 429 varje timme
+addCol('book_meta', 'rl_tries', 'INTEGER NOT NULL DEFAULT 0');
+addCol('book_meta', 'next_try', 'INTEGER');
 // books (skannern i audiobooks.js äger raderna) skapas här: book_feeds och book_listen nedan har främmande nycklar till den,
 // och SQLite behöver tabellen när en användare eller ett bibliotek tas bort (kaskaden) även om audiobooks.js inte laddats
 db.exec(`CREATE TABLE IF NOT EXISTS books(id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
@@ -901,6 +905,12 @@ export function tx(fn) {
   catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
   finally { txDepth--; }
 }
+
+// Filer som ffprobe inte kunde läsa (scanner.js): försöks igen först när storlek eller ändringstid ändras – annars
+// försökte varje timskanning samma trasiga fil ("moov atom not found") och loggade den varje gång. tries = antal
+// misslyckanden i rad med samma storlek/tid (tillfälliga fel, t.ex. en disk som vaknar, får några försök).
+db.exec(`CREATE TABLE IF NOT EXISTS probe_fail(path TEXT PRIMARY KEY, library_id INTEGER REFERENCES libraries(id) ON DELETE CASCADE,
+  size INTEGER, mtime INTEGER, error TEXT, tries INTEGER NOT NULL DEFAULT 1, at INTEGER NOT NULL)`);
 
 const settingsCache = new Map();
 export function getSetting(k, def = '') {

@@ -183,7 +183,8 @@ indexerade (annars tom lista tills repliksökningens jobb läst dem), `server` =
 ## Hälsokontroll och rättad språkmärkning: `/api/admin/health*`
 
 Bara för administratören på betrott nät (webbens `#/health`, `server/health.js`). `GET /api/admin/health` →
-`{ issues, overrides, kinds, status, settings, arr }`; varje fynd har `id`, `item`, `kind` (`broken`, `truncated`,
+`{ issues, unreadable, overrides, kinds, status, settings, arr }` (`unreadable` = filer som skanningen inte kunde läsa med
+ffprobe: `file`, `dir`, `library`, `error`, `tries`, `at`, `skipped` – `true` = försöks igen först när filen ändras); varje fynd har `id`, `item`, `kind` (`broken`, `truncated`,
 `length`, `decode`, `sync`, `audiolang`, `sublang`, `bitrate`, `quality`, `duplicate`, `missing`), `key`, `severity`
 (`error`/`warn`/`info`), `detail` (`msg` + typens fält, för språk `track`/`current`/`suggest`), `ignored`, `action`
 (`search`/`blocklist`) och `actions`. `POST /run` (`{ full }`), `PUT /settings` (`{ enabled, samples, maxMbps }`),

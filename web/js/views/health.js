@@ -50,6 +50,11 @@ views.health = async (tab = 'all') => {
           ${i.actions.includes('lang') ? `<button class="ghost small" data-lang="${i.id}">${t('Rätta språk…')}</button>` : ''}
           <button class="ghost small" data-ign="${i.id}">${i.ignored ? t('Visa igen') : t('Ignorera')}</button></div></li>`).join('')}</ul>`
       : emptyState({ compact: true, icon: tab === 'ignored' ? '🙈' : '✅', title: tab === 'ignored' ? t('Inget ignorerat') : s.files ? t('Inga fynd') : t('Inget kontrollerat än'), text: s.files || tab === 'ignored' ? '' : t('Kontrollen startar en stund efter skanningen, eller med Kontrollera nu.') })}</div>
+    ${D.unreadable?.length ? `<div class="panel"><h2>${t('Filer som inte gick att läsa')} (${D.unreadable.length})</h2>
+      <p class="muted small">${t('Skanningen kunde inte läsa de här filerna (ffprobe). De försöks igen först när filen ändras – byt ut eller ta bort filen.')}</p>
+      <ul class="hlist">${D.unreadable.map(u => `<li><span class="warn-badge hb-err">${t('Oläsbar')}</span>
+        <div class="hmain"><b>${esc(u.file)}</b><div>${esc(u.error || '')}</div>
+          <div class="muted small">${esc(u.library || '')} · ${esc(u.dir)} · ${esc(fmtDate(u.at))}${u.skipped ? '' : ` · ${t('försöks igen vid nästa skanning')}`}</div></div></li>`).join('')}</ul></div>` : ''}
     ${D.overrides.length ? `<div class="panel"><h2>${t('Rättad språkmärkning')}</h2><div class="tablewrap"><table>${D.overrides.map(o => `<tr>
       <td><a href="#/item/${+o.item_id}">${esc(o.kind === 'episode' ? `${o.show_title || ''} S${pad(o.season)}E${pad(o.episode)}` : o.title)}</a></td>
       <td class="muted small">${esc(o.track)}</td><td>${esc(o.orig ? langName(o.orig) : t('filens'))} → <b>${esc(langName(o.lang))}</b></td>

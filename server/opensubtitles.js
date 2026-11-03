@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { get, getSetting, SUBS_DIR } from './db.js';
 import { writeAtomic } from './util.js';
+import * as backoff from './backoff.js';
 
 const BASE = 'https://api.opensubtitles.com/api/v1';
 const UA = 'BraXhn TV v0.2';
@@ -12,15 +13,27 @@ let login = null; // { token, base, until }
 function key() { return getSetting('os_key') || process.env.OPENSUBTITLES_API_KEY || ''; }
 export const enabled = () => !!key();
 
+// OpenSubtitles tillåter några anrop per sekund ("API rate limit exceeded" = 429 med kort Retry-After): vänta och försök
+// igen när väntan är kort, annars pausar tjänsten (backoff.js) och anroparen får ett fel med rateLimited.
+export const SVC = 'opensubtitles';
+const SHORT_WAIT = 5000;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function call(p, { method = 'GET', body, token, base } = {}) {
   const headers = { 'Api-Key': key(), 'User-Agent': UA, Accept: 'application/json' };
   if (body) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = 'Bearer ' + token;
-  const r = await fetch((base || BASE) + p, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
-  const txt = await r.text();
-  let j; try { j = JSON.parse(txt); } catch { j = { message: txt.slice(0, 200) }; }
-  if (!r.ok) throw new Error(j.message || j.error || `OpenSubtitles svarade ${r.status}`);
-  return j;
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch((base || process.env.OPENSUBTITLES_API_URL || BASE) + p, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
+    const txt = await r.text();
+    let j; try { j = JSON.parse(txt); } catch { j = { message: txt.slice(0, 200) }; }
+    if (r.status === 429) {
+      const ra = backoff.retryAfterMs(r.headers.get('retry-after'));
+      if (attempt < 2 && (ra ?? 1000) <= SHORT_WAIT) { await sleep(Math.max(250, ra ?? 1000)); continue; }
+      throw Object.assign(new Error(j.message || 'OpenSubtitles: för många anrop (429)'), { rateLimited: true, retryAfter: ra, status: 429 });
+    }
+    if (!r.ok) throw Object.assign(new Error(j.message || j.error || `OpenSubtitles svarade ${r.status}`), { status: r.status });
+    return j;
+  }
 }
 
 async function userToken() {

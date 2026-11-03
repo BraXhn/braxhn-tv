@@ -15,6 +15,7 @@ import { bookRow, coverFile, coverPath, chaptersFor, lengthMatches, sortName } f
 import { probe } from './music.js';
 import { similarity, tokens } from './match.js';
 import { dropVariants } from './imgsize.js';
+import * as backoff from './backoff.js';
 
 const pexec = promisify(execFile);
 const base = (env, def) => String(process.env[env] || def).replace(/\/+$/, '');
@@ -63,8 +64,12 @@ async function readCapped(r, max) {
   for await (const c of r.body) { n += c.length; if (n > max) throw new Error('svaret är för stort'); chunks.push(c); }
   return Buffer.concat(chunks);
 }
+// En tjänst som svarat 429/403 pausas (backoff.js, per värd): inga anrop under pausen, en loggrad när den börjar
+const svcOf = (host) => `bookmeta:${host}`;
+const paused = (host) => Object.assign(new Error(`${host}: för många anrop – pausad`), { rateLimited: true, paused: true });
 async function fetchOk(url, accept) {
   const host = new URL(url).host;
+  if (backoff.waitMs(svcOf(host))) throw paused(host);
   await slot(host);
   let r;
   try { r = await fetch(url, { headers: { Accept: accept, 'User-Agent': UA() }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT) }); }
@@ -72,8 +77,13 @@ async function fetchOk(url, accept) {
   // Omdirigering får inte leda bort från värden (Open Library flyttar sammanslagna verk inom samma värd)
   if (new URL(r.url || url).host !== host) { r.body?.cancel().catch(() => {}); throw new Error(`${host} skickade vidare till en annan värd`); }
   if (r.status === 404) { r.body?.cancel().catch(() => {}); return null; }
-  if (r.status === 429 || r.status === 403) { r.body?.cancel().catch(() => {}); throw Object.assign(new Error(`${host}: för många anrop just nu (${r.status})`), { rateLimited: true }); }
+  if (r.status === 429 || r.status === 403) {
+    r.body?.cancel().catch(() => {});
+    backoff.limited(svcOf(host), { retryAfter: backoff.retryAfterMs(r.headers.get('retry-after')), label: host, tag: 'bokmetadata', why: `för många anrop (${r.status})` });
+    throw Object.assign(new Error(`${host}: för många anrop just nu (${r.status})`), { rateLimited: true });
+  }
   if (!r.ok) { r.body?.cancel().catch(() => {}); throw new Error(`${host} svarade ${r.status}`); }
+  backoff.ok(svcOf(host), { label: host, tag: 'bokmetadata' });
   return r;
 }
 async function getJson(url) {
@@ -386,19 +396,33 @@ export function queue(libId) {
 async function runLibrary(libId) {
   const lib = get("SELECT * FROM libraries WHERE id=? AND type='audiobook'", libId); if (!lib) return;
   const todo = all(`SELECT b.* FROM books b LEFT JOIN book_meta m ON m.book_id=b.id WHERE b.library_id=?
-    AND (m.book_id IS NULL OR (m.locked=0 AND (m.state=0 OR (m.state=2 AND COALESCE(m.tried, 0) < ?)))) ORDER BY b.added DESC LIMIT ?`, libId, now() - RETRY_DAYS * 86400, PER_RUN);
+    AND (m.book_id IS NULL OR (m.locked=0 AND (m.state=0 OR (m.state=2 AND COALESCE(m.tried, 0) < ?)))) AND COALESCE(m.next_try, 0) <= ?
+    ORDER BY b.added DESC LIMIT ?`, libId, now() - RETRY_DAYS * 86400, now(), PER_RUN);
   if (!todo.length) return;
   Object.assign(status, { library: lib.name, done: 0, total: todo.length });
   let errors = 0;
   for (const b of todo) {
     if (!enabled()) break;
     status.done++;
-    try { if (await autoMatch(b)) status.matched++; errors = 0; }
-    catch (e) {
+    try {
+      if (await autoMatch(b)) status.matched++;
+      errors = 0;
+      run('UPDATE book_meta SET rl_tries=0, next_try=NULL WHERE book_id=? AND (rl_tries>0 OR next_try IS NOT NULL)', b.id);
+    } catch (e) {
       status.error = e.message;
+      if (e.rateLimited) {
+        // För många anrop: pausen och loggraden sköts av backoff.js. Boken försöks igen senare (1 h, 4 h, 16 h …) så att
+        // nästa skanning inte börjar med samma bok och samma 429. Den markeras inte som "ingen träff".
+        // En pausad tjänst (inget anrop gjordes) räknas inte mot boken.
+        if (!e.paused) {
+          const tries = (get('SELECT rl_tries FROM book_meta WHERE book_id=?', b.id)?.rl_tries || 0) + 1;
+          upsert(b.id, { rl_tries: tries, next_try: now() + backoff.nextTrySec(tries) });
+        }
+        break;
+      }
       console.warn('[bokmetadata]', b.title, '–', e.message);
-      // Ingen kontakt eller dygnskvoten slut: försök igen vid nästa skanning (boken markeras inte som "ingen träff")
-      if (e.rateLimited || ++errors >= 3) break;
+      // Ingen kontakt: försök igen vid nästa skanning
+      if (++errors >= 3) break;
     }
   }
 }

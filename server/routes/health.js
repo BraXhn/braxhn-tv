@@ -11,7 +11,7 @@ import { ctx } from '../http/context.js';
 import { send, fail, readJson } from '../util.js';
 import { all, get, run, now, setSetting } from '../db.js';
 import { audit } from '../auth.js';
-import { tvdbOf } from '../scanner.js';
+import { tvdbOf, unreadableFiles } from '../scanner.js';
 import * as arr from '../arr.js';
 import * as health from '../health.js';
 import * as libfilter from '../libfilter.js';
@@ -33,7 +33,9 @@ route('GET', '/api/admin/health', admin, (c) => {
       library: r.library, libraryId: r.library_id, link: r.ikind === 'episode' ? r.parent_id : (r.version_of || r.item_id), file: r.path ? path.basename(r.path) : null };
   });
   const files = get('SELECT COUNT(*) AS n, MAX(checked) AS last FROM health_files');
-  send(c.res, 200, { issues, overrides: health.overrides(), kinds: health.KINDS,
+  // Filer som skanningen inte kunde läsa (ffprobe) – visas för sig, de har ingen rad i biblioteket att länka till
+  const unreadable = unreadableFiles().map(r => ({ file: path.basename(r.path), dir: path.dirname(r.path), library: r.library, error: r.error, tries: r.tries, at: r.at, skipped: r.skipped }));
+  send(c.res, 200, { issues, unreadable, overrides: health.overrides(), kinds: health.KINDS,
     status: { enabled: health.enabled(), running: health.running(), progress: health.progress(), last: health.lastPass(), files: files.n, checked: files.last },
     settings: { enabled: health.enabled(), samples: health.samples(), maxMbps: health.maxMbps() },
     arr: { movie: arr.configured('movie'), show: arr.configured('show') } });
