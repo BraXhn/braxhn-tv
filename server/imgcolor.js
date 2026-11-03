@@ -46,7 +46,11 @@ export function forget(id, types = TYPES) {
   kick();
 }
 
-// Bakgrundsjobbet: rader med bild men utan färg, i omgångar tills inget återstår
+// Bakgrundsjobbet: rader med bild men utan färg, i omgångar tills inget återstår. Delindexet items_color_todo (db.js) har
+// exakt samma villkor och ordning – ändras frågan ska indexet ändras likadant (test/large-library-perf.test.js).
+export const TODO_SQL = `SELECT id, poster, backdrop, thumb, poster_color, backdrop_color, thumb_color FROM items
+  WHERE (poster=1 AND poster_color IS NULL) OR (backdrop=1 AND backdrop_color IS NULL) OR (thumb=1 AND thumb_color IS NULL)
+  ORDER BY kind='episode', id DESC LIMIT ?`;
 let running = false, again = false, timer = null;
 async function work() {
   if (running) { again = true; return; }
@@ -54,9 +58,7 @@ async function work() {
   try {
     for (;;) {
       again = false;
-      const rows = all(`SELECT id, poster, backdrop, thumb, poster_color, backdrop_color, thumb_color FROM items
-        WHERE (poster=1 AND poster_color IS NULL) OR (backdrop=1 AND backdrop_color IS NULL) OR (thumb=1 AND thumb_color IS NULL)
-        ORDER BY kind='episode', id DESC LIMIT ?`, BATCH);
+      const rows = all(TODO_SQL, BATCH);
       if (!rows.length) { if (again) continue; break; }
       // Upp till PER_RUN bilder per ffmpeg-körning (att starta ffmpeg kostar mer än att läsa en affisch)
       const todo = [];

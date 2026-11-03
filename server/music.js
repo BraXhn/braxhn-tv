@@ -199,7 +199,8 @@ export function artist(id, uid) {
   const a = get('SELECT * FROM artists WHERE id=?', id);
   if (!a || !libOk(uid, a.library_id)) return null;
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
-  const popular = all(`${TRACK_SQL} WHERE t.artist_id=? OR al.artist_id=? ORDER BY (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id) DESC, t.title LIMIT 10`, id, id).map(t => shapeTrack(t, favs));
+  // Artistens spår och spåren på artistens album via index (med OR över två tabeller gick SQLite igenom alla spår)
+  const popular = all(`${TRACK_SQL} WHERE t.id IN (SELECT id FROM tracks WHERE artist_id=?1 UNION SELECT x.id FROM albums a JOIN tracks x ON x.album_id=a.id WHERE a.artist_id=?1) ORDER BY (SELECT COUNT(*) FROM track_plays p WHERE p.track_id=t.id) DESC, t.title LIMIT 10`, id).map(t => shapeTrack(t, favs));
   return { id: a.id, name: a.name, albums: all(`${ALBUM_SQL} WHERE al.artist_id=? ORDER BY al.year DESC`, id).map(shapeAlbum), popular };
 }
 /**

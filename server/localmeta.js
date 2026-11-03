@@ -91,6 +91,9 @@ function convert(src, out, maxW) {
 async function syncImages(row, want) {
   const local = localOf(row);
   for (const k of Object.keys(local)) if (!(k in want)) want[k] = null;
+  // Ingen lokal bild nu och ingen tidigare: inget att göra (vanligast). Utan den här kontrollen frågades låsen för
+  // varje titel i varje skanning – 66 000 frågor ≈ 1 s utan paus i ett stort bibliotek.
+  if (!Object.entries(want).some(([k, src]) => src || local[k])) return false;
   // En bild som administratören valt eller laddat upp är låst – den lokala filen läses igen först när låset tas bort
   const locks = imgLocksOf(get('SELECT img_locked FROM items WHERE id=?', row.id));
   for (const k of Object.keys(locks)) want[k] = undefined;

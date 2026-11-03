@@ -39,9 +39,11 @@ export function nested(paths) {
 /** Mappen som filen ligger i, eller null */
 export const rootOf = (roots, file) => roots.find(r => file.startsWith(r + path.sep)) || null;
 /** Filens sökväg relativt sin biblioteksmapp (som path.relative(lib.path, file) när biblioteket har en mapp) */
+// Under mappen: resten av sökvägen direkt (samma som path.relative för normaliserade sökvägar, som skanningens) –
+// path.relative löser upp båda sökvägarna varje gång, ~9 µs per fil och 0,5 s per skanning med 60 000 filer
 export function relOf(roots, file) {
   const r = rootOf(roots, file);
-  return r ? path.relative(r, file) : path.relative(roots[0], file);
+  return r ? file.slice(r.length + 1) : path.relative(roots[0], file);
 }
 
 /**

@@ -164,19 +164,26 @@ function showFor(lib, name, year, yearHint = null) {
 }
 /** Flytta avsnitt som ligger under fel serie (t.ex. två serier med samma namn men olika år som slogs ihop
  *  av tidigare versioner). Bara strängjämförelser – inga filer läses. */
-function regroupShows(lib) {
+async function regroupShows(lib) {
   lib._shows = null;
   // Seriens alla nycklar (mappnamnet och hopslagna mappar), jämförda med nkey
   const keyOf = new Map(all(`SELECT id, src_name, src_alias FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, new Set(keysOf(r).map(nkey))]));
   const has = (id, k) => !!keyOf.get(id)?.has(nkey(k));
   const eps = all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL`, lib.id);
   const touched = new Set(), years = new Map();
+  // Filnamnen tolkas en gång, i omgångar med paus emellan: 60 000 avsnitt tog annars ~2 s i ett svep varje skanning
+  // (händelseslingan stod still – strömmar och API-anrop fick vänta). Inget skrivs förrän allt är tolkat.
+  const parsed = new Map();
+  for (let i = 0; i < eps.length; i++) {
+    if (i && i % 2000 === 0) await new Promise(r => setImmediate(r));
+    parsed.set(eps[i].id, parseEpisode(rel(lib, eps[i].path)));
+  }
   // Ny tolkning av mappnamnen (t.ex. "Barn/Bluey" → "Bluey", "Paw Patrol (Svenskt tal)" → "Paw Patrol"): flyttar alla en
   // series avsnitt till samma nya nyckel som ingen annan serie har byter serien bara namn – raden behåller metadata,
   // låsning ("Fel titel?") och Min lista
   const moves = new Map();
   for (const e of eps) {
-    const p = parseEpisode(rel(lib, e.path));
+    const p = parsed.get(e.id);
     const k = p ? showKey(p.show, p.year) : null;
     if (!moves.has(e.parent_id)) moves.set(e.parent_id, new Set());
     moves.get(e.parent_id).add(k && !has(e.parent_id, k) ? k : '');
@@ -192,7 +199,7 @@ function regroupShows(lib) {
       keyOf.set(sid, new Set([nkey(k)])); taken.add(nkey(k));
     }
     for (const e of eps) {
-      const p = parseEpisode(rel(lib, e.path));
+      const p = parsed.get(e.id);
       if (!p) continue;
       const key = showKey(p.show, p.year);
       if (has(e.parent_id, key)) continue;
@@ -354,15 +361,16 @@ async function scanLibrary(lib) {
   const found = [], sideFiles = [], themeFiles = [];
   // Extramaterial (trailers, featurettes, borttagna scener …) blir inte egna titlar – de kopplas till titeln efteråt.
   // Lokal metadata (NFO, bilder) i extramaterialets mappar hör inte till någon titel.
+  // Varje fil tolkas en gång (relOf + extraOf två gånger per fil tog ~1 s i ett stort bibliotek, utan paus)
   const legacy = isLegacy(lib), extraKind = (f) => extraOf(relOf(roots, f).split(path.sep), { legacy });
+  const extraFiles = [], titleFiles = [];
   for (const f of list.files) {
-    const n = path.basename(f), x = extraKind(f);
-    if (THEME.test(n)) themeFiles.push(f);
-    else if (isVideo(n)) found.push(f);
+    const n = path.basename(f);
+    if (THEME.test(n)) { themeFiles.push(f); continue; }
+    const x = extraKind(f);
+    if (isVideo(n)) { if (x !== 'skip') (x ? extraFiles : titleFiles).push(f); found.push(f); }
     else if (!x) sideFiles.push(f);
   }
-  const extraFiles = [], titleFiles = [];
-  for (const f of found) { const x = extraKind(f); if (x === 'skip') continue; (x ? extraFiles : titleFiles).push(f); }
   // Kopierade Blu-ray-skivor: bara huvudfilmen blir en titel (inte varningar, loggor och menyer)
   const files = await discMainOnly(titleFiles);
   // Onumrerade avsnitt numreras i namnordning per mapp, efter mappens högsta riktiga avsnittsnummer.
@@ -393,7 +401,7 @@ async function scanLibrary(lib) {
   for (const d of failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime,episode,ep_guess,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
-  if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); reparseEpisodes(lib); }
+  if (lib.type === 'show') { backfillSrcNames(lib); await regroupShows(lib); reparseEpisodes(lib); }
   const seen = new Set(), touched = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
   const newMovies = []; // nyskapade filmer (webhooken library.new)

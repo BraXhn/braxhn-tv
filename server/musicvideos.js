@@ -143,7 +143,8 @@ export function classify(file, roots, ix, tags = {}) {
 export async function syncVideos(lib, files, { list, allFiles, status = {} }) {
   const roots = lib.roots || rootsOf(lib);
   const known = new Map(all('SELECT * FROM music_videos WHERE library_id=?', lib.id).map(r => [r.path, r]));
-  const ix = trackIndex(lib.id);
+  // Låtindexet byggs först när det finns en video (50 000 låtar ≈ 0,4 s utan paus i varje skanning annars)
+  let ix = null;
   const seen = new Set();
   let added = 0;
   for (const f of files) {
@@ -157,7 +158,7 @@ export async function syncVideos(lib, files, { list, allFiles, status = {} }) {
       if (!info.video) continue; // t.ex. en .mp4 med bara ljud
     }
     const tags = info ? { artist: info.artist, title: info.title } : { artist: row.tag_artist, title: row.tag_title };
-    const c = classify(f, roots, ix, tags);
+    const c = classify(f, roots, ix ??= trackIndex(lib.id), tags);
     if (!c) { if (row) run('DELETE FROM music_videos WHERE id=?', row.id); continue; }
     if (row && !info) { run('UPDATE music_videos SET artist_id=?, track_id=?, title=?, kind=? WHERE id=?', c.artistId, c.trackId, c.title, c.kind, row.id); continue; }
     if (row) {

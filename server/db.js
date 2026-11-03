@@ -428,7 +428,10 @@ addCol('items', 'f_slang', 'TEXT');
 addCol('items', 'f_ach', 'INTEGER');
 addCol('items', 'f_atmos', 'INTEGER');
 addCol('items', 'f_v', 'INTEGER');
-db.exec(`CREATE INDEX IF NOT EXISTS items_facets_todo ON items(id) WHERE f_v IS NULL AND path IS NOT NULL;
+// Det som väntar på omräkning (refreshFacets, pendingCount): indexet är på f_v – ett delindex på id (radnumret) väljer
+// SQLite aldrig, och då gick varje omgång igenom hela items från början (65 000 avsnitt: 8 s i stället för 3,4 s).
+// Det gamla items_facets_todo tas bort i versionsmigreringen 8.
+db.exec(`CREATE INDEX IF NOT EXISTS items_fv_todo ON items(f_v) WHERE f_v IS NULL AND path IS NOT NULL;
 CREATE TRIGGER IF NOT EXISTS items_facets_upd AFTER UPDATE OF streams, path ON items WHEN NEW.f_v IS NOT NULL
 BEGIN UPDATE items SET f_v=NULL WHERE id=NEW.id; END;`);
 // Smarta samlingar (server/customcollections.js): kind 'smart' = innehållet räknas fram vid visning ur def
@@ -713,8 +716,20 @@ db.exec(`CREATE TABLE IF NOT EXISTS recaps(id INTEGER PRIMARY KEY, key TEXT NOT 
 CREATE INDEX IF NOT EXISTS recaps_show ON recaps(show_id);
 CREATE INDEX IF NOT EXISTS recaps_used ON recaps(used);`);
 
+// ---- Index för stora bibliotek (uppmätt med 5 000 filmer, 60 000 avsnitt, 50 000 låtar; test/large-library-perf.test.js) ----
+//   items_color_todo  bildfärgernas bakgrundsjobb (imgcolor.js): nästa omgång utan att gå igenom hela items (37 → 0,1 ms
+//                     per omgång, tusentals omgångar efter en första skanning). Uttrycken måste vara exakt som i frågan.
+//   items_kind_rating Liknande titlar (similarTo): de 2 000 med högst betyg utan att sortera alla (16 → 4 ms per titelsida)
+//   tracks_album_dur  albumlistan: antal spår och speltid per album ur indexet (23 → 12 ms för 4 000 album)
+//   items_search      sökningen (search.js ranked): förurvalet med instr() läser indexet i stället för hela raderna – se
+//                     slutet av filen (kolumnen skapas av searchKeys)
+db.exec(`CREATE INDEX IF NOT EXISTS items_color_todo ON items(kind='episode', id DESC)
+  WHERE (poster=1 AND poster_color IS NULL) OR (backdrop=1 AND backdrop_color IS NULL) OR (thumb=1 AND thumb_color IS NULL);
+CREATE INDEX IF NOT EXISTS items_kind_rating ON items(kind, rating);
+CREATE INDEX IF NOT EXISTS tracks_album_dur ON tracks(album_id, duration);`);
+
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
-const LATEST = 7;
+const LATEST = 8;
 let ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver < 2) {
   // v0.2: analysera om alla filer (HDR-info, bildundertexter)
@@ -744,6 +759,12 @@ if (ver < 7) {
   // E-böcker och serietidningar: libraries.type tillåter 'ebook' (allowLibraryType ovan)
   allowLibraryType('ebook');
   ver = 7;
+}
+if (ver < 8) {
+  // Prestanda med stora bibliotek: delindexet på id användes aldrig (ersatt av items_fv_todo ovan). De nya indexen
+  // skapas med IF NOT EXISTS (se "Index för stora bibliotek" ovan; items_search i slutet av filen).
+  db.exec('DROP INDEX IF EXISTS items_facets_todo');
+  ver = 8;
 }
 if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
 // Äldre programversion mot en nyare databas (t.ex. efter återgång till en gammal image): fungerar oftast,
@@ -896,6 +917,10 @@ export const now = () => Math.floor(Date.now() / 1000);
 
 // Söknycklar för tabellerna i db.js (övriga moduler anropar searchKeys efter sin CREATE TABLE)
 searchKeys('items', ['title'], ['original_title']);
+// Sökningens förurval (instr på skeyc) per typ: SQLite prövar villkoret på indexet och läser bara träffarnas rader.
+// Delindex (skey IS NOT NULL, som sökfrågan alltid har): ett vanligt index på (kind, version_of) valdes annars av
+// listItems för alla listor (kind=? AND version_of IS NULL) och startsidan tog 500 ms i stället för 40.
+db.exec('CREATE INDEX IF NOT EXISTS items_search ON items(kind, version_of, skeyc) WHERE skey IS NOT NULL');
 searchKeys('artists', ['name']);
 searchKeys('albums', ['title']);
 searchKeys('tracks', ['title']);

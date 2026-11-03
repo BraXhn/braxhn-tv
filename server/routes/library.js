@@ -586,10 +586,12 @@ function collapseCollections(items) {
   return out;
 }
 /** TMDB-samlingarna profilen får se: minst två filmer; antal och år räknas bara på det profilen får se (v = synlig) */
+// CROSS JOIN: samlingarna först och deras filmer via items_coll – annars gick SQLite igenom alla filmer (7,6 → 1,2 ms
+// med 5 000 filmer; startsidan frågar varje gång)
 function collectionsFor(uid) {
   const age = ageFilter(uid);
   const cols = all(`SELECT c.*, COUNT(*) AS total, SUM(m.v) AS n, MIN(CASE WHEN m.v THEN m.y END) AS y0, MAX(CASE WHEN m.v THEN m.y END) AS y1
-    FROM collections c JOIN (SELECT i.collection_id AS cid, i.year AS y, (1${age.sql}) AS v FROM items i LEFT JOIN items s ON s.id=i.parent_id
+    FROM collections c CROSS JOIN (SELECT i.collection_id AS cid, i.year AS y, (1${age.sql}) AS v FROM items i LEFT JOIN items s ON s.id=i.parent_id
       WHERE i.collection_id IS NOT NULL AND i.kind='movie'${MAIN_ONLY}) m ON m.cid=c.id
     GROUP BY c.id HAVING total >= 2 AND n > 0 ORDER BY c.name`, ...age.params);
   return cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,

@@ -50,6 +50,27 @@ export function refreshFacets(max = 500) {
   });
   return rows.length;
 }
+// Kontrollen efter skanning: alla filer räknas om i id-ordning, men bara ändrade värden skrivs. Förut nollställdes f_v
+// för alla och skrevs tillbaka – varje rad i items skrevs om två gånger per skanning (varje timme), och omgångarna
+// räknades om från början. recheck = nästa id att kontrollera (null = ingen kontroll), small = få nog att göra direkt.
+let recheck = null, recheckSmall = false;
+/** Kontrollerar upp till max räknade filer efter en skanning. Returnerar antalet (0 = klar). */
+export function recheckFacets(max = 500) {
+  if (recheck == null) return 0;
+  const rows = all(`SELECT id, path, streams, f_alang, f_slang, f_ach, f_atmos FROM items WHERE id > ? AND f_v IS NOT NULL AND path IS NOT NULL ORDER BY id LIMIT ?`, recheck, max);
+  if (!rows.length) { recheck = null; return 0; }
+  recheck = rows[rows.length - 1].id;
+  const changed = [];
+  for (const r of rows) {
+    const f = facetsOf(r);
+    if (f.alang !== r.f_alang || f.slang !== r.f_slang || f.ach !== r.f_ach || f.atmos !== r.f_atmos) changed.push([r.id, f]);
+  }
+  if (changed.length) {
+    tx(() => { for (const [id, f] of changed) run('UPDATE items SET f_alang=?, f_slang=?, f_ach=?, f_atmos=? WHERE id=?', f.alang, f.slang, f.ach, f.atmos, id); });
+    clearFacets();
+  }
+  return rows.length;
+}
 let running = false;
 /** Räknar om allt som väntar i bakgrunden, i omgångar (blockerar inte servern) */
 export function kickFacets() {
@@ -57,21 +78,23 @@ export function kickFacets() {
   running = true;
   const step = () => {
     let n = 0;
-    try { n = refreshFacets(200); } catch (e) { console.warn('[filter] fil-egenskaper:', e.message); }
+    try { n = refreshFacets(200) || recheckFacets(200); } catch (e) { console.warn('[filter] fil-egenskaper:', e.message); }
     if (n) setImmediate(step); else running = false;
   };
   setImmediate(step);
 }
 /** Före en fråga som använder f_*: små mängder räknas direkt, stora i bakgrunden (svaret använder de gamla värdena) */
 function ensureFacets() {
+  if (recheckSmall && recheck != null) while (recheckFacets(500));
   const n = pendingCount();
   if (!n) return;
   if (n <= 2000) { while (refreshFacets(500)); return; }
   kickFacets();
 }
-/** Efter skanning: undertextfiler kan ha lagts till/tagits bort bredvid filerna – räkna om allt i bakgrunden */
+/** Efter skanning: undertextfiler kan ha lagts till/tagits bort bredvid filerna – kontrollera allt i bakgrunden */
 export function afterScan() {
-  run('UPDATE items SET f_v=NULL WHERE f_v IS NOT NULL AND path IS NOT NULL');
+  recheck = 0;
+  recheckSmall = get('SELECT COUNT(*) AS n FROM items WHERE path IS NOT NULL').n <= 2000;
   kickFacets();
 }
 /** En titels undertexter ändrades (nedladdning/borttagning) */
