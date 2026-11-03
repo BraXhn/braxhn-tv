@@ -32,6 +32,8 @@ import * as sublines from './sublines.js';
 import * as prestart from './prestart.js';
 import * as health from './health.js';
 import * as family from './familyfilter.js';
+import * as jobs from './jobs.js';
+import './loopmon.js'; // händelseslingans fördröjning (Statistik, diagnos vid hack)
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/sso.js'; // enkel inloggning: OIDC, bekräftad koppling, Mitt konto och administration
@@ -64,8 +66,13 @@ import './routes/photos.js';
 import './routes/ebooks.js'; // e-böcker och serietidningar, lösenord för läsappar och OPDS (/api/opds/*)
 export { handle } from './http/router.js';
 
+// Någon tittar: en HLS-ström hämtas (segment de senaste 20 s) eller en uppspelning (även direkt) skickar framsteg och
+// är inte pausad. Alla bakgrundsjobb väntar då eller går långsamt (jobs.yieldToPlayback, busy-kontrollerna nedan).
+jobs.setWatching(() => st.streamingNow() || act.watchingNow());
+const busy = () => st.activeTranscodes().length > 0 || jobs.watching();
 // Skanningen kontrollerar bara att nyckelbildsfilen finns (läser inte in alla listor i minnet)
 hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
+hooks.keyframesCached = (it) => st.keyframesCached(it);
 hooks.markers = (lib, status) => detectMarkers(lib, status);
 hooks.trickplay = (lib, status) => trick.generateLibrary(lib, status);
 // Artistbilder, biografier och albumtyper från nätet hämtas i bakgrunden efter musikskanningen (skanningen väntar inte)
@@ -91,7 +98,7 @@ booktools.setRescan((libId) => scan(libId));
 hooks.photos = (lib, status) => photos.scanPhotos(lib, status);
 // E-böcker och serietidningar (ebooks.js): metadata och omslag ur filerna
 hooks.ebooks = (lib, status) => ebooks.scanEbooks(lib, status);
-photos.setBusyCheck(() => st.activeTranscodes().length > 0);
+photos.setBusyCheck(busy);
 photos.kickThumbs(30000);
 // Snabbstart: startcachen kopplas in i strömningen; nya titlar har just lästs av skanningen (disken är vaken)
 st.fastStart.direct = prestart.serveDirect;
@@ -123,13 +130,13 @@ colors.kick(20000);
 // Filtrens fil-egenskaper för titlar som inte räknats än (t.ex. efter uppgradering)
 setTimeout(() => libfilter.kickFacets(), 15000).unref();
 // Ljudanalysen fortsätter där den slutade (efter omstart) och väntar medan video omkodas eller flera ljudströmmar kodas om
-sonic.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
+sonic.setBusyCheck(() => busy() || music.audioTranscodes() >= 2);
 sonic.kick(60000);
 // Glapplöst/övertoning: trim och tystnad i kanterna för spår som inte analyserats (lägsta prioritet, väntar under omkodning)
-gapless.setBusyCheck(() => st.activeTranscodes().length > 0 || music.audioTranscodes() >= 2);
+gapless.setBusyCheck(() => busy() || music.audioTranscodes() >= 2);
 gapless.kick(75000);
 // Repliksökningen fortsätter där den slutade och väntar medan video omkodas
-sublines.setBusyCheck(() => st.activeTranscodes().length > 0);
+sublines.setBusyCheck(busy);
 sublines.kick(90000);
 // Hälsokontrollen: rättad språkmärkning läggs på spåren; jobbet väntar medan något spelas eller kodas om
 st.setLangFix(health.langFixFor);
@@ -144,7 +151,7 @@ st.setFamilyForce((uid, it, audio) => {
   const a = audio !== '' ? st.streamsOf(it).find(x => x.type === 'audio' && String(x.index) === String(audio)) : null;
   return family.muteIntervals(it, a?.lang).length > 0;
 });
-health.setBusyCheck(() => st.activeTranscodes().length > 0 || act.listActive().length > 0);
+health.setBusyCheck(() => busy() || act.listActive().length > 0);
 health.kick(+(process.env.HEALTH_START_DELAY ?? 120000));
 
 // Filbevakning: skanna direkt när filer läggs till/tas bort (med periodisk skanning som reserv)

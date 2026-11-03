@@ -342,6 +342,8 @@ export async function pass() {
   try {
     do {
       S.again = false;
+      // Hela genomgången (även biblioteksfynden och listningen av undertexter) väntar medan någon tittar
+      while (busy()) await sleep(10e3);
       const t0 = Date.now();
       libraryPass();
       const have = new Map(all('SELECT item_id, sig, sub_sig, ver FROM health_files').map(r => [r.item_id, r]));
@@ -350,7 +352,7 @@ export async function pass() {
         const it = items[k], h = have.get(it.id), sig = fileSig(it), ss = subSigOf(it);
         if (!h || h.sig !== sig || h.ver !== VERSION) todo.push({ it, full: true, sig, ss });
         else if ((h.sub_sig || '') !== ss) todo.push({ it, full: false, sig, ss });
-        if (k % 200 === 199) await new Promise(r => setImmediate(r));
+        if (k % 25 === 24) await new Promise(r => setImmediate(r)); // varje titel läser mappen och undertextfilerna synkront
       }
       S.done = 0; S.total = todo.length;
       if (todo.length) jb = jobs.track('health', 'Hälsokontroll av biblioteket', { total: todo.length });

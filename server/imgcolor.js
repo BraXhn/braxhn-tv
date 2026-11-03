@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { lowPriority } from './util.js';
+import * as jobs from './jobs.js';
 import { all, run, tx, IMAGES } from './db.js';
 
 export const TYPES = ['poster', 'backdrop', 'thumb'];
@@ -61,6 +62,7 @@ async function work() {
       const todo = [];
       for (const r of rows) for (const t of TYPES) if (r[t] && r[COL[t]] == null) todo.push({ id: r.id, t, f: path.join(IMAGES, `${r.id}-${t}.jpg`) });
       for (let k = 0; k < todo.length; k += PER_RUN) {
+        await jobs.yieldToPlayback({ gap: 100 });
         const part = todo.slice(k, k + PER_RUN), have = part.filter(x => fs.existsSync(x.f));
         const got = await averageColors(have.map(x => x.f));
         have.forEach((x, i) => { x.c = got[i]; });

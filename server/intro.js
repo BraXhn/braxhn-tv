@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { lowPriority } from './util.js';
+import * as jobs from './jobs.js';
 import { all, run, tx, CACHE, getSetting } from './db.js';
 
 const SR = 5512, FRAME = 2048, HOP = 256;
@@ -285,6 +286,7 @@ export async function detectMarkers(lib, status) {
   for (const g of groups) {
     const eps = all(`SELECT id, path, mtime, duration FROM items WHERE parent_id=? AND season=? AND duration > 120 ORDER BY episode`, g.parent_id, g.season);
     if (eps.length < 2) { run('UPDATE items SET markers_done=1 WHERE parent_id=? AND season=?', g.parent_id, g.season); continue; }
+    await jobs.yieldToPlayback({ pause: true }); // ljudanalysen väntar medan någon tittar
     try { await season(eps, status); } catch (e) { console.warn('[intro] säsong misslyckades', e.message); }
   }
 }

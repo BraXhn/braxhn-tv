@@ -18,6 +18,7 @@ import { Readable, pipeline } from 'node:stream';
 import { execFile } from 'node:child_process';
 import { all, get, getSetting, setSetting } from './db.js';
 import { librariesWithRoots, rootOf } from './libpaths.js';
+import * as jobs from './jobs.js';
 
 const GB = 1e9, MB = 1 << 20;
 const OWN = /^(\d+)\.(json|p\d+|p\d+\.part|json\.part)$/;
@@ -390,6 +391,9 @@ export async function tick({ force = false } = {}) {
       const e = usable(cand.it);
       if (e && (e.key === keyOf(w) || Date.now() - (e.used || 0) < (over.quietMs ?? REFILL_QUIET))) continue;
       if (!force && !awakeFor(cand.it, c)) continue;
+      // Kopieringen läser samma diskar som strömmarna: den väntar medan någon tittar (Fyll nu: bara korta pauser)
+      await jobs.yieldToPlayback(force ? { gap: 200 } : { pause: true });
+      if (!config().on) break;
       try { if (await fill(c, cand, rank, w)) { filled++; state.lastFill = { id: cand.it.id, title: cand.it.title, at: Date.now() }; } }
       catch (er) { console.warn('[snabbstart] kunde inte kopiera', cand.it.path, er.message); }
       // Nyckelbildsindexet (remux) tas fram nu när disken ändå är vaken

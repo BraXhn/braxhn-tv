@@ -13,6 +13,7 @@ import * as gapless from './gapless.js';
 import * as sonic from './sonic.js';
 import { libOk, libFilter } from './perms.js';
 import * as mvideo from './musicvideos.js';
+import * as jobs from './jobs.js';
 
 const pexec = promisify(execFile);
 export const AUDIO = new Set(['.m4b', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.alac', '.wma', '.aiff', '.aif', '.ape', '.wv', '.mka']);
@@ -103,6 +104,7 @@ export async function scanMusic(lib, status) {
     let st; try { st = await fs.promises.stat(f); } catch { continue; }
     const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
     if (k && k.size === st.size && k.mtime === mtime) continue;
+    await jobs.yieldToPlayback({ gap: 50 }); // medan någon tittar: en kort paus mellan spåren
     let info;
     try { info = await probe(f); } catch (e) { console.warn('[music] ffprobe', f, e.message); continue; }
     const t = info.tags, fp = fromPath(lib, f);

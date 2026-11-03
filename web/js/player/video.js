@@ -3,6 +3,8 @@ import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr, t } from
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
+import { abrClass, hlsConfig } from './hlsconfig.js';
+import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
@@ -102,7 +104,9 @@ export async function play(id, start = 0, opts = {}) {
       <div class="setgrp"><b>${t('Ljud')}</b>
         <label class="chk"><input type="checkbox" id="pnight"> ${t('Nattläge')} <span class="muted">${t('jämnare ljud, svaga ljud lyfts')}</span></label>
         <label class="chk"><input type="checkbox" id="pdialog"> ${t('Tydligare dialog')} <span class="muted">${t('rösterna förstärks')}</span></label></div>
-      <details class="setgrp"><summary>${t('Undertextens utseende')}</summary>${subStyleFields('pst')}</details></div>
+      <details class="setgrp"><summary>${t('Undertextens utseende')}</summary>${subStyleFields('pst')}</details>
+      <button class="ghost small" id="pstatsbtn" aria-pressed="false" aria-controls="pstats">${t('Statistik')}</button></div>
+    <dl class="pstats" id="pstats" role="region" aria-label="${t('Statistik för uppspelningen')}" aria-live="off" hidden></dl>
     <div class="ctl" id="ctl">
       <div class="learnbar" id="plearnbar" role="toolbar" aria-label="${t('Språkinlärning')}" hidden></div>
       <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="${t('Tidslinje')}" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"><div class="preview" id="prev" hidden><div class="pimg" id="pimg"></div><span id="ptime"></span></div>
@@ -134,6 +138,8 @@ export async function play(id, start = 0, opts = {}) {
   initFilter(cur, v); // familjefiltret: tysta svordomar, hoppa över scener, markera scener under ⚙
   // "Det här har hänt": servern avgör om sammanfattningen erbjuds (första avsnittet i en ny säsong efter ett uppehåll)
   if (it.kind === 'episode' && !(start > 0) && !partyId) need('player/recap.js').then(m => { if (P === cur) m.offerRecap(cur, v); }).catch(() => {});
+  const sb = q('#pstatsbtn');
+  sb.onclick = () => sb.setAttribute('aria-pressed', String(toggleStats(cur, v, q('#pstats'))));
   q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
   q('#prate').value = String(rate);
   q('#prate').onchange = (e) => { rate = +e.target.value; v.defaultPlaybackRate = v.playbackRate = rate; };
@@ -372,16 +378,10 @@ async function load(start, { play = true } = {}) {
     if (!live()) return;
     if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
     // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
-    // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner
-    // Omkodning av HEVC/4K kan ta mer än hls.js standard (10 s) innan första byten kommer. Ge upp för tidigt så
-    // försöker spelaren igen eller byter kvalitetssteg – då startar servern om omkodningen och filmen kommer aldrig
-    // igång. Servern väntar själv upp till 90 s på ett segment.
-    const slow = { maxTimeToFirstByteMs: 60000, maxLoadTimeMs: 180000, timeoutRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 4000 },
-      errorRetry: { maxNumRetry: 4, retryDelayMs: 1000, maxRetryDelayMs: 8000 } };
-    // capLevelToPlayerSize: hämta inte 1080p till en telefonskärm; startgissningen från mätningen ovan
+    // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner. Buffertar, glapp, väntetider
+    // och bandbreddsmätningen (från första byte – serverns omkodning är inte nätet): se hlsconfig.js
     const est = lastBandwidth() ? lastBandwidth() * 1000 * 0.8 : 6e6;
-    const hls = cur.hls = new Hls({ startPosition: start, maxBufferLength: 40, abrEwmaDefaultEstimate: est, capLevelToPlayerSize: true,
-      fragLoadPolicy: { default: slow }, xhrSetup: (x) => { x.withCredentials = true; } });
+    const hls = cur.hls = new Hls(hlsConfig({ start, est, Abr: abrClass(Hls), xhrSetup: (x) => { x.withCredentials = true; } }));
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
       if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = t('{label}{vcl} · {height}p (anpassas){v}', { label, vcl, height: l.height, v: pb.remote ? t(' · utanför hemmet') : '' });
@@ -438,6 +438,8 @@ async function load(start, { play = true } = {}) {
   tryPlay();
   // Står filmen still fast den spelar (glapp i början av strömmen m.m.) puttas den igång – som när man pausar och startar
   cur.stall?.(); cur.stall = watchStall(v, { live });
+  // Mätvärden för Statistik och rapport till servern när uppspelningen hackar (orsaken loggas där)
+  cur.unwatch?.(); cur.unwatch = watchPlayback(cur, v, cur.hls, window.Hls);
   applyAudioFx(v);
 }
 /** Omkodad HEVC/AV1 som inte gick att avkoda: ladda om med H.264 (en gång per uppspelning). true = laddar om. */
@@ -502,7 +504,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
-  pgsStop(P); textStop(P); stopAudioFx(v); stopFilter(P);
+  pgsStop(P); textStop(P); stopAudioFx(v); stopFilter(P); stopStats(P); P.unwatch?.(); P.unwatch = null;
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);

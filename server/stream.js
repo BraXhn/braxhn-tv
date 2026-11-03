@@ -583,15 +583,18 @@ export function computeKeyframes(it, { priority = false } = {}) {
     try {
       // Snabba vägen: filens eget index (MKV Cues / MP4 moov) – sekunder i stället för att läsa hela filen.
       // fMP4-remux (HEVC) delar på varje nyckelbild och kräver en komplett lista; TS (H.264) klarar ett urval.
-      const fast = await fastKeyframes(it.path, it.duration);
+      const fast = await fastKeyframes(it.path, it.duration, { low: !priority });
       let kf = fast && (fast.complete || it.vcodec === 'h264') ? fast.kf : null;
       if (!kf) {
         const t0 = Date.now();
         const jb = jobs.track('keyframes', `Indexerar nyckelbilder: ${it.title || path.basename(it.path)}`, { detail: 'läser hela filen' });
         let stdout;
         try {
-          ({ stdout } = await pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
-            '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 }));
+          // Hela filen läses: i bakgrunden med lägsta prioritet för processor och disk (strömmar går före)
+          const pr = pexec('ffprobe', ['-v', 'error', ...SAFE_IN, '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags',
+            '-of', 'csv=p=0', it.path], { maxBuffer: 256 << 20, timeout: 30 * 60000 });
+          if (!priority) lowPriority(pr.child);
+          ({ stdout } = await pr);
         } finally { jb.end(); }
         kf = [];
         for (const line of stdout.split('\n')) {
@@ -1052,6 +1055,7 @@ export function fragStart(file) {
 // exakt vid -ss – de första ~0,25 s av segmentet blev tysta och ljudet glappade mot föregående segment.
 // Utan exakt sökning avkodas ljudet från samma ställe som bilden.
 const REMUX_SEEK = ['-noaccurate_seek'];
+const STREAM_NICE = Math.max(0, Math.min(19, parseInt(process.env.STREAM_NICE ?? '3', 10) || 0));
 
 function startFfmpeg(s, it, n) {
   stopProc(s);
@@ -1111,7 +1115,23 @@ function startFfmpeg(s, it, n) {
     // gamla filer framåt kan komma från en annan körning – skapa om dem för entydig klarsignal
     for (const f of fs.readdirSync(s.dir)) { const m = /^seg_(\d+)\.(ts|m4s)$/.exec(f); if (m && +m[1] >= n) fs.rmSync(path.join(s.dir, f), { force: true }); }
   }
-  const p = spawn('ffmpeg', args, { stdio: [pipeIn ? 'pipe' : 'ignore', 'ignore', 'pipe'], env: { ...process.env, SVT_LOG: '1' } });
+  // -progress: ffmpeg skriver hur långt utdata kommit varje sekund – serverns hastighet (× realtid) i Statistik
+  // och i diagnosen vid hack (hinner omkodningen med?)
+  const p = spawn('ffmpeg', ['-progress', 'pipe:1', '-stats_period', '1', ...args], { stdio: [pipeIn ? 'pipe' : 'ignore', 'pipe', 'pipe'], env: { ...process.env, SVT_LOG: '1' } });
+  // Strömmens ffmpeg något under serverns egen prioritet (nice 3, bakgrundsjobben har 19): en omkodning som tar alla
+  // kärnor trängde annars undan Node-tråden som skickar segmenten (händelseslingan stod still upp till 0,24 s)
+  if (STREAM_NICE) { try { os.setPriority(p.pid, Math.min(19, os.getPriority(process.pid) + STREAM_NICE)); } catch {} }
+  s.prog = { at: null, out: null, speed: null };
+  let pbuf = '';
+  p.stdout?.on('data', (c) => {
+    pbuf += c;
+    let i;
+    while ((i = pbuf.indexOf('\n')) >= 0) {
+      const line = pbuf.slice(0, i); pbuf = pbuf.slice(i + 1);
+      if (line.startsWith('out_time_us=')) noteProgress(s, p, +line.slice(12) / 1e6);
+    }
+    if (pbuf.length > 4096) pbuf = '';
+  });
   if (pipeIn) {
     // Originalfilen ändrades eller gick inte att läsa: avbryt (nästa segment startar om från filen)
     pipeIn.on('error', (e) => { console.warn('[hls] startcachen:', e.message); p.kill('SIGKILL'); });
@@ -1156,7 +1176,7 @@ function startFfmpeg(s, it, n) {
     // Hårdvaran fungerar inte: nästa start (spelaren väntar och servern försöker igen) använder processorn
     if (code && !sig && d.mode === 'transcode' && HW !== 'none' && HW_FAIL.test(err)) disableHw(err);
   });
-  s.proc = p; s.paused = false; s.start = n; s.done = false; s.total = segs.length;
+  s.proc = p; s.paused = false; s.start = n; s.done = false; s.total = segs.length; s.segs = segs;
   if ((s.trimmed ?? -1) >= n) s.trimmed = n - 1; // spolat bakåt: segmenten därifrån skapas på nytt
 }
 
@@ -1164,8 +1184,24 @@ function startFfmpeg(s, it, n) {
 // till disk på några minuter. Den återupptas när spelaren närmar sig eller ber om något som saknas.
 // Omkodning ligger högst ~70 s före (som Plex standardbuffert på 60 s): processorn/grafikkortet arbetar inte i
 // onödan med minuter som kanske aldrig ses (spolning, avbrott) och lämnar utrymme åt andra strömmar.
-const AHEAD = 40, AHEAD_TRANSCODE = 12;
-function resume(s) { if (s.paused && s.proc) s.proc.kill('SIGCONT'); s.paused = false; }
+// Omkodningen fortsätter redan när den ligger mindre än AHEAD_TRANSCODE − 3 segment före (förut först under hälften,
+// 36 s): kodaren står inte still i onödan och hinner bygga upp ett försprång i lätta scener som räcker genom tunga
+// scener och stunder när processorn har annat att göra.
+const AHEAD = 40, AHEAD_TRANSCODE = 15, RESUME_TRANSCODE = AHEAD_TRANSCODE - 3;
+function resume(s) {
+  if (s.paused && s.proc) { s.proc.kill('SIGCONT'); if (s.prog) s.prog.at = null; } // pausen räknas inte in i hastigheten
+  s.paused = false;
+}
+/** ffmpegs -progress: utdatans tid → hastighet (× realtid, glidande medel) medan processen inte är pausad */
+function noteProgress(s, p, out) {
+  if (s.proc !== p || !Number.isFinite(out) || out < 0) return;
+  const now = performance.now() / 1000, g = s.prog;
+  if (g.at != null && !s.paused && out > g.out && now - g.at < 5) {
+    const inst = (out - g.out) / Math.max(0.05, now - g.at);
+    g.speed = g.speed == null ? inst : g.speed * 0.7 + inst * 0.3;
+  }
+  g.at = now; g.out = out;
+}
 // Segment långt bakom uppspelningen tas bort – annars hamnar en hel film i omkodningsmappen
 // (ofta /tmp = RAM i Unraid). Spolar man tillbaka skapas de igen.
 const BEHIND = 30;
@@ -1180,7 +1216,7 @@ function throttle(s, n) {
   if (!s.proc) return;
   const ahead = highestFile(s) - n, max = s.d.mode === 'transcode' ? AHEAD_TRANSCODE : AHEAD;
   if (!s.paused && ahead > max) { s.proc.kill('SIGSTOP'); s.paused = true; }
-  else if (s.paused && ahead < max / 2) resume(s);
+  else if (s.paused && ahead < (s.d.mode === 'transcode' ? RESUME_TRANSCODE : max / 2)) resume(s);
 }
 function stopProc(s) {
   s.paused = false;
@@ -1356,13 +1392,18 @@ export async function serveSegment(req, res, it, n, query, userId) {
   const total = segmentsOf(it, d).length;
   s.total = total;
   if (!(Number.isInteger(n) && n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
+  let waitMs = 0;
+  s.reqN = n; s.reqAt = Date.now();
   if (!complete(s, n)) {
     s.waiting++;
     const w0 = Date.now();
     try { const r = await awaitSegment(req, res, it, s, n, userId); if (r !== true) return; }
     finally { s.waiting--; }
     // Diagnos: spelaren fick vänta på ett segment mitt i uppspelningen = servern hinner inte med
-    const waited = (Date.now() - w0) / 1000;
+    waitMs = Date.now() - w0;
+    const waited = waitMs / 1000;
+    // Väntan längre än segmentets längd efter starten = spelarens buffert krymper (Statistik, orsak vid hack)
+    if (s.firstLogged) { s.waits = (s.waits || 0) + 1; if (waitMs > (s.maxWait || 0)) s.maxWait = waitMs; s.lastWait = { n, ms: waitMs, at: Date.now(), dur: segmentsOf(it, d)[n].dur }; }
     if (s.firstLogged && waited > 4 && !s.slowLogged) {
       s.slowLogged = true;
       console.warn(`[hls] ${s.title}: väntade ${waited.toFixed(1)} s på segment ${n} (${d.mode}) – ${d.mode === 'transcode' ? `omkodningen (${HW === 'none' ? 'processor' : HW}) är långsammare än uppspelningen` : 'disken eller nätverket hinner inte med'}`);
@@ -1379,9 +1420,9 @@ export async function serveSegment(req, res, it, n, query, userId) {
     s.init ||= transcodeInit(s);
     const at = fragStart(file);
     if (at < 0) return fail(res, 404, 'Segmentet försvann – försök igen');
-    return sendSegment(req, res, file, 'video/iso.segment', at);
+    return sendSegment(req, res, file, 'video/iso.segment', at, waitMs);
   }
-  sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t');
+  sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t', 0, waitMs);
 }
 /** Väntar tills segment n är klart (startar ffmpeg vid behov). Allt annat än true = ett felsvar har skickats. */
 async function awaitSegment(req, res, it, s, n, userId) {
@@ -1404,25 +1445,36 @@ async function awaitSegment(req, res, it, s, n, userId) {
         if (!ensureCapacity(s, userId)) return fail(res, 503, 'Servern har för många samtidiga omkodningar just nu');
         startFfmpeg(s, it, n);
       }
-      await new Promise(r => setTimeout(r, 120));
+      // Kort intervall: segmentet skickas inom ~50 ms från att det blivit klart (förut i snitt 60 ms senare)
+      await new Promise(r => setTimeout(r, 50));
     }
   }
   return true;
 }
-function sendSegment(req, res, file, type, from = 0) {
+// X-Seg-Wait: hur länge servern väntade på att segmentet skulle bli klart (ms) – spelarens Statistik skiljer på
+// omkodningens väntan och nätets överföring. Alltid Content-Length (spelarens bandbreddsmätning och keep-alive)
+// och aldrig komprimering (segmenten är redan komprimerade).
+function sendSegment(req, res, file, type, from = 0, waitMs = 0) {
   let st; try { st = fs.statSync(file); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
   const size = Math.max(0, st.size - from);
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Cache-Control': 'no-store' });
+  res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Cache-Control': 'no-store', 'X-Seg-Wait': String(waitMs) });
   if (req.method === 'HEAD' || !size) return res.end();
   pipeline(fs.createReadStream(file, { start: from }), res, () => {});
 }
 
+/** Sessionsmappen döps om direkt (en ny session med samma nyckel får en tom mapp) och raderas sedan i bakgrunden */
+function rmLater(dir) {
+  const gone = `${dir}.gone-${crypto.randomBytes(3).toString('hex')}`;
+  try { fs.renameSync(dir, gone); } catch { return fs.rm(dir, { recursive: true, force: true }, () => {}); }
+  fs.rm(gone, { recursive: true, force: true }, () => {});
+}
 // Städa: döda inaktiva ffmpeg efter 60 s, radera cache efter 15 min
 setInterval(() => {
   for (const [k, s] of sessions) {
     const idle = Date.now() - s.last;
     if (idle > 60000 && s.proc) stopProc(s);
-    if (idle > 900000) { fs.rmSync(s.dir, { recursive: true, force: true }); sessions.delete(k); }
+    // Asynkront: en mapp med hundratals segment tog ~0,1 s att radera synkront – då stod alla strömmar still
+    if (idle > 900000) { rmLater(s.dir); sessions.delete(k); }
   }
 }, 15000).unref();
 
@@ -1432,6 +1484,33 @@ export function stopUserSessions(itemId, userId, pid = '') {
   for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) stopProc(s);
 }
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
+/** Någon hämtar en HLS-ström just nu (segment de senaste 20 s) – bakgrundsjobben väntar (jobs.watching) */
+export const streamingNow = (ms = 20000) => { const t = Date.now() - ms; for (const s of sessions.values()) if ((s.reqAt || 0) > t) return true; return false; };
+/**
+ * Strömningens läge för spelarens Statistik och diagnosen vid hack: hastighet (× realtid), försprång, väntan på
+ * segment. Bara användarens egen session av titeln (med pid den uppspelningen). null = ingen HLS-session.
+ */
+export function sessionStats(itemId, userId, pid = '') {
+  let s = null;
+  for (const x of sessions.values()) {
+    if (x.user !== userId || x.item !== itemId || (pid && x.d.pid !== pid)) continue;
+    if (!s || (x.reqAt || 0) > (s.reqAt || 0)) s = x;
+  }
+  if (!s) return null;
+  const hi = highestFile(s), n = s.reqN ?? -1;
+  let ahead = 0;
+  if (s.segs?.length && hi >= 0 && n >= 0 && hi >= n) ahead = (s.segs[hi]?.start ?? 0) + (s.segs[hi]?.dur ?? 0) - (s.segs[n]?.start ?? 0);
+  const speed = s.prog?.speed != null ? Math.round(s.prog.speed * 100) / 100 : null;
+  const doneAll = !s.proc && s.done;
+  return {
+    mode: s.d.mode, fmt: s.d.fmt, vcodec: s.d.mode === 'transcode' ? s.d.vc : null, quality: s.d.q, tonemap: !!s.d.tonemap,
+    encoder: s.d.mode !== 'transcode' ? 'copy' : s.d.vc !== 'h264' ? encoderFor(s.d.vc)?.name || null : HW === 'none' ? 'libx264' : HW,
+    hw: HW, running: !!s.proc, throttled: !!s.paused, done: doneAll, speed, ahead: Math.round(ahead),
+    // Hinner servern med? Klar, pausad för att den ligger långt före, eller snabbare än realtid
+    keepingUp: doneAll || !!s.paused || ahead >= 30 || (speed != null && speed >= 1.05),
+    waits: s.waits || 0, maxWait: s.maxWait || 0, lastWait: s.lastWait || null, segment: n, segments: s.total || 0
+  };
+}
 jobs.addSource(() => [...sessions.values()].filter(s => s.proc && !s.paused).map(s => ({
   id: 'hls-' + s.key, kind: s.d.mode === 'transcode' ? 'transcode' : 'remux',
   title: `${s.d.mode === 'transcode' ? 'Omkodar' : 'Remuxar'} ${s.title || ''}`.trim(),
@@ -1443,7 +1522,7 @@ export function purgeIdle(idleMs) {
   let n = 0;
   for (const [k, s] of sessions) {
     if (Date.now() - s.last <= idleMs) continue;
-    stopProc(s); fs.rmSync(s.dir, { recursive: true, force: true }); sessions.delete(k); n++;
+    stopProc(s); rmLater(s.dir); sessions.delete(k); n++;
   }
   return n;
 }

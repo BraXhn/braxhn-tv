@@ -404,7 +404,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms).unref?.());
 export function waitReason(s = settings(), d = new Date()) {
   if (s.paused) return 'pausad';
   if (!inWindow(s.window, d)) return `utanför tidsfönstret ${s.window}`;
-  if (s.onlyIdle && (activeTranscodes().length > 0 || listActive().length > 0)) return 'någon tittar';
+  if (s.onlyIdle && (activeTranscodes().length > 0 || listActive().length > 0 || jobs.watching())) return 'någon tittar';
   return null;
 }
 function hold(reason) {

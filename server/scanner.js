@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES } from './db.js';
 import * as jobs from './jobs.js';
-import { deletionBlocked } from './util.js';
+import { deletionBlocked, lowPriority } from './util.js';
 import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
 import * as localMeta from './localmeta.js';
 import { AGE } from './nfo.js';
@@ -18,7 +18,9 @@ import { searchKey, compactKey } from './searchkey.js';
 import { dropVariants } from './imgsize.js';
 import * as colors from './imgcolor.js';
 
-const pexec = promisify(execFile);
+const pexec0 = promisify(execFile);
+// Skanningens och analysens ffprobe/ffmpeg körs med lägsta prioritet – uppspelningen (ffmpeg för strömmar) går före
+const pexec = (...a) => { const pr = pexec0(...a); lowPriority(pr.child, { io: a[0] === 'ffmpeg' }); return pr; };
 const VIDEO = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.webm', '.ts', '.m2ts',
   '.wmv', '.mpg', '.mpeg', '.flv', '.ogv']);
 
@@ -406,7 +408,8 @@ async function scanLibrary(lib) {
     for (const f of files) {
       status.done++;
       seen.add(f);
-      if (pending.length >= 200 || Date.now() - flushed > 2000) flush();
+      // Små omgångar: en skrivning med 200 titlar höll händelseslingan ~80 ms (strömmar fick vänta)
+      if (pending.length >= 50 || Date.now() - flushed > 2000) flush();
       let st; try { st = await fs.promises.stat(f); } catch { continue; }
       const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
       // Huvudfilm på en Blu-ray som tidigare fick filnamnet ("00800") som titel: byt till skivans namn
@@ -416,6 +419,8 @@ async function scanLibrary(lib) {
           p.title, sortTitle(p.title), p.year, k.id, raw));
       }
       if (k && k.size === st.size && k.mtime === mtime) continue;
+      // Medan någon tittar: en kort paus mellan filerna (nya titlar kommer ändå med, bara långsammare)
+      await jobs.yieldToPlayback({ gap: 50 });
       const info = await probe(f);
       touched.add(f);
       // Misslyckad probe (t.ex. disken vaknade för långsamt): spara mtime 0 så att filen läses om vid nästa skanning
@@ -523,7 +528,13 @@ async function analyzeLibrary(lib, st) {
   st.phase = 'Indexerar nyckelbilder (för remux)';
   const kf = all(`SELECT id, path, mtime, vcodec, duration FROM items WHERE library_id=? AND vcodec IN ('h264','hevc') AND path IS NOT NULL ORDER BY added DESC`, lib.id);
   st.done = 0; st.total = kf.length;
-  for (const it of kf) { st.done++; await hooks.keyframes?.(it); if (st.done % 200 === 0) await new Promise(setImmediate); }
+  // Medan någon tittar väntar analysen (den som trycker på Spela får nyckelbilderna direkt, se computeKeyframes)
+  for (const it of kf) {
+    st.done++;
+    if (hooks.keyframesCached?.(it)) { if (st.done % 200 === 0) await new Promise(setImmediate); continue; }
+    await jobs.yieldToPlayback({ pause: true });
+    await hooks.keyframes?.(it);
+  }
   // Fotobibliotekens videoklipp: bara nyckelbilderna (miniatyrerna gör photos.js, inga kapitel/undertexter/förhandsbilder)
   if (lib.type === 'photo') return;
   await thumbnails(lib, st);
@@ -1024,7 +1035,7 @@ async function chapters(lib, st = status) {
   const todo = all(`SELECT id,path FROM items WHERE library_id=? AND kind IN('movie','episode') AND chapters IS NULL AND path IS NOT NULL`, lib.id);
   if (!todo.length) return;
   st.phase = 'Läser kapitel'; st.done = 0; st.total = todo.length;
-  for (const it of todo) { st.done++; run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
+  for (const it of todo) { st.done++; await jobs.yieldToPlayback({ pause: true }); run('UPDATE items SET chapters=? WHERE id=?', JSON.stringify(await readChapters(it.path)), it.id); }
 }
 export async function readChapters(file) {
   try {
@@ -1115,7 +1126,7 @@ export async function extractThumb(it) {
 async function thumbnails(lib, st = status) {
   const todo = all(`SELECT id,path,duration FROM items WHERE library_id=? AND kind IN('movie','episode') AND thumb=0 AND vcodec IS NOT NULL`, lib.id);
   st.phase = 'Skapar miniatyrer'; st.done = 0; st.total = todo.length;
-  for (const it of todo) { st.done++; await extractThumb(it); }
+  for (const it of todo) { st.done++; await jobs.yieldToPlayback({ pause: true }); await extractThumb(it); }
   // Serier utan affisch: använd första avsnittets miniatyr
   for (const sh of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND poster=0 AND thumb=0`, lib.id)) {
     const ep = get(`SELECT id FROM items WHERE parent_id=? AND thumb=1 ORDER BY season, episode LIMIT 1`, sh.id);

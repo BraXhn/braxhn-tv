@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { lowPriority } from './util.js';
 
 const pexec = promisify(execFile);
 
@@ -185,18 +186,24 @@ async function mp4Keyframes(r) {
 }
 
 // ---------------- kontroll ----------------
-async function sample(file, at, len) {
-  const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-select_streams', 'v:0', '-read_intervals', `${at.toFixed(1)}%+${len}`,
+async function sample(file, at, len, low = false) {
+  const pr = pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-select_streams', 'v:0', '-read_intervals', `${at.toFixed(1)}%+${len}`,
     '-show_entries', 'packet=pts_time,flags', '-of', 'csv=p=0', file], { maxBuffer: 16 << 20, timeout: 60000 });
+  if (low) lowPriority(pr.child, { io: false });
+  const { stdout } = await pr;
   return stdout.split('\n').map(l => l.split(',')).filter(([t, f]) => f && f[0] === 'K').map(([t]) => parseFloat(t)).filter(x => !isNaN(x));
 }
 /** complete: varje nyckelbild i stickproven finns i listan (krävs för fMP4-remux, där varje GOP blir ett segment) */
-async function check(file, kf, duration) {
+async function check(file, kf, duration, low = false) {
   const has = (t) => { let lo = 0, hi = kf.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (kf[m] < t - 0.002) lo = m + 1; else hi = m; } return Math.abs(kf[lo] - t) <= 0.002; };
   let any = false, complete = true;
   // Fem utspridda stickprov (fMP4-remux kräver en komplett lista – ett index som saknar nyckelbilder ska fångas)
-  // Samtidigt (spelaren väntar), 8 s vardera
-  const samples = await Promise.all([0, duration * 0.23, duration * 0.47, duration * 0.71, Math.max(0, duration - 30)].map(at => sample(file, at, 8)));
+  // Samtidigt när spelaren väntar, 8 s vardera. I bakgrunden ett i taget med lägsta prioritet: fem processer som
+  // startas på en gång blockerade händelseslingan (och strömmarna) i upp till en halv sekund
+  const at = [0, duration * 0.23, duration * 0.47, duration * 0.71, Math.max(0, duration - 30)];
+  const samples = [];
+  if (low) for (const t of at) { samples.push(await sample(file, t, 8, true)); await new Promise(setImmediate); }
+  else samples.push(...await Promise.all(at.map(t => sample(file, t, 8))));
   for (const s of samples) {
     // Stickprovets första nyckelbild kan ligga före intervallet (sökningen landar på närmaste föregående)
     for (const t of s) { if (has(t)) any = true; else complete = false; }
@@ -211,7 +218,7 @@ async function check(file, kf, duration) {
 }
 
 /** { kf, complete } eller null (ingen snabb väg – läs hela filen med ffprobe) */
-export async function fastKeyframes(file, duration) {
+export async function fastKeyframes(file, duration, { low = false } = {}) {
   let r;
   try {
     r = await reader(file);
@@ -225,7 +232,7 @@ export async function fastKeyframes(file, duration) {
     // Rimlighet: täcker hela filen och inga orimliga luckor
     if (duration && kf[kf.length - 1] < duration - 120) return null;
     for (let k = 1; k < kf.length; k++) if (kf[k] - kf[k - 1] > 60) return null;
-    const c = await check(file, kf, duration || kf[kf.length - 1]);
+    const c = await check(file, kf, duration || kf[kf.length - 1], low);
     if (!c.ok) return null;
     return { kf, complete: c.complete };
   } catch { return null; }

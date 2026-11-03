@@ -246,6 +246,19 @@ samma rubriker (`Content-Length`, `Content-Range`, `Accept-Ranges`) oavsett om d
 HLS-adresserna är oförändrade. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
 `POST /api/ops/prestart/clear` och `POST /api/ops/prestart/fill`.
 
+### Statistik och hack (tillägg)
+
+`GET /api/stream/:id/stats?pid=` (inloggad, titeln måste vara tillåten för profilen) ger spelarens Statistik:
+`session` (null vid direktuppspelning) med `mode`, `fmt`, `vcodec`, `quality`, `tonemap`, `encoder`, `running`,
+`throttled` (pausad för att den ligger långt före), `done`, `speed` (× realtid, null tills ffmpeg rapporterat),
+`ahead` (sekunder före spelarens senaste begäran), `keepingUp`, `waits`/`maxWait`/`lastWait` (väntan på segment efter
+starten); `loop` (`p99`, `max` i ms de senaste 10 s, `block` = senaste stoppet över 40 ms med bakgrundsjobbens typer);
+`jobs` (typer av pågående jobb) och `watching`. Varje HLS-segment har rubriken `X-Seg-Wait` (ms servern väntade på
+att det blev klart). `POST /api/stream/:id/stall?pid=` med `{ position, buffer, dropped, bw, bitrate, lastFrag: { load,
+wait, dur } }` (alla valfria) när uppspelningen stannat: svaret `{ ok, cause, text }` där `cause` är `server-busy`,
+`transcode`, `disk`, `network` eller `client`; högst en rapport per uppspelning och 5 s (`skipped: true`). Orsaken
+loggas och syns i `/api/activity` (`stalls`, `stallCause`, `stallAt`). Apparna kan använda dem men behöver inte.
+
 ## Rättigheter per användare
 
 Administratören kan begränsa ett konto eller en profil (`server/perms.js`). Inga fält har ändrats – apparna märker det

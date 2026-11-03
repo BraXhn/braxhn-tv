@@ -84,6 +84,22 @@ export function startPlay({ user, item, mode, quality, ip, remote, ua, reasons, 
   fire('media.play', s);
   return s;
 }
+/** Någon tittar just nu (bakgrundsjobben väntar): en uppspelning som inte är pausad och skickat framsteg de senaste
+ *  30 s (spelarna skickar var 10:e sekund medan filmen spelas), eller som startade nyss och inte hunnit skicka något */
+export function watchingNow(at = now()) {
+  for (const s of active.values()) {
+    if (s.stopTimer || s.paused) continue;
+    if (s.lastProgress ? at - s.lastProgress <= 30 : at - s.started <= 15) return true;
+  }
+  return false;
+}
+/** Spelaren rapporterade ett hack (POST /api/stream/:id/stall): räknas och syns i aktiviteten med orsaken */
+export function noteStall(userId, itemId, cause, at = now()) {
+  const s = active.get(keyOf(userId, itemId));
+  if (!s) return null;
+  s.stalls = (s.stalls || 0) + 1; s.stallCause = cause; s.stallAt = at;
+  return s;
+}
 /** Framsteg från spelaren (position i sekunder) – paus, fortsätter, sedd ≥ 90 % och historikens speltid */
 export function progress(userId, itemId, position, at = now()) {
   const s = active.get(keyOf(userId, itemId));
@@ -267,7 +283,7 @@ export function watchLibraries(onChange) {
   pending.clear();
   const gen = ++watchGen;
   if (getSetting('watch_enabled', process.env.WATCH_FILES || '1') !== '1') return;
-  // Rekursiv fs.watch går igenom hela mappträdet synkront – körs efter svaret, ett bibliotek per varv i händelseloopen
+  // Varje mapp bevakas för sig och mappträdet gås igenom asynkront (watchTree) – ett bibliotek per varv i händelseloopen
   // En bevakning per mapp (bibliotek kan ha flera mappar, libpaths.js)
   const jobs = all('SELECT * FROM libraries').flatMap(lib => rootsOf(lib).map(root => [lib, root]));
   const next = () => {
@@ -279,10 +295,56 @@ export function watchLibraries(onChange) {
   };
   setImmediate(next);
 }
+/**
+ * Rekursiv bevakning som inte blockerar: en fs.watch per mapp, och mapparna gås igenom asynkront i omgångar.
+ * (fs.watch med recursive går på Linux igenom hela trädet synkront – 0,8 s för 1 500 filmmappar, och under tiden
+ * kunde servern inte skicka ett enda segment.) Filnamnen i händelserna är relativa till root, som med recursive.
+ * Nya undermappar bevakas när de dyker upp; punktmappar (papperskorgen, Synologys @eaDir m.fl.) hoppas över.
+ */
+export function watchTree(root, cb) {
+  const ws = new Map();
+  let closed = false, onError = null, warned = false;
+  const add = (dir) => {
+    if (closed || ws.has(dir)) return;
+    let w;
+    try {
+      w = fs.watch(dir, { persistent: false }, (ev, f) => {
+        if (closed) return;
+        const full = f ? path.join(dir, String(f)) : dir;
+        cb(ev, f ? path.relative(root, full) : null);
+        if (f && ev === 'rename' && !String(f).startsWith('.')) fs.stat(full, (e, st) => { if (!e && st.isDirectory()) walk(full); });
+      });
+    } catch (e) {
+      if (dir === root) throw e;
+      if (!warned) { warned = true; console.warn(`[watch] kan inte bevaka alla mappar i ${root}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`); }
+      return;
+    }
+    w.on('error', (e) => { w.close(); ws.delete(dir); if (dir === root) onError?.(e); });
+    ws.set(dir, w);
+  };
+  const walk = async (start) => {
+    const stack = [start];
+    let n = 0;
+    while (stack.length && !closed) {
+      const dir = stack.pop();
+      add(dir);
+      let list; try { list = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of list) if (e.isDirectory() && !e.name.startsWith('.')) stack.push(path.join(dir, e.name));
+      if (++n % 25 === 0) await new Promise(setImmediate);
+    }
+  };
+  add(root); // synkront: saknad mapp eller fel syns direkt
+  walk(root).catch(() => {});
+  return {
+    on(ev, fn) { if (ev === 'error') onError = fn; return this; },
+    close() { closed = true; for (const w of ws.values()) { try { w.close(); } catch {} } ws.clear(); },
+    get size() { return ws.size; }
+  };
+}
 function watchOne(lib, root, onChange) {
   const key = `${lib.id}:${root}`;
   try {
-    const w = fs.watch(root, { recursive: true, persistent: false }, (ev, file) => {
+    const w = watchTree(root, (ev, file) => {
       const fx = file ? path.extname(String(file)).toLowerCase() : '';
       if (file && !watchRelevant(root, String(file)) && !(lib.type === 'photo' && PHOTO_EXT.has(fx)) && !(lib.type === 'ebook' && EBOOK_EXT.has(fx))) return;
       clearTimeout(pending.get(lib.id));

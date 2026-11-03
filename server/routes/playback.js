@@ -25,6 +25,9 @@ import * as prestart from '../prestart.js';
 import * as family from '../familyfilter.js';
 import * as sublines from '../sublines.js';
 import crypto from 'node:crypto';
+import { loopStats } from '../loopmon.js';
+import { stallCause } from '../stalls.js';
+import * as jobs from '../jobs.js';
 
 // Familjefiltret påtvingat (barnprofil) och titeln har svordomar: originalfilen (direkt, nedladdning, offline) skulle ge
 // ljudet otystat – bara HLS-strömmen från /playback (där servern tystar) är tillåten
@@ -307,6 +310,38 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden
   if (row) act.clientStop(c.user.id, ver.mainOf(row).id);
   send(c.res, 200, { ok: true });
+});
+
+// Spelarens Statistik: strömningssessionen (hastighet, försprång, väntan på segment) och serverns händelseslinga.
+// Bara den egna sessionen av titeln (pid = uppspelningen); bakgrundsjobben bara som typer (inga titlar).
+const pidOf = (c) => /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
+const statsOf = (c, it) => ({ session: st.sessionStats(it.id, c.user.id, pidOf(c)), loop: loopStats(), hw: st.hwStatus.active,
+  jobs: [...new Set(jobs.list().map(j => j.kind))], watching: jobs.watching() });
+route('GET', '/api/stream/:id/stats', user, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  send(c.res, 200, statsOf(c, it));
+});
+// Spelaren hackade (bufferten tog slut): orsaken bestäms ur spelarens och serverns mätvärden, loggas och syns i
+// aktiviteten (stalls/stallCause på uppspelningen). Högst en rapport per uppspelning och 5 s.
+const stallSeen = new Map();
+route('POST', '/api/stream/:id/stall', user, async (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const b = (await readJson(c.req).catch(() => null)) || {};
+  const key = `${c.user.id}-${it.id}-${pidOf(c)}`, nowMs = Date.now();
+  if (nowMs - (stallSeen.get(key) || 0) < 5000) return send(c.res, 200, { ok: true, skipped: true });
+  stallSeen.set(key, nowMs);
+  if (stallSeen.size > 500) for (const [k, t] of stallSeen) if (nowMs - t > 60e3) stallSeen.delete(k);
+  const num = (v, max = 1e12) => Number.isFinite(+v) ? Math.max(0, Math.min(max, +v)) : 0;
+  const f = b.lastFrag && typeof b.lastFrag === 'object' ? { load: num(b.lastFrag.load, 6e5), wait: num(b.lastFrag.wait, 6e5), dur: num(b.lastFrag.dur, 600) } : null;
+  const cl = { bw: num(b.bw), bitrate: num(b.bitrate), dropped: num(b.dropped, 1e7), buffer: num(b.buffer, 1e4), position: num(b.position, 1e6), lastFrag: f };
+  const s = statsOf(c, it);
+  const r = stallCause(s.session, cl, s.loop);
+  const row = get('SELECT * FROM items WHERE id=?', it.id);
+  const main = row ? ver.mainOf(row) : it;
+  act.noteStall(c.user.id, main.id, r.cause);
+  const pos = `${Math.floor(cl.position / 60)}:${String(Math.floor(cl.position % 60)).padStart(2, '0')}`;
+  console.warn(`[uppspelning] hack i ${main.title || it.title} vid ${pos} (${s.session?.mode || 'direkt'}): ${r.text}`);
+  send(c.res, 200, { ok: true, ...r });
 });
 
 // Undertexter från OpenSubtitles

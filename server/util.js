@@ -217,10 +217,13 @@ export function streamFile(req, res, file, size, headers = {}, { ranges = true }
 // Bakgrundsjobb (förhandsbilder, intro-detektering, platshållarfärger …) körs med lägsta prioritet – processor (nice 19)
 // och disk (ionice "idle", om verktyget finns) – så att strömning och omkodning alltid går före.
 let ioniceOk = null;
-export function lowPriority(child) {
+// io: false för korta processer (ffprobe av huvudet) – ionice är en egen process, och varje spawn kostar
+// händelseslingan några millisekunder
+export function lowPriority(child, { io = true } = {}) {
   const pid = child?.pid;
   if (!pid) return child;
   try { os.setPriority(pid, 19); } catch {}
+  if (!io) return child;
   if (ioniceOk == null) ioniceOk = String(process.env.PATH || '').split(path.delimiter).some(d => { try { return fs.statSync(path.join(d, 'ionice')).isFile(); } catch { return false; } });
   if (ioniceOk) { try { spawnProc('ionice', ['-c', '3', '-p', String(pid)], { stdio: 'ignore' }).on('error', () => {}); } catch {} }
   return child;

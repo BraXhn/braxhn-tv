@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { all, run, CACHE, getSetting } from './db.js';
 import { keyframesReady } from './stream.js';
 import { lowPriority } from './util.js';
+import * as jobs from './jobs.js';
 
 const pexec0 = promisify(execFile);
 // Förhandsbilder görs i bakgrunden – lägsta prioritet (strömning går före)
@@ -82,7 +83,10 @@ export async function generateLibrary(lib, status) {
   let next = 0;
   const worker = async () => {
     while (next < todo.length) {
+      // Förhandsbilderna avkodar hela filmen – de väntar medan någon tittar
+      await jobs.yieldToPlayback({ pause: true });
       const it = todo[next++];
+      if (!it) break;
       try { await generate(it); } catch (e) { console.warn('[trickplay]', it.path, e.message); run('UPDATE items SET trickplay=2 WHERE id=?', it.id); }
       if (status) status.done++;
     }

@@ -86,6 +86,7 @@ export async function pass() {
   try {
     do {
       S.again = false;
+      while (busy()) await sleep(10e3); // även genomgången av mapparna väntar medan någon tittar
       const have = new Map(); // titel → Map(undertext → signatur)
       for (const r of all('SELECT item_id, sub, sig FROM sub_index')) {
         if (!have.has(r.item_id)) have.set(r.item_id, new Map());
@@ -99,7 +100,7 @@ export async function pass() {
         // Undertexter som inte finns längre (borttagen fil, färre spår) tas bort
         for (const sub of mine.keys()) if (!keys.has(sub)) run('DELETE FROM sub_index WHERE item_id=? AND sub=?', it.id, sub);
         for (const w of want) if (mine.get(w.key) !== w.sig) todo.push([it, w]);
-        if (k % 200 === 199) await new Promise(r => setImmediate(r)); // låt förfrågningar komma emellan
+        if (k % 25 === 24) await new Promise(r => setImmediate(r)); // låt förfrågningar komma emellan (varje titel läser mappen och undertextfilerna synkront)
       }
       if (!todo.length) continue;
       S.done = 0; S.total = todo.length;
