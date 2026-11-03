@@ -171,6 +171,7 @@ t('förberedelse: konto, bibliotek och bio-läge', async () => {
   S.andra = id("SELECT id FROM items WHERE kind='movie' AND title='Andra'");
   S.tredje = id("SELECT id FROM items WHERE kind='movie' AND title='Tredje'");
   for (const n of [1, 2, 3]) S['e' + n] = id("SELECT id FROM items WHERE kind='episode' AND episode=?", n);
+  S.show = id("SELECT id FROM items WHERE kind='show'");
   S.album = id('SELECT id FROM albums'); S.book = id('SELECT id FROM books');
   S.tracks = db.prepare('SELECT id FROM tracks ORDER BY track_no').all().map(r => r.id);
   db.prepare('UPDATE items SET genres=? WHERE id IN (?,?,?)').run('["Action"]', S.main, S.andra, S.tredje);
@@ -395,6 +396,38 @@ t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
     assert.deepEqual(errors, []);
     await close();
   }
+});
+
+t('spelaren: ett avsnitt startar av sig själv även när de första play()-försöken avbryts', async () => {
+  const { page, errors, close } = await newPage();
+  // Som när webbläsaren avbryter play() för att strömmen byts ("interrupted by a new load request"): de tre
+  // första försöken misslyckas. Förut blev avsnittet då stående tills man pausade och startade igen.
+  await page.addInitScript(() => {
+    const orig = HTMLMediaElement.prototype.play; let n = 0;
+    HTMLMediaElement.prototype.play = function () {
+      if (this.id === 'vid' && n++ < 3) return Promise.reject(new DOMException('The play() request was interrupted by a new load request.', 'AbortError'));
+      return orig.call(this);
+    };
+  });
+  await page.goto(B + '/#/item/' + S.e2);
+  await page.click('[data-play="0"]');
+  await page.waitForFunction(() => { const v = document.querySelector('#vid'); return v && !v.paused && v.currentTime > 0.5; }, null, { timeout: 30000, polling: 100 });
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+t('spelaren: avsnitt valda på seriesidan startar av sig själva, även efter varandra', async () => {
+  const { page, errors, close } = await newPage();
+  await page.goto(B + '/#/item/' + S.show);
+  for (const ep of [S.e1, S.e2, S.e3, S.e1]) {
+    await page.waitForSelector(`#eps [data-play="${ep}"]`, { timeout: 30000 });
+    await page.click(`#eps [data-play="${ep}"]`);
+    await page.waitForFunction(() => { const v = document.querySelector('#vid'); return v && !v.paused && v.currentTime > 0.5; }, null, { timeout: 30000, polling: 100 });
+    await page.click('#pclose');
+    await page.waitForFunction(() => document.querySelector('#player')?.hidden !== false || !!document.querySelector('#player.mini'), null, { timeout: 10000 });
+  }
+  assert.deepEqual(errors, []);
+  await close();
 });
 
 t('spelaren: kontrollerna döljs även när det inte gick vid första försöket (panel öppen, pekaren över knapparna)', async () => {

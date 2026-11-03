@@ -199,3 +199,17 @@ test('startsidan: nya avsnitt grupperas per serie och säsong (nyast först)', a
   assert.equal(g[0].showTitle, 'Serie 10');
   assert.equal(groupNewEpisodes([ep(1, 10, 3, 8), ep(2, 20, 1, 2)], 1).length, 1);
 });
+
+test('spelaren: vakten mot stillastående uppspelning hoppar över glapp och puttar igång när data finns', async () => {
+  const { stallAction } = await import('../web/js/player/stall.js');
+  // Glapp i början: första segmentet börjar 0,08 s in – hoppa dit
+  assert.deepEqual(stallAction([[0.08, 6]], 0), { do: 'jump', to: 0.13 });
+  // Glapp mellan två segment framför oss
+  assert.deepEqual(stallAction([[0, 4], [4.2, 10]], 4.0), { do: 'jump', to: 4.25 });
+  // Data finns där vi står men tiden går inte: pausa och spela
+  assert.deepEqual(stallAction([[0, 10]], 3), { do: 'kick' });
+  // Bufferten är slut (väntar på nätet) eller nästa bit ligger långt bort: gör inget
+  assert.equal(stallAction([[0, 3.1]], 3), null);
+  assert.equal(stallAction([[0, 3], [20, 30]], 3), null);
+  assert.equal(stallAction([], 0), null);
+});

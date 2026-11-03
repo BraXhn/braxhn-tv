@@ -2,6 +2,7 @@
 import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
+import { watchStall } from './stall.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
 import { bindControls, keys } from './controls.js';
@@ -407,11 +408,34 @@ async function load(start, { play = true } = {}) {
     setSubs();
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
-  // Efter byte av kvalitet, ljud, nattläge m.m.: fortsätt spela av sig själv. play() försöks direkt, när
-  // spellistan är inläst och när det finns data att spela – det som först lyckas räcker.
-  function tryPlay() { if (play && live() && v.paused) v.play().catch(() => {}); }
-  v.addEventListener('canplay', tryPlay, { once: true });
+  // Starta (även efter byte av kvalitet, ljud, nattläge m.m.) av sig själv. play() försöks direkt, när spellistan
+  // är inläst, vid varje tecken på att det finns data (loadeddata/canplay/canplaythrough) och med en vakt varje
+  // sekund i 20 s – tills filmen faktiskt spelar. Förut räckte det att de första försöken avbröts ("interrupted by
+  // a new load request" när ett avsnitt valdes och strömmen byttes) för att filmen skulle bli stående tills man
+  // pausade och startade igen. Blockerar webbläsaren uppspelning med ljud (ingen tryckning nyss, t.ex. Safari efter
+  // en lång förberedelse) visas kontrollerna och en uppmaning i stället för en stilla bild.
+  let started = false, asked = false;
+  const evs = ['loadeddata', 'canplay', 'canplaythrough'];
+  const done = () => { started = true; clearInterval(guard); document.removeEventListener('keydown', onKey, true); for (const e of evs) v.removeEventListener(e, tryPlay); v.removeEventListener('playing', done); };
+  function tryPlay() {
+    if (!play || started || !live()) return done();
+    if (!v.paused) return;
+    v.play().catch((e) => {
+      if (e?.name !== 'NotAllowedError' || asked || !live()) return;
+      asked = true; el.classList.remove('idle');
+      toast(t('Tryck på ▶ för att starta uppspelningen'));
+    });
+  }
+  for (const e of evs) v.addEventListener(e, tryPlay);
+  v.addEventListener('playing', done);
+  const t0 = Date.now(), guard = setInterval(() => { if (Date.now() - t0 > 20000) return done(); if (v.readyState >= 2) tryPlay(); }, 1000);
+  // Pausar man själv innan filmen hunnit starta ska den inte startas igen
+  el.querySelector('#cplay')?.addEventListener('click', done, { once: true });
+  const onKey = (e) => { if (e.key === ' ' || e.key === 'k') { done(); document.removeEventListener('keydown', onKey, true); } };
+  document.addEventListener('keydown', onKey, true);
   tryPlay();
+  // Står filmen still fast den spelar (glapp i början av strömmen m.m.) puttas den igång – som när man pausar och startar
+  cur.stall?.(); cur.stall = watchStall(v, { live });
   applyAudioFx(v);
 }
 /** Omkodad HEVC/AV1 som inte gick att avkoda: ladda om med H.264 (en gång per uppspelning). true = laddar om. */
