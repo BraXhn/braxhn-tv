@@ -289,6 +289,8 @@ tw('webben: knappen på seriesidan och erbjudandet i spelaren med Hoppa över (3
     await page.click('#recap');
     await page.waitForSelector('dialog.recapdlg[open]');
     assert.match(await page.textContent('dialog[open] .dlg-title'), /Det här har hänt/);
+    // Sammanfattningsraden fylls när svaret kommit (läst direkt efter att dialogen öppnats var den ibland tom under last)
+    await page.waitForFunction(() => !!document.querySelector('#rcsum')?.textContent);
     assert.match(await page.textContent('#rcsum'), /^Tidigare i Bron · Säsong 1/);
     // Klar sedan tidigare: videon kopplas in (Playwrights Chromium saknar H.264 – då ett meddelande i stället)
     await page.waitForFunction(() => { const v = document.querySelector('#rcvid'); const s = document.querySelector('#rcstate'); return (v && !v.hidden && (v.src || v.readyState > 0 || v.srcObject !== undefined)) || /kan inte spelas/.test(s?.textContent || ''); });

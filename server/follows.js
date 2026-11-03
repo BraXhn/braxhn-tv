@@ -213,7 +213,7 @@ export function syncPlan(uid, have = []) {
   for (const [sid, n] of shows) {
     if (ids.length >= MAX_ITEMS) break;
     const rows = all(`SELECT e.id FROM items e LEFT JOIN progress p ON p.item_id=e.id AND p.user_id=?
-      WHERE e.parent_id=? AND e.kind='episode' AND e.season > 0 AND e.path IS NOT NULL AND COALESCE(p.watched,0)=0
+      WHERE e.parent_id=? AND e.kind='episode' AND e.version_of IS NULL AND e.season > 0 AND e.path IS NOT NULL AND COALESCE(p.watched,0)=0
         AND (e.season*10000+e.episode) > COALESCE((SELECT MAX(x.season*10000+x.episode) FROM items x JOIN progress q ON q.item_id=x.id AND q.user_id=? AND q.watched=1
           WHERE x.parent_id=e.parent_id AND x.season > 0), -1)
       ORDER BY e.season, e.episode LIMIT ?`, uid, sid, uid, Math.min(n, MAX_ITEMS - ids.length));

@@ -325,8 +325,8 @@ function playFor(uid, id) {
   if (!it) return null;
   if (it.kind !== 'show') return { id: it.id, position: get('SELECT position FROM progress WHERE user_id=? AND item_id=? AND watched=0', uid, it.id)?.position || 0 };
   const e = get(`SELECT e.id, COALESCE(p.position, 0) AS pos FROM items e LEFT JOIN progress p ON p.item_id=e.id AND p.user_id=?
-    WHERE e.parent_id=? AND COALESCE(p.watched, 0)=0 ORDER BY (COALESCE(p.position, 0) > 0) DESC, e.season, e.episode LIMIT 1`, uid, id)
-    || get('SELECT id, 0 AS pos FROM items WHERE parent_id=? ORDER BY season, episode LIMIT 1', id);
+    WHERE e.parent_id=? AND e.version_of IS NULL AND COALESCE(p.watched, 0)=0 ORDER BY (COALESCE(p.position, 0) > 0) DESC, e.season, e.episode LIMIT 1`, uid, id)
+    || get('SELECT id, 0 AS pos FROM items WHERE parent_id=? AND version_of IS NULL ORDER BY season, episode LIMIT 1', id);
   return e ? { id: e.id, position: e.pos || 0 } : null;
 }
 /** Läget för en deltagare. Visar aldrig vem som röstat vad – bara hur långt var och en kommit. */

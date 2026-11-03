@@ -416,6 +416,32 @@ t('spelaren: ett avsnitt startar av sig själv även när de första play()-för
   await close();
 });
 
+t('"Det här har hänt": dialogen ber om sammanfattningen igen när servern glömt jobbet (omstart)', async () => {
+  const { page, errors, close } = await newPage();
+  // Servern (låtsad): första frågan – ingen än; POST – görs; sedan "none" som efter en omstart (väntande jobb glöms
+  // vid start). Förut frågade dialogen då för evigt med GET och inget gjordes; nu POST igen, och den spelas när den är klar.
+  const info = { available: true, show: { id: S.show, title: 'Serien' }, target: { id: S.e2, season: 1, episode: 2, title: 'Avsnitt 2', position: 0 },
+    scope: 'episodes', season: 1, title: 'Tidigare i Serien', episodes: [{ id: S.e1, season: 1, episode: 1, title: 'Avsnitt 1' }], clips: 2, estimate: 20, offer: false };
+  let posts = 0, gets = 0;
+  await page.route(`**/api/items/${S.show}/recap`, (r) => {
+    const post = r.request().method() === 'POST';
+    if (post) posts++; else gets++;
+    const state = post ? (posts >= 2 ? 'ready' : 'pending') : 'none';
+    const body = { ...info, state, ...(state === 'ready' ? { id: 1, url: '/api/recaps/1/index.m3u8', duration: 20, clipList: [] } : {}) };
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.route('**/api/recaps/1/**', (r) => r.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"Finns inte"}' }));
+  await page.goto(B + '/#/item/' + S.show);
+  await page.waitForSelector('#recap', { timeout: 30000 });
+  await page.click('#recap');
+  await page.waitForSelector('dialog.recapdlg[open]');
+  await until(() => posts >= 2, `ny POST efter "none" (POST ${posts}, GET ${gets})`, 15000);
+  await page.keyboard.press('Escape');
+  // Den låtsade sammanfattningen finns inte (404) – väntat; inga andra fel
+  assert.deepEqual(errors.filter(e => !/\/api\/recaps\/1\//.test(e) && !/Failed to load|MEDIA_ERR|NotSupported|manifest/i.test(e)), []);
+  await close();
+});
+
 t('spelaren: avsnitt valda på seriesidan startar av sig själva, även efter varandra', async () => {
   const { page, errors, close } = await newPage();
   await page.goto(B + '/#/item/' + S.show);

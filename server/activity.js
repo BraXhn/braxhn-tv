@@ -304,6 +304,11 @@ export function watchLibraries(onChange) {
 export function watchTree(root, cb) {
   const ws = new Map();
   let closed = false, onError = null, warned = false;
+  // En borttagen eller omdöpt mapp: dess bevakning (och undermapparnas) följer inoden, inte sökvägen – den gav händelser
+  // med det gamla namnet och hindrade att en ny mapp med samma namn bevakades (ws.has). Tas bort och läggs till på nytt.
+  const drop = (dir) => {
+    for (const [d, w] of ws) if (d === dir || d.startsWith(dir + path.sep)) { try { w.close(); } catch {} ws.delete(d); }
+  };
   const add = (dir) => {
     if (closed || ws.has(dir)) return;
     let w;
@@ -312,14 +317,18 @@ export function watchTree(root, cb) {
         if (closed) return;
         const full = f ? path.join(dir, String(f)) : dir;
         cb(ev, f ? path.relative(root, full) : null);
-        if (f && ev === 'rename' && !String(f).startsWith('.')) fs.stat(full, (e, st) => { if (!e && st.isDirectory()) walk(full); });
+        if (f && ev === 'rename' && !String(f).startsWith('.') && full !== root) fs.stat(full, (e, st) => {
+          if (closed) return;
+          if (e) { if (e.code === 'ENOENT') drop(full); }
+          else if (st.isDirectory()) { drop(full); walk(full).catch(() => {}); }
+        });
       });
     } catch (e) {
       if (dir === root) throw e;
       if (!warned) { warned = true; console.warn(`[watch] kan inte bevaka alla mappar i ${root}: ${e.message}${e.code === 'ENOSPC' ? ' (höj fs.inotify.max_user_watches)' : ''}`); }
       return;
     }
-    w.on('error', (e) => { w.close(); ws.delete(dir); if (dir === root) onError?.(e); });
+    w.on('error', (e) => { w.close(); if (ws.get(dir) === w) ws.delete(dir); if (dir === root) onError?.(e); });
     ws.set(dir, w);
   };
   const walk = async (start) => {

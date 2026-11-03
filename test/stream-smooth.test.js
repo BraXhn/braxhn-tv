@@ -124,6 +124,9 @@ test('hack: orsaken väljs ur serverns och spelarens mätvärden', () => {
   const ok = { mode: 'transcode', running: true, keepingUp: true, speed: 2.4, lastWait: null };
   assert.equal(stallCause(ok, { bw: 3e6, bitrate: 8e6 }, {}, now).cause, 'network');
   assert.equal(stallCause(ok, { lastFrag: { load: 7000, wait: 100, dur: 6 } }, {}, now).cause, 'network');
+  // Bara överföringstiden känd (ingen bandbredd/bithastighet): texten säger det, utan tomma parenteser
+  assert.equal(stallCause(ok, { lastFrag: { load: 7000, wait: 100, dur: 6 } }, {}, now).text, 'nätet hann inte med (segmentet på 6 s tog 6,9 s att hämta)');
+  assert.equal(stallCause(ok, { bw: 3e6, bitrate: 8e6 }, {}, now).text, 'nätet hann inte med (uppmätt 3,0 Mbit/s, strömmen behöver 8,0 Mbit/s)');
   // Lång väntan på servern räknas inte som nät
   assert.equal(stallCause(ok, { lastFrag: { load: 7000, wait: 6900, dur: 6 } }, {}, now).cause, 'client');
   assert.equal(stallCause(ok, { bw: 80e6, bitrate: 8e6, dropped: 40 }, { block: { ms: 60 } }, now).cause, 'client');
@@ -170,6 +173,39 @@ test('mappbevakningen: stort träd blockerar inte händelseslingan, nya mappar o
     for (let i = 0; i < 100 && !(ev.some(f => f === path.join('Ny film (2024)', 'Ny film (2024).mkv')) && ev.some(f => f === path.join('Film 5 (2000)', 'Extras', 'trailer.mkv'))); i++) await sleep(20);
     assert.ok(ev.includes(path.join('Ny film (2024)', 'Ny film (2024).mkv')), 'fil i en ny mapp');
     assert.ok(ev.includes(path.join('Film 5 (2000)', 'Extras', 'trailer.mkv')), 'fil i en undermapp, relativt roten');
+  } finally { w.close(); }
+});
+
+test('mappbevakningen: borttagen och återskapad mapp bevakas igen, omdöpt mapp ger nya namnet', async () => {
+  const { watchTree } = await import('../server/activity.js');
+  const root = path.join(ROOT, 'tree2');
+  fs.mkdirSync(path.join(root, 'Film (2020)'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'Gammal'), { recursive: true });
+  const ev = [];
+  const w = watchTree(root, (e, f) => ev.push(f));
+  const seen = async (f) => { for (let i = 0; i < 100 && !ev.includes(f); i++) await sleep(20); return ev.includes(f); };
+  try {
+    for (let i = 0; i < 100 && w.size < 3; i++) await sleep(10);
+    // Radarr/Sonarr: mappen tas bort och laddas ner på nytt med samma namn
+    fs.rmSync(path.join(root, 'Film (2020)'), { recursive: true });
+    await sleep(200);
+    fs.mkdirSync(path.join(root, 'Film (2020)'));
+    await sleep(300);
+    fs.writeFileSync(path.join(root, 'Film (2020)', 'Film (2020).mkv'), 'x');
+    assert.ok(await seen(path.join('Film (2020)', 'Film (2020).mkv')), 'fil i en återskapad mapp');
+    // Omdöpt mapp: händelserna har det nya namnet, och en ny mapp med det gamla namnet bevakas
+    fs.renameSync(path.join(root, 'Gammal'), path.join(root, 'Ny'));
+    await sleep(300);
+    ev.length = 0;
+    fs.writeFileSync(path.join(root, 'Ny', 'a.mkv'), 'x');
+    assert.ok(await seen(path.join('Ny', 'a.mkv')));
+    await sleep(100);
+    assert.ok(!ev.includes(path.join('Gammal', 'a.mkv')), 'inga händelser med det gamla namnet: ' + ev.join(', '));
+    fs.mkdirSync(path.join(root, 'Gammal'));
+    await sleep(300);
+    fs.writeFileSync(path.join(root, 'Gammal', 'b.mkv'), 'x');
+    assert.ok(await seen(path.join('Gammal', 'b.mkv')), 'ny mapp med det gamla namnet');
+    assert.equal(w.size, 4, 'roten och tre mappar');
   } finally { w.close(); }
 });
 

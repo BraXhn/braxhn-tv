@@ -26,7 +26,9 @@ export function stallCause(srv, cl = {}, loop = {}, at = Date.now()) {
   // Överföringen (från första byte) tog längre tid än segmentets längd, eller uppmätt bandbredd under strömmens
   const slowXfer = f && f.dur > 0 && f.load - (f.wait || 0) > f.dur * 1000 * 0.8;
   if (slowXfer || (cl.bw > 0 && cl.bitrate > 0 && cl.bw < cl.bitrate * 1.15)) {
-    return { cause: 'network', text: `nätet hann inte med${cl.bw > 0 ? ` (uppmätt ${mbit(cl.bw)} Mbit/s` : ' ('}${cl.bitrate > 0 ? `${cl.bw > 0 ? ', ' : ''}strömmen behöver ${mbit(cl.bitrate)} Mbit/s` : ''})` };
+    const why = [cl.bw > 0 ? `uppmätt ${mbit(cl.bw)} Mbit/s` : '', cl.bitrate > 0 ? `strömmen behöver ${mbit(cl.bitrate)} Mbit/s` : ''].filter(Boolean);
+    if (!why.length && slowXfer) why.push(`segmentet på ${String(f.dur).replace('.', ',')} s tog ${((f.load - (f.wait || 0)) / 1000).toFixed(1).replace('.', ',')} s att hämta`);
+    return { cause: 'network', text: `nätet hann inte med${why.length ? ` (${why.join(', ')})` : ''}` };
   }
   const dropped = cl.dropped > 0 ? `, ${cl.dropped} tappade bildrutor` : '';
   return { cause: 'client', text: `klienten – servern och nätet hann med (avkodningen eller webbläsaren${dropped})` };

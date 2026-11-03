@@ -62,7 +62,10 @@ export async function openRecap(id, { next = null } = {}) {
     if (info.state === 'ready') return play(info);
     if (info.state === 'failed') return say(t(info.error || 'Sammanfattningen kunde inte göras'));
     say(t('Klipper ihop sammanfattningen ur avsnitten… (det kan ta en minut)'), true);
-    timer = setTimeout(() => api(`/items/${id}/recap`, { bg: true }).then(show, fail), POLL);
+    // state none medan vi väntar: jobbet glömdes (servern startades om) eller urvalet ändrades (ett avsnitt sett i en
+    // annan flik, ny fil) – be om den igen, annars frågade dialogen för evigt utan att något gjordes
+    const again = info.state === 'none';
+    timer = setTimeout(() => api(`/items/${id}/recap`, again ? { method: 'POST', bg: true } : { bg: true }).then(show, fail), POLL);
   }
   const fail = (e) => { if (!gone) say(e?.message || t('Sammanfattningen kunde inte göras')); };
   api(`/items/${id}/recap`, { bg: true })

@@ -268,7 +268,7 @@ route('POST', '/api/items/:id/wake', user, (c) => {
   let row = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!row || !allowedFor(c.user.id, row)) return fail(c.res, 404, 'Finns inte');
   if (row.kind === 'show') {
-    row = get(`SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.parent_id=? AND i.kind='episode' AND i.path IS NOT NULL
+    row = get(`SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.parent_id=? AND i.kind='episode' AND i.version_of IS NULL AND i.path IS NOT NULL
       AND COALESCE(p.watched,0)=0 ORDER BY (COALESCE(p.position,0)>0) DESC, i.season, i.episode LIMIT 1`, c.user.id, row.id);
     if (!row || !allowedFor(c.user.id, row)) return send(c.res, 200, { ok: true, woke: false });
   }

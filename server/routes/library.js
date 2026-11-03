@@ -303,8 +303,9 @@ route('GET', '/api/items/:id', user, (c) => {
     out.defaultAudio = a ? a.index : null;
     out.defaultSub = playprefs.pickSub(out.subtitles, a, prefs, { pgs: true })?.id ?? null;
     if (it.kind === 'episode') {
-      const sib = all(`SELECT id FROM items WHERE parent_id=? ORDER BY season, episode`, it.parent_id).map(r => r.id);
-      const i = sib.indexOf(it.id);
+      // Versioner (samma avsnitt i två mappar, mergeShows) hoppas över; spelas en version räknas huvudradens plats
+      const sib = all(`SELECT id FROM items WHERE parent_id=? AND version_of IS NULL ORDER BY season, episode`, it.parent_id).map(r => r.id);
+      const i = sib.indexOf(it.version_of ?? it.id);
       out.prevId = sib[i - 1] || null; out.nextId = sib[i + 1] || null;
     }
   }

@@ -223,14 +223,17 @@ function regroupShows(lib) {
  * TMDB-id slås aldrig ihop. Returnerar id:n på de serier som fått avsnitt.
  */
 export function mergeShows(lib) {
-  const rows = all(`SELECT s.id, s.src_name, s.src_alias, s.tmdb_id, s.match_locked, s.meta_done, s.locked,
+  const rows = all(`SELECT s.id, s.src_name, s.src_alias, s.tmdb_id, s.match_locked, s.match_unsure, s.meta_done, s.locked,
     (SELECT COUNT(*) FROM items e WHERE e.parent_id=s.id) AS n FROM items s WHERE s.library_id=? AND s.kind='show' ORDER BY s.id`, lib.id);
   const parent = new Map(rows.map(r => [r.id, r.id]));
   const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
   const owner = new Map();
   const link = (k, id) => { const o = owner.get(k); if (o == null) owner.set(k, id); else parent.set(find(id), find(o)); };
+  // Bara säkra (eller godkända/låsta) TMDB-träffar slår ihop: en osäker träff väntar på granskning i Administration, och
+  // ihopslagningen går inte att ångra (avsnitten flyttas och blir versioner av varandra)
+  const sure = (r) => r.tmdb_id && r.meta_done === 1 && (!r.match_unsure || r.match_locked);
   for (const r of rows) {
-    if (r.tmdb_id && r.meta_done === 1) link('t' + r.tmdb_id, r.id);
+    if (sure(r)) link('t' + r.tmdb_id, r.id);
     for (const k of keysOf(r)) link('k' + nkey(k), r.id);
   }
   const groups = new Map();
@@ -241,7 +244,7 @@ export function mergeShows(lib) {
     for (const g of groups.values()) {
       if (g.length < 2) continue;
       // Skydd: olika TMDB-id, eller årtal i mappnamnen som skiljer mer än ett år ("Doctor Who (1963)"/"(2005)")
-      const ids = new Set(g.filter(r => r.tmdb_id && r.meta_done === 1).map(r => r.tmdb_id));
+      const ids = new Set(g.filter(r => r.tmdb_id && r.meta_done === 1).map(r => r.tmdb_id)); // även osäkra: olika id → aldrig ihop
       const years = [...new Set(g.flatMap(r => keysOf(r).map(yearOf)).filter(Boolean))];
       if (ids.size > 1 || (years.length > 1 && Math.max(...years) - Math.min(...years) > 1)) continue;
       const main = g.find(r => r.match_locked) || [...g].sort((a, b) => b.n - a.n || a.id - b.id)[0];

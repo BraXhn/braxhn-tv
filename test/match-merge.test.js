@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { startFakeTmdb } from './fixtures/match/tmdb.js';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-mmerge-'));
@@ -106,6 +107,49 @@ test('skydd: två serier med samma TMDB-id men årtal långt ifrån varandra sl�
   D.run('DELETE FROM items WHERE id IN (?, ?)', a, b);
 });
 
+test('skydd: två serier som bara osäkert matchats till samma TMDB-id slås inte ihop', () => {
+  const lib = D.get('SELECT * FROM libraries WHERE id=?', ids.shows);
+  const add = (src) => {
+    const s = Number(D.run(`INSERT INTO items(library_id,kind,title,sort_title,src_name,tmdb_id,meta_done,match_unsure,match_score,added) VALUES(?,?,?,?,?,?,1,1,0.6,0)`,
+      lib.id, 'show', src, src.toLowerCase(), src, 777).lastInsertRowid);
+    const e = Number(D.run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,path,added) VALUES(?,?,?,?,?,1,1,?,0)`,
+      lib.id, 'episode', s, 'Avsnitt 1', 'avsnitt 1', path.join(SER, src, `${src} S01E01.mkv`)).lastInsertRowid);
+    return [s, e];
+  };
+  const [a, ea] = add('Bamse'), [b, eb] = add('Bamses äventyr');
+  try {
+    // Osäkra träffar väntar på administratörens granskning – att slå ihop dem går inte att ångra (avsnitten blir versioner)
+    scanner.mergeShows(lib);
+    assert.ok(D.get('SELECT 1 FROM items WHERE id=?', a) && D.get('SELECT 1 FROM items WHERE id=?', b), 'båda serierna finns kvar');
+    assert.equal(D.get('SELECT version_of FROM items WHERE id=?', eb).version_of, null);
+    // Godkänd (låst) matchning för båda: samma serie, slås ihop
+    D.run('UPDATE items SET match_unsure=0, match_locked=1 WHERE id IN (?, ?)', a, b);
+    scanner.mergeShows(lib);
+    assert.equal([a, b].filter(id => D.get('SELECT 1 FROM items WHERE id=?', id)).length, 1);
+  } finally { D.run('DELETE FROM items WHERE id IN (?, ?, ?, ?)', a, b, ea, eb); }
+});
+
+test('avsnitt med versioner (ihopslagen serie): föregående/nästa och offlinesynken hoppar över versionen', async () => {
+  const main = shows(/^Clarkson/)[0];
+  const eps = D.all('SELECT id, season, episode, version_of FROM items WHERE parent_id=? ORDER BY season, episode, version_of IS NOT NULL', main.id);
+  const [e1, e2] = [eps.find(e => e.season === 1 && e.episode === 1), eps.find(e => e.season === 1 && e.episode === 2 && e.version_of == null)];
+  const ver = eps.find(e => e.version_of != null), s2 = eps.find(e => e.season === 2);
+  assert.ok(e1 && e2 && ver && s2, JSON.stringify(eps));
+  const one = async (id) => (await req(`/api/items/${id}`)).data;
+  assert.equal((await one(e1.id)).nextId, e2.id, 'nästa efter S01E01 är S01E02 (inte en version av det)');
+  assert.equal((await one(e2.id)).nextId, s2.id, 'nästa efter S01E02 är S02E01');
+  assert.equal((await one(s2.id)).prevId, e2.id, 'föregående före S02E01 är S01E02');
+  // Offlinesynken: nästa osedda avsnitt – versionen av ett sett avsnitt ska inte laddas ner (ännu en gång)
+  const follows = await import('../server/follows.js');
+  D.run('DELETE FROM progress WHERE user_id=?', uid);
+  D.run('INSERT INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(?,?,0,0,1,1)', uid, e1.id);
+  D.run('INSERT OR REPLACE INTO follows(user_id,show_id,active,auto,sync,added) VALUES(?,?,1,0,5,0)', uid, main.id);
+  try {
+    const plan = follows.syncPlan(uid);
+    assert.deepEqual(plan.ids, [e2.id, s2.id], JSON.stringify(plan));
+  } finally { D.run('DELETE FROM follows WHERE user_id=? AND show_id=?', uid, main.id); D.run('DELETE FROM progress WHERE user_id=?', uid); }
+});
+
 test('felmatchad serie rättas när den nya träffen är klart bättre – aldrig när den är låst', async () => {
   const clark = shows(/^Clark$/)[0];
   assert.equal(clark.tmdb_id, 90241, 'Clark (2022) och inte Lois & Clark');
@@ -146,4 +190,30 @@ test('osäkra matchningar och förslag i Administration; Godkänn låser', async
   await new Promise(r => setTimeout(r, 300));
   while (scanner.status.running) await new Promise(r => setTimeout(r, 100));
   assert.equal(D.get('SELECT tmdb_id FROM items WHERE id=?', pelle.id).tmdb_id, 90101);
+});
+
+test('intro och eftertexter: ett avsnitt jämförs aldrig med sin egen version', { skip: spawnSync('ffmpeg', ['-version']).status !== 0 && 'ffmpeg saknas' }, async () => {
+  const intro = await import('../server/intro.js');
+  const dir = path.join(ROOT, 'intro', 'Prov', 'Season 1');
+  fs.mkdirSync(dir, { recursive: true });
+  // Två olika avsnitt utan gemensamt ljud (ingen intro) och en exakt kopia av avsnitt 2 i en annan mapp (versionen)
+  const ep = (n, seed) => {
+    const f = path.join(dir, `Prov S01E0${n}.mka`);
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `anoisesrc=d=150:c=pink:r=22050:seed=${seed}`, '-c:a', 'libopus', '-b:a', '24k', f]);
+    return f;
+  };
+  const f1 = ep(1, 11), f2 = ep(2, 22), f2v = path.join(ROOT, 'intro', 'Prov S01E02 kopia.mka');
+  fs.copyFileSync(f2, f2v);
+  const lib = Number(D.run(`INSERT INTO libraries(name,type,path) VALUES('Prov','show',?)`, path.join(ROOT, 'intro')).lastInsertRowid);
+  const show = Number(D.run(`INSERT INTO items(library_id,kind,title,sort_title,added) VALUES(?,?,?,?,0)`, lib, 'show', 'Prov', 'prov').lastInsertRowid);
+  const add = (f, e, ver = null) => Number(D.run(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,season,episode,path,duration,mtime,version_of,added)
+    VALUES(?,?,?,?,?,1,?,?,150,1,?,0)`, lib, 'episode', show, 'A' + e, 'a' + e, e, f, ver).lastInsertRowid);
+  const e1 = add(f1, 1), e2 = add(f2, 2);
+  add(f2v, 2, e2);
+  await intro.detectMarkers(D.get('SELECT * FROM libraries WHERE id=?', lib));
+  for (const id of [e1, e2]) {
+    const r = D.get('SELECT intro_start, intro_end, credits_start, markers_done FROM items WHERE id=?', id);
+    // Förut: avsnitt 2 fick intro 0–67 s och eftertexter från 97,5 s (av 150 s) från jämförelsen med sin kopia
+    assert.deepEqual({ ...r }, { intro_start: null, intro_end: null, credits_start: null, markers_done: 1 }, `avsnitt ${id}: ingen falsk intro/eftertexter`);
+  }
 });

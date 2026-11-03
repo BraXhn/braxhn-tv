@@ -280,11 +280,13 @@ export function findRecap(A, P, intro, maxStart = 420) {
 }
 
 export async function detectMarkers(lib, status) {
+  // Versioner av ett avsnitt (samma avsnitt i två mappar, scanner.js mergeShows) jämförs aldrig: med sin egen kopia
+  // stämmer hela fönstret – början blev "intro" och slutet "eftertexter" (prov: 0–67 s och 97,5 s av 150 s)
   const groups = all(`SELECT parent_id, season, SUM(markers_done=0) AS todo, COUNT(*) AS n FROM items
-    WHERE library_id=? AND kind='episode' AND duration > 120 GROUP BY parent_id, season HAVING todo > 0`, lib.id);
+    WHERE library_id=? AND kind='episode' AND version_of IS NULL AND duration > 120 GROUP BY parent_id, season HAVING todo > 0`, lib.id);
   if (status) { status.done = 0; status.total = groups.reduce((s, g) => s + Math.max(0, g.n - 1), 0); }
   for (const g of groups) {
-    const eps = all(`SELECT id, path, mtime, duration FROM items WHERE parent_id=? AND season=? AND duration > 120 ORDER BY episode`, g.parent_id, g.season);
+    const eps = all(`SELECT id, path, mtime, duration FROM items WHERE parent_id=? AND season=? AND version_of IS NULL AND duration > 120 ORDER BY episode`, g.parent_id, g.season);
     if (eps.length < 2) { run('UPDATE items SET markers_done=1 WHERE parent_id=? AND season=?', g.parent_id, g.season); continue; }
     await jobs.yieldToPlayback({ pause: true }); // ljudanalysen väntar medan någon tittar
     try { await season(eps, status); } catch (e) { console.warn('[intro] säsong misslyckades', e.message); }
