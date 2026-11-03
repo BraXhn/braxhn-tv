@@ -2,9 +2,9 @@
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, later, toast, t, locale } from '../core.js';
 import { confirmDialog } from '../ui/dialog.js';
+import { importPanelHtml, bindImport } from './historyimport.js';
 // Diskarnas namn kommer från servern (server/diskmon.js) på svenska: "Omkodning", "Bibliotek: <namn>" …
 const diskLabel = (l) => /^Bibliotek: /.test(l) ? t('Bibliotek: {name}', { name: l.slice(11) }) : t(l);
-import { errorState, loadingState } from '../ui/states.js';
 
 // ---------- Drift: diskutrymme, import från Plex/Jellyfin, DLNA och Prometheus ----------
 const DISK_LEVEL = { ok: ['OK', 'ok-badge'], low: [t('Lite plats'), 'warn-badge'], critical: [t('Nästan fullt'), 'warn-badge'], unknown: ['', ''] };
@@ -40,7 +40,6 @@ export async function adminOps() {
   // DLNA visar alla bibliotek (null) eller bara de valda (rättigheter för hela hemnätet – DLNA har ingen inloggning)
   const dlLibs = O.dlna.libraries;
   const dlLibOpts = L.map(l => `<label class="switch"><input type="checkbox" data-dllib="${+l.id}" ${dlLibs == null || dlLibs.includes(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('');
-  const userOpts = O.users.map(u => `<label class="switch"><input type="checkbox" data-impu="${+u.id}"> ${u.parent_id ? '&nbsp;&nbsp;↳ ' : ''}${esc(u.name)}</label>`).join('');
   el.innerHTML = `
   <div class="panel"><h2>${t('Diskutrymme')}</h2>
     <p class="muted small">${t('Ledigt utrymme kontrolleras var 5:e minut. Notis skickas när något går under gränsen (och högst en påminnelse per dygn) – kryssa i <i>Lågt diskutrymme</i> under Notiser. När omkodningsmappen nästan är full rensas inaktiva uppspelningar tidigare.')}</p>
@@ -57,18 +56,7 @@ export async function adminOps() {
       ${P.dir ? `<div><label for="oppgb">${t('Största storlek (GB)')}</label><input id="oppgb" type="number" min="0.1" max="10000" step="0.1" value="${esc(P.maxGb)}" style="width:110px"></div>` : ''}
       <button class="ghost">${t('Spara')}</button>${P.dir ? t('<button type="button" class="ghost" id="oppfill" title="Kopierar direkt och väcker diskarna">Fyll nu</button><button type="button" class="ghost" id="oppclr">Töm cachen</button>') : ''}</div></form>
   </div>
-  <div class="panel"><h2>${t('Importera tittarhistorik från Plex eller Jellyfin')}</h2>
-    <p class="muted small">${t('Hämtar vad som är sett och hur långt du kommit i påbörjade filmer och avsnitt och för in det på valda användare här. Titlar matchas i första hand på TMDB/IMDb/TVDB-id, sedan på filsökväg och sist på titel och år (serier: säsong och avsnitt). Inget ändras förrän du klickar på <i>Importera</i>.')}</p>
-    <form id="impf"><div class="row"><div><label for="imps">${t('Källa')}</label><select id="imps"><option value="plex">Plex</option><option value="jellyfin">Jellyfin / Emby</option></select></div>
-      <div style="flex:2;min-width:220px"><label for="impu">${t('Adress')}</label><input id="impu" placeholder="http://192.168.1.10:32400"></div></div>
-      <div class="row" id="impplex"><div style="flex:1;min-width:220px"><label for="impt">X-Plex-Token <span class="muted small">${t('(historiken för kontot som äger token)')}</span></label><input id="impt" type="password" autocomplete="off"></div></div>
-      <div class="row" id="impjf" hidden><div style="flex:1;min-width:180px"><label for="impk">${t('API-nyckel')} <span class="muted small">${t('(Instrumentpanel → API-nycklar)')}</span></label><input id="impk" type="password" autocomplete="off"></div>
-        <div style="flex:1;min-width:160px"><label for="impjfu">${t('Användare i Jellyfin')}</label><select id="impjfu"><option value="">${t('Hämta först…')}</option></select></div>
-        <button type="button" class="ghost small" id="impjfl">${t('Hämta användare')}</button></div>
-      <label for="impm">${t('Sökvägsmappning om filerna ligger på olika ställen (en per rad), t.ex. <code>/data/movies=/media/Filmer</code>')}</label><textarea id="impm" rows="2" style="width:100%"></textarea>
-      <div class="row" style="margin-top:12px"><button class="primary">${t('Förhandsvisa')}</button></div></form>
-    <div id="impres"></div>
-  </div>
+  ${importPanelHtml()}
   <div class="panel"><h2>${t('DLNA – smart-TV utan app {v}', { v: O.dlna.enabled ? (O.dlna.running ? t('<span class="ok-badge">Aktiv</span>') : O.dlna.error ? t('<span class="warn-badge">Fel</span>') : t('<span class="warn-badge">Startar</span>')) : '' })}</h2>
     <p class="muted small">${t('Smart-TV, spelkonsoler och mediaspelare (VLC, Kodi) hittar biblioteket under <i>Medieservrar</i> och spelar filerna direkt, utan omkodning – formatet måste alltså stödjas av TV:n. <b>Ingen inloggning:</b> alla enheter på hemnätet kan se och spela det som visas här, därför finns en åldersgräns. Nås aldrig via omvänd proxy eller utifrån. I Docker krävs nätverkstypen <b>host</b> (eller macvlan/br0 med egen IP) för att TV:n ska hitta servern.')}</p>
     ${O.dlna.error ? `<p class="err small">${esc(O.dlna.error)}</p>` : ''}${O.dlna.running && O.dlna.addresses.length ? `<p class="muted small">${t('Annonseras på {v}.', { v: esc(O.dlna.addresses.join(', ')) })}</p>` : ''}
@@ -131,39 +119,8 @@ export async function adminOps() {
     showPs(await api('/ops/prestart/clear', { method: 'POST' })); toast(t('Cachen är tömd'));
   });
 
-  // Import
-  const src = () => $('#imps').value;
-  $('#imps').onchange = () => { $('#impplex').hidden = src() !== 'plex'; $('#impjf').hidden = src() === 'plex'; $('#impu').placeholder = src() === 'plex' ? 'http://192.168.1.10:32400' : 'http://192.168.1.10:8096'; };
-  const fillJfUsers = (users) => { $('#impjfu').innerHTML = users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('') || t('<option value="">Inga användare</option>'); };
-  $('#impjfl').onclick = act(async () => fillJfUsers(await api('/import/users', { method: 'POST', body: { url: $('#impu').value, apiKey: $('#impk').value } })));
-  $('#impf').onsubmit = async (e) => {
-    e.preventDefault();
-    const b = $('#impf button.primary'); b.disabled = true; b.textContent = t('Hämtar…');
-    $('#impres').innerHTML = loadingState({ kind: 'inline', label: t('Hämtar tittarhistorik…') });
-    try {
-      const P = await api('/import/preview', { method: 'POST', body: { source: src(), url: $('#impu').value, token: $('#impt').value, apiKey: $('#impk').value, user: $('#impjfu').value, pathMap: $('#impm').value } });
-      if (!$('#impres')) return;
-      $('#impres').innerHTML = `<div class="tiles" style="margin-top:14px"><div class="tile"><b>${+P.total}</b><span>${t('sedda/påbörjade')}</span></div><div class="tile"><b>${+P.matched}</b><span>${t('matchade')}</span></div><div class="tile"><b>${+P.unmatched}</b><span>${t('saknas här')}</span></div></div>
-        <p class="muted small">${t('Matchade på id: {id} · filsökväg: {path} · titel: {title}. Att importera: {watched} sedda och {inProgress} påbörjade.', { id: +P.byMethod.id, path: +P.byMethod.path, title: +P.byMethod.title, watched: +P.watched, inProgress: +P.inProgress })}</p>
-        ${P.unmatchedSample.length ? `<details><summary class="muted small">${t('Omatchade ({unmatched}{v})', { unmatched: +P.unmatched, v: P.unmatched > P.unmatchedSample.length ? t(', visar {unmatchedSampleN}', { unmatchedSampleN: P.unmatchedSample.length }) : '' })}</summary><table>${P.unmatchedSample.map(u => `<tr><td>${esc(u.title)}</td><td class="muted small" style="word-break:break-all">${esc(u.path || '')}</td></tr>`).join('')}</table></details>` : ''}
-        ${P.matched ? `<label style="margin-top:10px">${t('För in på')}</label>${userOpts}
-        <label class="switch"><input type="checkbox" id="impow"> ${t('Skriv över nyare positioner här (sedda titlar avmarkeras aldrig)')}</label>
-        <div class="row" style="margin-top:10px"><button class="primary" id="imprun">${t('Importera')}</button></div>` : ''}`;
-      const run = $('#imprun');
-      if (run) run.onclick = act(async () => {
-        const users = $$('[data-impu]').filter(x => x.checked).map(x => +x.dataset.impu);
-        if (!users.length) return toast(t('Välj minst en användare'));
-        run.disabled = true;
-        try {
-          const r = await api('/import/run', { method: 'POST', body: { id: P.id, users, overwrite: $('#impow').checked } });
-          $('#impres').innerHTML = `<p class="ok-badge" style="display:inline-block;margin-top:12px">${t('Klart: {watched} markerade som sedda, {progress} påbörjade, {skipped} oförändrade ({users} användare).', { watched: +r.watched, progress: +r.progress, skipped: +r.skipped, users: +r.users })}</p>`;
-        } finally { if ($('#imprun')) run.disabled = false; }
-      });
-    } catch (er) {
-      if (er.aborted) return;
-      if ($('#impres')) $('#impres').innerHTML = errorState(er, { compact: true });
-    } finally { b.disabled = false; b.textContent = t('Förhandsvisa'); }
-  };
+  // Import (views/historyimport.js)
+  bindImport(O);
 
   // DLNA
   $('#dlnaf').onsubmit = act(async (e) => {

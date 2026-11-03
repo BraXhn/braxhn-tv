@@ -66,6 +66,7 @@ const fake = http.createServer((q, r) => {
 }).listen(0);
 await new Promise(r => fake.once('listening', r));
 const FB = `http://127.0.0.1:${fake.address().port}`;
+process.env.PLEX_TV_URL = FB + '/ingen-plextv'; // inga hemanvändare (plex.tv svarar 404)
 after(() => { fake.close(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
 const D = await import('../server/db.js');

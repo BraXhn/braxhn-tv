@@ -584,6 +584,21 @@ Bara tillägg – apparna läser inget av det (de nya fälten i `GET /api/audiob
   `book_meta_region`, `PUT /api/settings { bookMetaRegion }`: us, uk, de, fr, ca, au, it, es, in, jp), och `POST …/match` tar
   `source: 'audible'` (detaljerna hämtas från Audnexus).
 
+## Import av tittarhistorik: `/api/import/*` (admin, betrott nät)
+
+Bara webbens administration använder dem (inte apparna). Token, API-nycklar och PIN skickas bara in och syns aldrig i något svar.
+
+- `POST /api/import/preview` `{ source: 'plex'|'jellyfin', mode?: 'api'|'db', url?, token?, apiKey?, user?, dbPath?, pathMap?, pins?: { 'plex:<konto-id>': '1234' } }` →
+  `{ id, source, mode, notes: [], total, matched, unmatched, byMethod: { path, id, title }, watched, inProgress, unmatchedSample, profiles: [...] }`.
+  Sammanfattningen överst gäller den första profilen (Plex-ägaren). Varje profil: `{ key, name, kind: 'owner'|'home'|'friend'|'user', kid, maxAge, protected, needPin, pinError, partial,
+  error, total, matched, unmatched, watched, inProgress, byMethod, link: { id, name } | { skip: true } | null, suggest: { id, name } | null }`. `key` är `plex:<konto-id>` (ägaren = `plex:1`)
+  både via servern och databasfilen, `jellyfin:<id>` för Jellyfin. `partial` = bara sedda titlar (delade vänner, hemanvändare utan PIN).
+- `POST /api/import/run` `{ id, profiles: [{ key, action: 'link'|'create'|'skip', userId?, name?, maxAge? }], overwrite?, sync?: { on, hours } }` →
+  `{ source, profiles: [{ key, name, action, userId, userName, watched, progress, skipped, error }], created: [{ id, name, maxAge }], watched, progress, skipped, users }`.
+  Profiler som inte nämns lämnas orörda; `skip` sparas. Nya profiler skapas under administratörens huvudkonto. Den äldre formen `{ id, users: [id…] }` (den första profilens historik på valda användare) fungerar fortfarande.
+- `GET /api/import/sync` → `{ on, hours, mode, url, dbPath, configured, tokenSet, last, result, error, running, links: [{ key, name, userId, userName, syncedAt }] }`;
+  `PUT /api/import/sync` `{ on?, hours? }` (1–168 timmar); `POST /api/import/sync/run` kör nu och ger samma svar plus `ran`.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

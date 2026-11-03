@@ -637,6 +637,11 @@ CREATE TABLE IF NOT EXISTS sso_links(provider_id INTEGER NOT NULL REFERENCES sso
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, managed INTEGER NOT NULL DEFAULT 0, email TEXT, username TEXT,
   created INTEGER NOT NULL, last_login INTEGER, PRIMARY KEY(provider_id, subject));
 CREATE INDEX IF NOT EXISTS sso_links_user ON sso_links(user_id);`);
+// Import av tittarhistorik (server/mediaimport.js): profil i Plex/Jellyfin (ext_key 'plex:<konto-id>') → profil här.
+// user_id NULL = hoppa över. secret = hemanvändarens servertoken, bara medan löpande synk är på (lämnas aldrig ut).
+// synced_at = senaste tiden i källan som förts in (synken tar bara det som ändrats efter den).
+db.exec(`CREATE TABLE IF NOT EXISTS import_links(source TEXT NOT NULL, ext_key TEXT NOT NULL, ext_name TEXT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, secret TEXT, synced_at INTEGER, updated INTEGER, PRIMARY KEY(source, ext_key));`);
 
 // E-böcker och serietidningar (server/ebooks.js, bibliotekstypen 'ebook'). En rad per fil: format epub | cbz | pdf;
 // series/series_no ur OPF (calibre:series, belongs-to-collection), ComicInfo.xml eller filnamnet; age = åldersgräns ur

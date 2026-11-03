@@ -440,18 +440,48 @@ route('POST', '/api/import/users', admin, async (c) => {
   const b = await readJson(c.req);
   try { send(c.res, 200, await mediaImport.jellyfinUsers({ url: b.url, apiKey: b.apiKey })); } catch (e) { fail(c.res, e.status || 502, e.message); }
 });
+// Huvudkontot som nya profiler från Plex skapas under (administratörens hushåll)
+const rootOf = (c) => { const u = get('SELECT id, parent_id FROM users WHERE id=?', c.user.id); return u ? u.parent_id || u.id : null; };
 route('POST', '/api/import/preview', admin, async (c) => {
   const b = await readJson(c.req);
-  try { send(c.res, 200, await mediaImport.preview({ source: b.source, url: b.url, token: b.token, apiKey: b.apiKey, user: b.user, pathMap: b.pathMap })); }
-  catch (e) { e.users ? send(c.res, 400, { error: e.message, users: e.users }) : fail(c.res, e.status || 502, e.message); }
+  try {
+    send(c.res, 200, await mediaImport.preview({ source: b.source, mode: b.mode, url: b.url, token: b.token, apiKey: b.apiKey, user: b.user, pathMap: b.pathMap,
+      dbPath: b.dbPath, pins: b.pins, rootId: rootOf(c) }));
+  } catch (e) { e.users ? send(c.res, 400, { error: e.message, users: e.users }) : fail(c.res, e.status || 502, e.message); }
 });
 route('POST', '/api/import/run', admin, async (c) => {
   const b = await readJson(c.req);
-  const r = mediaImport.runImport(b.id, b.users, { overwrite: !!b.overwrite });
+  // profiles: val per profil (koppla/skapa/hoppa över); users: äldre form – ägarens historik på valda användare
+  if (Array.isArray(b.profiles)) {
+    let r;
+    try { r = await mediaImport.runProfiles(b.id, b.profiles, { overwrite: !!b.overwrite, rootId: rootOf(c), sync: b.sync || null }); }
+    catch (e) { return fail(c.res, e.status || 500, e.message); }
+    for (const u of r.created) audit('profile_created', { ...ctx(c), detail: `${u.name}${u.maxAge != null ? ` (max ${u.maxAge} år)` : ''} – från ${r.source}` });
+    for (const p of r.profiles) if (p.userId) invalidateProfile(p.userId);
+    audit('history_imported', { ...ctx(c), detail: `${r.source}: ${r.watched} sedda, ${r.progress} påbörjade, ${r.users} profiler${b.sync?.on ? ', löpande synk på' : ''}` });
+    return send(c.res, 200, r);
+  }
+  let r;
+  try { r = mediaImport.runImport(b.id, b.users, { overwrite: !!b.overwrite }); } catch (e) { return fail(c.res, e.status || 500, e.message); }
   for (const uid of b.users || []) invalidateProfile(+uid);
   audit('history_imported', { ...ctx(c), detail: `${r.source}: ${r.watched} sedda, ${r.progress} påbörjade, ${r.users} användare` });
   send(c.res, 200, r);
 });
+// Löpande synk från Plex (envägs, av som standard): läge, på/av och intervall; kör nu
+route('GET', '/api/import/sync', admin, (c) => send(c.res, 200, mediaImport.syncInfo()));
+route('PUT', '/api/import/sync', admin, async (c) => {
+  const b = await readJson(c.req);
+  let r; try { r = mediaImport.updateSync({ on: b.on == null ? undefined : !!b.on, hours: b.hours }); } catch (e) { return fail(c.res, e.status || 500, e.message); }
+  audit('settings_changed', { ...ctx(c), detail: `synk från Plex: ${r.on ? `på, var ${r.hours}:e timme` : 'av'}` });
+  send(c.res, 200, r);
+});
+route('POST', '/api/import/sync/run', admin, async (c) => {
+  try {
+    const r = await mediaImport.syncNow();
+    send(c.res, 200, { ...mediaImport.syncInfo(), ran: r });
+  } catch (e) { fail(c.res, e.status || 502, e.message); }
+});
+mediaImport.startSync((uids) => { for (const uid of uids) invalidateProfile(uid); });
 diskmon.start();
 setTimeout(() => { try { dlna.apply(); } catch (e) { console.warn('[dlna]', e.message); } }, 1000).unref();
 
