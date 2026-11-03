@@ -19,6 +19,7 @@ import { execFile } from 'node:child_process';
 import { all, get, getSetting, setSetting } from './db.js';
 import { librariesWithRoots, rootOf } from './libpaths.js';
 import * as jobs from './jobs.js';
+import { startedSql } from './resume.js';
 
 const GB = 1e9, MB = 1 << 20;
 const OWN = /^(\d+)\.(json|p\d+|p\d+\.part|json\.part)$/;
@@ -207,9 +208,9 @@ export function candidates(nowS = Math.floor(Date.now() / 1000)) {
     else if (score > c.score) { c.score = score; c.why = why; }
     if (pos != null && c.positions.length < 3 && !c.positions.some(p => Math.abs(p - pos) < 30)) c.positions.push(pos);
   };
-  // Fortsätt titta: platsen där man slutade (senaste 60 dagarna)
+  // Fortsätt titta: platsen där man slutade (senaste 60 dagarna; under 2 min börjar titeln om, server/resume.js)
   for (const r of all(`SELECT i.*, p.position AS _pos, p.updated AS _upd FROM progress p JOIN items i ON i.id=p.item_id
-      WHERE ${PLAYABLE} AND p.watched=0 AND p.position>5 AND (i.duration IS NULL OR p.position < i.duration*0.95) AND p.updated>?
+      WHERE ${PLAYABLE} AND p.watched=0 AND ${startedSql()} AND (i.duration IS NULL OR p.position < i.duration*0.95) AND p.updated>?
       ORDER BY p.updated DESC LIMIT 200`, nowS - 60 * 86400)) {
     add(r, 100 - Math.min(30, (nowS - r._upd) / 86400), 'Fortsätt titta', r._pos);
   }

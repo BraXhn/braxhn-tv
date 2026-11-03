@@ -2,7 +2,7 @@
 // osedda titlar (fältet featured i /api/home). Bläddrar långsamt av sig själv, men aldrig med prefers-reduced-motion,
 // och står still medan muspekaren är över eller fokus är inuti, eller när användaren pausat (WCAG 2.2.2).
 // Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit, data-nav-up).
-import { api, esc, fmtDur, heroUrl, later, toast, t } from '../core.js';
+import { api, esc, fmtDur, heroUrl, later, resumeAt, toast, t } from '../core.js';
 import { startPlay } from '../lazy.js';
 
 const INTERVAL = 9000;
@@ -40,7 +40,7 @@ export function featuredHtml(items) {
 
 /** Spela: filmer där man slutade (eller från början), serier nästa avsnitt */
 async function playTitle(b, it) {
-  if (it.kind !== 'show') return startPlay(b, it.id, it.position > 30 ? it.position : 0);
+  if (it.kind !== 'show') return startPlay(b, it.id, resumeAt(it.position, it.duration));
   b.disabled = true;
   try {
     const st = await api(`/items/${it.id}/state`, { bg: true });

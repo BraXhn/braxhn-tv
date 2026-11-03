@@ -28,6 +28,7 @@ import crypto from 'node:crypto';
 import { loopStats } from '../loopmon.js';
 import { stallCause } from '../stalls.js';
 import * as jobs from '../jobs.js';
+import { startedSql } from '../resume.js';
 
 // Familjefiltret påtvingat (barnprofil) och titeln har svordomar: originalfilen (direkt, nedladdning, offline) skulle ge
 // ljudet otystat – bara HLS-strömmen från /playback (där servern tystar) är tillåten
@@ -269,7 +270,7 @@ route('POST', '/api/items/:id/wake', user, (c) => {
   if (!row || !allowedFor(c.user.id, row)) return fail(c.res, 404, 'Finns inte');
   if (row.kind === 'show') {
     row = get(`SELECT i.* FROM items i LEFT JOIN progress p ON p.item_id=i.id AND p.user_id=? WHERE i.parent_id=? AND i.kind='episode' AND i.version_of IS NULL AND i.path IS NOT NULL
-      AND COALESCE(p.watched,0)=0 ORDER BY (COALESCE(p.position,0)>0) DESC, i.season, i.episode LIMIT 1`, c.user.id, row.id);
+      AND COALESCE(p.watched,0)=0 ORDER BY ${startedSql()} DESC, i.season, i.episode LIMIT 1`, c.user.id, row.id);
     if (!row || !allowedFor(c.user.id, row)) return send(c.res, 200, { ok: true, woke: false });
   }
   send(c.res, 200, { ok: true, woke: prestart.wake(row, c.user.id) });

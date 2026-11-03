@@ -1,7 +1,7 @@
 // Snabbåtgärder på affischkorten (⋮, högerklick, långtryck, Menu-tangenten): spela, sedd/osedd, Min lista,
 // ta bort från Fortsätt titta, följ, eget betyg, titta tillsammans och – för administratörer – metadataverktygen.
 // Kortet uppdateras direkt (optimistiskt) och ändringar som går att ångra får "Ångra" i toasten.
-import { $$, act, api, fmtTime, me, sxe, toast, toastErr, t } from '../core.js';
+import { $$, act, api, fmtTime, me, resumeAt, sxe, toast, toastErr, t } from '../core.js';
 import { need, play, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
@@ -107,7 +107,7 @@ async function seasonWatched(it) {
 /** Menyns val för en titel. st = /items/:id/state (Min lista, följer, nästa avsnitt). */
 export function cardActions(it, st, el) {
   const show = it.kind === 'show', media = !show, ep = it.kind === 'episode';
-  const pos = media && it.position > 30 ? it.position : 0;
+  const pos = media ? resumeAt(it.position, it.duration) : 0;
   const admin = !!me?.adminHere, curate = admin || !!me?.curateHere; // curate: rätta matchning/metadata (även utifrån med 2FA)
   return [
     { icon: '▶', label: t('Fortsätt från {pos}', { pos: fmtTime(pos) }), hidden: !pos, onSelect: () => startPlay(null, it.id, pos) },
@@ -191,7 +191,7 @@ export async function openCardMenu(el, point = null) {
 async function playCard(b) {
   const it = cardItem(b.dataset.cplay);
   if (b.dataset.pos != null || !it) return startPlay(b, +b.dataset.cplay, +b.dataset.pos || 0);
-  if (it.kind !== 'show') return startPlay(b, it.id, it.position > 30 ? it.position : 0);
+  if (it.kind !== 'show') return startPlay(b, it.id, resumeAt(it.position, it.duration));
   b.disabled = true;
   try {
     const st = await api(`/items/${it.id}/state`, { bg: true });

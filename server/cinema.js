@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { get, all, run, getSetting } from './db.js';
+import { startedSql } from './resume.js';
 
 export const MAX_TRAILERS = 3;
 // Mediatoken för förfilmen gäller bara den filen (router.js: scope = PREROLL_SCOPE + filens nummer i listan)
@@ -100,14 +101,14 @@ export function rankTrailers(movieGenres, cands, taste = {}, n = 1, rand = Math.
 /**
  * Trailers att visa före filmen movie (huvudraden) för användaren uid: [{ tid, itemId, title, path }].
  * age = ageFilter(uid) från http/context.js (alias i = titeln, s = ev. serie), taste = smakprofilen.
- * Bara filmer som användaren inte börjat på eller sett och som inte är samma film (eller en version av den).
+ * Bara filmer som användaren inte börjat på (minst 2 min, server/resume.js) eller sett och som inte är samma film (eller en version av den).
  */
 export function pickTrailers(uid, movie, n, { age = { sql: '', params: [] }, taste = {}, rand = Math.random } = {}) {
   if (!(n > 0)) return [];
   const rows = all(`SELECT t.id AS tid, t.path, i.id AS item_id, i.title, i.genres, i.rating FROM trailers t JOIN items i ON i.id=t.item_id
     LEFT JOIN items s ON s.id=i.parent_id
     WHERE t.kind='trailer' AND i.kind='movie' AND i.version_of IS NULL AND i.id != ?${age.sql}
-      AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id=? AND p.item_id=i.id AND (p.watched=1 OR p.position > 0))
+      AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id=? AND p.item_id=i.id AND (p.watched=1 OR ${startedSql()}))
     ORDER BY t.id LIMIT 3000`, movie.id, ...age.params, uid);
   const byItem = new Map();
   for (const r of rows) { if (!byItem.has(r.item_id)) byItem.set(r.item_id, []); byItem.get(r.item_id).push(r); }

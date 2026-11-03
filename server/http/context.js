@@ -9,6 +9,7 @@ import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
 import * as st from '../stream.js';
 import { permsOf, libsOf, libOk, libFilter, canDownload, remoteMax } from '../perms.js';
+import { resumeAt, startedSql } from '../resume.js';
 export { permsOf, libsOf, libOk, libFilter, canDownload, remoteMax };
 
 export const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
@@ -47,7 +48,9 @@ function shape(r) {
   if (r.kind === 'episode') Object.assign(o, { season: r.season, episode: r.episode, show: r.parent_id, showTitle: r.show_title, showPoster: !!r.show_poster, showThumb: !!r.show_thumb,
     showPh: r.show_poster_color || undefined });
   if (r.kind === 'show') Object.assign(o, { episodes: r.ep_total, watchedEpisodes: r.ep_watched, watched: r.ep_total > 0 && r.ep_total === r.ep_watched, seasons: r.ep_seasons ?? 0 });
-  else Object.assign(o, { position: r.p_pos || 0, watched: !!r.p_watched, height: r.height,
+  // position: bara när titeln räknas som påbörjad (server/resume.js) – annars 0, så att webben och apparna börjar om
+  // från början, inte visar framsteg och inte erbjuder "Fortsätt från" för det man bara tittat in i
+  else Object.assign(o, { position: resumeAt(r.p_pos || 0, r.duration), watched: !!r.p_watched, height: r.height,
     intro: r.intro_end ? { start: r.intro_start || 0, end: r.intro_end } : null, credits: r.credits_start || null,
     recap: r.recap_end ? { start: r.recap_start || 0, end: r.recap_end } : null, trickplay: r.trickplay === 1 });
   return o;
@@ -203,7 +206,7 @@ export function recommend(uid, limit, seenIds = null) {
   const age = ageFilter(uid);
   // Titlar man redan börjat på/sett (serier räknas via sina avsnitt) och titlar i Min lista hoppas över
   const seen = seenIds || new Set(all(`SELECT DISTINCT COALESCE(e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
-    WHERE q.user_id=? AND (q.watched=1 OR q.position > 0)`, uid).map(r => r.id));
+    WHERE q.user_id=? AND (q.watched=1 OR ${startedSql('q.position', 'e.duration')})`, uid).map(r => r.id));
   for (const r of all('SELECT item_id FROM watchlist WHERE user_id=?', uid)) seen.add(r.item_id);
   const cands = candidates(age).filter(r => !seen.has(r.id)).slice(0, 3000);
   const total = Object.values(w).reduce((a, b) => a + b, 0);

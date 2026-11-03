@@ -60,7 +60,8 @@ t('förberedelse: konto, barnprofil och titlar i databasen', async () => {
   S.old = item(movies, 'movie', 'Gammal film');
   S.kidMovie = item(movies, 'movie', 'Barnfilm', { age: 7, col: 1, year: 2001 });
   item(movies, 'movie', 'Vuxen i samling', { col: 1, year: 2010 });
-  item(movies, 'movie', 'Vuxen 1', { col: 2 }); item(movies, 'movie', 'Vuxen 2', { col: 2 });
+  S.v1 = item(movies, 'movie', 'Vuxen 1', { col: 2 }); item(movies, 'movie', 'Vuxen 2', { col: 2 });
+  S.movies = movies; S.shows = shows;
   const show = (title, eps) => { const id = item(shows, 'show', title); return [id, ...eps.map(([s, e]) => item(shows, 'episode', `${title} S${s}E${e}`, { parent: id, season: s, episode: e }))]; };
   [S.a, S.a1, S.a2] = show('Alfa', [[1, 1], [1, 2]]);
   [S.b, S.b01, S.b02, S.b11] = show('Beta', [[0, 1], [0, 2], [1, 1]]);
@@ -97,21 +98,61 @@ t('specialavsnitt föreslås inte före säsong 1', async () => {
   assert.equal(ids[0], S.b11, 'senaste aktiviteten först');
 });
 
-t('mindre än 2 minuter sett hamnar inte i Fortsätt titta (positionen sparas ändå)', async () => {
+t('mindre än 2 minuter sett räknas inte som påbörjat: varken i Fortsätt titta, filtret, nästa avsnitt eller "Fortsätt från"', async () => {
   await sleep(1100);
-  // Bara tittat in i första avsnittet av serien C: varken avsnittet eller "nästa avsnitt" visas
-  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 90 } });
+  // Bara tittat in i andra avsnittet av serien C och i en film
+  await req(`/api/items/${S.c2}/progress`, { method: 'POST', body: { position: 90 } });
+  await req(`/api/items/${S.v1}/progress`, { method: 'POST', body: { position: 90 } });
   let ids = await cont();
-  assert.ok(![S.c1, S.c2].some(id => ids.includes(id)), JSON.stringify(ids));
-  // Positionen finns kvar – titeln startar där man slutade
+  assert.ok(![S.c1, S.c2, S.v1].some(id => ids.includes(id)), JSON.stringify(ids));
+  // Positionen ligger kvar i databasen, men API:t (webben och apparna) säger 0: titeln börjar om från början
   const db = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db'));
-  assert.equal(db.prepare('SELECT position FROM progress WHERE item_id=?').get(S.c1)?.position, 90);
+  assert.equal(db.prepare('SELECT position FROM progress WHERE item_id=?').get(S.c2)?.position, 90);
   db.close();
-  // Två minuter eller mer: med i Fortsätt titta
-  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 130 } });
+  // (titlarna saknar fil, så filmens position läses ur bibliotekslistan i stället för titelsidan)
+  const moviePos = async () => (await req(`/api/libraries/${S.movies}/items`)).data.items.find(i => i.id === S.v1).position;
+  assert.equal(await moviePos(), 0);
+  // Seriesidans ▶ och kortmenyn: första osedda avsnittet, inte det man tittat in i
+  const show = (await req(`/api/items/${S.c}`)).data;
+  assert.equal(show.next.id, S.c1);
+  assert.equal(show.children.find(e => e.id === S.c2).position, 0);
+  assert.equal((await req(`/api/items/${S.c}/state`)).data.next.id, S.c1);
+  // Filtret Påbörjade
+  const prog = async (lib) => (await req(`/api/libraries/${lib}/items?filter=inprogress`)).data.items.map(i => i.id);
+  assert.ok(!(await prog(S.movies)).includes(S.v1));
+  assert.ok(!(await prog(S.shows)).includes(S.c));
+  // Två minuter eller mer: påbörjad överallt
+  await req(`/api/items/${S.c2}/progress`, { method: 'POST', body: { position: 130 } });
+  await req(`/api/items/${S.v1}/progress`, { method: 'POST', body: { position: 120 } });
   ids = await cont();
-  assert.ok(ids.includes(S.c1), JSON.stringify(ids));
-  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 0 } });
+  assert.ok(ids.includes(S.c2) && ids.includes(S.v1), JSON.stringify(ids));
+  assert.equal(await moviePos(), 120);
+  assert.equal((await req(`/api/items/${S.c}`)).data.next.id, S.c2);
+  assert.equal((await req(`/api/items/${S.c}/state`)).data.next.position, 130);
+  assert.ok((await prog(S.movies)).includes(S.v1));
+  assert.ok((await prog(S.shows)).includes(S.c));
+  for (const id of [S.c2, S.v1]) await req(`/api/items/${id}/progress`, { method: 'POST', body: { position: 0 } });
+});
+
+test('gränsen för påbörjad: korta klipp från en fjärdedel, samma värde i webben som på servern', async () => {
+  const { CONTINUE_MIN, isStarted, resumeAt, startedSql } = await import('../server/resume.js');
+  assert.equal(CONTINUE_MIN, 120);
+  assert.equal(isStarted(119, 3600), false); assert.equal(isStarted(120, 3600), true);
+  assert.equal(isStarted(14, 60), false); assert.equal(isStarted(15, 60), true, 'en fjärdedel av ett kort klipp');
+  assert.equal(isStarted(130, null), true, 'okänd längd: 2 minuter'); assert.equal(isStarted(0, 2), false);
+  assert.equal(resumeAt(90, 3600), 0); assert.equal(resumeAt(600, 3600), 600);
+  // SQL-varianten ger samma svar
+  const db = new DatabaseSync(':memory:');
+  const sql = (pos, dur) => !!db.prepare(`SELECT ${startedSql('?1', '?2')} AS s`).get(pos, dur).s;
+  for (const [pos, dur] of [[119, 3600], [120, 3600], [14, 60], [15, 60], [130, null], [130, 0], [0, 2], [null, 3600]]) assert.equal(sql(pos, dur), isStarted(pos, dur), `${pos}/${dur}`);
+  db.close();
+  // Webbens kopia (web/js/core.js) – samma gräns och samma formel
+  const core = fs.readFileSync(new URL('../web/js/core.js', import.meta.url), 'utf8');
+  assert.equal(+core.match(/export const CONTINUE_MIN = (\d+);/)?.[1], CONTINUE_MIN);
+  const body = core.match(/export const resumeAt = (\(pos, dur\) => [^\n]+);/)?.[1];
+  assert.ok(body);
+  const webResume = new Function('CONTINUE_MIN', `return ${body}`)(CONTINUE_MIN);
+  for (const [pos, dur] of [[119, 3600], [120, 3600], [14, 60], [15, 60], [130, null], [0, 2], [600, 3600]]) assert.equal(webResume(pos, dur), resumeAt(pos, dur), `${pos}/${dur}`);
 });
 
 t('Markera som osedd lägger inte serien i Fortsätt titta', async () => {

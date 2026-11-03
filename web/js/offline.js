@@ -16,7 +16,7 @@
 //
 // Tittarposition offline sparas lokalt (pending) och skickas med "at" (när den sparades) när servern svarar igen –
 // servern behåller ett senare framsteg från en annan enhet.
-import { api, esc, fmtSize, me, store, toast, toastErr, t } from './core.js';
+import { api, esc, fmtSize, me, resumeAt, store, toast, toastErr, t } from './core.js';
 import { audioCaps, capsQuery } from './player/caps.js';
 import { confirmDialog, openDialog } from './ui/dialog.js';
 
@@ -111,7 +111,7 @@ const videoEntry = (it, p, q) => ({
   key: keyOf(it.kind, it.id), kind: it.kind, id: it.id, file: p?.version || it.id, q, title: it.title,
   sub: it.kind === 'episode' ? `${it.showTitle || ''}`.trim() : it.year ? String(it.year) : '',
   show: it.kind === 'episode' && it.show ? { id: it.show, title: it.showTitle || '' } : null, season: it.season ?? null, episode: it.episode ?? null,
-  duration: it.duration || p?.duration || 0, position: it.position > 30 && !it.watched ? it.position : 0, defSub: p?.defaultSub || null,
+  duration: it.duration || p?.duration || 0, position: it.watched ? 0 : resumeAt(it.position, it.duration), defSub: p?.defaultSub || null,
   intro: p?.intro || null, credits: p?.credits || null });
 
 /** "Spara offline" för en film eller ett avsnitt (it = titeln från ett kort eller titelsidan) */

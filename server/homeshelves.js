@@ -5,6 +5,7 @@
 // dagen och layouten, så att en sedd film försvinner ur "osedda" hyllor direkt. Skanningen tömmer allt (clearHome).
 import { all, get, run } from './db.js';
 import { ageFilter, itemsByIds, listItems, MAIN_ONLY, recommend } from './http/context.js';
+import { startedSql } from './resume.js';
 import * as books from './audiobooks.js';
 
 // ---------- hyllorna och användarens layout ----------
@@ -136,7 +137,7 @@ function parentOf() {
  *  hits = [id, år] för titlar som sågs klart inom något av tidsfönstren wins ([år, från, till], "sedd för N år sedan") */
 function progressOf(uid, wins) {
   const par = parentOf(), seen = new Map(), hits = [];
-  for (const r of all('SELECT item_id, updated, watched FROM progress WHERE user_id=? AND (watched=1 OR position > 0)', uid)) {
+  for (const r of all(`SELECT p.item_id, p.updated, p.watched FROM progress p JOIN items i ON i.id=p.item_id WHERE p.user_id=? AND (p.watched=1 OR ${startedSql()})`, uid)) {
     const id = par.get(r.item_id) ?? r.item_id, u = r.updated;
     if (!(seen.get(id) >= u)) seen.set(id, u);
     if (r.watched) for (const w of wins) if (u >= w[1] && u <= w[2]) hits.push([id, w[0]]);

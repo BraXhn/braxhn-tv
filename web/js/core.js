@@ -158,6 +158,11 @@ export const toastErr = (e) => { if (!e?.aborted) toast(e?.message || String(e),
 export const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toastErr(e); } };
 // Profilfärg: bara #hex, rgb()/hsl() släpps in i style-attributet
 export const safeColor = (c) => typeof c === 'string' && (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\([0-9a-z\s.,%/+-]*\)$/i.test(c)) ? c : '';
+// Påbörjad film/avsnitt: sett minst 2 minuter (korta klipp: en fjärdedel). Samma gräns som server/resume.js – servern
+// skickar redan position 0 under gränsen; det här är för det webben själv vet (nedladdningar, IPTV-filmer).
+export const CONTINUE_MIN = 120;
+/** Positionen att fortsätta från (s): pos om titeln räknas som påbörjad, annars 0 (börja om från början) */
+export const resumeAt = (pos, dur) => pos > 0 && pos >= Math.min(CONTINUE_MIN, (dur > 0 ? dur : 1e9) * 0.25) ? pos : 0;
 export const fmtTime = (s) => {
   s = Math.max(0, Math.floor(s || 0));
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;

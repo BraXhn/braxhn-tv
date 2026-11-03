@@ -34,6 +34,7 @@ import { wordsOf } from './sublines.js';
 import { copyStart } from './moments.js';
 import * as family from './familyfilter.js';
 import * as jobs from './jobs.js';
+import { isStarted, resumeAt } from './resume.js';
 
 export const DIR = path.join(CONFIG, 'recaps');
 const envNum = (k, def, lo, hi) => { const v = Number(process.env[k]); return Number.isFinite(v) && v > 0 ? Math.max(lo, Math.min(hi, v)) : def; };
@@ -68,7 +69,7 @@ export function scopeFor(uid, id) {
   if (!show) return null;
   const all2 = all(EPS, uid, show.id);
   const target = it.kind === 'episode' ? all2.find(e => e.id === it.id)
-    : all2.find(e => !e.watched && e.position > 0) || all2.find(e => !e.watched) || null;
+    : all2.find(e => !e.watched && isStarted(e.position, e.duration)) || all2.find(e => !e.watched) || null;
   if (!target) return { show, reason: 'Du har sett hela serien' };
   if (!target.season) return { show, target, reason: 'Specialavsnitt har ingen sammanfattning' };
   const inSeason = all2.filter(e => e.season === target.season);
@@ -435,13 +436,13 @@ export function visibleTo(uid, r, allowed) {
 /** Svaret för GET/POST /api/items/:id/recap */
 export function out(p, r) {
   const o = { available: !p.reason, show: { id: p.show.id, title: p.show.title } };
-  if (p.target) o.target = { id: p.target.id, season: p.target.season, episode: p.target.episode, title: p.target.title, position: p.target.position || 0 };
+  if (p.target) o.target = { id: p.target.id, season: p.target.season, episode: p.target.episode, title: p.target.title, position: resumeAt(p.target.position || 0, p.target.duration) };
   if (p.reason) return { ...o, reason: p.reason, offer: false, state: 'none' };
   Object.assign(o, {
     scope: p.scope, season: p.season, title: p.plan.title, episodes: p.eps.map(e => ({ id: e.id, season: e.season, episode: e.episode, title: e.title })),
     clips: p.plan.want, estimate: Math.round(TITLE_SECS + p.plan.clips.reduce((s, c) => s + c.e - c.s, 0)),
     // Erbjudandet i spelaren: första avsnittet i en ny säsong, inte påbörjat, efter ett uppehåll
-    offer: p.scope === 'season' && p.first && p.target.position < 30 && p.lastWatch > 0 && now() - p.lastWatch > offerDays() * 86400,
+    offer: p.scope === 'season' && p.first && !isStarted(p.target.position, p.target.duration) && p.lastWatch > 0 && now() - p.lastWatch > offerDays() * 86400,
     state: r ? STATE[r.state] : 'none'
   });
   if (r) {

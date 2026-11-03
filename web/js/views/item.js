@@ -1,6 +1,6 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, extramaterial, eget betyg, temamusik, metadataverktyg, undertextsökning och följ-knapp
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, store, sxe, toast, toastErr, views, t } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, resumeAt, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { curPlayer, liveOpen, loadPlayer, need, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
@@ -56,7 +56,7 @@ views.item = async (id, season) => {
   loadPlayer().catch(() => {}); // titelsidan finns för att spela: spelaren laddas medan sidan ritas
   if (it.kind === 'show') return showView(it, season);
   const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
-  const resume = it.position > 30;
+  const resume = resumeAt(it.position, it.duration) > 0;
   const actions = `<div class="row">
     ${resume ? `<button class="primary" data-play="${it.position}">${t('▶ Fortsätt från {position}', { position: fmtTime(it.position) })}</button><button class="ghost" data-play="0">${t('Börja om')}</button>`
       : `<button class="primary" data-play="0">${t('▶ Spela')}</button>`}

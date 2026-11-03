@@ -2,7 +2,7 @@
 // titelsida med handling och avsnitt, och uppspelning som fortsätter där man var (player/iptv.js).
 // #/vod (filmer), #/vod/series, #/vod/movie?cat=… / ?q=…, #/vod/item/<id>
 // @lazy – laddas vid behov (LAZY i js/router.js)
-import { $, $$, act, api, esc, fmtDur, fmtTime, main, views, t } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtTime, main, resumeAt, views, t } from '../core.js';
 import { playVod } from '../player/iptv.js';
 import { emptyState } from '../ui/states.js';
 import { tabsHtml, bindTabs } from '../ui/tabs.js';
@@ -59,7 +59,7 @@ async function grid(kind, q) {
 async function item(id) {
   const v = await api('/iptv/vod/' + id);
   const meta = [v.year, v.genre, v.duration ? fmtDur(v.duration) : '', v.rating ? '★ ' + v.rating : ''].filter(Boolean).join(' · ');
-  const resume = v.progress && !v.progress.watched && v.progress.position > 60;
+  const resume = v.progress && !v.progress.watched && resumeAt(v.progress.position, v.progress.duration || v.duration) > 0;
   main.innerHTML = `<div class="vhero">${v.backdrop ? `<img class="vbg" src="/api/iptv/vod/${v.id}/backdrop.jpg" alt="" data-fb="1">` : ''}
     <div class="vhero-in"><span class="vcov big">${cover(v)}<i>${esc(v.name.slice(0, 40))}</i></span><div>
       <p class="muted small"><a href="${v.kind === 'series' ? '#/vod/series' : '#/vod'}">${v.kind === 'series' ? t('Serier') : t('Filmer')}</a>${v.category ? ' · ' + esc(v.category) : ''}${v.source ? ' · ' + esc(v.source) : ''}</p>

@@ -25,6 +25,7 @@ import * as homes from '../homeshelves.js';
 import * as playprefs from '../playprefs.js';
 import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
+import { startedSql } from '../resume.js';
 import * as photos from '../photos.js';
 import * as ebooks from '../ebooks.js';
 import * as prestart from '../prestart.js';
@@ -103,22 +104,19 @@ route('GET', '/api/fs', admin, (c) => {
 
 // Bläddra
 const CONTINUE_MAX = 20;
-// Fortsätt titta: bara det man sett minst 2 minuter av – ett avsnitt man bara tittat in i (provat, startat av misstag)
-// ska inte ligga där. Korta klipp (under 8 min) räknas från en fjärdedel av längden. Positionen sparas ändå, så
-// titeln startar där man slutade om man öppnar den. (alias = tabellen med kolumnen duration)
-export const CONTINUE_MIN = 120;
-const startedSql = (alias) => `p.position >= MIN(${CONTINUE_MIN}, COALESCE(NULLIF(${alias}.duration, 0), 1e9) * 0.25)`;
+// Fortsätt titta: bara det man sett minst 2 minuter av (korta klipp: en fjärdedel) – ett avsnitt man bara tittat in i
+// (provat, startat av misstag) ska inte ligga där. Gränsen finns i server/resume.js; under den börjar titeln om från början.
 route('GET', '/api/home', user, (c) => {
   const uid = c.user.id;
   // Även sedda titlar som man börjat se om räknas
-  const cont = listItems(uid, `i.kind IN('movie','episode') AND ${startedSql('i')}`, [], 'p.updated DESC', CONTINUE_MAX);
+  const cont = listItems(uid, `i.kind IN('movie','episode') AND ${startedSql()}`, [], 'p.updated DESC', CONTINUE_MAX);
   // Senaste aktivitet per titel: halvsedda efter sitt framsteg, "nästa avsnitt" efter seriens senaste tittande
   const at = new Map(cont.length ? all(`SELECT item_id, updated FROM progress WHERE user_id=? AND item_id IN (${cont.map(() => '?').join(',')})`,
     uid, ...cont.map(x => x.id)).map(r => [r.item_id, r.updated]) : []);
   // "Nästa avsnitt" för serier man håller på med. Bara sedda/påbörjade avsnitt räknas – att markera som osedd
   // skriver också framsteg (position 0) men betyder inte att man håller på med serien.
   const shows = all(`SELECT e.parent_id AS sid, MAX(p.updated) AS t FROM progress p JOIN items e ON e.id=p.item_id
-    WHERE p.user_id=? AND e.kind='episode' AND (p.watched=1 OR ${startedSql('e')}) GROUP BY e.parent_id
+    WHERE p.user_id=? AND e.kind='episode' AND (p.watched=1 OR ${startedSql('p.position', 'e.duration')}) GROUP BY e.parent_id
     HAVING MAX(p.updated) > COALESCE((SELECT h.at FROM continue_hidden h WHERE h.user_id=p.user_id AND h.item_id=e.parent_id), -1)
     ORDER BY t DESC LIMIT 20`, uid);
   const have = new Set(cont.map(x => x.show).filter(Boolean));
@@ -290,6 +288,7 @@ route('GET', '/api/items/:id', user, (c) => {
     // Säsonger med lokal affisch (nytt fält): /api/image/:id/season<N>
     const sp = seasonPosters(it);
     if (sp.length) out.seasonPosters = sp;
+    // position är 0 för det man sett mindre än 2 min (shape i http/context.js) – det räknas inte som påbörjat
     out.next = out.children.find(e => !e.watched && e.position > 0) || out.children.find(e => !e.watched) || out.children[0] || null;
     if (out.next) prestart.wake(get('SELECT * FROM items WHERE id=?', out.next.id), uid);
   } else {

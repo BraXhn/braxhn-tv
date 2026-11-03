@@ -32,6 +32,7 @@ import { listActive } from './activity.js';
 import { lowPriority } from './util.js';
 import { librariesWithRoots, rootOf } from './libpaths.js';
 import * as jobs from './jobs.js';
+import { startedSql } from './resume.js';
 
 export const CODECS = ['hevc', 'av1'];
 const CPU_ENC = { hevc: 'libx265', av1: 'libsvtav1' };
@@ -186,7 +187,7 @@ export function report(o = {}) {
   for (const r of all('SELECT item_id, MAX(updated) AS t FROM progress WHERE position > 0 OR watched=1 GROUP BY item_id')) bump(r.item_id, r.t);
   for (const r of all('SELECT item_id, MAX(ts) AS t FROM plays GROUP BY item_id')) bump(r.item_id, r.t);
   const listed = new Set(all('SELECT DISTINCT item_id FROM watchlist').map(r => r.item_id));
-  const started = new Set(all('SELECT DISTINCT item_id FROM progress WHERE position > 0 AND watched=0').map(r => r.item_id));
+  const started = new Set(all(`SELECT DISTINCT p.item_id FROM progress p JOIN items i ON i.id=p.item_id WHERE p.watched=0 AND ${startedSql()}`).map(r => r.item_id));
   let followed = new Set(); try { followed = new Set(all('SELECT DISTINCT show_id FROM follows WHERE active=1').map(r => r.show_id)); } catch {}
   const jobOf = new Map(all(`SELECT j.* FROM shrink_jobs j JOIN (SELECT item_id, MAX(id) AS id FROM shrink_jobs WHERE item_id IS NOT NULL GROUP BY item_id) m ON m.id=j.id`).map(j => [j.item_id, j]));
   const rows = all(ITEMS);

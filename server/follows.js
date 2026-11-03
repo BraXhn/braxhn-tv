@@ -6,6 +6,7 @@
 import { db, get, all, run, tx, now } from './db.js';
 import { sendPersonal, PERSONAL_KINDS } from './notify.js';
 import { safePost } from './podcasts.js';
+import { startedSql } from './resume.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS follows(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   show_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE, active INTEGER NOT NULL DEFAULT 1, auto INTEGER NOT NULL DEFAULT 0,
@@ -203,7 +204,7 @@ export function syncPlan(uid, have = []) {
   if (s.scope === 'continue' && s.count > 0) {
     // Serier man tittat på senaste 30 dagarna (samma som "Fortsätt titta"); avföljda serier hoppas över
     for (const r of all(`SELECT e.parent_id AS sid, MAX(p.updated) AS t FROM progress p JOIN items e ON e.id=p.item_id
-      WHERE p.user_id=? AND e.kind='episode' AND p.updated > ? GROUP BY e.parent_id ORDER BY t DESC LIMIT 20`, uid, now() - 30 * 86400)) {
+      WHERE p.user_id=? AND e.kind='episode' AND (p.watched=1 OR ${startedSql('p.position', 'e.duration')}) AND p.updated > ? GROUP BY e.parent_id ORDER BY t DESC LIMIT 20`, uid, now() - 30 * 86400)) {
       const f = get('SELECT active, sync FROM follows WHERE user_id=? AND show_id=?', uid, r.sid);
       if (f && (!f.active || f.sync === 0)) continue;
       if (!shows.has(r.sid)) shows.set(r.sid, f?.sync ?? s.count);

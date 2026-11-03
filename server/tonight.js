@@ -16,6 +16,7 @@
 //     topplistan när ingen match blev av.
 import crypto from 'node:crypto';
 import { get, all } from './db.js';
+import { startedSql } from './resume.js';
 
 // allowedFor, ageFilter och genreProfile (http/context.js) kopplas in av routes/tonight.js – serverns moduler
 // importerar inte från http/. Tills de är inkopplade är inget tillåtet.
@@ -73,7 +74,7 @@ export function parseFilters(b = {}) {
 /** Titlar (huvudrader: film eller serie) som profilen sett eller börjat på */
 function seenBy(uid) {
   return new Set(all(`SELECT DISTINCT COALESCE(e.version_of, e.parent_id, e.id) AS id FROM progress q JOIN items e ON e.id=q.item_id
-    WHERE q.user_id=? AND (q.watched=1 OR q.position > 60)`, uid).map(r => r.id));
+    WHERE q.user_id=? AND (q.watched=1 OR ${startedSql('q.position', 'e.duration')})`, uid).map(r => r.id));
 }
 /** Alla titlar som passar filtren och är tillåtna för alla deltagare (lätta kolumner) */
 function pool(s) {
@@ -323,9 +324,10 @@ const allDone = (s) => s.deck.length > 0 && [...s.members.keys()].every(u => vot
 function playFor(uid, id) {
   const it = get('SELECT id, kind FROM items WHERE id=?', id);
   if (!it) return null;
-  if (it.kind !== 'show') return { id: it.id, position: get('SELECT position FROM progress WHERE user_id=? AND item_id=? AND watched=0', uid, it.id)?.position || 0 };
-  const e = get(`SELECT e.id, COALESCE(p.position, 0) AS pos FROM items e LEFT JOIN progress p ON p.item_id=e.id AND p.user_id=?
-    WHERE e.parent_id=? AND e.version_of IS NULL AND COALESCE(p.watched, 0)=0 ORDER BY (COALESCE(p.position, 0) > 0) DESC, e.season, e.episode LIMIT 1`, uid, id)
+  // Under 2 min sett räknas inte som påbörjat (server/resume.js): börjar om från början
+  if (it.kind !== 'show') return { id: it.id, position: get(`SELECT p.position FROM progress p JOIN items i ON i.id=p.item_id WHERE p.user_id=? AND p.item_id=? AND p.watched=0 AND ${startedSql()}`, uid, it.id)?.position || 0 };
+  const e = get(`SELECT e.id, CASE WHEN ${startedSql('p.position', 'e.duration')} THEN p.position ELSE 0 END AS pos FROM items e LEFT JOIN progress p ON p.item_id=e.id AND p.user_id=?
+    WHERE e.parent_id=? AND e.version_of IS NULL AND COALESCE(p.watched, 0)=0 ORDER BY ${startedSql('p.position', 'e.duration')} DESC, e.season, e.episode LIMIT 1`, uid, id)
     || get('SELECT id, 0 AS pos FROM items WHERE parent_id=? AND version_of IS NULL ORDER BY season, episode LIMIT 1', id);
   return e ? { id: e.id, position: e.pos || 0 } : null;
 }

@@ -8,6 +8,7 @@ import { parseQuery } from '../searchkey.js';
 import { ageOk } from './channels.js';
 import { sourceRow, ctxOf } from './sources.js';
 import * as xt from './xtream.js';
+import { startedSql } from '../resume.js';
 
 const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
 const JOIN = `FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id LEFT JOIN iptv_sources s ON s.tuner_id=t.id
@@ -49,7 +50,7 @@ export function shelves(u, kind) {
   const out = [];
   if (kind === 'movie') {
     const cont = all(`SELECT ${cols} ${JOIN} JOIN iptv_vod_progress p ON p.user_id=? AND p.kind='movie' AND p.ref_id=v.id
-      WHERE v.kind='movie' AND ${VIS} AND ${aw} AND p.watched=0 AND p.position > 60 ORDER BY p.updated DESC LIMIT 20`, u.id, ...ap).map(card);
+      WHERE v.kind='movie' AND ${VIS} AND ${aw} AND p.watched=0 AND ${startedSql('p.position', 'COALESCE(p.duration, v.duration)')} ORDER BY p.updated DESC LIMIT 20`, u.id, ...ap).map(card);
     if (cont.length) out.push({ key: 'continue', title: 'Fortsätt titta', items: cont });
   } else {
     const cont = all(`SELECT v.id, v.kind, v.name, v.year, v.rating, v.category, v.cover FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id LEFT JOIN iptv_sources s ON s.tuner_id=t.id

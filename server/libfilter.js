@@ -14,6 +14,7 @@ import { get, all, run, tx, now } from './db.js';
 import { ageFilter, PROG, FROM, MAIN_ONLY, MY_RATING, listItems } from './http/context.js';
 import { streamsOf, subtitlesOf } from './stream.js';
 import { langKey } from './playprefs.js';
+import { startedSql } from './resume.js';
 
 const DAY = 86400;
 export const MAX_LIST = 30;
@@ -204,8 +205,8 @@ export function build(f, type = 'movie') {
   if (f.filter === 'unwatched') where.push(t === 'show' ? 'ep_watched < ep_total' : 'COALESCE(p.watched,0)=0');
   if (f.filter === 'watched') where.push(t === 'show' ? 'ep_watched = ep_total' : 'p.watched=1');
   if (f.filter === 'inprogress') where.push(t === 'show'
-    ? `((ep_watched > 0 AND ep_watched < ep_total) OR EXISTS (SELECT 1 FROM items e CROSS JOIN progress q WHERE e.parent_id=i.id AND q.user_id=p_uid.uid AND q.item_id=e.id AND q.watched=0 AND q.position > 0))`
-    : '(COALESCE(p.watched,0)=0 AND p.position > 0)');
+    ? `((ep_watched > 0 AND ep_watched < ep_total) OR EXISTS (SELECT 1 FROM items e CROSS JOIN progress q WHERE e.parent_id=i.id AND q.user_id=p_uid.uid AND q.item_id=e.id AND q.watched=0 AND ${startedSql('q.position', 'e.duration')}))`
+    : `(COALESCE(p.watched,0)=0 AND ${startedSql()})`);
   if (t === 'movie' && f.coll) where.push(f.coll === 'yes' ? 'i.collection_id IS NOT NULL' : 'i.collection_id IS NULL');
   if (t === 'show' && f.status) where.push(`EXISTS (SELECT 1 FROM calendar_shows cs WHERE cs.show_id=i.id AND cs.status IS NOT NULL AND cs.status ${f.status === 'ended' ? '' : 'NOT '}IN ${ENDED})`);
   if (t === 'show' && f.seasonsMin != null) { where.push(`${SEASONS} >= ?`); params.push(f.seasonsMin); }

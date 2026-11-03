@@ -2,7 +2,7 @@
 // utan servern. Startar appen utan kontakt med servern (app.js → offlineStart) visas den senast inloggade profilens
 // nedladdningar; i övrigt kräver vyn inloggning som alla andra.
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, esc, fmtDur, fmtSize, fmtTime, main, me, onLeave, routeGen, sxe, toast, views, t } from '../core.js';
+import { $, $$, esc, fmtDur, fmtSize, fmtTime, main, me, onLeave, resumeAt, routeGen, sxe, toast, views, t } from '../core.js';
 import * as off from '../offline.js';
 import { iconButton } from '../ui/buttons.js';
 import { confirmDialog } from '../ui/dialog.js';
@@ -54,7 +54,9 @@ function progressText(e, got = e?.got || 0) {
 }
 const qLabel = (q) => ({ src: 'original', orig: t('full upplösning'), '1080': '1080p', '720': '720p', '480': '480p' }[q] || q);
 const titleOf = (e) => e.kind === 'episode' ? `${e.season != null ? sxe(e) + ' · ' : ''}${e.title}` : e.title;
-const leftOf = (e) => e.position > 30 && e.duration && !e.finished ? ` ${t('· {v} kvar', { v: fmtTime(Math.max(0, e.duration - e.position)) })}` : '';
+// Fortsätt från: filmer och avsnitt efter samma gräns som servern (2 min, resumeAt i core.js), ljudböcker efter 30 s
+const startOf = (e) => e.finished ? 0 : e.kind === 'movie' || e.kind === 'episode' ? resumeAt(e.position, e.duration) : e.position > 30 ? e.position : 0;
+const leftOf = (e) => startOf(e) && e.duration ? ` ${t('· {v} kvar', { v: fmtTime(Math.max(0, e.duration - e.position)) })}` : '';
 
 async function render(who) {
   const g = routeGen;
@@ -122,9 +124,9 @@ function row(e) {
     <div class="dlinfo"><b>${esc(tm)}</b>${sub ? `<div class="muted small">${esc(sub)}</div>` : ''}
       <div class="muted small" data-prog${e.state === 'error' ? ' role="alert"' : ''}>${esc(progressText(e))}${done ? esc(leftOf(e)) : ''}</div>
       ${active && e.state === 'downloading' ? `<progress max="1" value="${frac}" aria-label="${t('Nedladdat av {v}', { v: esc(tm) })}"></progress>` : ''}
-      ${done && e.position > 30 && e.duration && !e.finished ? `<div class="pbar" aria-hidden="true"><i style="width:${Math.min(100, e.position / e.duration * 100).toFixed(1)}%"></i></div>` : ''}</div>
+      ${done && startOf(e) && e.duration ? `<div class="pbar" aria-hidden="true"><i style="width:${Math.min(100, e.position / e.duration * 100).toFixed(1)}%"></i></div>` : ''}</div>
     <div class="dlacts">
-      ${done ? `<button class="primary small" data-a="play">${e.position > 30 && !e.finished ? t('▶ Fortsätt') : t('▶ Spela')}</button>` : ''}
+      ${done ? `<button class="primary small" data-a="play">${startOf(e) ? t('▶ Fortsätt') : t('▶ Spela')}</button>` : ''}
       ${active ? iconButton({ icon: '⏸', label: t('Pausa nedladdningen av {v}', { v: tm }), data: { a: 'pause' } }) : ''}
       ${e.state === 'paused' || e.state === 'error' ? `<button class="ghost small" data-a="resume">${e.state === 'error' ? t('Försök igen') : t('Fortsätt')}</button>` : ''}
       ${iconButton({ icon: '✕', label: t('Ta bort {v} från Nedladdat', { v: tm }), data: { a: 'del' } })}
@@ -199,7 +201,7 @@ async function playVideo(p) {
     if (e.defSub && s.id === e.defSub) tm.default = true;
     media.append(tm);
   }
-  const start = e.position > 30 && !e.finished ? e.position : 0;
+  const start = startOf(e);
   if (start) media.addEventListener('loadedmetadata', () => { media.currentTime = start; }, { once: true });
   const save = saver(p, () => media.currentTime);
   media.addEventListener('ended', () => {
@@ -234,7 +236,7 @@ async function playBook(p) {
     if (p.part < parts.length - 1) { await load((parts[p.part + 1].offset || 0) + 0.01); media.play().catch(() => {}); }
     else { p.ended = true; save(true, true); }
   });
-  await load(e.position > 30 && !e.finished ? e.position : 0);
+  await load(startOf(e));
 }
 async function playAlbum(p) {
   const { e, media, el } = p;
