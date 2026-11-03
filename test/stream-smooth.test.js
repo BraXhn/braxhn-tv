@@ -51,6 +51,19 @@ test('hls.js: buffert bakåt begränsad, en minut framåt, glapp upp till 0,5 s 
   assert.ok(Object.isFrozen(HLS_VOD));
 });
 
+test('hls.js: ingen worker från blob: (CSP:n tillåter det inte) – i alla spelare', () => {
+  // Utan enableWorker: false försökte hls.js skapa en worker vid varje uppspelning: "Refused to create a worker from
+  // 'blob:…' because it violates the following Content Security Policy directive" i konsolen, sedan reservläget
+  assert.equal(hlsConfig({}).enableWorker, false);
+  const web = path.join(import.meta.dirname, '..', 'web', 'js');
+  const bad = [];
+  for (const f of fs.readdirSync(web, { recursive: true }).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(web, f), 'utf8');
+    for (const m of src.matchAll(/= new Hls\(([^\n]*)/g)) if (!/^hlsConfig\(|enableWorker: false/.test(m[1])) bad.push(`${f}: new Hls(${m[1].slice(0, 60)}`);
+  }
+  assert.deepEqual(bad, []);
+});
+
 test('hls.js ABR: bandbredd från första byte, svarstiden kapas, inget nödbyte före första byte', () => {
   assert.equal(holdEmergency({ loading: { start: 100, first: 0 } }), true);
   assert.equal(holdEmergency({ loading: { start: 100, first: 900 } }), false);

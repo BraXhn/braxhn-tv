@@ -379,8 +379,14 @@ test('http: /metrics kräver token, DLNA och driftsidan bara från hemnätet', a
     const sub = await fetch(B + '/dlna/event/ContentDirectory', { method: 'SUBSCRIBE', headers: { callback: '<http://192.168.1.9/>', nt: 'upnp:event' } });
     assert.equal(sub.status, 200); assert.match(sub.headers.get('sid'), /^uuid:/);
     // Säkerhetskontrollen nämner DLNA och diskutrymmet finns i statistiken
+    // En barnprofil är ingen egen inloggning (ingen egen 2FA) – nämns inte bland användare utan tvåstegsverifiering
+    assert.equal((await req('/api/profiles', { method: 'POST', body: { name: 'Barnet', maxAge: 7 } })).status, 200);
+    assert.equal((await req('/api/users', { method: 'POST', body: { name: 'gast', password: 'Kaffekopp-Blå-77' } })).status, 200);
     const sc = await req('/api/security-check');
     assert.ok(sc.json.some(i => /DLNA/.test(i.title)));
+    const no2fa = sc.json.find(i => /^Användare med fjärråtkomst/.test(i.title));
+    assert.ok(no2fa && /gast/.test(no2fa.detail), JSON.stringify(no2fa));
+    assert.doesNotMatch(no2fa.detail, /Barnet/);
     assert.ok('disk' in (await req('/api/stats')).json);
   } finally { srv.kill(); await new Promise(r => srv.once('exit', r)); }
 });

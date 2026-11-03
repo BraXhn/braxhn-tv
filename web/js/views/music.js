@@ -1,6 +1,6 @@
 // Vyer: musik – bibliotek, album, artister, spellistor och smarta spellistor
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, me, routeGen, store, toast, views, t } from '../core.js';
+import { $, $$, act, api, cardW, coverImg, esc, fmtDur, fmtTime, hue, imgSrc, keyClick, later, libs, main, me, routeGen, store, toast, views, t, tn } from '../core.js';
 import { M, playQueue, startRadio } from '../audio.js';
 import { route } from '../router.js';
 import { emptyState, noLib } from '../ui/states.js';
@@ -61,7 +61,7 @@ views.music = async (lid, tab) => {
   if (tab === 'home') {
     const d = await api(`/music/${lid}/home`);
     const smartOnly = (d.smart || []).filter(x => !x.station); // stationerna har en egen hylla
-    body = `<p class="muted">${t('{artists} artister · {albums} album · {tracks} låtar', { artists: d.stats.artists, albums: d.stats.albums, tracks: d.stats.tracks })}</p>
+    body = `<p class="muted">${[tn(d.stats.artists, '{n} artist', '{n} artister'), tn(d.stats.albums, '1 album', '{n} album'), tn(d.stats.tracks, '{n} låt', '{n} låtar')].join(' · ')}</p>
       ${d.recentlyPlayed.length ? `<section class="section"><h2>${t('Spelat nyligen')}</h2><div class="shelf">${d.recentlyPlayed.map(albumCard).join('')}</div></section>` : ''}
       ${stationsHtml(lid, d.smart || [], d.sonic)}
       <section class="section"><h2>${t('Smarta listor <a class="btn ghost small" href="#/smartedit/{lid}/new">+ Ny smart spellista</a>', { lid: +lid })}</h2>${smartOnly.length ? `<div class="shelf">${smartOnly.map(x => smartCard(lid, x)).join('')}</div>` : t('<p class="muted">Inga smarta listor med låtar ännu.</p>')}</section>

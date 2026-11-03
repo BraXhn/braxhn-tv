@@ -102,7 +102,11 @@ async function renderHome(d, cols, own, fromCache) {
   const later_ = ids.slice(n);
   if (libs.some(l => l.type === 'movie' || l.type === 'show') && !d.rows.some(r => r.items.length) && !fromCache) {
     const s = await api('/scan');
-    blocks.push(emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? t('Skannar bibliotek…') : t('Inget innehåll hittades'), text: s.running ? `${s.phase} ${s.done}/${s.total}` : t('Kontrollera sökvägarna under Administration.') }));
+    // Barnprofil: biblioteket finns men inget har en åldersgräns inom profilens (utan TMDB-nyckel saknas åldersgränser helt)
+    const kid = me?.kid && !s.running;
+    blocks.push(emptyState({ icon: s.running ? '⏳' : kid ? '🧸' : '🔍', title: s.running ? t('Skannar bibliotek…') : kid ? t('Inget här inom åldersgränsen ännu') : t('Inget innehåll hittades'),
+      text: s.running ? `${s.phase} ${s.done}/${s.total}` : kid ? t('Barnprofiler ser bara filmer och serier som har en känd åldersgräns. Utan TMDB-nyckel saknas åldersgränser – en vuxen kan slå på Barnprofiler får se titlar utan känd åldersgräns under Administration → Säkerhet.')
+        : t('Kontrollera sökvägarna under Administration.') }));
     if (s.running) later(route, 3000);
   }
   const foot = libs.length ? [`<div class="homefoot"><button type="button" class="ghost" id="homecustom">${t('Anpassa startsidan')}</button></div>`] : [];

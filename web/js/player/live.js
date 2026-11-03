@@ -127,7 +127,7 @@ async function growingSource(rp, url) {
   try {
     const Hls = await loadHls();
     if (RP !== rp) return;
-    const hls = rp.hls = new Hls({ backBufferLength: 90, xhrSetup: (x) => { x.withCredentials = true; } });
+    const hls = rp.hls = new Hls({ backBufferLength: 90, enableWorker: false, xhrSetup: (x) => { x.withCredentials = true; } });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || RP !== rp || rp.hls !== hls) return;
       if (d.type === 'networkError' && d.response?.code !== 404) setTimeout(() => { if (RP === rp && rp.hls === hls) hls.startLoad(); }, 1500);

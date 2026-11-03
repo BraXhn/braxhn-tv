@@ -12,6 +12,8 @@
 //   på servern är inte nätet. Annars trodde hls.js att nätet var långsamt och bytte ner – vilket startar om
 //   omkodningen på det nya steget och ger ännu längre väntan.
 export const HLS_VOD = Object.freeze({
+  // CSP:n tillåter inga workers från blob: – hls.js försökte ändå varje gång (fel i konsolen) och föll sedan tillbaka
+  enableWorker: false,
   maxBufferLength: 60,
   maxMaxBufferLength: 120,
   backBufferLength: 30,

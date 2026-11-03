@@ -74,7 +74,7 @@ export async function openEditor(it, tab = 'general') {
   const general = `<div class="megrid">${Object.keys(FIELDS).filter(f => m.fields.includes(f)).map(f => fieldHtml(f, m.values[f], locked.has(f))).join('')}</div>
     <datalist id="me-genre-sugg">${m.genreSuggestions.map(g => `<option value="${esc(g)}"></option>`).join('')}</datalist>
     <p class="muted small">${t('🔒 Låsta fält ändras aldrig av <i>Uppdatera metadata</i>, NFO-filer eller omskanning. Ett fält du ändrar låses automatiskt.')}</p>`;
-  const images = `<div class="row meimgtypes" role="group" aria-label="Bildtyp">${Object.keys(m.images).map(t => `<button type="button" class="ghost small" data-imgtype="${esc(t)}" aria-pressed="${t === imgType}">${esc(imgLabel(t))}</button>`).join('')}</div>
+  const images = `<div class="row meimgtypes" role="group" aria-label="${t('Bildtyp')}">${Object.keys(m.images).map(t => `<button type="button" class="ghost small" data-imgtype="${esc(t)}" aria-pressed="${t === imgType}">${esc(imgLabel(t))}</button>`).join('')}</div>
     <div class="mecur" id="me-cur"></div><div id="me-opts" class="meopts" aria-live="polite"></div>`;
   const h = openDialog({ title: t('Redigera – {v}', { v: it.title || m.values.title }), size: 'wide', form: true, className: 'metaedit',
     body: tabsHtml({ id: 'me-tabs', label: t('Redigera'), current: tab, items: tabs }) + panel('general', general) + panel('images', images) + panel('advanced', ''),

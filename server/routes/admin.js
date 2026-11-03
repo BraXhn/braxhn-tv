@@ -367,7 +367,8 @@ route('GET', '/api/security-check', admin, (c) => {
   const no2fa = admins.filter(a => !a.totp_enabled).map(a => a.name);
   if (no2fa.length) add(pub ? 'bad' : 'warn', L('Administratörer utan tvåstegsverifiering', 'Administrators without two-step verification'), no2fa.join(', ') + L(' – aktivera under Mitt konto.', ' – enable it under My account.'));
   else add('ok', L('Alla administratörer har tvåstegsverifiering', 'All administrators have two-step verification'), '');
-  const users = all('SELECT name, totp_enabled, remote_allowed FROM users WHERE is_admin=0');
+  // Profiler loggar aldrig in med eget lösenord (bara via profilbyte i hushållet) – de har ingen egen 2FA att slå på
+  const users = all('SELECT name, totp_enabled, remote_allowed FROM users WHERE is_admin=0 AND parent_id IS NULL');
   const uNo = users.filter(u => !u.totp_enabled && u.remote_allowed).map(u => u.name);
   if (uNo.length) add(require2faRemote() ? 'ok' : 'warn', L('Användare med fjärråtkomst utan tvåstegsverifiering', 'Users with remote access without two-step verification'), uNo.join(', ') + (require2faRemote() ? L(' – de kan bara logga in på hemnätet tills 2FA aktiverats.', ' – they can only sign in on the home network until 2FA is enabled.') : L(' – överväg "Kräv tvåstegsverifiering utanför hemmet".', ' – consider "Require two-step verification away from home".')));
   add(adminAnywhere() ? 'warn' : 'ok', adminAnywhere() ? L('Administration tillåten från internet', 'Administration allowed from the internet') : L('Administration endast från hemnät/VPN', 'Administration only from the home network/VPN'), adminAnywhere() ? L('Slå av om du inte behöver administrera utifrån.', 'Turn off if you do not need to administer from outside.') : '');

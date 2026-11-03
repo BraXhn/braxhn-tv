@@ -130,7 +130,7 @@ export async function play(id, start = 0, opts = {}) {
         </div>
       </div>
     </div>`;
-  el.setAttribute('aria-label', 'Videospelare: ' + (it.kind === 'episode' ? `${it.showTitle} ${sxe(it)} ${it.title}` : it.title));
+  el.setAttribute('aria-label', t('Videospelare: {title}', { title: it.kind === 'episode' ? `${it.showTitle} ${sxe(it)} ${it.title}` : it.title }));
   overlayOpen(el);
   const v = q('#vid');
   applySubStyle(el);

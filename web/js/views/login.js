@@ -187,7 +187,7 @@ views.profiles = async () => {
         if (!pin) return; body.pin = pin; return attempt();
       }
       if (j.needPassword) {
-        const pw = await promptDialog(t('Huvudkontots lösenord'), { title: t('Byt till {name}', { name }), type: 'password', required: true, okLabel: t('Byt profil') });
+        const pw = await promptDialog(t('Huvudkontots lösenord'), { title: t('Byt till {name}', { name }), text: body.password ? t('Fel lösenord – försök igen.') : '', type: 'password', required: true, okLabel: t('Byt profil') });
         if (!pw) return; body.password = pw; return attempt();
       }
       if (!r.ok) return toast(j.error || t('Kunde inte byta profil'));

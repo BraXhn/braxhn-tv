@@ -187,6 +187,10 @@ test('webben: startsidan laddar bara sina egna moduler – spelaren och övriga 
   assert.ok(!preloads.some(u => u.includes('/player/')), 'spelaren förladdas vid start');
   assert.deepEqual([...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m => m[1].replace(/\?.*/, '')), ['/m/app.js'], 'bara app.js som <link> i sidan');
   assert.ok(html.indexOf('<script>self.__preload') < html.indexOf('rel="stylesheet"'), 'startskriptet före stilmallen');
+  // Import map före startskriptet: förladdningen som startskriptet lägger in löser modulernas importer – kom den först
+  // (snabbt ur service workerns cache) tappade Chrome import map-reglerna ("An import map rule … was removed") och
+  // hämtade modulerna en gång till utan hash
+  assert.ok(html.indexOf('<script type="importmap">') < html.indexOf('<script>self.__preload'), 'import map före startskriptet');
   assert.ok(!/start\.js/.test(html), 'start.js som egen fil');
   const fetches = inline[1].indexOf("fetch('/api'"), links = inline[1].indexOf("rel = 'modulepreload'");
   assert.ok(fetches > 0 && links > fetches, 'API-anropen startar före förladdningen');

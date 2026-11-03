@@ -119,6 +119,11 @@ test('förslag på bibliotek: typ från mappnamn och innehåll, en nivå ner i o
   assert.equal(by.Serier.type, 'show');
   assert.equal(by.Musik.type, 'music');
   assert.equal(by['Ljudböcker'].type, 'audiobook');
+  // En fil: singular ("1 ljudbok", inte "1 ljudböcker")
+  assert.equal(by['Ljudböcker'].reason, 'Mappnamnet – 1 ljudbok (m4b)');
+  assert.equal(by.Musik.reason, 'Mappnamnet – 1 ljudfil');
+  assert.equal(by.Filmer.reason, 'Mappnamnet – 1 videofil');
+  assert.equal(by.Nerladdat.reason, 'Innehållet: 6 videofiler, 6 med avsnittsnummer (SxxEyy)');
   assert.equal(by.Nerladdat.type, 'show'); assert.equal(by.Nerladdat.by, 'content');
   assert.equal(by.Nerladdat.episodes, 6);
   assert.match(by.Nerladdat.reason, /SxxEyy/);

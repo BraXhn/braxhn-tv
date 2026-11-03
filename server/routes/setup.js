@@ -131,9 +131,11 @@ function guess(name, n) {
 // Förklaringen följer webbens språk för profilen (users.lang)
 function reasonText(g, n, en = false) {
   const parts = [];
-  if (n.videos) parts.push(en ? `${n.videos} video files${n.episodes ? `, ${n.episodes} with episode numbers (SxxEyy)` : ''}` : `${n.videos} videofiler${n.episodes ? `, ${n.episodes} med avsnittsnummer (SxxEyy)` : ''}`);
-  if (n.audio) parts.push(en ? `${n.audio} audio files` : `${n.audio} ljudfiler`);
-  if (n.books) parts.push(en ? `${n.books} audiobooks (m4b)` : `${n.books} ljudböcker (m4b)`);
+  // Singular vid 1 ("1 ljudbok", inte "1 ljudböcker")
+  const pl = (k, sv1, sv, en1, en2) => `${k} ${k === 1 ? (en ? en1 : sv1) : en ? en2 : sv}`;
+  if (n.videos) parts.push(pl(n.videos, 'videofil', 'videofiler', 'video file', 'video files') + (n.episodes ? en ? `, ${n.episodes} with episode numbers (SxxEyy)` : `, ${n.episodes} med avsnittsnummer (SxxEyy)` : ''));
+  if (n.audio) parts.push(pl(n.audio, 'ljudfil', 'ljudfiler', 'audio file', 'audio files'));
+  if (n.books) parts.push(pl(n.books, 'ljudbok', 'ljudböcker', 'audiobook', 'audiobooks') + ' (m4b)');
   const found = parts.length ? parts.join(', ') : en ? 'no media files found yet' : 'inga mediafiler hittades ännu';
   if (g.by === 'name') return en ? `The folder name – ${found}` : `Mappnamnet – ${found}`;
   if (g.by === 'content') return en ? `The content: ${found}` : `Innehållet: ${found}`;

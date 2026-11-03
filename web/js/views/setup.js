@@ -3,10 +3,17 @@
 // hårdvaruomkodning, åtkomst utanför hemmet och hushållet. Läget (aktuellt steg, klarade/överhoppade steg och
 // om guiden är klar) sparas på servern: server/routes/setup.js. Kan köras igen från Administration.
 // Fungerar med fjärrkontroll/tangentbord: ↑/↓ flyttar mellan kontrollerna, ←/→ mellan stegen i stegindikatorn.
-import { $, $$, act, api, esc, keyClick, later, main, me, toast, toastErr, views, t, locale } from '../core.js';
+import { $, $$, act, api, esc, keyClick, later, main, me, toast, toastErr, views, t, tn, locale } from '../core.js';
 import { boot, loadLibs } from '../router.js';
-import { confirmDialog } from '../ui/dialog.js';
+import { confirmDialog, choiceDialog } from '../ui/dialog.js';
 import { emptyState, errorState, bindRetry, loadingState } from '../ui/states.js';
+
+/** Antal i ett bibliotek med rätt ord och böjning ("1 titel", "3 titlar", "1 bok") */
+const countText = (type, n) => type === 'music' ? tn(n, '1 album', '{n} album') : type === 'audiobook' || type === 'ebook' ? tn(n, '{n} bok', '{n} böcker')
+  : type === 'photo' ? tn(n, '{n} foto', '{n} foton') : tn(n, '{n} titel', '{n} titlar');
+/** "1 konto, 2 profiler (varav 1 barnprofil)" */
+const householdText = (accounts, profiles, kids) => [tn(accounts, '{n} konto', '{n} konton'), tn(profiles, '{n} profil', '{n} profiler')].join(', ')
+  + (kids ? tn(kids, ' (varav {n} barnprofil)', ' (varav {n} barnprofiler)') : '');
 
 const STEPS = [
   { id: 'welcome', title: t('Välkommen') }, { id: 'metadata', title: 'Metadata' }, { id: 'libraries', title: t('Bibliotek') },
@@ -50,6 +57,7 @@ views.setup = async (step) => {
   if ($('#stskip')) $('#stskip').onclick = act(async () => { await mark(cur.id, 'skipped'); go(idx + 1); });
   $('#stnext').onclick = act(async () => {
     if (last) { await finish(false); return; }
+    if (cur.id === 'libraries' && !await librariesChosen()) return;
     await mark(cur.id, 'done'); go(idx + 1);
   });
   $('#stskipall').onclick = act(async () => {
@@ -65,6 +73,22 @@ views.setup = async (step) => {
   $('#sttitle')?.focus({ preventScroll: true });
 };
 
+/**
+ * Bibliotekssteget: Nästa utan ett enda bibliotek – förslagen läggs inte till av sig själva, och utan bibliotek blir
+ * startsidan tom. Erbjud att lägga till alla förslag som har en typ. false = stanna kvar på steget.
+ */
+async function librariesChosen() {
+  const sug = $$('[data-sga]:not([disabled])');
+  if (!sug.length || (await api('/libraries')).length) return true;
+  const v = await choiceDialog(t('Inga bibliotek ännu'), [{ label: t('Fortsätt utan bibliotek'), value: 'skip' }, { label: t('Lägg till förslagen'), value: 'add', kind: 'primary' }],
+    { text: tn(sug.length, 'Förslaget läggs inte till av sig självt – utan bibliotek blir startsidan tom. Lägga till den föreslagna mappen och skanna den?',
+      'Förslagen läggs inte till av sig själva – utan bibliotek blir startsidan tom. Lägga till de {n} föreslagna mapparna och skanna dem?'), cancelLabel: t('Stanna kvar') });
+  if (v === 'skip') return true;
+  if (v !== 'add') return false;
+  // Varje tillägg ritar om förslagen (det tillagda blir "Tillagd i …") – leta upp nästa knapp efter varje
+  for (let i = 0, b; i < sug.length && (b = $('[data-sga]:not([disabled])')); i++) await b.onclick();
+  return true;
+}
 async function finish(skipped) {
   await api('/setup', { method: 'PUT', body: { done: true, skipped } });
   await boot();
@@ -161,7 +185,7 @@ const STEP = {
       <p class="muted small">${t('Hittar du inte mappen? Lägg till den som en sökväg i Unraid-mallen (t.ex. <code>/mnt/user/Filmer</code> → <code>{mediaRoot}/Filmer</code>) och starta om containern.\n      Hur filerna bör heta står i README under <i>Namnge filer</i>.', { mediaRoot: esc(S.mediaRoot) })}</p>`;
     let libs = S.checks.libraries;
     const drawLibs = () => {
-      $('#stlibs').innerHTML = libs.length ? `<h3>${t('Dina bibliotek')}</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? t('Hemvideor') : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${+l.count || 0} ${l.type === 'music' ? 'album' : l.type === 'audiobook' ? t('böcker') : l.type === 'photo' ? t('foton') : l.type === 'ebook' ? t('böcker') : t('titlar')}</span></li>`).join('')}</ul>` : '';
+      $('#stlibs').innerHTML = libs.length ? `<h3>${t('Dina bibliotek')}</h3><ul class="setup-libs">${libs.map(l => `<li><b>${esc(l.name)}</b> <span class="muted">${l.home_video ? t('Hemvideor') : TYPES[l.type] || ''} · ${(l.paths || [l.path]).map(p => `<code>${esc(p)}</code>`).join(', ')}</span> <span class="ok-badge">${countText(l.type, +l.count || 0)}</span></li>`).join('')}</ul>` : '';
     };
     drawLibs();
     const add = async (name, type, p, homeVideo = false) => {
@@ -188,7 +212,7 @@ const STEP = {
       const targets = (i) => {
         const sel = $(`[data-sgd="${i}"]`); if (!sel) return;
         const type = $(`[data-sgt="${i}"]`).value, same = libs.filter(l => l.type === type && !!l.home_video === !!r.suggestions[i].homeVideo);
-        sel.innerHTML = t('<option value="">Som nytt bibliotek</option>') + same.map(l => `<option value="${+l.id}">I ${esc(l.name)}</option>`).join('');
+        sel.innerHTML = t('<option value="">Som nytt bibliotek</option>') + same.map(l => `<option value="${+l.id}">${t('I {name}', { name: esc(l.name) })}</option>`).join('');
         sel.hidden = !same.length;
       };
       r.suggestions.forEach((_, i) => targets(i));
@@ -324,7 +348,7 @@ const STEP = {
         <form id="stkid" class="setup-form"><h3>${t('Ny barnprofil')}</h3>
           <label for="stkn">${t('Namn')}</label><input id="stkn" required maxlength="40" autocomplete="off">
           <label for="stka">${t('Åldersgräns')}</label><select id="stka">${[[0, t('Barntillåtet')], [7, t('7 år')], [11, t('11 år')], [15, t('15 år')]].map(([v, n]) => `<option value="${v}" ${v === 7 ? 'selected' : ''}>${n}</option>`).join('')}</select>
-          <label for="stkp">${t('PIN för att byta från profilen (valfri, 4–8 siffror)')}</label><input id="stkp" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" autocomplete="off">
+          <label for="stkp">${t('PIN för att byta till profilen (valfri, 4–8 siffror)')}</label><input id="stkp" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" autocomplete="off">
           <button class="primary">${t('Skapa barnprofil')}</button></form></div>
         <h3>${t('Logga in på TV:n med kod')}</h3>
         ${c.quickConnect ? `<p>${t('Slipp skriva lösenord med fjärrkontrollen: välj <b>Logga in med kod</b> på TV:n (webbläsaren eller appen). En sexsiffrig kod visas –\n          godkänn den från telefonen under <b>Godkänn inloggning på TV</b> i menyn, eller skanna QR-koden. <a href="#/quickconnect">Godkänn en kod nu</a>.')}</p>`
@@ -361,7 +385,7 @@ const STEP = {
       [c.hw.active !== 'none' || c.hw.wanted === 'none', t('Omkodning'), c.hw.active !== 'none' ? t('Grafikkrets ({active})', { active: c.hw.active }) : c.hw.wanted !== 'none' ? t('HWACCEL={wanted} fungerar inte – processorn används', { wanted: c.hw.wanted }) : t('Processorn (ingen grafikkrets inställd)'), 'hardware'],
       [!c.publicUrl || c.publicUrl.startsWith('https://'), t('Utanför hemmet'), c.publicUrl ? c.publicUrl : t('Bara hemma eller via VPN'), 'remote'],
       [c.my2fa, t('Tvåstegsverifiering för dig'), c.my2fa ? t('På') : t('Av – rekommenderas, särskilt om servern nås från internet'), 'remote'],
-      [c.accounts.length + c.profiles.length > 1, t('Hushållet'), t('{accountsN} konton, {profilesN} profiler{v}', { accountsN: c.accounts.length, profilesN: c.profiles.length, v: c.profiles.some(p => p.kid) ? t(' (varav barnprofiler)') : '' }), 'household']
+      [c.accounts.length + c.profiles.length > 1, t('Hushållet'), householdText(c.accounts.length, c.profiles.length, c.profiles.filter(p => p.kid).length), 'household']
     ];
     const left = rows.filter(r => !r[0]);
     el.innerHTML = `<p>${left.length ? t('Nästan klart! {v} kan du göra nu eller senare.', { v: left.length === 1 ? t('En sak') : left.length + t(' saker') }) : t('Allt är klart – mycket nöje!')}</p>
