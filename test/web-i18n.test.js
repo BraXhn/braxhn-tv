@@ -129,7 +129,7 @@ before(async () => {
   fs.writeFileSync(path.join(MEDIA, 'Movies', 'Alpha (2020)', 'Alpha (2020).en.srt'), '1\n00:00:01,000 --> 00:00:09,000\nHello and welcome\n');
   clip(path.join(MEDIA, 'Movies', 'Beta (2021)', 'Beta (2021).webm'), 4, 500);
   const se = path.join(MEDIA, 'Shows', 'The Show', 'Season 1');
-  clip(path.join(se, 'The Show S01E01.webm'), 4, 600);
+  clip(path.join(se, 'The Show S01E01.webm'), 24, 600); // så lång att "Det här har hänt" har två klipp att visa
   clip(path.join(se, 'The Show S01E02.webm'), 4, 700);
   const alb = path.join(MEDIA, 'Music', 'The Artist', 'The Album'); fs.mkdirSync(alb, { recursive: true });
   for (const n of [1, 2]) ff('-f', 'lavfi', '-i', `sine=frequency=${300 * n}:duration=8`, '-metadata', `title=Song ${n}`, '-metadata', 'artist=The Artist', '-metadata', 'album=The Album',
@@ -342,6 +342,21 @@ bt('engelska: dialoger, kortmenyn, spelaren och datum/tal med engelsk locale', a
     await page.keyboard.press('Escape');
     await page.waitForSelector('dialog[open]', { state: 'detached' });
   }
+  // "Det här har hänt": knappen på seriesidan och dialogen (titelskylten från servern på profilens språk)
+  const eps = (await srv.req(`/api/items/${S.show}`)).data.children;
+  assert.equal((await srv.req(`/api/items/${eps[0].id}/watched`, { method: 'POST', body: { watched: true } })).status, 200);
+  await open(page, `item/${S.show}`);
+  await page.waitForSelector('#recap');
+  assert.equal((await page.textContent('#recap')).trim(), '⟲ Previously');
+  await page.click('#recap');
+  await page.waitForSelector('dialog.recapdlg[open]');
+  await page.waitForFunction(() => document.querySelector('#rcstate')?.getAttribute('aria-busy') === 'false', null, { timeout: 120000 });
+  assert.match(await page.textContent('#rcsum'), /^Previously on The Show · Season 1 · latest: one episode · about \d+ s$/);
+  assert.deepEqual(swedish(await page.evaluate(visibleText, 'dialog[open]')), []);
+  assert.deepEqual(await page.evaluate(auditPage, { scope: 'dialog[open]', contrast: false }), []);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await srv.req(`/api/items/${eps[0].id}/watched`, { method: 'POST', body: { watched: false } });
   // Datum i engelskt format (Intl med en-GB): veckodag/månad på engelska i historiken
   await open(page, 'history');
   const txt = await page.evaluate(() => document.querySelector('#main').innerText);

@@ -132,6 +132,8 @@ export async function play(id, start = 0, opts = {}) {
   applySubStyle(el);
   bindControls(cur, v);
   initFilter(cur, v); // familjefiltret: tysta svordomar, hoppa över scener, markera scener under ⚙
+  // "Det här har hänt": servern avgör om sammanfattningen erbjuds (första avsnittet i en ny säsong efter ett uppehåll)
+  if (it.kind === 'episode' && !(start > 0) && !partyId) need('player/recap.js').then(m => { if (P === cur) m.offerRecap(cur, v); }).catch(() => {});
   q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
   q('#prate').value = String(rate);
   q('#prate').onchange = (e) => { rate = +e.target.value; v.defaultPlaybackRate = v.playbackRate = rate; };

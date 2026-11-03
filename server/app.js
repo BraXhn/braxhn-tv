@@ -48,6 +48,7 @@ import './routes/ratings.js';
 import './routes/playback.js';
 import './routes/vocab.js'; // språkinlärningens ordlista per profil, export till Anki och ljudklipp
 import './routes/moments.js'; // Ögonblick: klipp som hushållet delar, reaktioner, kommentarer och externa länkar (/api/share/*)
+import './routes/recap.js'; // "Det här har hänt": sammanfattning av förra säsongen ur de egna filerna (/api/items/:id/recap, /api/recaps/*)
 import './routes/familyfilter.js'; // familjefilter: profilens läge, scener att hoppa över, ordlistor (admin)
 import './routes/social.js';
 import './routes/books.js';

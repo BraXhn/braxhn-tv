@@ -511,6 +511,26 @@ Används inte av apparna än.
   utgång; förfalskad eller okänd = 404, utgången, återkallad eller borttaget ögonblick = 410. Länken fungerar inte som
   inloggning (Bearer, `?t=` eller kaka) någon annanstans.
 
+## "Det här har hänt": `/api/items/:id/recap` och `/api/recaps/*`
+
+Sammanfattningen inför en serie eller ett avsnitt (`server/recap.js`, `server/routes/recap.js`; webben
+`web/js/player/recap.js`). Vanlig inloggning (kaka eller apptoken). Serien och avsnittet måste vara tillåtna för profilen
+(åldersgräns, bibliotek), annars 404.
+
+- `GET /api/items/:id/recap` (`id` = serie → nästa avsnitt, eller ett avsnitt) → `{ available, show: { id, title },
+  target?: { id, season, episode, title, position }, reason? }` och när `available`: `scope` (`season` = förra säsongen,
+  `episodes` = de senaste sedda avsnitten i samma säsong), `season`, `title` ("Tidigare i …" på profilens språk),
+  `episodes: [{ id, season, episode, title }]` (bara sedda avsnitt före `target`), `clips` (planerade), `estimate` (s),
+  `offer` (spelaren ska erbjuda den: första avsnittet i en säsong, inte påbörjat, senast sett för mer än
+  `RECAP_OFFER_DAYS` dagar sedan), `state` (`none` | `pending` | `ready` | `failed`), `id`, och när den är klar `url`
+  (spellistan), `duration`, `mode` (`copy` | `encode` | `mixed`) och `clipList: [{ item, season, episode, s, e, d, mode }]`
+  (tider i avsnittet, `d` = segmentets längd); `error` när den misslyckats.
+- `POST /api/items/:id/recap` → `202` (görs) eller `200` (klar) med samma svar; `409` när det inte finns något att
+  sammanfatta, `429` när kön är full, skärmtid som vid uppspelning.
+- `GET /api/recaps/:rid/index.m3u8` → HLS (VOD): titelskylten `t.ts` och ett MPEG-TS-segment per klipp (`c0.ts` …) med
+  `#EXT-X-DISCONTINUITY` före varje klipp (H.264 + AAC stereo, klippen kan ha olika upplösning). Bara för profiler som
+  har sett alla avsnitten i sammanfattningen och – med familjefiltret på – bara den tystade; annars 404.
+
 ## E-böcker och serietidningar: `/api/ebooks/*` och OPDS `/api/opds/*`
 
 Bara webben (apparna får inte bibliotekstypen `ebook` i `/api/libraries`, och `reading` i `/api/home` samt `ebooks` i `/api/search/all` är tomma för apptoken). Allt kontrolleras mot profilens behörighet: biblioteket, barnprofiler bara när `libraries.kids` = 1 och då bara böcker utan högre `age` – annars 404.

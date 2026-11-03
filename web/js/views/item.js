@@ -2,7 +2,7 @@
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { capsQuery } from '../player/caps.js';
-import { curPlayer, liveOpen, loadPlayer, openRemotePicker, startPlay } from '../lazy.js';
+import { curPlayer, liveOpen, loadPlayer, need, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { remoteButton } from '../ui/buttons.js';
 import { art, card, castShelf, fmtTaken, shelf } from '../ui/cards.js';
@@ -156,6 +156,7 @@ function showView(it, season) {
   main.insertAdjacentHTML('beforeend', shelf(t('Liknande serier'), it.similar));
   bindTabs($('#tabs'), (key, tab) => { cur = +key; store.set('season.' + it.id, cur); $('#eps').setAttribute('aria-label', tab.textContent); renderEps(); });
   if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
+  if (nx) need('player/recap.js').then(m => m.recapButton(it)).catch(() => {}); // "Det här har hänt" när något är sett
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
   if ($('#refresh')) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
   playTheme(it);

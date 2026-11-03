@@ -699,6 +699,14 @@ CREATE TABLE IF NOT EXISTS moment_shares(id INTEGER PRIMARY KEY, moment_id INTEG
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0,
   views INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS moment_shares_m ON moment_shares(moment_id);`);
+// "Det här har hänt" (server/recap.js): en sammanfattning per nyckel (urvalet + familjefiltret + språket), delas av
+// profiler med samma sett-läge. eps = avsnitten som ingår (JSON, spoilergränsen kontrolleras mot dem), plan = urvalet
+// med reserver (JSON), clips = klippen som blev (JSON), state 0 väntar/görs, 1 klar, 2 misslyckad, used = senast använd.
+db.exec(`CREATE TABLE IF NOT EXISTS recaps(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, show_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  season INTEGER, scope TEXT, eps TEXT NOT NULL DEFAULT '[]', plan TEXT NOT NULL, ff INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL DEFAULT 0,
+  mode TEXT, clips TEXT, dur REAL, size INTEGER NOT NULL DEFAULT 0, error TEXT, created INTEGER NOT NULL, used INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS recaps_show ON recaps(show_id);
+CREATE INDEX IF NOT EXISTS recaps_used ON recaps(used);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
 const LATEST = 7;

@@ -51,7 +51,7 @@ before(async () => {
   fs.writeFileSync(path.join(F, 'Alfa (2020)', 'Alfa (2020).sv.srt'), '1\n00:00:01,000 --> 00:00:09,000\nHej och välkommen\n');
   clip(path.join(F, 'Beta (2021)', 'Beta (2021).webm'), 4, 500);
   const se = path.join(MEDIA, 'Serier', 'Serien', 'Season 1');
-  clip(path.join(se, 'Serien S01E01.webm'), 4, 600);
+  clip(path.join(se, 'Serien S01E01.webm'), 24, 600); // så lång att "Det här har hänt" har två klipp att visa
   clip(path.join(se, 'Serien S01E02.webm'), 4, 700);
   const alb = path.join(MEDIA, 'Musik', 'Artisten', 'Albumet'); fs.mkdirSync(alb, { recursive: true });
   for (const n of [1, 2]) ff('-f', 'lavfi', '-i', `sine=frequency=${300 * n}:duration=8`, '-metadata', `title=Låt ${n}`, '-metadata', 'artist=Artisten', '-metadata', 'album=Albumet',
@@ -297,6 +297,30 @@ t('ljudböckernas dialoger: kapitelredigeraren, RSS-flödet och lyssningsstatist
   await audit('RSS-flöde', '#bfeed', `book/${S.book}`);
   await audit('Lyssningsstatistik', '#bstats', `books/${S.audiobook}`);
   assert.deepEqual(found, [], fmt(found));
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+t('"Det här har hänt": knappen på seriesidan och dialogen (granskning, fokus i dialogen och tillbaka)', async () => {
+  const eps = (await srv.req(`/api/items/${S.show}`)).data.children;
+  assert.equal((await srv.req(`/api/items/${eps[0].id}/watched`, { method: 'POST', body: { watched: true } })).status, 200);
+  const { page, errors, close } = await newPage('desktop');
+  await open(page, `item/${S.show}`);
+  await page.waitForSelector('#recap');
+  await settled(page);
+  let f = await page.evaluate(auditPage, {});
+  await page.focus('#recap');
+  await press(page, 'Enter');
+  await page.waitForSelector('dialog.recapdlg[open]');
+  await page.waitForFunction(() => document.querySelector('#rcstate')?.getAttribute('aria-busy') === 'false', null, { timeout: 120000 });
+  await settled(page);
+  f = [...f, ...await page.evaluate(auditPage, { scope: 'dialog[open]' })];
+  assert.deepEqual(f, [], fmt(f));
+  assert.ok((await active(page)).inDialog, 'fokus i dialogen');
+  await press(page, 'Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  assert.equal((await active(page)).sel, '#recap', 'fokus tillbaka på knappen');
+  await srv.req(`/api/items/${eps[0].id}/watched`, { method: 'POST', body: { watched: false } });
   assert.deepEqual(errors, []);
   await close();
 });
