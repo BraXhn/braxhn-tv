@@ -97,6 +97,23 @@ t('specialavsnitt föreslås inte före säsong 1', async () => {
   assert.equal(ids[0], S.b11, 'senaste aktiviteten först');
 });
 
+t('mindre än 2 minuter sett hamnar inte i Fortsätt titta (positionen sparas ändå)', async () => {
+  await sleep(1100);
+  // Bara tittat in i första avsnittet av serien C: varken avsnittet eller "nästa avsnitt" visas
+  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 90 } });
+  let ids = await cont();
+  assert.ok(![S.c1, S.c2].some(id => ids.includes(id)), JSON.stringify(ids));
+  // Positionen finns kvar – titeln startar där man slutade
+  const db = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db'));
+  assert.equal(db.prepare('SELECT position FROM progress WHERE item_id=?').get(S.c1)?.position, 90);
+  db.close();
+  // Två minuter eller mer: med i Fortsätt titta
+  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 130 } });
+  ids = await cont();
+  assert.ok(ids.includes(S.c1), JSON.stringify(ids));
+  await req(`/api/items/${S.c1}/progress`, { method: 'POST', body: { position: 0 } });
+});
+
 t('Markera som osedd lägger inte serien i Fortsätt titta', async () => {
   await req(`/api/items/${S.c}/watched`, { method: 'POST', body: { watched: false } });
   const ids = await cont();
