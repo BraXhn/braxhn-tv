@@ -17,6 +17,10 @@ for (const p of [process.env.PLAYWRIGHT, '/opt/node22/lib/node_modules/playwrigh
   try { ({ chromium } = await import(p)); break; } catch {}
 }
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-smooth-'));
+// Modulerna som importeras direkt i testet (activity.js → db.js) får en egen konfigmapp – annars /config,
+// som inte går att skriva i GitHub Actions (bygget av imagen föll på det)
+process.env.CONFIG_DIR = path.join(ROOT, 'unitconfig');
+fs.mkdirSync(process.env.CONFIG_DIR, { recursive: true });
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
 const PORT = 19000 + Math.floor(Math.random() * 900);
 const B = `http://127.0.0.1:${PORT}`;
