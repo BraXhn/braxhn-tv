@@ -161,9 +161,16 @@ route('GET', '/api/home', user, (c) => {
   const photoMemories = off.has('memories') || c.user.kind === 'app' ? [] : photos.memories(uid);
   // Fortsätt läsa: påbörjade e-böcker och serietidningar (nytt fält – bara webben)
   const reading = off.has('reading') || c.user.kind === 'app' ? [] : ebooks.continueReading(uid, 12);
-  send(c.res, 200, { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming,
+  const out = { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming,
     featured, because: th.because, topRated: th.topRated, hiddenGems: th.hiddenGems, shortTonight: th.shortTonight, onThisDay: th.onThisDay,
-    genreOfDay: th.genreOfDay, listening, photoMemories, reading, homeLayout });
+    genreOfDay: th.genreOfDay, listening, photoMemories, reading, homeLayout };
+  // ?web=1 (webbens startsida, nya fält): samlingarna i samma svar som /api/collections och /api/custom-collections –
+  // två förfrågningar färre vid start (HTTP/1.1 har bara sex anslutningar och varje rundtur syns)
+  if (c.q.get('web') === '1') {
+    out.collectionsList = off.has('collections') ? [] : collectionsFor(uid);
+    out.ownCollections = off.has('collections') ? [] : ccol.listFor(c.user, { adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) });
+  }
+  send(c.res, 200, out);
 });
 // Startsidans ordning, dolda hyllor och Utvalt per användare (följer med mellan enheter)
 route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayout(c.user.id)));
@@ -539,16 +546,17 @@ function collapseCollections(items) {
   }
   return out;
 }
-route('GET', '/api/collections', user, (c) => {
-  // En samling är minst två filmer; antal och år räknas bara på det profilen får se (v = synlig för profilen)
-  const age = ageFilter(c.user.id);
+/** TMDB-samlingarna profilen får se: minst två filmer; antal och år räknas bara på det profilen får se (v = synlig) */
+function collectionsFor(uid) {
+  const age = ageFilter(uid);
   const cols = all(`SELECT c.*, COUNT(*) AS total, SUM(m.v) AS n, MIN(CASE WHEN m.v THEN m.y END) AS y0, MAX(CASE WHEN m.v THEN m.y END) AS y1
     FROM collections c JOIN (SELECT i.collection_id AS cid, i.year AS y, (1${age.sql}) AS v FROM items i LEFT JOIN items s ON s.id=i.parent_id
       WHERE i.collection_id IS NOT NULL AND i.kind='movie'${MAIN_ONLY}) m ON m.cid=c.id
     GROUP BY c.id HAVING total >= 2 AND n > 0 ORDER BY c.name`, ...age.params);
-  send(c.res, 200, cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
-    count: col.n, years: [col.y0, col.y1], visible: true })));
-});
+  return cols.map(col => ({ id: col.id, name: col.name, overview: col.overview, poster: !!col.poster, backdrop: !!col.backdrop,
+    count: col.n, years: [col.y0, col.y1], visible: true }));
+}
+route('GET', '/api/collections', user, (c) => send(c.res, 200, collectionsFor(c.user.id)));
 /** Får profilen se någon film i samlingen? (annars ska varken namn, beskrivning eller bilder synas) */
 const collectionVisible = (uid, cid) => {
   const age = ageFilter(uid);

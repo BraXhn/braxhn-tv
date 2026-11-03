@@ -106,6 +106,8 @@ label{display:block;font-size:.8125rem;color:var(--dim);margin:12px 0 5px}
 
 /* Hyllor och rutnät: en rad per hylla som skrollar i sidled (‹ › från ui/shelves.js), kortbredd från reglaget (--cw) */
 .section{margin-bottom:26px;position:relative}
+/* Startsidans hyllor utanför skärmen ritas inte förrän man skrollar dit (hundratals kort vid start) */
+#main>.section{content-visibility:auto;contain-intrinsic-block-size:auto 320px}
 .section h2{font-size:1.125rem;font-weight:700;margin-bottom:8px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .section.has-nav h2{padding-right:76px}
 .section h2 a{font-size:.8125rem;color:var(--dim);font-weight:600}

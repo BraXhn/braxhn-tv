@@ -27,8 +27,8 @@ if (lang !== 'sv') {
 const LIB_PATH = { music: 'music', audiobook: 'books', photo: 'photos', ebook: 'ebooks' };
 const railItem = (href, icon, label) => `<a class="ri" href="${href}" title="${esc(label)}">${RAIL_ICON[icon] || RAIL_ICON.movie}<span class="lbl">${esc(label)}</span></a>`;
 const libIcon = (l) => /barn|kids|junior/i.test(l.name) && (l.type === 'movie' || l.type === 'show') ? 'kids' : l.type;
-export async function loadLibs() {
-  setLibs(await api('/libraries'));
+export async function loadLibs(list) {
+  setLibs(list || await api('/libraries'));
   // Sidomenyn: Hem, ett val per bibliotek och övriga delar (ikoner, namnen syns när menyn är utfälld)
   $('#libnav').innerHTML = railItem('#/', 'home', t('Hem')) + libs.map(l => railItem(`#/${LIB_PATH[l.type] || 'lib'}/${+l.id}`, libIcon(l), l.name)).join('')
     + (me?.liveTv ? railItem('#/live', 'live', t('Live-TV')) : '') + (me?.streaming ? railItem('#/streaming', 'streaming', t('Strömmande')) : '')
@@ -76,11 +76,16 @@ function syncLang() {
   try { const at = +sessionStorage.getItem('bx_langreload') || 0; if (Date.now() - at < 10000) return; sessionStorage.setItem('bx_langreload', String(Date.now())); } catch {}
   setTimeout(() => location.reload(), 0);
 }
-export async function boot() {
-  const st = await api('/status');
-  setLogin(st);
-  if (!me) { bootedAnon = true; stopRemote(); return false; }
-  syncLang();
+// Varm start: inloggningsläget och biblioteken från förra besöket (localStorage, rensas vid utloggning som de sparade
+// startsidorna), så att startsidan ritas utan att vänta på /status. Servern kontrolleras ändå direkt: en annan
+// profil eller utloggad laddar om sidan, annars uppdateras menyn tyst. Bara vid sidans start (app.js), aldrig efter
+// inloggning eller profilbyte.
+const BOOT_KEY = 'bxhomeboot1';
+function bootCache() { try { return JSON.parse(localStorage.getItem(BOOT_KEY) || 'null'); } catch { return null; } }
+function saveBoot(st) { try { localStorage.setItem(BOOT_KEY, JSON.stringify({ st, libs })); } catch {} }
+const dropBoot = () => { try { localStorage.removeItem(BOOT_KEY); } catch {} };
+/** Menyraden och sidomenyn för den inloggade */
+function showLogin() {
   $('#top').hidden = false;
   $('#userbtn').innerHTML = `<span class="avatar" aria-hidden="true">${me.kid ? '🧸' : esc((me.name || '?').slice(0, 1).toUpperCase())}</span><span class="uname">${esc(me.name)}</span><span class="caret" aria-hidden="true">▾</span>`;
   $$('[data-profiles]').forEach(e => e.hidden = me.profiles < 2);
@@ -90,13 +95,51 @@ export async function boot() {
   $('#userbtn').setAttribute('aria-label', t('{name} – konto och meny', { name: me.name }));
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
+}
+/** Det som bara görs med serverns svar: mätning, aktivitetsrutan, Spela på… och uppdateringsnotisen */
+function afterLogin(st) {
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
   if (st.remote) setTimeout(() => need('player/caps.js').then(m => m.measureBandwidth()).catch(() => {}), 3000);
   if (me.adminHere) idle(startActivity); else stopActivity();
   // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra. Laddar spelaren – när sidan är ritad.
   idle(startRemote);
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(t('Version {update} av BraXhn TV finns – se Administration', { update: me.update })); }
+}
+export async function boot({ fast = false } = {}) {
+  const old = fast && !/^#\/(login|invite|profiles)/.test(location.hash) ? bootCache() : null;
+  if (old?.st?.user && Array.isArray(old.libs)) {
+    const fresh = api('/status', { bg: true });
+    setLogin(old.st);
+    // Språket kontrolleras först med serverns svar (det sparade kan vara inaktuellt efter ett byte i Mitt konto)
+    showLogin();
+    await loadLibs(old.libs);
+    fresh.then(async (st) => {
+      if (st.user?.id !== old.st.user.id) { dropBoot(); location.reload(); return; }
+      setLogin(st);
+      syncLang();
+      showLogin();
+      afterLogin(st);
+      const list = await api('/libraries', { bg: true });
+      if (JSON.stringify(list) !== JSON.stringify(old.libs)) await loadLibs(list); else setLibs(list);
+      saveBoot(st);
+    }).catch((e) => {
+      // Servern svarar inte: som vid en vanlig start utan server (Nedladdat eller sidan om att servern inte nås)
+      if (!e?.offline) return;
+      dropBoot();
+      if (!store.get('dl.last', null)) return location.replace('/offline.html');
+      setMe(null);
+      need('views/downloads.js').then(m => m.offlineStart()).catch(() => location.replace('/offline.html'));
+    });
+    return true;
+  }
+  const st = await api('/status');
+  setLogin(st);
+  if (!me) { bootedAnon = true; dropBoot(); stopRemote(); return false; }
+  syncLang();
+  showLogin();
+  afterLogin(st);
   await loadLibs();
+  saveBoot(st);
   return true;
 }
 // Skelett medan vyn laddas – i samma form som sidan som kommer (ingen hoppande layout)
@@ -123,6 +166,7 @@ function prefetch(e) {
   const a = t.closest('a[href^="#/"]');
   if (a) prefetchView(a.getAttribute('href').slice(2).split('/')[0]);
   if (t.closest('.card, .feat, [data-play], #playfirst')) loadPlayer().catch(() => {});
+  if (t.closest('.card')) need('ui/cardmenu.js').catch(() => {}); // ▶ ✎ ⋮ (kopplas i app.js)
   // Snabbstart: pekaren på ett korts Spela-knapp väcker titelns disk i förväg (servern läser lite av filen)
   const w = t.closest('[data-cplay]');
   if (w) wakeDisk(+w.dataset.cplay);
@@ -208,7 +252,7 @@ function announcePage(name) {
 $('#skiplink').onclick = (e) => { e.preventDefault(); const h = main.querySelector('h1'); (h || main).tabIndex = -1; (h || main).focus(); };
 
 // Sparade startsidor (views/home.js) tas bort vid utloggning – nästa person på datorn ska inte se dem
-function clearHomeCache() { try { for (const k of Object.keys(localStorage)) if (k.startsWith('bxhome')) localStorage.removeItem(k); } catch {} }
+function clearHomeCache() { try { for (const k of Object.keys(localStorage)) if (k.startsWith('bxhome')) localStorage.removeItem(k); } catch {} } // även bxhomeboot1 (boot)
 // Användarmenyn: aria-expanded följer menyn, Escape stänger och lämnar fokus på knappen
 const userMenu = (open) => { $('#usermenu').hidden = !open; $('#userbtn').setAttribute('aria-expanded', String(open)); };
 // iPhone (Safari och hemskärmsappen): efter att tangentbordet stängts eller verktygsfältet krympt kan den synliga
@@ -256,7 +300,9 @@ document.addEventListener('keydown', (e) => {
 });
 // ---------- installera som app ----------
 // Service workern kräver HTTPS (eller localhost); utan den går appen ändå att lägga på hemskärmen
-if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// Registreras först när sidan är ritad: installationen hämtar hela appen (~100 filer) och skulle annars ta anslutningarna
+// från startsidans moduler, anrop och bilder vid första besöket
+if ('serviceWorker' in navigator && window.isSecureContext) idle(() => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let installEvt = null;

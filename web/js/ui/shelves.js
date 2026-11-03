@@ -11,17 +11,19 @@ function shelfName(h2) {
   const tt = h2?.childNodes[0]?.textContent?.trim();
   return tt || h2?.textContent?.trim() || t('raden');
 }
-function update(sh) {
+/** Läser hyllans skrolläge (bara läsningar, så att flera hyllor kan mätas utan en layout per hylla) */
+const measure = (sh) => ({ sh, max: sh.scrollWidth - sh.clientWidth, x: sh.scrollLeft });
+function apply({ sh, max, x }) {
   const nav = sh._nav; if (!nav) return;
-  const max = sh.scrollWidth - sh.clientWidth;
   nav.hidden = max <= 2;
   const [prev, next] = nav.children;
-  const atStart = sh.scrollLeft <= 2, atEnd = sh.scrollLeft >= max - 2;
+  const atStart = x <= 2, atEnd = x >= max - 2;
   // Fokus på en knapp som blir inaktiv flyttas till den andra (annars hamnar fokus på body)
   if (atStart && document.activeElement === prev && !atEnd) next.focus({ preventScroll: true });
   if (atEnd && document.activeElement === next && !atStart) prev.focus({ preventScroll: true });
   prev.disabled = atStart; next.disabled = atEnd;
 }
+function update(sh) { if (sh._nav) apply(measure(sh)); }
 /** Bläddrar en "sida": så många hela kort som får plats */
 function page(sh, dir) {
   const first = sh.querySelector('.card, .mcard, a');
@@ -29,7 +31,7 @@ function page(sh, dir) {
   const n = Math.max(1, Math.floor((sh.clientWidth + 1) / step));
   sh.scrollBy({ left: dir * n * step, behavior: reduce() ? 'auto' : 'smooth' });
 }
-const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver((es) => es.forEach(e => update(e.target))) : null;
+const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver((es) => es.map(e => measure(e.target)).forEach(apply)) : null;
 /** Lägger till ‹ › på nya hyllor i huvudytan */
 function enhance() {
   for (const sh of main.querySelectorAll('.shelf:not([data-nav])')) {
@@ -47,8 +49,9 @@ function enhance() {
     sh.parentElement.classList.add('has-nav');
     sh._nav = nav;
     sh.addEventListener('scroll', () => update(sh), { passive: true });
-    ro?.observe(sh);
-    update(sh);
+    // ResizeObserver anropar update() första gången efter layouten – ett direkt anrop här tvingade fram en ny layout av
+    // hela sidan för varje hylla (läser scrollWidth, skriver hidden/disabled)
+    if (ro) ro.observe(sh); else update(sh);
   }
 }
 

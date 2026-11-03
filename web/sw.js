@@ -12,7 +12,7 @@ const CACHE = 'braxhn-app-' + BUILD;
 const MODULES = ['core.js', 'router.js', 'lazy.js', 'passkeys.js', 'screentime.js', 'audio.js', 'audio-extras.js', 'sonic.js', 'musicinfo.js', 'ui/cards.js', 'ui/icons.js', 'ui/dialog.js', 'ui/states.js', 'ui/buttons.js', 'ui/tabs.js', 'ui/menu.js', 'ui/cardmenu.js', 'ui/activity.js', 'ui/shelves.js', 'ui/collections.js', 'player/overlay.js', 'player/video.js', 'player/controls.js', 'player/subs.js', 'player/caps.js', 'player/cast.js', 'player/live.js', 'player/party.js', 'views/login.js', 'views/home.js', 'views/collections.js', 'views/item.js', 'views/person.js', 'views/wrapped.js', 'views/account.js', 'views/books.js', 'views/booktools.js', 'views/live.js', 'views/streaming.js', 'views/requests.js', 'views/calendar.js', 'views/stats.js', 'views/admin.js', 'views/admin-ops.js', 'views/admin-users.js', 'views/music.js', 'views/quickconnect.js', 'views/search.js', 'player/comfort.js', 'views/setup.js', 'player/cinema.js', 'player/remote.js', 'ui/featured.js', 'views/homecustom.js', 'views/history.js', 'views/webhooks.js', 'player/autoskip.js', 'player/playprefs.js', 'views/photos.js', 'ui/libfilter.js', 'views/itemedit.js', 'ui/rating.js', 'ui/thememusic.js', 'player/subsync.js', 'views/dvr.js', 'offline.js', 'views/downloads.js', 'views/searchlines.js', 'player/iptv.js', 'views/epg.js', 'views/vod.js', 'views/iptvadmin.js', 'views/health.js', 'views/shrink.js', 'audioengine.js', 'audiomix.js', 'player/familyfilter.js', 'familyprefs.js', 'views/tonight.js', 'views/sso.js', 'views/ebooks.js', 'views/reader.js', 'reader/epub.js', 'reader/comic.js', 'player/learn.js', 'views/vocab.js', 'player/musicvideo.js', 'player/moments.js', 'views/moments.js'].map(f => '/js/' + f);
 const HASH = JSON.parse('{{hashes}}');
 const hashed = (f) => HASH[f.slice(1)] ? `/m${f}?h=${HASH[f.slice(1)]}` : V + f;
-const SHELL = [...['/app.js', '/start.js', '/i18n/en.js', ...MODULES, '/style.css', '/vendor/hls.min.js'].map(hashed),
+const SHELL = [...['/app.js', '/i18n/en.js', ...MODULES, '/style.css', '/vendor/hls.min.js'].map(hashed),
   '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg', '/brand/icon-192.png', '/brand/icon-512.png', '/offline.html', '/'];
 const versioned = (p) => p.startsWith('/m/') || p.startsWith(V + '/');
 
@@ -22,22 +22,53 @@ self.addEventListener('install', (e) => {
     const old = versioned(url) && await caches.match(url);
     if (old) return c.put(url, old);
     const res = await fetch(url, { cache: 'no-cache' });
+    if (url === '/') await savePage(res.clone());
     if (res.ok) await c.put(url, res);
   }))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  // Bara appens gamla cacher – nedladdningarna (braxhn-dl-*) ligger kvar
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && !k.startsWith('braxhn-dl-')).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  // Bara appens gamla cacher – nedladdningarna (braxhn-dl-*) ligger kvar. Förra byggets cache får finnas kvar ett dygn:
+  // en sida som startade ur cachen före uppdateringen hämtar sina moduler (även de som laddas vid behov) därifrån i
+  // stället för att blanda dem med det nya byggets.
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && !k.startsWith('braxhn-dl-')).map(async (k) => {
+    const c = await caches.open(k), mark = await c.match('/__retired');
+    if (!mark) return k.startsWith('braxhn-app-') ? c.put('/__retired', new Response(String(Date.now()))) : caches.delete(k);
+    if (Date.now() - (+(await mark.text()) || 0) > RETIRE_MS) return caches.delete(k);
+  }))).then(() => self.clients.claim()));
 });
+const RETIRE_MS = 24 * 3600e3;
+// Startsidan ur cachen (varm start utan att vänta på servern): sidan finns i två språk (server/http/static.js), så den
+// sparas per språk och används bara när språket går att läsa ur kakan bxlang (Cookie Store API). Annars, och första
+// gången, hämtas den från servern som förut. Varje gång hämtas en ny i bakgrunden till nästa start.
+const pageKey = (l) => '/__page/' + (l === 'en' ? 'en' : 'sv');
+async function wantedLang() {
+  try { const c = await self.cookieStore?.get('bxlang'); return c?.value === 'en' || c?.value === 'sv' ? c.value : null; } catch { return null; }
+}
+async function savePage(res) {
+  if (res.status !== 200 || res.type !== 'basic' || !/text\/html/.test(res.headers.get('content-type') || '')) return;
+  const html = await res.clone().text();
+  const l = /<html lang="(sv|en)"/.exec(html)?.[1];
+  if (l) await (await caches.open(CACHE)).put(pageKey(l), res);
+}
+function startPage(e) {
+  const net = fetch(e.request);
+  e.waitUntil(net.then(res => savePage(res.clone())).catch(() => {}));
+  return wantedLang().then(l => l && caches.match(pageKey(l), { cacheName: CACHE })).catch(() => null)
+    .then(hit => hit || net)
+    .catch(async () => (await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html'));
+}
 self.addEventListener('fetch', (e) => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== 'GET' || u.origin !== location.origin) return;
   // Sidan själv: från servern, annars en enkel sida om att servern inte nås
   if (r.mode === 'navigate') {
+    if (u.pathname === '/' && !u.search) { e.respondWith(startPage(e)); return; }
     e.respondWith(fetch(r).catch(async () => (u.pathname !== '/offline.html' && await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html')));
     return;
   }
   const key = u.pathname + u.search;
+  // En fil med hash som inte hör till det här bygget: ur förra byggets cache om sidan är därifrån, annars från servern
+  if (u.pathname.startsWith('/m/') && !SHELL.includes(key)) { e.respondWith(caches.match(key).then(hit => hit || fetch(r))); return; }
   if (!SHELL.includes(key) && !SHELL.includes(u.pathname)) return;
   // Versionerade filer: cachen först (samma adress = samma innehåll)
   if (versioned(u.pathname) && SHELL.includes(key)) {

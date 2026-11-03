@@ -609,6 +609,9 @@ Xtream-källa eller ett catch-up-arkiv som testservern saknar och finns därför
   `try?` var för sig (`HomeResponse` i `Models.swift`): saknas ett fält, eller har det oväntad form, blir det bara en
   hylla mindre. De står som inbäddade objekt under `optional` i kontraktet. Appen visar hyllorna i ordningen i
   `homeLayout.order` (id:n som i `server/homeshelves.js`) och hoppar över `homeLayout.hidden`.
+- `GET /api/home?web=1` (bara webben) har dessutom `collectionsList` (samma som `/api/collections`) och
+  `ownCollections` (samma som `/api/custom-collections`) – två förfrågningar färre vid start. Utan `web=1` är svaret
+  oförändrat.
 - `POST /api/profiles/switch` svarar `401` med `needPin`/`needPassword` vid fel PIN – appen loggar inte ut på det
   svaret (alla andra `401` med apptoken loggar ut).
 - Bio-läge: appen läser `GET /api/me/cinema` innan en film startas från början och skickar `cinema=1` bara när

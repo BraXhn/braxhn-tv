@@ -6,7 +6,6 @@ import { route } from '../router.js';
 import { iconButton } from '../ui/buttons.js';
 import { bookCard, card, colCard, ebookCard, podCover, seasonCard, shelf, shelfHtml, upcomingCard } from '../ui/cards.js';
 import { bindFeatured, featuredHtml } from '../ui/featured.js';
-import { SORT_DIR, SORT_LABEL, chips, chipsHtml, filterCount, hasFilter, hashQuery, openFilterPanel } from '../ui/libfilter.js';
 import { emptyState } from '../ui/states.js';
 
 // Startsidans hyllor i den ordning användaren valt (homeLayout från servern, "Anpassa startsidan"). Hyllor som
@@ -33,7 +32,10 @@ const homeKey = () => 'bxhome1:' + (me?.id || 0);
 function cachedHome() { try { return JSON.parse(localStorage.getItem(homeKey()) || 'null'); } catch { return null; } }
 function saveHome(o) { try { localStorage.setItem(homeKey(), JSON.stringify(o)); } catch { try { localStorage.removeItem(homeKey()); } catch {} } }
 views.home = async () => {
-  const fresh = Promise.all([api('/home'), api('/collections').catch(e => { if (e?.aborted) throw e; return []; }), api('/custom-collections').catch(e => { if (e?.aborted) throw e; return []; })]);
+  // ?web=1: samlingarna (collectionsList, ownCollections) kommer i samma svar – en äldre server utan dem: egna anrop
+  const soft = (p) => api(p).catch(e => { if (e?.aborted) throw e; return []; });
+  const fresh = api('/home?web=1').then(async ({ collectionsList, ownCollections, ...d }) =>
+    [d, collectionsList || await soft('/collections'), ownCollections || await soft('/custom-collections')]);
   const old = cachedHome();
   if (old?.d) await renderHome(old.d, old.cols || [], old.own || [], true);
   const [d, cols, own] = await fresh;
@@ -47,16 +49,18 @@ async function renderHome(d, cols, own, fromCache) {
   const L = d.homeLayout || { order: DEFAULT_ORDER, hidden: [], hero: 'auto' };
   const off = new Set(L.hidden || []);
   // Installationsguiden är inte klar (bara administratörer på hemnätet, fältet setupPending i /api/status)
-  let html = me.setupPending ? `<div class="setup-banner" role="region" aria-label="Installation"><div><b>${t('Slutför installationen')}</b>
+  // blocks: ett element per sträng (drawHome jämför dem med förra ritningen)
+  const blocks = [];
+  if (me.setupPending) blocks.push(`<div class="setup-banner" role="region" aria-label="Installation"><div><b>${t('Slutför installationen')}</b>
     <p class="muted small">${t('Några steg kvar: metadata, bibliotek, omkodning, åtkomst utanför hemmet och hushållet.')}</p></div>
-    <a class="btn primary" href="#/setup">${t('Fortsätt guiden')}</a></div>` : '';
+    <a class="btn primary" href="#/setup">${t('Fortsätt guiden')}</a></div>`);
   if (!libs.length) {
-    html += emptyState({ icon: '🎬', title: t('Inga bibliotek ännu'), text: me.is_admin ? t('Lägg till en mapp med filmer eller serier för att komma igång.') : t('Be administratören att lägga till bibliotek.'),
-      action: me.is_admin ? { label: t('Lägg till bibliotek'), href: me.setupPending ? '#/setup/libraries' : '#/admin' } : null });
+    blocks.push(emptyState({ icon: '🎬', title: t('Inga bibliotek ännu'), text: me.is_admin ? t('Lägg till en mapp med filmer eller serier för att komma igång.') : t('Be administratören att lägga till bibliotek.'),
+      action: me.is_admin ? { label: t('Lägg till bibliotek'), href: me.setupPending ? '#/setup/libraries' : '#/admin' } : null }));
   }
   // Utvalt överst: standard på bred skärm, valbart under "Anpassa startsidan"
   const hero = d.featured?.length && (L.hero === 'on' || (L.hero !== 'off' && matchMedia('(min-width: 900px)').matches));
-  if (hero) html += featuredHtml(d.featured);
+  if (hero) blocks.push(featuredHtml(d.featured));
   // Som Plex: en vågrät rad per hylla med stående affischer. Seriebibliotek visar nya avsnitt per säsong.
   const part = {
     foryou: () => d.forYou?.length ? shelfHtml(t('Nytt för dig'), cards(d.forYou), { row: 'foryou',
@@ -87,17 +91,59 @@ async function renderHome(d, cols, own, fromCache) {
     // Egna samlingar först, sedan TMDB:s filmserier
     collections: () => cols.length || own.length ? shelfHtml(t('Samlingar'), [...own, ...cols].map(colCard).join(''), { more: t('<a href="#/collections">Visa alla</a>') }) : ''
   };
-  for (const id of L.order || DEFAULT_ORDER) if (!off.has(id) && part[id]) html += part[id]();
+  // Hyllorna ritas i två steg: de första direkt (det som syns), resten i nästa uppgift – annars blir det en enda lång
+  // uppgift med hundratals kort (HTML, stil och layout) innan något syns, särskilt på en långsam TV eller telefon
+  // Även HTML:en för de senare hyllorna byggs först i andra steget. En hylla = en <section> (shelfHtml); en del
+  // (because, recent, custom) kan ge flera.
+  const ids = (L.order || DEFAULT_ORDER).filter(id => !off.has(id) && part[id]);
+  const secsOf = (id) => { const h = part[id](); return h ? h.split(/(?=<section class="section">)/) : []; };
+  let n = 0;
+  while (n < ids.length && (keep != null || blocks.filter(b => b.startsWith('<section')).length < FIRST_SHELVES)) blocks.push(...secsOf(ids[n++]));
+  const later_ = ids.slice(n);
   if (libs.some(l => l.type === 'movie' || l.type === 'show') && !d.rows.some(r => r.items.length) && !fromCache) {
     const s = await api('/scan');
-    html += emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? t('Skannar bibliotek…') : t('Inget innehåll hittades'), text: s.running ? `${s.phase} ${s.done}/${s.total}` : t('Kontrollera sökvägarna under Administration.') });
+    blocks.push(emptyState({ icon: s.running ? '⏳' : '🔍', title: s.running ? t('Skannar bibliotek…') : t('Inget innehåll hittades'), text: s.running ? `${s.phase} ${s.done}/${s.total}` : t('Kontrollera sökvägarna under Administration.') }));
     if (s.running) later(route, 3000);
   }
-  if (libs.length) html += `<div class="homefoot"><button type="button" class="ghost" id="homecustom">${t('Anpassa startsidan')}</button></div>`;
-  main.innerHTML = html;
+  const foot = libs.length ? [`<div class="homefoot"><button type="button" class="ghost" id="homecustom">${t('Anpassa startsidan')}</button></div>`] : [];
+  const rest = () => [...later_.flatMap(secsOf), ...foot];
+  const my = ++homeDraw;
+  const now = keep != null || !later_.length;
+  drawHome(now ? blocks.concat(rest()) : blocks, false);
   if (keep != null) window.scrollTo(0, keep);
   if (fromCache) main.removeAttribute('aria-busy');
-  if (hero) bindFeatured(main.querySelector('.feat'), d.featured);
+  const feat = hero && main.querySelector('.feat');
+  if (feat && !feat.dataset.bound) { feat.dataset.bound = '1'; bindFeatured(feat, d.featured); }
+  const bind = () => bindHome(d);
+  if (now) return bind();
+  // Efter nästa bildruta (de första hyllorna hinner synas), och inte alls om man gått vidare (later)
+  requestAnimationFrame(() => later(() => { if (my !== homeDraw) return; drawHome(rest(), true); bind(); }, 0));
+}
+const FIRST_SHELVES = 3;
+let homeDraw = 0; // en ny ritning (servern svarade) gör att en väntande andra del av den förra inte läggs till
+// Startsidans element och deras HTML som de ritades (innan ui/shelves.js lagt till pilarna): när servern svarar med
+// något nytt byts bara de hyllor som ändrats – inte hela sidan (stil, layout och bilder för hundratals kort igen)
+let drawnEls = [], drawnSrc = [];
+const normHtml = (h) => h.replace(/ (?:loading|fetchpriority)="[^"]*"/g, '');
+function drawHome(blocks, append) {
+  const tp = document.createElement('template');
+  tp.innerHTML = blocks.join('');
+  const els = [...tp.content.children];
+  // Ett block som inte blev precis ett element: ingen jämförelse nästa gång (hela sidan byts, som förut)
+  const src = els.length === blocks.length ? blocks.map(normHtml) : els.map(() => null);
+  if (append) { main.append(...els); drawnEls.push(...els); drawnSrc.push(...src); return; }
+  const cur = [...main.children];
+  if (cur.length && cur.length === drawnEls.length && cur.every((e, i) => e === drawnEls[i])) {
+    els.forEach((e, i) => {
+      if (i >= cur.length) main.append(e);
+      else if (src[i] == null || src[i] !== drawnSrc[i]) cur[i].replaceWith(e);
+      else els[i] = cur[i]; // oförändrad: elementet på sidan står kvar (med pilar, skrolläge och laddade bilder)
+    });
+    cur.slice(els.length).forEach(e => e.remove());
+  } else main.replaceChildren(...els);
+  drawnEls = els; drawnSrc = src;
+}
+function bindHome(d) {
   if ($('#fyclear')) $('#fyclear').onclick = act(async (e) => { e.preventDefault(); await api('/foryou/seen', { method: 'POST', body: {} }); route(); });
   if ($('#homecustom')) $('#homecustom').onclick = () => need('views/homecustom.js').then(m => m.openHomeCustomizer({ onChange: route }));
   main.querySelectorAll('[data-lpod]').forEach(a => a.onclick = (e) => {
@@ -119,6 +165,8 @@ function applyFilter(id, qs) {
 views.lib = async (id, folder) => {
   // Hemvideor: mappar som navigering, liggande kort och datum (fälten home_video/folders från servern)
   if (libs.find(l => l.id === +id)?.home_video) return homeVideos(id, folder);
+  // Filtret och sorteringen laddas först här (inte vid start – startsidan behöver dem inte)
+  const { SORT_DIR, SORT_LABEL, chips, chipsHtml, filterCount, hasFilter, hashQuery, openFilterPanel } = await need('ui/libfilter.js');
   let qs = hashQuery();
   if (qs == null) {
     // Ingen adressdel: senaste filtret för biblioteket (eller de äldre valen sort/filter)

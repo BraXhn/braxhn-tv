@@ -5,7 +5,7 @@ import { $$, act, api, fmtTime, me, sxe, toast, toastErr, t } from '../core.js';
 import { need, play, startPlay } from '../lazy.js';
 import { route } from '../router.js';
 import { card, cardItem, seasonCard, seasonItem, setCardItem } from './cards.js';
-import { closeMenu, contextMenu, openMenu } from './menu.js';
+import { closeMenu, openMenu } from './menu.js';
 
 // Metadataverktygen (views/item.js) och samlingsdialogen laddas när de väljs
 const editItem = (it) => need('views/item.js').then(m => m.editItem(it));
@@ -200,17 +200,13 @@ async function playCard(b) {
   } catch (e) { toastErr(e); } finally { b.disabled = false; }
 }
 
-/** Kopplar knapparna på korten (▶ ✎ ⋮) och snabbmenyn för alla kort (delegerat – fungerar även för kort som ritas senare) */
-export function initCardMenus() {
-  document.addEventListener('click', (e) => {
-    const p = e.target.closest?.('.cplay');
-    if (p) { e.preventDefault(); e.stopPropagation(); return playCard(p); }
-    const ed = e.target.closest?.('.cedit');
-    if (ed) { e.preventDefault(); e.stopPropagation(); return act(async () => editItem(await api('/items/' + ed.dataset.cedit, { bg: true })))(); }
-    const b = e.target.closest?.('.cmenu'); if (!b) return;
-    e.preventDefault(); e.stopPropagation();
-    if (b.getAttribute('aria-expanded') === 'true') return closeMenu();
-    openCardMenu(b.closest('.card'));
-  });
-  contextMenu(document, '.card[data-id], .card[data-season]', (el, point) => { if (el.querySelector('.cmenu')) openCardMenu(el, point); });
+/**
+ * Ett klick på kortens ▶ ✎ ⋮ (b = knappen). Lyssnaren och snabbmenyn kopplas i app.js, som laddar den här modulen
+ * först när någon använder dem (den hör inte till startens moduler).
+ */
+export function cardClick(b) {
+  if (b.classList.contains('cplay')) return playCard(b);
+  if (b.classList.contains('cedit')) return act(async () => editItem(await api('/items/' + b.dataset.cedit, { bg: true })))();
+  if (b.getAttribute('aria-expanded') === 'true') return closeMenu();
+  openCardMenu(b.closest('.card'));
 }

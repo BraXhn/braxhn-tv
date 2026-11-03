@@ -129,7 +129,12 @@ test('webben: startsidan laddar bara sina egna moduler – spelaren och övriga 
   const start = new Set(PRELOAD_FILES);
   // Startens moduler = det app.js importerar statiskt. Varje modul är en förfrågan och HTTP/1.1 tar sex åt gången –
   // håll mängden liten. Spelaren, ljudspelaren och musikens moduler hör aldrig dit (fasaderna i js/lazy.js).
-  assert.ok(PRELOAD_FILES.length <= 16, `${PRELOAD_FILES.length} moduler vid start: ${PRELOAD_FILES.join(' ')}`);
+  assert.ok(PRELOAD_FILES.length <= 12, `${PRELOAD_FILES.length} moduler vid start: ${PRELOAD_FILES.join(' ')}`);
+  // …och deras storlek (okomprimerat, med app.js): 139 kB när gränsen sattes
+  const bytes = [...PRELOAD_FILES, 'app.js'].reduce((a, f) => a + fs.statSync(path.join(web, f)).size, 0);
+  assert.ok(bytes <= 160_000, `${bytes} byte JavaScript vid start`);
+  // Kortmenyn och bibliotekets filter laddas vid behov (app.js kopplar korten, views.lib hämtar filtret)
+  for (const f of ['js/ui/cardmenu.js', 'js/ui/libfilter.js']) assert.ok(!start.has(f), `${f} laddas vid start`);
   for (const f of ['js/core.js', 'js/router.js', 'js/lazy.js', 'js/views/home.js', 'js/ui/cards.js']) assert.ok(start.has(f), f);
   for (const f of PRELOAD_FILES) assert.ok(!/^js\/(player\/|audio|sonic|musicinfo|views\/(?!home\.js))/.test(f), `${f} laddas vid start`);
   for (const m of ['admin', 'admin-ops', 'stats', 'wrapped', 'requests', 'streaming', 'live', 'item', 'music', 'books', 'search', 'account', 'login'])
@@ -170,10 +175,95 @@ test('webben: startsidan laddar bara sina egna moduler – spelaren och övriga 
     serveStatic({ method: 'GET', headers: {} }, res, '/');
   });
   assert.deepEqual(JSON.parse(/<script type="application\/json" id="moddeps">([^<]*)<\/script>/.exec(html)[1]), LAZY_DEPS);
-  // Förladdningen pekar på adresserna med innehållshash – samma som import map ger import()
-  const preloads = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m => m[1]);
+  // Förladdningen pekar på adresserna med innehållshash – samma som import map ger import(). Startskriptet ligger
+  // direkt i sidan (först, före stilmallen) och lägger in förladdningen efter sina API-anrop: som <link> i HTML:en
+  // hittar webbläsaren dem i förväg och de tar alla sex anslutningarna före /status och /home.
   const imap = JSON.parse(/<script type="importmap">([^<]*)<\/script>/.exec(html)[1]).imports;
+  const inline = /<script>(self\.__preload=(\[[^\]]*\]);[\s\S]*?)<\/script>/.exec(html);
+  assert.ok(inline, 'startskriptet saknas i sidan');
+  const preloads = JSON.parse(inline[2]);
   for (const f of PRELOAD_FILES) assert.ok(preloads.includes(imap['/m/' + f]), `${f} förladdas inte med sin hash`);
   assert.ok(imap['/m/js/player/video.js'], 'spelaren saknas i import map (need() slår upp adressen där)');
   assert.ok(!preloads.some(u => u.includes('/player/')), 'spelaren förladdas vid start');
+  assert.deepEqual([...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m => m[1].replace(/\?.*/, '')), ['/m/app.js'], 'bara app.js som <link> i sidan');
+  assert.ok(html.indexOf('<script>self.__preload') < html.indexOf('rel="stylesheet"'), 'startskriptet före stilmallen');
+  assert.ok(!/start\.js/.test(html), 'start.js som egen fil');
+  const fetches = inline[1].indexOf("fetch('/api'"), links = inline[1].indexOf("rel = 'modulepreload'");
+  assert.ok(fetches > 0 && links > fetches, 'API-anropen startar före förladdningen');
+  const csp = await new Promise((resolve) => {
+    const res = { writeHead: (s, h) => resolve(h['Content-Security-Policy']), end() {} };
+    serveStatic({ method: 'GET', headers: {} }, res, '/');
+  });
+  const hash = `'sha256-${(await import('node:crypto')).createHash('sha256').update(inline[1]).digest('base64')}'`;
+  assert.ok(csp.includes(hash), 'startskriptets hash saknas i CSP');
+  // Engelska: katalogen (~300 kB) stoppar inte HTML-läsningen (defer – körs ändå före modulerna)
+  const en = await new Promise((resolve) => {
+    const res = { writeHead() {}, end: (b) => resolve(String(b)) };
+    serveStatic({ method: 'GET', headers: {} }, res, '/', '', () => 'en');
+  });
+  assert.match(en, /<script src="[^"]*i18n\/en\.js[^"]*" defer><\/script>/);
+});
+
+test('servern: /api/home och /api/status svarar snabbt med ett större bibliotek, ?web=1 ger samlingarna i samma svar', async () => {
+  const { spawn } = await import('node:child_process');
+  const { DatabaseSync } = await import('node:sqlite');
+  const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-perfhome-')), CONFIG = path.join(ROOT, 'config'), MEDIA = path.join(ROOT, 'media');
+  fs.mkdirSync(MEDIA, { recursive: true });
+  const PORT = 31000 + Math.floor(Math.random() * 900), B = `http://127.0.0.1:${PORT}`, PW = 'Testlösen-2026!';
+  const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], { cwd: path.join(import.meta.dirname, '..'),
+    env: { ...process.env, PORT: String(PORT), HTTPS_PORT: String(PORT + 1), CONFIG_DIR: CONFIG, MEDIA_ROOT: MEDIA, TRANSCODE_DIR: path.join(ROOT, 'tc'),
+      TMDB_API_KEY: '', WATCH_FILES: '0', UPDATE_CHECK: '0' }, stdio: ['ignore', 'ignore', 'ignore'] });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  try {
+    for (let i = 0; i < 80; i++) { try { await fetch(B + '/api/health'); break; } catch { await sleep(150); } }
+    const j = async (p, o = {}) => (await fetch(B + p, { method: o.method || 'GET', headers: { 'content-type': 'application/json' }, body: o.body && JSON.stringify(o.body) })).json();
+    await j('/api/setup', { method: 'POST', body: { name: 'admin', password: PW } });
+    const tok = (await j('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true } })).token;
+    const auth = { authorization: 'Bearer ' + tok };
+    // 3000 filmer i två bibliotek, 120 serier med 20 avsnitt, 1500 sedda/påbörjade och en lista
+    const d = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db'));
+    d.exec('PRAGMA busy_timeout=5000');
+    const lib = (n, t) => Number(d.prepare('INSERT INTO libraries(name,type,path) VALUES(?,?,?)').run(n, t, path.join(MEDIA, n)).lastInsertRowid);
+    const L = [lib('Filmer', 'movie'), lib('Barn', 'movie'), lib('Serier', 'show')];
+    const ins = d.prepare(`INSERT INTO items(library_id,kind,parent_id,title,sort_title,year,season,episode,duration,rating,genres,overview,poster,backdrop,collection_id,added)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,?)`);
+    const now = Math.floor(Date.now() / 1000), movies = [], eps = [];
+    d.exec('BEGIN');
+    const col = Number(d.prepare("INSERT INTO collections(name) VALUES('Samlingen')").run().lastInsertRowid);
+    for (let i = 0; i < 3000; i++) movies.push(Number(ins.run(L[i % 2], 'movie', null, 'Film ' + i, 'film ' + i, 1960 + i % 60, null, null, 5400, 5 + i % 5, '["Drama","Action"]', 'Text '.repeat(40), i < 3 ? col : null, now - i * 900).lastInsertRowid));
+    for (let s = 0; s < 120; s++) {
+      const sid = Number(ins.run(L[2], 'show', null, 'Serie ' + s, 'serie ' + s, 2000 + s % 25, null, null, null, 7, '["Drama"]', 'Serie', null, now - s * 3600).lastInsertRowid);
+      for (let e = 0; e < 20; e++) eps.push(Number(ins.run(L[2], 'episode', sid, 'A' + e, 'a' + e, null, 1 + (e >> 3), 1 + e, 2400, null, null, null, null, now - s * 3600 - e).lastInsertRowid));
+    }
+    const pr = d.prepare('INSERT OR IGNORE INTO progress(user_id,item_id,position,duration,watched,updated) VALUES(1,?,?,?,?,?)');
+    for (let i = 0; i < 1000; i++) pr.run(movies[(i * 7) % movies.length], i % 50 ? 0 : 1200, 5400, i % 50 ? 1 : 0, now - i * 60);
+    for (let i = 0; i < 500; i++) pr.run(eps[(i * 3) % eps.length], 0, 2400, 1, now - i * 30);
+    for (let i = 0; i < 30; i++) d.prepare('INSERT OR IGNORE INTO watchlist(user_id,item_id,added) VALUES(1,?,?)').run(movies[i * 11], now);
+    d.exec('COMMIT'); d.exec('ANALYZE'); d.close();
+    const time = async (p) => { const s = performance.now(); const r = await fetch(B + p, { headers: auth }); const body = await r.json(); return [performance.now() - s, body]; };
+    const [, home] = await time('/api/home?web=1'); // första gången: frågorna förbereds, rekommendationerna räknas
+    assert.ok(Array.isArray(home.collectionsList) && Array.isArray(home.ownCollections), 'samlingarna saknas i ?web=1');
+    assert.ok(home.rows.length >= 3 && home.continue.length > 0, 'startsidan är tom');
+    const [, plain] = await time('/api/home');
+    assert.equal(plain.collectionsList, undefined, 'apparnas svar ska vara oförändrat');
+    assert.equal(plain.ownCollections, undefined);
+    const med = async (p) => { const t = []; for (let i = 0; i < 9; i++) t.push((await time(p))[0]); return t.sort((a, b) => a - b)[4]; };
+    // Lokalt ~30 ms resp. ~2 ms – gränserna har marginal för en långsam CI-maskin. Blir de för snäva: titta på
+    // frågeplanerna i /api/home (listItems, PROG) innan gränsen höjs.
+    const h = await med('/api/home?web=1'), st = await med('/api/status');
+    assert.ok(h < 250, `/api/home ${h.toFixed(0)} ms (median)`);
+    assert.ok(st < 40, `/api/status ${st.toFixed(0)} ms (median)`);
+  } finally { srv.kill(); fs.rmSync(ROOT, { recursive: true, force: true }); }
+});
+
+test('service workern: startsidan ur cachen per språk, förra byggets filer finns kvar ett dygn', () => {
+  const sw = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'sw.js'), 'utf8');
+  // Sidan ur cachen bara när språket går att läsa (kakan bxlang) – annars från servern som förut
+  assert.match(sw, /cookieStore\?\.get\('bxlang'\)/);
+  assert.match(sw, /u\.pathname === '\/' && !u\.search\) \{ e\.respondWith\(startPage\(e\)\)/);
+  assert.match(sw, /e\.waitUntil\(net\.then\(res => savePage/); // alltid en ny i bakgrunden
+  assert.match(sw, /'\/__retired'/);
+  // Registreras först när sidan är ritad
+  const router = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'js', 'router.js'), 'utf8');
+  assert.match(router, /idle\(\(\) => navigator\.serviceWorker\.register\('\/sw\.js'\)/);
 });

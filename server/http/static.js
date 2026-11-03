@@ -34,7 +34,11 @@ const PREFIX = `/v/${BUILD}`;
 const FILEHASH = new Map(walk(WEB).map(f => [rel(f), crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex').slice(0, 10)]));
 export const hashedUrl = (r) => FILEHASH.has(r) ? `/m/${r}?h=${FILEHASH.get(r)}` : `/${r}`;
 const IMPORTMAP = JSON.stringify({ imports: Object.fromEntries([...FILEHASH.keys()].filter(r => /^js\/.*\.js$/.test(r)).sort().map(r => [`/m/${r}`, hashedUrl(r)])) });
-const IMPORTMAP_CSP = `'sha256-${crypto.createHash('sha256').update(IMPORTMAP).digest('base64')}'`;
+const cspHash = (src) => `'sha256-${crypto.createHash('sha256').update(src).digest('base64')}'`;
+const IMPORTMAP_CSP = cspHash(IMPORTMAP);
+// web/start.js ligger direkt i index.html (inte som egen fil): de första API-anropen startar när HTML:en lästs, i
+// stället för en rundtur senare – och innan stilmallen och modulerna tar webbläsarens sex anslutningar. Hashen i CSP:n.
+
 // Startens moduler = allt som web/app.js importerar statiskt (hela kedjan) – förladdas från index.html, så att
 // webbläsaren hämtar dem parallellt direkt i stället för en importnivå i taget. Övriga moduler (spelaren, vyerna utom
 // startsidan) laddas med import() när de behövs (web/js/lazy.js); deras beroenden står i #moddeps i index.html,
@@ -50,25 +54,30 @@ const closure = (start) => {
 };
 const START = closure('app.js');
 export const PRELOAD_FILES = [...START].filter(f => f !== 'app.js').sort();
-const PRELOAD = PRELOAD_FILES.map(f => `<link rel="modulepreload" href="${hashedUrl(f)}">`).join('\n');
+// Förladdningen läggs in av startskriptet (efter dess API-anrop), inte som <link> i HTML:en: webbläsarens förladdning
+// läser länkarna i förväg och tog alla sex anslutningarna, så att /status och /home fick vänta en hel omgång
+export const PRELOAD_URLS = PRELOAD_FILES.map(hashedUrl);
 // Modul -> dess statiska importer utanför startens moduler (relativt web/js/), bara moduler som har några
 export const LAZY_DEPS = Object.fromEntries([...IMPORTS].filter(([f]) => !START.has(f))
   .map(([f, d]) => [f.slice(3), d.filter(t => !START.has(t)).map(t => t.slice(3))]).filter(([, d]) => d.length));
 const DEPS = JSON.stringify(LAZY_DEPS).replace(/</g, '\\u003c');
 // Moduler märkta "// @lazy" (vyer i LAZY i web/js/router.js) får aldrig nås statiskt från app.js (test/web-perf.test.js)
 export const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
+const START_JS = `self.__preload=${JSON.stringify(PRELOAD_URLS)};\n${fs.readFileSync(path.join(WEB, 'start.js'), 'utf8')}`.replace(/<\//g, '<\\/');
+const START_CSP = cspHash(START_JS);
 // Service workerns skal: filerna med hash (sw.js läser listan)
-const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|start\.js|style\.css|vendor\/hls\.min\.js|i18n\/en\.js)$/.test(r))));
+const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|style\.css|vendor\/hls\.min\.js|i18n\/en\.js)$/.test(r))));
 
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK)
-const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} https://www.gstatic.com`,
+const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} ${START_CSP} https://www.gstatic.com`,
   "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https://image.tmdb.org", "media-src 'self' blob:", "connect-src 'self'",
   "font-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "frame-src https://www.gstatic.com"].join('; ');
 
 // Färdiga svar per fil: { raw, br, gz, etag, type, mtime }. Byts när filen ändras (utveckling); i imagen aldrig.
 const cache = new Map();
 // Språk: index.html finns i två varianter – svenska (standard, ingen katalog) och engelska (<html lang="en"> och
-// katalogen web/i18n/en.js som ett vanligt skript före modulerna, så att t() i web/js/core.js har den direkt).
+// katalogen web/i18n/en.js som ett vanligt skript före modulerna, så att t() i web/js/core.js har den direkt). Skriptet
+// är defer: det stoppar inte HTML-läsningen men körs ändå före modulerna (samma ordning som i dokumentet).
 function load(f, st, lang = 'sv') {
   const name = rel(f);
   const key = name === 'index.html' && lang === 'en' ? f + '#en' : f;
@@ -76,14 +85,14 @@ function load(f, st, lang = 'sv') {
   if (c && c.mtime === st.mtimeMs && c.size === st.size) return c;
   let raw = fs.readFileSync(f);
   if (name === 'index.html') {
-    raw = Buffer.from(String(raw).replace('{{i18n}}', key === f ? '' : '<script src="/v/{{b}}/i18n/en.js"></script>')
+    raw = Buffer.from(String(raw).replace('{{i18n}}', key === f ? '' : '<script src="/v/{{b}}/i18n/en.js" defer></script>')
       .replace('<html lang="sv">', `<html lang="${key === f ? 'sv' : 'en'}">`));
   }
   // Mallvärden: rätt bygge i index.html och service workern
   if (name === 'index.html' || name === 'sw.js' || name === 'offline.html') {
     raw = Buffer.from(String(raw).replace(/\/v\/\{\{b\}\}\/([\w./-]+)/g, (_, r) => FILEHASH.has(r) ? hashedUrl(r) : `${PREFIX}/${r}`)
-      .replaceAll('{{b}}', BUILD).replaceAll('{{preload}}', PRELOAD).replaceAll('{{importmap}}', `<script type="importmap">${IMPORTMAP}</script>`)
-      .replaceAll('{{hashes}}', SW_HASHES).replaceAll('{{deps}}', DEPS));
+      .replaceAll('{{b}}', BUILD).replaceAll('{{importmap}}', `<script type="importmap">${IMPORTMAP}</script>`)
+      .replaceAll('{{start}}', () => `<script>${START_JS}</script>`).replaceAll('{{hashes}}', SW_HASHES).replaceAll('{{deps}}', DEPS));
   }
   const e = { raw, type: MIME[path.extname(f)] || 'application/octet-stream', mtime: st.mtimeMs, size: st.size,
     etag: `"${crypto.createHash('sha1').update(raw).digest('base64url').slice(0, 22)}"` };

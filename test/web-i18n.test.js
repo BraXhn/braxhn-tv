@@ -94,7 +94,7 @@ test('webben: katalogen är inget startberoende – bara ett vanligt skript i de
   assert.match(sv, /<html lang="sv">/); assert.equal(sv, sv2);
   assert.ok(!sv.includes('i18n/en.js'), 'svenska sidan laddar katalogen');
   assert.match(en, /<html lang="en">/);
-  const src = /<script src="([^"]*i18n\/en\.js[^"]*)"><\/script>/.exec(en)?.[1];
+  const src = /<script src="([^"]*i18n\/en\.js[^"]*)" defer><\/script>/.exec(en)?.[1];
   assert.ok(src && /\?h=[0-9a-f]+$/.test(src), 'katalogen med innehållshash');
   assert.ok(en.indexOf(src) < en.indexOf('type="module"'), 'katalogen före modulerna');
   assert.match(fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8'), /'\/i18n\/en\.js'/);

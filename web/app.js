@@ -6,7 +6,7 @@
 import { me, rememberPage, store } from './js/core.js';
 import { boot, prefetchView, route } from './js/router.js';
 import { idle, loadPlayer, need, pageDrawn } from './js/lazy.js';
-import { initCardMenus } from './js/ui/cardmenu.js';
+import { contextMenu } from './js/ui/menu.js';
 import { initCardSize, initShelves } from './js/ui/shelves.js';
 import './js/screentime.js';
 import './js/views/home.js';
@@ -27,7 +27,15 @@ addEventListener('unhandledrejection', (e) => {
   report(r.message || r, r.stack);
 });
 
-initCardMenus();
+// Kortens knappar (▶ ✎ ⋮) och snabbmenyn, delegerat (även kort som ritas senare): ui/cardmenu.js laddas vid första
+// användningen – i förväg när pekaren eller fokus når ett kort (router.js) och när sidan är ritad
+const cardMenus = () => need('ui/cardmenu.js');
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('.cplay, .cedit, .cmenu'); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  cardMenus().then(m => m.cardClick(b)).catch(() => {});
+});
+contextMenu(document, '.card[data-id], .card[data-season]', (el, point) => { if (el.querySelector('.cmenu')) cardMenus().then(m => m.openCardMenu(el, point)).catch(() => {}); });
 initShelves();
 initCardSize();
 
@@ -36,7 +44,7 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
 
 (async () => {
   let offline = false;
-  try { await boot(); } catch (e) { offline = !!e?.offline; }
+  try { await boot({ fast: true }); } catch (e) { offline = !!e?.offline; }
   // Servern svarar inte (appen startade ur service workerns cache): Nedladdat för den senast inloggade profilen
   // (utan sparad profil: sidan om att servern inte svarar, som förut)
   if (!me && offline) {
@@ -54,7 +62,7 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
   pageDrawn();
   idle(() => {
     loadPlayer().then(() => need('player/cast.js')).then(m => m.initCast()).catch(() => {});
-    if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); }
+    if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); cardMenus().catch(() => {}); }
     // Offline: nedladdningar som inte är klara och positioner som sparats utan nät fortsätter
     if (me && store.get('dlwork', false)) need('offline.js').then(m => m.resume()).catch(() => {});
   });
