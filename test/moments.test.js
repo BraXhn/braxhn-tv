@@ -278,10 +278,11 @@ t('delade länkar: bara klippet, Open Graph, förfalskad/utgången/återkallad g
   assert.equal((await req('/api/moments', { tok: '', headers: { cookie: 'kt=' + tok } })).status, 401);
   // Inloggade routes nås aldrig under /api/share/ (routealternativet share)
   assert.equal((await req('/api/share/x', { tok: admin })).status, 404);
-  // Förfalskad: annat id/utgång med samma signatur
+  // Förfalskad: annat id/utgång med samma signatur, eller signaturens sista tecken utbytt (aldrig mot samma tecken –
+  // annars är länken äkta och testet faller en gång på 64)
   const [sid, exp, sig] = tok.split('.');
   assert.equal((await req(`/api/share/${sid}.${+exp + 3600}.${sig}`, { tok: '' })).status, 404);
-  assert.equal((await req(`/api/share/${sid}.${exp}.${sig.slice(0, -1)}A/clip.mp4`, { tok: '', raw: true })).status, 404);
+  assert.equal((await req(`/api/share/${sid}.${exp}.${sig.slice(0, -1)}${sig.endsWith('A') ? 'B' : 'A'}/clip.mp4`, { tok: '', raw: true })).status, 404);
   // Utgången: en rad med utgång i det förflutna, signerad med serverns nyckel
   const key = Buffer.from(dbRun("SELECT v FROM settings WHERE k='moments_share_key'").v, 'hex');
   const past = Math.floor(Date.now() / 1000) - 60;
