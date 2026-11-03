@@ -3827,4 +3827,5 @@ self.BX_I18N = {
   "Ögonblicket har redan tio giltiga länkar – återkalla någon först": "The moment already has ten valid links – revoke one first",
   "Ogiltig start eller slut": "Invalid start or end",
   "Länken gäller inte längre": "The link is no longer valid",
+  "Tryck på ▶ för att starta uppspelningen": "Press ▶ to start playback",
 };
