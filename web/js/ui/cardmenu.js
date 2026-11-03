@@ -108,7 +108,7 @@ async function seasonWatched(it) {
 export function cardActions(it, st, el) {
   const show = it.kind === 'show', media = !show, ep = it.kind === 'episode';
   const pos = media && it.position > 30 ? it.position : 0;
-  const admin = !!me?.adminHere;
+  const admin = !!me?.adminHere, curate = admin || !!me?.curateHere; // curate: rätta matchning/metadata (även utifrån med 2FA)
   return [
     { icon: '▶', label: t('Fortsätt från {pos}', { pos: fmtTime(pos) }), hidden: !pos, onSelect: () => startPlay(null, it.id, pos) },
     { icon: pos ? '↺' : '▶', label: pos ? t('Spela från början') : t('Spela'), hidden: !media, onSelect: () => startPlay(null, it.id, 0) },
@@ -133,11 +133,11 @@ export function cardActions(it, st, el) {
     { icon: 'ℹ', label: t('Visa information'), href: `#/item/${+it.id}` },
     { icon: '↗', label: t('Gå till serien'), hidden: !ep, href: `#/item/${+it.show}` },
     'separator',
-    { icon: '⟳', label: t('Uppdatera metadata'), hidden: !admin, onSelect: () => refreshMeta(it) },
-    { icon: '?', label: t('Fel titel?'), hidden: !admin || ep, onSelect: () => matchItem(it) },
+    { icon: '⟳', label: t('Uppdatera metadata'), hidden: !curate, onSelect: () => refreshMeta(it) },
+    { icon: '?', label: t('Fel titel?'), hidden: !curate || ep, onSelect: () => matchItem(it) },
     // Listorna saknar beskrivningen – hämta hela titeln så att Redigera inte tömmer den
-    { icon: '✎', label: t('Redigera…'), hidden: !admin, onSelect: () => editItem(it) },
-    { icon: '🖼', label: t('Byt bild…'), hidden: !admin, onSelect: () => editItem(it, 'images') },
+    { icon: '✎', label: t('Redigera…'), hidden: !curate, onSelect: () => editItem(it) },
+    { icon: '🖼', label: t('Byt bild…'), hidden: !curate, onSelect: () => editItem(it, 'images') },
     { icon: '⟲', label: t('Analysera intro och eftertexter igen'), hidden: !admin || !ep,
       onSelect: act(async () => { await api(`/items/${it.id}/markers/redetect`, { method: 'POST', bg: true }); toast(t('Analyserar i bakgrunden')); }) },
   ];
@@ -145,7 +145,7 @@ export function cardActions(it, st, el) {
 
 /** Menyns val för ett säsongskort (nya avsnitt i en säsong) */
 export function seasonActions(g, el) {
-  const admin = !!me?.adminHere, sn = g.season === 0 ? t('specialavsnitten') : t('säsong {season}', { season: g.season });
+  const admin = !!me?.adminHere || !!me?.curateHere, sn = g.season === 0 ? t('specialavsnitten') : t('säsong {season}', { season: g.season });
   return [
     { icon: '▶', label: g.next ? `${g.next.position > 0 ? t('Fortsätt') : t('Spela')} S${g.season} · A${g.next.episode}` : '', hidden: !g.next,
       onSelect: () => startPlay(null, g.next.id, g.next.position || 0) },

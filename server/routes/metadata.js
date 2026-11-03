@@ -5,7 +5,7 @@ import { send, readJson, fail } from '../util.js';
 import { audit } from '../auth.js';
 import { refreshItem, extractThumb, hasTmdb, scan } from '../scanner.js';
 import * as meta from '../itemmeta.js';
-import { route, admin } from '../http/router.js';
+import { route, curate } from '../http/router.js';
 import { ctx, oneItem } from '../http/context.js';
 
 /** Titeln som redigeras: en filmversion redigeras som filmen (huvudraden) */
@@ -17,11 +17,11 @@ function rowOf(c) {
 }
 const typeOk = (c, row) => { if (meta.imageTypes(row).includes(c.p.type)) return true; fail(c.res, 404, 'Okänd bildtyp'); return false; };
 
-route('GET', '/api/items/:id/metadata', admin, (c) => {
+route('GET', '/api/items/:id/metadata', curate, (c) => {
   const row = rowOf(c); if (!row) return;
   send(c.res, 200, meta.editable(row));
 });
-route('PUT', '/api/items/:id/metadata', admin, async (c) => {
+route('PUT', '/api/items/:id/metadata', curate, async (c) => {
   const row = rowOf(c); if (!row) return;
   const b = await readJson(c.req);
   const next = meta.save(row, { values: b.values || {}, locked: b.locked ?? null });
@@ -31,28 +31,28 @@ route('PUT', '/api/items/:id/metadata', admin, async (c) => {
 });
 
 // Bilder: TMDB:s alternativ, välj ett, ladda upp egen, återställ
-route('GET', '/api/items/:id/images/:type', admin, async (c) => {
+route('GET', '/api/items/:id/images/:type', curate, async (c) => {
   const row = rowOf(c); if (!row || !typeOk(c, row)) return;
   let options = [], error = null;
   try { options = await meta.tmdbImages(row, c.p.type); }
   catch (e) { if (e.status) throw e; error = 'TMDB: ' + e.message; }
   send(c.res, 200, { type: c.p.type, options, error, tmdb: hasTmdb(), current: meta.imagesOf(row)[c.p.type] });
 });
-route('POST', '/api/items/:id/images/:type', admin, async (c) => {
+route('POST', '/api/items/:id/images/:type', curate, async (c) => {
   const row = rowOf(c); if (!row || !typeOk(c, row)) return;
   const { tmdbPath } = await readJson(c.req);
   const images = await meta.chooseTmdb(row, c.p.type, tmdbPath);
   audit('item_image', { ...ctx(c), detail: `${row.title}: ${c.p.type} från TMDB` });
   send(c.res, 200, { images });
 });
-route('PUT', '/api/items/:id/images/:type', admin, async (c) => {
+route('PUT', '/api/items/:id/images/:type', curate, async (c) => {
   const row = rowOf(c); if (!row || !typeOk(c, row)) return;
   const buf = await meta.readUpload(c.req);
   const images = await meta.storeImage(row, c.p.type, buf, 'upload');
   audit('item_image', { ...ctx(c), detail: `${row.title}: ${c.p.type} uppladdad` });
   send(c.res, 200, { images });
 });
-route('DELETE', '/api/items/:id/images/:type', admin, async (c) => {
+route('DELETE', '/api/items/:id/images/:type', curate, async (c) => {
   const row = rowOf(c); if (!row || !typeOk(c, row)) return;
   meta.resetImage(row, c.p.type);
   // Automatiskt igen: TMDB:s bild direkt (serien för ett avsnitt), en lokal fil bredvid videon vid skanningen

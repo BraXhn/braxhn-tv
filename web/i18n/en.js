@@ -3828,4 +3828,6 @@ self.BX_I18N = {
   "Ogiltig start eller slut": "Invalid start or end",
   "Länken gäller inte längre": "The link is no longer valid",
   "Tryck på ▶ för att starta uppspelningen": "Press ▶ to start playback",
+  "Rätta matchning och metadata utanför hemmet": "Fix matches and metadata away from home",
+  "(bara administratörer med tvåstegsverifiering eller passkey – övrig administration kräver hemnätet)": "(only administrators with two-step verification or a passkey – other administration requires the home network)",
 };

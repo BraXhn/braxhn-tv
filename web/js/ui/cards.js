@@ -107,7 +107,7 @@ export function card(it, land = false, { menu = true } = {}) {
   const href = it.kind === 'episode' && !land ? `#/item/${it.show}` : `#/item/${it.id}`;
   const name = it.kind === 'episode' && !land && it.showTitle ? `${it.showTitle} ${sxe(it)}` : t;
   return `<div class="card${land ? ' land' : ''}" data-id="${+it.id}"><a class="clink" href="${href}" aria-label="${esc(cardLabel(it, [t, s, s2]))}">${art(it, land)}${textLines(t, s, s2)}</a>`
-    + (menu ? overlay({ id: it.id, name, play: true, edit: me?.adminHere ? it.id : 0, menu: true }) : '')
+    + (menu ? overlay({ id: it.id, name, play: true, edit: (me?.adminHere || me?.curateHere) ? it.id : 0, menu: true }) : '')
     + '</div>';
 }
 
@@ -127,7 +127,7 @@ export function seasonCard(g) {
   const badge = g.unwatched > 0 ? countBadge(g.unwatched) : seenBadge();
   return `<div class="card scard" data-show="${+g.show}" data-season="${+g.season}"><a class="clink" href="#/item/${+g.show}/${+g.season}" aria-label="${esc(label)}">`
     + `<div class="art">${placeholder(tm, pick === 'poster' ? g.showPh : null)}${img}${badge}</div>${textLines(tm, s, s2)}</a>`
-    + overlay({ id: g.show, name: `${tm} ${sn}`, play: !!g.next, data: g.next ? `data-cplay="${+g.next.id}" data-pos="${+g.next.position || 0}"` : '', edit: me?.adminHere ? g.show : 0, menu: true })
+    + overlay({ id: g.show, name: `${tm} ${sn}`, play: !!g.next, data: g.next ? `data-cplay="${+g.next.id}" data-pos="${+g.next.position || 0}"` : '', edit: (me?.adminHere || me?.curateHere) ? g.show : 0, menu: true })
     + '</div>';
 }
 

@@ -317,3 +317,31 @@ test('behörighet: bara administratör, bara betrott nät, CSRF med kaka', { ski
   assert.equal((await req('/api/items/999999/metadata')).status, 404);
   assert.equal(item('id=?', id).title, 'Matrix igen', 'inget nekat anrop ändrade titeln');
 });
+
+test('utanför hemmet: administratör med tvåstegsverifiering får rätta matchning och metadata – inget annat', { skip: !hasFfmpeg }, async () => {
+  const far = { 'x-forwarded-for': '81.2.3.4' };
+  const adminId = D.get("SELECT id FROM users WHERE name='admin'").id;
+  const st = async () => (await req('/api/status', { headers: far })).data.user;
+  try {
+    // Utan tvåstegsverifiering: nekas, som förut
+    assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 403);
+    assert.equal((await st()).curateHere, false);
+    // Med tvåstegsverifiering: matchning, redigering, bilder och Uppdatera metadata går
+    D.run('UPDATE users SET totp_enabled=1 WHERE id=?', adminId);
+    assert.equal((await st()).curateHere, true);
+    assert.equal((await st()).adminHere, false, 'övrig administration räknas fortfarande inte som tillåten');
+    assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 200);
+    assert.equal((await req(`/api/items/${ids.movie}/match?q=Matrix`, { headers: far })).status, 200);
+    assert.equal((await req(`/api/items/${ids.movie}/images/poster`, { headers: far })).status, 200);
+    // Övrig administration är fortfarande låst till hemnätet
+    assert.equal((await req('/api/users', { headers: far })).status, 403);
+    assert.equal((await req('/api/libraries', { method: 'POST', body: { name: 'X', type: 'movie', path: '/tmp' }, headers: far })).status, 403);
+    // Inställningen kan bara ändras hemifrån, och avstängd gäller den inte
+    assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: false }, headers: far })).status, 403);
+    assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: false } })).status, 200);
+    assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 403);
+    assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: true } })).status, 200);
+    // Vanliga användare får aldrig
+    assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far, t: userTok })).status, 403);
+  } finally { D.run('UPDATE users SET totp_enabled=0 WHERE id=?', adminId); }
+});

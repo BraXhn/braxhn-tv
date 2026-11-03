@@ -28,7 +28,7 @@ import { sized } from '../imgsize.js';
 import * as photos from '../photos.js';
 import * as ebooks from '../ebooks.js';
 import * as prestart from '../prestart.js';
-import { route, user, admin, img, adminAnywhere, isTrusted } from '../http/router.js';
+import { route, user, admin, img, adminAnywhere, isTrusted, curate } from '../http/router.js';
 import { forgetPhotoLibs, insideMedia, MEDIA_ROOT, ctx, listItems, itemsByIds, ageFilter, PROG, FROM, MAIN_ONLY, allowedFor, oneItem, similarTo, chaptersOf, groupNewEpisodes, invalidateProfile, screenBlock, libOk, restricted } from '../http/context.js';
 
 // Bibliotek. Fälten i svaret (l.*: id, name, type, path, anime, nfo, home_video, count) läses av apparna – bara tillägg.
@@ -352,7 +352,7 @@ route('POST', '/api/items/:id/watched', user, async (c) => {
   if (watched) trakt.markWatched(c.user.id, targets.map(id => get('SELECT * FROM items WHERE id=?', id)).filter(Boolean)).catch(() => {});
   send(c.res, 200, { ok: true });
 });
-route('POST', '/api/items/:id/refresh', admin, async (c) => {
+route('POST', '/api/items/:id/refresh', curate, async (c) => {
   const it = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
   const { tmdbId } = await readJson(c.req);
@@ -364,7 +364,7 @@ route('POST', '/api/items/:id/refresh', admin, async (c) => {
   } catch (e) { fail(c.res, 502, 'Metadata misslyckades: ' + e.message); }
 });
 // Manuell matchning ("fel film?") – sök i TMDB och välj rätt titel. Matchningen låses så att omskanning inte ändrar den.
-route('GET', '/api/items/:id/match', admin, async (c) => {
+route('GET', '/api/items/:id/match', curate, async (c) => {
   const it = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!it || it.kind === 'episode') return fail(c.res, 404, 'Finns inte');
   if (!(getSetting('tmdb_key') || process.env.TMDB_API_KEY)) return fail(c.res, 400, 'Ange en TMDB-nyckel under Administration först');
@@ -372,7 +372,7 @@ route('GET', '/api/items/:id/match', admin, async (c) => {
   try { send(c.res, 200, { current: it.tmdb_id, locked: !!it.match_locked, results: await tmdbSearch(it.kind, q, year) }); }
   catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
-route('POST', '/api/items/:id/match', admin, async (c) => {
+route('POST', '/api/items/:id/match', curate, async (c) => {
   const it = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!it || it.kind === 'episode') return fail(c.res, 404, 'Finns inte');
   const { tmdbId, unlock } = await readJson(c.req);
