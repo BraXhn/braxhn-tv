@@ -122,9 +122,10 @@ export function moveImages(moves) {
   }
 }
 
-/** Huvudraden och dess versioner (huvudraden först) */
+/** Huvudraden och dess versioner (huvudraden först) – filmer och avsnitt */
 export function versionsOf(main) {
-  if (!main || main.kind !== 'movie') return main ? [main] : [];
+  // Avsnitt får versioner när samma avsnitt finns i två mappar av samma serie (scanner.js mergeShows)
+  if (!main || (main.kind !== 'movie' && main.kind !== 'episode')) return main ? [main] : [];
   return [main, ...all('SELECT * FROM items WHERE version_of=? ORDER BY id', main.id)];
 }
 

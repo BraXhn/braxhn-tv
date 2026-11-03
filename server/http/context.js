@@ -19,8 +19,8 @@ export const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/media');
 // progress. Utan eller med inaktuell statistik (sqlite_stat1, t.ex. tagen när biblioteket var tomt) valde SQLite annars att gå igenom alla
 // användarens progress-rader för varje serie: 400 serier × 10 000 rader = 1,2 s i stället för 12 ms.
 export const PROG = `p.position AS p_pos, p.watched AS p_watched, p.updated AS p_updated,
-  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id) END AS ep_total,
-  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e CROSS JOIN progress q WHERE e.parent_id=i.id AND q.user_id=p_uid.uid AND q.item_id=e.id AND q.watched=1) END AS ep_watched,
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e WHERE e.parent_id=i.id AND e.version_of IS NULL) END AS ep_total,
+  CASE WHEN i.kind='show' THEN (SELECT COUNT(*) FROM items e CROSS JOIN progress q WHERE e.parent_id=i.id AND e.version_of IS NULL AND q.user_id=p_uid.uid AND q.item_id=e.id AND q.watched=1) END AS ep_watched,
   CASE WHEN i.kind='show' THEN (SELECT COUNT(DISTINCT e.season) FROM items e WHERE e.parent_id=i.id) END AS ep_seasons`;
 // Kolumner som shape() använder – inte tunga fält som streams/chapters (och overview i listvyer)
 const COLS = `i.id, i.kind, i.title, i.year, i.library_id, i.poster, i.backdrop, i.thumb, i.duration, i.rating, i.added, i.hdr,

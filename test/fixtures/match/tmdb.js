@@ -4,13 +4,19 @@
 //   titlar. Inga ord tas bort ("och", "and" och "&" räknas som de står; "&" är ett skiljetecken), extra ord ger noll
 //   träffar. year/first_air_date_year filtrerar exakt på premiäråret. Högst 20 träffar, de populäraste först.
 // - language styr bara vilken titel som visas: sv-SE → svensk (annars originaltiteln), en-US → engelsk.
-// - /movie/{id} och /tv/{id} (längd, genrer, säsonger), /…/alternative_titles, /find/{imdb|tvdb}, /tv/{id}/season/{n}.
+//   Sökningen ger 20 träffar per sida (page, total_pages). /search/movie: year= träffar premiäråret eller ett svenskt
+//   premiärår (release_dates), primary_release_year= bara premiäråret.
+// - /movie/{id} (med release_dates) och /tv/{id} (längd, genrer, säsonger), /…/alternative_titles, /…/translations,
+//   /find/{imdb|tvdb}, /tv/{id}/season/{n} (avsnittsnamn), /tv/{id}/episode_groups och /tv/episode_group/{id}.
+// Fler titlar för den svenska korpusen ligger i tmdb-sv.js.
 // Id:n och titlarna är tagna efter TMDB men behöver inte stämma exakt – det är beteendet som ska efterliknas.
+
+import { MOVIES_SV, SHOWS_SV } from './tmdb-sv.js';
 
 const ANIM = 16, FAM = 10751, KIDS = 10762;
 const GENRE = { 12: 'Äventyr', 14: 'Fantasy', 16: 'Animerat', 18: 'Drama', 28: 'Action', 35: 'Komedi', 53: 'Thriller', 80: 'Kriminal',
   878: 'Science fiction', 9648: 'Mysterium', 10749: 'Romantik', 10751: 'Familj', 10759: 'Action & äventyr', 10762: 'Barn',
-  10765: 'Sci-fi & fantasy', 10767: 'Talkshow' };
+  10765: 'Sci-fi & fantasy', 10767: 'Talkshow', 99: 'Dokumentär', 10764: 'Reality', 10768: 'Krig & politik', 10763: 'Nyheter', 10402: 'Musik', 10770: 'TV-film' };
 
 // [id, svensk titel, engelsk titel, originaltitel, originalspråk, år, längd (min), genrer, popularitet, alternativa titlar, imdb]
 const M = (id, sv, en, orig, lang, year, runtime, genres, pop, alts = [], imdb = null) => ({ id, sv, en, orig, lang, year, runtime, genres, pop, alts, imdb });
@@ -234,28 +240,38 @@ export const SHOWS = [
   S(80004, 'Bron till Terabithia', 'Bridge to Terabithia', 'Bron till Terabithia', 'sv', 2010, [18], 1, [4]),
 ];
 
+// Den svenska korpusens titlar (samma id ersätter titeln ovan) och svenska premiärår
+for (const [list, extra] of [[MOVIES, MOVIES_SV], [SHOWS, SHOWS_SV]]) for (const r of extra) {
+  const i = list.findIndex(x => x.id === r.id);
+  if (i >= 0) list[i] = r; else list.push(r);
+}
+for (const [id, se] of [[354912, 2018], [277834, 2017], [38757, 2011], [12, 2003]]) MOVIES.find(x => x.id === id).se = se;
+
 // ---------- sökning som TMDB ----------
 const fold = (s) => String(s || '').normalize('NFKD').toLowerCase().replace(/\p{M}+/gu, '').replace(/[æ]/g, 'ae').replace(/[ø]/g, 'o')
   .replace(/['’`´]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const toks = (s) => fold(s).split(' ').filter(Boolean);
 const namesOf = (r) => [r.sv, r.en, r.orig, ...r.alts];
-function hits(list, query, year) {
+function hits(list, query, year, page = 1, anyYear = false) {
   const q = toks(query);
-  if (!q.length) return [];
-  return list.filter(r => (!year || r.year === +year) && namesOf(r).some(n => { const t = toks(n); return q.every(w => t.some(x => x.startsWith(w))); }))
-    .sort((a, b) => b.pop - a.pop).slice(0, 20);
+  if (!q.length) return { results: [], total: 0 };
+  const all = list.filter(r => (!year || r.year === +year || (anyYear && r.se === +year)) && namesOf(r).some(n => { const t = toks(n); return q.every(w => t.some(x => x.startsWith(w))); }))
+    .sort((a, b) => b.pop - a.pop);
+  return { results: all.slice((page - 1) * 20, page * 20), total: all.length };
 }
+const pageOf = (h, page, map) => ({ page, results: h.results.map(map), total_results: h.total, total_pages: Math.max(1, Math.ceil(h.total / 20)) });
 const shown = (r, lang) => /^en/.test(lang) ? r.en || r.orig : r.sv || r.orig;
 const movieResult = (r, lang) => ({ id: r.id, title: shown(r, lang), original_title: r.orig, original_language: r.lang, release_date: `${r.year}-06-01`,
   popularity: r.pop, genre_ids: r.genres, overview: '', poster_path: null, backdrop_path: null, vote_average: 7 });
 // Ursprungsland (TMDB:s origin_country): efter språket, brittiska och australiska serier undantagna
 const GB = new Set([2996, 121, 57243, 12101, 2152, 12225, 1640, 1950]), AU = new Set([82728]);
 const LANDS = { sv: 'SE', ja: 'JP', da: 'DK', fr: 'FR', en: 'US' };
-const countryOf = (r) => [GB.has(r.id) ? 'GB' : AU.has(r.id) ? 'AU' : LANDS[r.lang] || 'US'];
+const countryOf = (r) => r.country || [GB.has(r.id) ? 'GB' : AU.has(r.id) ? 'AU' : LANDS[r.lang] || 'US'];
 const tvResult = (r, lang) => ({ id: r.id, name: shown(r, lang), original_name: r.orig, original_language: r.lang, origin_country: countryOf(r), first_air_date: `${r.year}-03-01`,
   popularity: r.pop, genre_ids: r.genres, overview: '', poster_path: null, backdrop_path: null, vote_average: 7 });
 const genres = (ids) => ids.map(id => ({ id, name: GENRE[id] || String(id) }));
 // Avsnittens sändningsdatum: veckovis från säsongens år (för datumavsnitt)
+const epName = (show, sn, ep) => show.eps?.[sn]?.[ep - 1] || `Avsnitt ${ep}`;
 const airDate = (show, sn, ep) => { const d = new Date(Date.UTC(show.year + sn - 1, 0, 1 + (ep - 1) * 2)); return d.toISOString().slice(0, 10); };
 
 /** Svar som TMDB:s API: { status, body } för en sökväg utan /3 och dess parametrar */
@@ -263,8 +279,31 @@ export function respond(pathname, params, calls = null) {
   const lang = params.get('language') || 'en-US';
   calls?.push(pathname + (params.get('query') ? `?${params.get('query')}` : ''));
   let m;
-  if (pathname === '/search/movie') return { status: 200, body: { page: 1, results: hits(MOVIES, params.get('query'), params.get('year') || params.get('primary_release_year')).map(r => movieResult(r, lang)) } };
-  if (pathname === '/search/tv') return { status: 200, body: { page: 1, results: hits(SHOWS, params.get('query'), params.get('first_air_date_year')).map(r => tvResult(r, lang)) } };
+  const page = Math.max(1, +params.get('page') || 1);
+  if (pathname === '/search/movie') {
+    const y = params.get('primary_release_year') || params.get('year');
+    return { status: 200, body: pageOf(hits(MOVIES, params.get('query'), y, page, !params.get('primary_release_year')), page, r => movieResult(r, lang)) };
+  }
+  if (pathname === '/search/tv') return { status: 200, body: pageOf(hits(SHOWS, params.get('query'), params.get('first_air_date_year'), page), page, r => tvResult(r, lang)) };
+  if ((m = pathname.match(/^\/(movie|tv)\/(\d+)\/translations$/))) {
+    const r = (m[1] === 'movie' ? MOVIES : SHOWS).find(x => x.id === +m[2]); if (!r) return { status: 404, body: {} };
+    const k = m[1] === 'movie' ? 'title' : 'name';
+    return { status: 200, body: { id: r.id, translations: [
+      { iso_3166_1: 'SE', iso_639_1: 'sv', name: 'svenska', data: { [k]: r.sv === r.orig ? '' : r.sv } },
+      { iso_3166_1: 'US', iso_639_1: 'en', name: 'English', data: { [k]: r.en } }] } };
+  }
+  if ((m = pathname.match(/^\/tv\/(\d+)\/episode_groups$/))) {
+    const r = SHOWS.find(x => x.id === +m[1]); if (!r) return { status: 404, body: {} };
+    return { status: 200, body: { id: r.id, results: (r.groups || []).map(g => ({ id: g.id, name: g.name, type: g.type, group_count: g.seasons.length,
+      episode_count: g.seasons.reduce((a, b) => a + b.length, 0), description: '' })) } };
+  }
+  if ((m = pathname.match(/^\/tv\/episode_group\/([0-9a-f]+)$/))) {
+    const r = SHOWS.find(x => (x.groups || []).some(g => g.id === m[1])); if (!r) return { status: 404, body: {} };
+    const g = r.groups.find(x => x.id === m[1]);
+    return { status: 200, body: { id: g.id, name: g.name, type: g.type, groups: g.seasons.map((eps, i) => ({ id: `${g.id}-${i + 1}`, name: `Säsong ${i + 1}`, order: i + 1,
+      episodes: eps.map(([sn, en], j) => ({ id: r.id * 10000 + sn * 100 + en, season_number: sn, episode_number: en, order: j, name: epName(r, sn, en), overview: '',
+        air_date: airDate(r, sn, en), show_id: r.id })) })) } };
+  }
   if ((m = pathname.match(/^\/movie\/(\d+)\/alternative_titles$/))) {
     const r = MOVIES.find(x => x.id === +m[1]); if (!r) return { status: 404, body: {} };
     return { status: 200, body: { id: r.id, titles: [...r.alts.map(t => ({ iso_3166_1: 'SE', title: t, type: '' })), { iso_3166_1: 'US', title: r.en, type: '' }] } };
@@ -276,13 +315,14 @@ export function respond(pathname, params, calls = null) {
   if ((m = pathname.match(/^\/movie\/(\d+)$/))) {
     const r = MOVIES.find(x => x.id === +m[1]); if (!r) return { status: 404, body: {} };
     return { status: 200, body: { ...movieResult(r, lang), runtime: r.runtime, genres: genres(r.genres), imdb_id: r.imdb, belongs_to_collection: null,
-      release_dates: { results: [] }, credits: { cast: [], crew: [] }, videos: { results: [] } } };
+      release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ release_date: `${r.year}-06-01T00:00:00.000Z`, type: 3, certification: '' }] },
+        ...(r.se ? [{ iso_3166_1: 'SE', release_dates: [{ release_date: `${r.se}-02-01T00:00:00.000Z`, type: 3, certification: 'Btl' }] }] : [])] }, credits: { cast: [], crew: [] }, videos: { results: [] } } };
   }
   if ((m = pathname.match(/^\/tv\/(\d+)\/season\/(\d+)$/))) {
     const r = SHOWS.find(x => x.id === +m[1]), sn = +m[2], n = sn === 0 ? 3 : r?.seasons[sn - 1];
     if (!r || !n) return { status: 404, body: {} };
     return { status: 200, body: { season_number: sn, episodes: Array.from({ length: n }, (_, i) => ({ episode_number: i + 1, season_number: sn,
-      name: `Avsnitt ${i + 1}`, overview: '', still_path: null, air_date: airDate(r, Math.max(1, sn), i + 1) })) } };
+      name: epName(r, sn, i + 1), overview: '', still_path: null, air_date: airDate(r, Math.max(1, sn), i + 1) })) } };
   }
   if ((m = pathname.match(/^\/tv\/(\d+)$/))) {
     const r = SHOWS.find(x => x.id === +m[1]); if (!r) return { status: 404, body: {} };

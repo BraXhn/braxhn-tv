@@ -267,7 +267,7 @@ route('GET', '/api/items/:id', user, (c) => {
   const it = ver.mainOf(row);
   if (!allowedFor(uid, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const out = oneItem(uid, it.id);
-  const versions = it.kind === 'movie' ? ver.versionsOf(it) : [it];
+  const versions = it.kind === 'movie' || it.kind === 'episode' ? ver.versionsOf(it) : [it];
   const wanted = row.version_of ? row.id : +c.q.get('version') || it.id;
   const file = versions.find(v => v.id === wanted) || it;
   if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
@@ -385,7 +385,7 @@ route('POST', '/api/items/:id/match', curate, async (c) => {
   if (!(+tmdbId > 0)) return fail(c.res, 400, 'Välj en titel');
   try {
     if (!(await refreshItem(it, +tmdbId))) return fail(c.res, 404, 'Titeln hittades inte i TMDB');
-    run('UPDATE items SET match_locked=1 WHERE id=?', it.id);
+    run('UPDATE items SET match_locked=1, match_unsure=0, match_cands=NULL WHERE id=?', it.id);
     audit('item_matched', { ...ctx(c), detail: `${it.title} → tmdb ${+tmdbId}` });
     send(c.res, 200, oneItem(c.user.id, it.id));
   } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
@@ -393,9 +393,18 @@ route('POST', '/api/items/:id/match', curate, async (c) => {
 // Omatchade titlar (Administration): filnamnet och det som tolkades, så att admin kan matcha för hand ("Fel titel?")
 const UNMATCHED = `FROM items i JOIN libraries l ON l.id=i.library_id WHERE i.kind IN ('movie','show') AND i.meta_done=2 AND i.version_of IS NULL
   AND i.match_locked=0 AND NOT (l.type='movie' AND l.home_video=1)`;
-route('GET', '/api/unmatched', admin, (c) => {
-  const total = get(`SELECT COUNT(*) AS n ${UNMATCHED}`).n;
-  const rows = all(`SELECT i.*, l.name AS library ${UNMATCHED} ORDER BY l.name, i.sort_title LIMIT 500`);
+// Osäkra matchningar: matchade automatiskt men med låg poäng eller en nära konkurrent (scanner.js autoMatch) – aldrig låsta
+const UNSURE = `FROM items i JOIN libraries l ON l.id=i.library_id WHERE i.kind IN ('movie','show') AND i.meta_done=1 AND i.match_unsure=1
+  AND i.version_of IS NULL AND i.match_locked=0 AND i.tmdb_id IS NOT NULL`;
+/** Förslagen som matchningen sparat (bästa först): [{ tmdbId, title, year, score }] */
+const suggestionsOf = (it) => {
+  let a = []; try { a = JSON.parse(it.match_cands || '[]'); } catch {}
+  return (Array.isArray(a) ? a : []).filter(x => +x?.id > 0).slice(0, 4)
+    .map(x => ({ tmdbId: +x.id, title: String(x.title || '').slice(0, 200), year: +x.year || null, score: Number.isFinite(+x.score) ? Math.round(+x.score * 100) / 100 : null }));
+};
+function matchRows(where, c) {
+  const total = get(`SELECT COUNT(*) AS n ${where}`).n;
+  const rows = all(`SELECT i.*, l.name AS library ${where} ORDER BY l.name, i.sort_title LIMIT 500`);
   const roots = new Map();
   const items = rows.map(it => {
     const lib = get('SELECT * FROM libraries WHERE id=?', it.library_id);
@@ -403,18 +412,43 @@ route('GET', '/api/unmatched', admin, (c) => {
     const file = it.kind === 'movie' ? it.path : get('SELECT path FROM items WHERE parent_id=? AND path IS NOT NULL ORDER BY season, episode LIMIT 1', it.id)?.path;
     const q = matchQuery(it);
     return { id: it.id, kind: it.kind, title: it.title, year: it.year, library: it.library, libraryId: it.library_id,
-      file: file ? relOf(roots.get(lib.id), file) : null, parsed: { title: q.titles.find(Boolean) || it.title, year: q.year || null } };
+      file: file ? relOf(roots.get(lib.id), file) : null, parsed: { title: q.titles.find(Boolean) || it.title, year: q.year || null },
+      tmdbId: it.tmdb_id || null, score: it.match_score != null ? Math.round(it.match_score * 100) / 100 : null, suggestions: suggestionsOf(it) };
   });
   send(c.res, 200, { total, items, tmdb: hasTmdb() });
+}
+route('GET', '/api/unmatched', admin, (c) => matchRows(UNMATCHED, c));
+route('GET', '/api/matches/unsure', admin, (c) => matchRows(UNSURE, c));
+// Godkänn en osäker matchning (eller välj ett av förslagen): matchningen låses som vid "Fel titel?"
+route('POST', '/api/matches/:id/approve', admin, async (c) => {
+  const it = get('SELECT * FROM items WHERE id=?', c.p.id);
+  if (!it || (it.kind !== 'movie' && it.kind !== 'show')) return fail(c.res, 404, 'Finns inte');
+  const { tmdbId } = await readJson(c.req);
+  const id = +tmdbId > 0 ? +tmdbId : it.tmdb_id;
+  if (!(id > 0)) return fail(c.res, 400, 'Välj en titel');
+  // Bara den nuvarande träffen eller ett av förslagen kan väljas här (annat görs med "Fel titel?")
+  if (id !== it.tmdb_id && !suggestionsOf(it).some(x => x.tmdbId === id)) return fail(c.res, 400, 'Förslaget finns inte längre – sök med "Fel titel?"');
+  try {
+    if (id !== it.tmdb_id && !(await refreshItem(it, id))) return fail(c.res, 404, 'Titeln hittades inte i TMDB');
+    run('UPDATE items SET match_locked=1, match_unsure=0, match_cands=NULL WHERE id=?', it.id);
+    audit('item_matched', { ...ctx(c), detail: `${it.title} → tmdb ${id} (godkänd)` });
+    send(c.res, 200, { ok: true, id: it.id, tmdbId: id });
+  } catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
-// "Försök matcha omatchade igen": alla omatchade (inte låsta) titlar söks på nytt vid en skanning
-route('POST', '/api/unmatched/retry', admin, (c) => {
+// "Försök matcha igen": omatchade (och med { unsure: true } även osäkra) titlar söks på nytt vid en skanning. Låsta
+// (manuellt valda eller godkända) rörs aldrig, och en osäker träff byts bara mot en klart bättre (scanner.js autoMatch).
+route('POST', '/api/unmatched/retry', admin, async (c) => {
   if (!hasTmdb()) return fail(c.res, 400, 'Ange en TMDB-nyckel under Administration först');
-  const libsTodo = all(`SELECT DISTINCT i.library_id AS id ${UNMATCHED}`).map(r => r.id);
-  const n = run(`UPDATE items SET meta_done=0 WHERE id IN (SELECT i.id ${UNMATCHED})`).changes;
+  const b = await readJson(c.req).catch(() => ({}));
+  let n = 0;
+  const libsTodo = new Set();
+  for (const where of b?.unsure ? [UNMATCHED, UNSURE] : [UNMATCHED]) {
+    for (const r of all(`SELECT DISTINCT i.library_id AS id ${where}`)) libsTodo.add(r.id);
+    n += Number(run(`UPDATE items SET meta_done=0 WHERE id IN (SELECT i.id ${where})`).changes);
+  }
   for (const id of libsTodo) scan(id);
   audit('unmatched_retry', { ...ctx(c), detail: `${n} titlar` });
-  send(c.res, 200, { count: Number(n) });
+  send(c.res, 200, { count: n });
 });
 // Ändra ett bibliotek: { name, anime, paths (alla mappar) eller addPath (en till), nfo, homeVideo }. En borttagen mapp tar bort
 // titlarna i den ur biblioteket (filerna på disken rörs inte).

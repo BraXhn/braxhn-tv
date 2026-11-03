@@ -99,12 +99,14 @@ test('lösa avsnittsnamn: skivor, volymer och onumrerade', () => {
   let e = scanner.parseEpisode(['Byggare Bob', 'Byggare Bob 026 - Jul hos Byggare Bob.avi'].join(sep));
   assert.equal(e.show, 'Byggare Bob'); assert.equal(e.episode, 26); assert.equal(e.epTitle, 'Jul hos Byggare Bob');
   e = scanner.parseEpisode(['Julkalendrar', 'jul.i.kapernaum.1995.disc1.mp4'].join(sep));
-  assert.equal(e.show, 'jul i kapernaum'); assert.equal(e.year, 1995); assert.equal(e.episode, 1);
+  assert.equal(e.show, 'Jul i kapernaum'); assert.equal(e.year, 1995); assert.equal(e.episode, 1); // helt gemena namn får versal först
   e = scanner.parseEpisode(['Tures', 'Turesdvd2.mp4'].join(sep));
   assert.equal(e.show, 'Tures'); assert.equal(e.episode, 2);
   e = scanner.parseEpisode(['Chuggington - Collection', 'Chuggington - Hjälpsamma Hodge.avi'].join(sep));
   assert.equal(e.show, 'Chuggington'); assert.equal(e.episode, null); assert.equal(e.epTitle, 'Hjälpsamma Hodge');
-  assert.equal(scanner.parseEpisode('Liv i Luckan.mp4'), null);
+  // En fil utan nummer direkt i seriebiblioteket blir en serie med filnamnet (förut ignorerades den helt)
+  e = scanner.parseEpisode('Liv i Luckan.mp4');
+  assert.equal(e.show, 'Liv i Luckan'); assert.equal(e.episode, null);
 });
 
 test('anime: absolut numrering och mappning till säsonger', () => {

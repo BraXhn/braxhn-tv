@@ -12,8 +12,9 @@ import * as os from './opensubtitles.js';
 import * as people from './people.js';
 import { extraOf, isLegacy, syncExtras, syncThemes, THEME, pickYoutube } from './trailers.js';
 import { groupVersions, promoteVersions, moveImages, mergeInto, versionKey } from './versions.js';
-import { findMatch, similarity, GOOD } from './match.js';
-import { parseMovie, parseEpisode, discRoot, idsIn, clean } from './parse.js';
+import { matchDetail, similarity, GOOD } from './match.js';
+import { parseMovie, parseEpisode, discRoot, idsIn, clean, showName, movieFolderTitle } from './parse.js';
+import { searchKey, compactKey } from './searchkey.js';
 import { dropVariants } from './imgsize.js';
 import * as colors from './imgcolor.js';
 
@@ -75,7 +76,10 @@ function takenOf(info, st) {
 /** Hemvideons titel: filnamnet (punkter och understreck blir mellanslag) */
 const homeTitle = (f) => { const b = path.basename(f, path.extname(f)); return clean(b) || b; };
 
+const PROBE_FAILED = () => ({ failed: true, hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' });
 export async function probe(file) {
+  // En tom fil (nedladdning som inte börjat, platshållare) går inte att läsa – inget ffprobe-anrop
+  try { if ((await fs.promises.stat(file)).size === 0) return PROBE_FAILED(); } catch {}
   try {
     const { stdout } = await pexec('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-print_format', 'json',
       '-show_format', '-show_streams', file], { maxBuffer: 16 << 20, timeout: 60000 });
@@ -113,7 +117,7 @@ export async function probe(file) {
     };
   } catch (e) {
     console.warn('[scan] ffprobe misslyckades:', file, e.message);
-    return { failed: true, hdr: null, duration: null, container: null, vcodec: null, acodec: null, width: null, height: null, streams: '[]' };
+    return PROBE_FAILED();
   }
 }
 
@@ -125,23 +129,44 @@ const isVideo = (name) => VIDEO.has(path.extname(name).toLowerCase()) && !/\bsam
 // så att "Doctor Who (1963)" och "Doctor Who (2005)" blir två serier.
 // Äldre rader utan src_name matchas på titeln och får src_name ifyllt.
 export const showKey = (name, year) => year ? `${name} (${year})` : name;
+// Jämförelsenyckel för mappnamn: "Clarkson's Farm" = "Clarksons Farm" = "clarksons.farm" (samma serie, olika stavning)
+const nkey = (k) => compactKey(searchKey(k));
+const aliasesOf = (r) => { try { const a = JSON.parse(r?.src_alias || '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
+const keysOf = (r) => [r.src_name, ...aliasesOf(r)].filter(Boolean);
+/** Seriens nycklar i biblioteket (nkey → id), även hopslagna mappnamn (src_alias). Byggs om när serier läggs till eller slås ihop. */
+function showIndex(lib) {
+  if (!lib._shows) {
+    lib._shows = new Map();
+    for (const r of all(`SELECT id, src_name, src_alias FROM items WHERE library_id=? AND kind='show' ORDER BY id`, lib.id))
+      for (const k of keysOf(r)) if (!lib._shows.has(nkey(k))) lib._shows.set(nkey(k), r.id);
+  }
+  return lib._shows;
+}
 function showFor(lib, name, year, yearHint = null) {
   const key = showKey(name, year);
   const r = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, key);
   if (r) return r.id;
+  // Samma serie med annan stavning av mappen, eller en mapp som slagits ihop med en annan (Serien går före en ny rad)
+  const same = showIndex(lib).get(nkey(key));
+  if (same && get(`SELECT 1 FROM items WHERE id=? AND kind='show'`, same)) return same;
   // Tidigare versioner sparade namnet utan årtal: ta över en sådan serie om årtalet inte talar emot
   const old = year && get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE AND (year IS NULL OR year=?)`, lib.id, name, year);
   if (old) { run('UPDATE items SET src_name=? WHERE id=?', key, old.id); return old.id; }
   const t = get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IS NULL AND title=? COLLATE NOCASE`, lib.id, name);
   if (t) { run('UPDATE items SET src_name=? WHERE id=?', key, t.id); return t.id; }
   // yearHint: årtalet i filnamnet ("Doctor.Who.2005.S01E01") – hjälper matchningen men ingår inte i nyckeln
-  return Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,src_name,added) VALUES(?,?,?,?,?,?,?)`,
+  const id = Number(run(`INSERT INTO items(library_id,kind,title,sort_title,year,src_name,added) VALUES(?,?,?,?,?,?,?)`,
     lib.id, 'show', name, sortTitle(name), year ?? yearHint, key, now()).lastInsertRowid);
+  showIndex(lib).set(nkey(key), id);
+  return id;
 }
 /** Flytta avsnitt som ligger under fel serie (t.ex. två serier med samma namn men olika år som slogs ihop
  *  av tidigare versioner). Bara strängjämförelser – inga filer läses. */
 function regroupShows(lib) {
-  const keyOf = new Map(all(`SELECT id, src_name FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, String(r.src_name || '').toLowerCase()]));
+  lib._shows = null;
+  // Seriens alla nycklar (mappnamnet och hopslagna mappar), jämförda med nkey
+  const keyOf = new Map(all(`SELECT id, src_name, src_alias FROM items WHERE library_id=? AND kind='show'`, lib.id).map(r => [r.id, new Set(keysOf(r).map(nkey))]));
+  const has = (id, k) => !!keyOf.get(id)?.has(nkey(k));
   const eps = all(`SELECT id, path, parent_id FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL`, lib.id);
   const touched = new Set(), years = new Map();
   // Ny tolkning av mappnamnen (t.ex. "Barn/Bluey" → "Bluey", "Paw Patrol (Svenskt tal)" → "Paw Patrol"): flyttar alla en
@@ -152,25 +177,26 @@ function regroupShows(lib) {
     const p = parseEpisode(rel(lib, e.path));
     const k = p ? showKey(p.show, p.year) : null;
     if (!moves.has(e.parent_id)) moves.set(e.parent_id, new Set());
-    moves.get(e.parent_id).add(k && k.toLowerCase() !== keyOf.get(e.parent_id) ? k : '');
+    moves.get(e.parent_id).add(k && !has(e.parent_id, k) ? k : '');
   }
-  const taken = new Set(keyOf.values());
+  const taken = new Set([...keyOf.values()].flatMap(x => [...x]));
   tx(() => {
     for (const [sid, ks] of moves) {
       const [k] = ks;
-      if (ks.size !== 1 || !k || taken.has(k.toLowerCase())) continue;
+      if (ks.size !== 1 || !k || taken.has(nkey(k))) continue;
       const name = k.replace(/\s\((?:19|20)\d\d\)$/, '');
       run(`UPDATE items SET src_name=?, title=CASE WHEN tmdb_id IS NULL THEN ? ELSE title END, sort_title=CASE WHEN tmdb_id IS NULL THEN ? ELSE sort_title END,
         meta_done=CASE WHEN meta_done=2 AND match_locked=0 THEN 0 ELSE meta_done END WHERE id=?`, k, name, sortTitle(name), sid);
-      keyOf.set(sid, k.toLowerCase()); taken.add(k.toLowerCase());
+      keyOf.set(sid, new Set([nkey(k)])); taken.add(nkey(k));
     }
     for (const e of eps) {
       const p = parseEpisode(rel(lib, e.path));
       if (!p) continue;
       const key = showKey(p.show, p.year);
-      if (keyOf.get(e.parent_id) === key.toLowerCase()) continue;
+      if (has(e.parent_id, key)) continue;
       const sid = showFor(lib, p.show, p.year);
-      keyOf.set(sid, key.toLowerCase());
+      if (!keyOf.has(sid)) keyOf.set(sid, new Set());
+      keyOf.get(sid).add(nkey(key));
       if (sid === e.parent_id) continue;
       run('UPDATE items SET parent_id=? WHERE id=?', sid, e.id);
       touched.add(e.parent_id).add(sid);
@@ -182,7 +208,72 @@ function regroupShows(lib) {
       run(`UPDATE items SET year=COALESCE(?, year), meta_done=0 WHERE id=? AND match_locked=0`, years.get(id) ?? null, id);
     }
   });
+  lib._shows = null;
   if (touched.size) console.log(`[scan] ${lib.name}: ${touched.size} serier delades upp eller slogs ihop efter årtal`);
+}
+
+/**
+ * Samma serie i flera mappar ("Clarkson's Farm" och "Clarksons gård", eller en mapp per säsong med olika namn) blir EN serie:
+ * serier i biblioteket som matchats till samma TMDB-id, eller (utan id) har samma normaliserade mappnamn och år, slås ihop.
+ * Den kvarvarande raden (låst matchning, annars flest avsnitt, annars äldst) tar över Min lista, betyg, samlingar, följningar
+ * och låsta fält; de andra mappnamnen sparas i src_alias så att nästa skanning lägger avsnitten där. Ett avsnitt som finns i
+ * båda (samma säsong/avsnitt) blir en version av det kvarvarande avsnittet. Två serier med olika år i mappnamnet eller olika
+ * TMDB-id slås aldrig ihop. Returnerar id:n på de serier som fått avsnitt.
+ */
+export function mergeShows(lib) {
+  const rows = all(`SELECT s.id, s.src_name, s.src_alias, s.tmdb_id, s.match_locked, s.meta_done, s.locked,
+    (SELECT COUNT(*) FROM items e WHERE e.parent_id=s.id) AS n FROM items s WHERE s.library_id=? AND s.kind='show' ORDER BY s.id`, lib.id);
+  const parent = new Map(rows.map(r => [r.id, r.id]));
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const owner = new Map();
+  const link = (k, id) => { const o = owner.get(k); if (o == null) owner.set(k, id); else parent.set(find(id), find(o)); };
+  for (const r of rows) {
+    if (r.tmdb_id && r.meta_done === 1) link('t' + r.tmdb_id, r.id);
+    for (const k of keysOf(r)) link('k' + nkey(k), r.id);
+  }
+  const groups = new Map();
+  for (const r of rows) { const g = find(r.id); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); }
+  const yearOf = (k) => +(String(k).match(/\((\d{4})\)$/)?.[1] || 0);
+  const merged = [];
+  tx(() => {
+    for (const g of groups.values()) {
+      if (g.length < 2) continue;
+      // Skydd: olika TMDB-id, eller årtal i mappnamnen som skiljer mer än ett år ("Doctor Who (1963)"/"(2005)")
+      const ids = new Set(g.filter(r => r.tmdb_id && r.meta_done === 1).map(r => r.tmdb_id));
+      const years = [...new Set(g.flatMap(r => keysOf(r).map(yearOf)).filter(Boolean))];
+      if (ids.size > 1 || (years.length > 1 && Math.max(...years) - Math.min(...years) > 1)) continue;
+      const main = g.find(r => r.match_locked) || [...g].sort((a, b) => b.n - a.n || a.id - b.id)[0];
+      const alias = new Set(aliasesOf(main));
+      let locked = {}; try { locked = JSON.parse(main.locked || '{}') || {}; } catch {}
+      for (const d of g) {
+        if (d === main) continue;
+        for (const e of all('SELECT id, season, episode, ep_guess, segment, version_of FROM items WHERE parent_id=?', d.id)) {
+          const twin = !e.ep_guess && e.version_of == null && get(`SELECT id FROM items WHERE parent_id=? AND season=? AND episode=? AND ep_guess=0
+            AND version_of IS NULL AND COALESCE(segment,'')=? AND path IS NOT NULL`, main.id, e.season, e.episode, e.segment || '');
+          if (twin) {
+            run('UPDATE items SET parent_id=?, version_of=? WHERE id=?', main.id, twin.id, e.id);
+            run('UPDATE items SET version_of=? WHERE version_of=?', twin.id, e.id);
+            mergeInto(e.id, twin.id);
+          } else run('UPDATE items SET parent_id=? WHERE id=?', main.id, e.id);
+        }
+        mergeInto(d.id, main.id);
+        // Följningar (follows.js) och dolda "Fortsätt titta" följer med serien
+        for (const sql of ['INSERT OR IGNORE INTO follows(user_id,show_id,active,auto,sync,added) SELECT user_id, ?, active, auto, sync, added FROM follows WHERE show_id=?',
+          'UPDATE OR IGNORE new_episodes SET show_id=? WHERE show_id=?',
+          'INSERT OR IGNORE INTO continue_hidden(user_id,item_id,at) SELECT user_id, ?, at FROM continue_hidden WHERE item_id=?']) { try { run(sql, main.id, d.id); } catch {} }
+        try { const l = JSON.parse(d.locked || '{}') || {}; locked = { ...l, ...locked }; } catch {}
+        for (const k of keysOf(d)) alias.add(k);
+        run('DELETE FROM items WHERE id=?', d.id);
+        removeImages(d.id);
+      }
+      alias.delete(main.src_name);
+      run('UPDATE items SET src_alias=?, locked=? WHERE id=?', alias.size ? JSON.stringify([...alias]) : null, Object.keys(locked).length ? JSON.stringify(locked) : null, main.id);
+      merged.push(main.id);
+    }
+  });
+  lib._shows = null;
+  if (merged.length) console.log(`[scan] ${lib.name}: ${merged.length} serier i flera mappar slogs ihop`);
+  return merged;
 }
 /** Fyll i src_name för serier från tidigare versioner (utifrån ett av seriens avsnitt) */
 function backfillSrcNames(lib) {
@@ -275,15 +366,18 @@ async function scanLibrary(lib) {
   const dirEps = new Map();
   const unnumberedIndex = (f) => {
     const dir = path.dirname(f);
-    if (!dirEps.has(dir)) {
-      const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(rel(lib, x))]).filter(([, p]) => p);
+    const pf = parseEpisode(rel(lib, f)), dk = dir + '\u0000' + (pf ? showKey(pf.show, pf.year).toLowerCase() : '');
+    if (!dirEps.has(dk)) {
+      // Per serie i mappen: filer direkt i biblioteket kan vara olika serier ("Noscene-anki o pytte.avi" bredvid "Bluey S01E05.mkv")
+      const sk = (p) => showKey(p.show, p.year).toLowerCase(), mine = sk(parseEpisode(rel(lib, f)) || { show: '' });
+      const eps = files.filter(x => path.dirname(x) === dir).map(x => [x, parseEpisode(rel(lib, x))]).filter(([, p]) => p && sk(p) === mine);
       const loose = eps.filter(([, p]) => p.episode == null).map(([x]) => x).sort((a, b) => a.localeCompare(b, 'sv'));
       const nums = new Map(loose.filter(x => known.get(x)?.episode != null).map(x => [x, known.get(x).episode]));
       let next = Math.max(0, ...eps.filter(([, p]) => p.episode != null).map(([, p]) => p.episode), ...nums.values());
       for (const x of loose) if (!nums.has(x)) nums.set(x, ++next);
-      dirEps.set(dir, nums);
+      dirEps.set(dk, nums);
     }
-    return dirEps.get(dir).get(f);
+    return dirEps.get(dk).get(f);
   };
   if (!list.rootOk) {
     // Ingen mapp går att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
@@ -294,7 +388,7 @@ async function scanLibrary(lib) {
   for (const d of failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime,episode,ep_guess,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
-  if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); }
+  if (lib.type === 'show') { backfillSrcNames(lib); regroupShows(lib); reparseEpisodes(lib); }
   const seen = new Set(), touched = new Set();
   const newEpisodes = []; // nyskapade avsnitt (för notiser till dem som följer serien)
   const newMovies = []; // nyskapade filmer (webhooken library.new)
@@ -360,6 +454,8 @@ async function scanLibrary(lib) {
           // Även serier som inte hittades förut får ett nytt försök när avsnitt tillkommer.
           run(`UPDATE items SET added=?, meta_done=CASE WHEN meta_done=1 OR (meta_done=2 AND match_locked=0) THEN 0 ELSE meta_done END WHERE id=?`, now(), showId);
           run('UPDATE items SET hdr=?, markers_done=0 WHERE path=?', info.hdr, f);
+          // "Serie 103" (S01E03 eller absolut – avgörs mot TMDB i remapAbsolute) och segment ("03a")
+          run('UPDATE items SET abs_alt=?, segment=? WHERE path=?', p.absAlt ?? null, p.segment ?? null, f);
           // Datumavsnitt (nyheter, talkshower): sändningsdatumet matchas mot TMDB:s avsnitt (matchEpisodes)
           if (p.date) run('UPDATE items SET released=? WHERE path=?', p.date, f);
         });
@@ -376,7 +472,8 @@ async function scanLibrary(lib) {
       // Omdöpt eller utbytt fil (t.ex. Sonarr/Radarr som byter 720p mot 1080p): den nya filen tar över framsteg och Min lista
       adoptRenamed(lib, missing, known);
       // Huvudfilen till en film med flera versioner försvann: en kvarvarande version tar över (med framsteg)
-      if (lib.type === 'movie') moves = promoteVersions(missing.map(r => r.id));
+      // (Avsnitt kan också ha versioner: samma avsnitt i två mappar som slagits ihop, mergeShows)
+      moves = promoteVersions(missing.map(r => r.id));
       for (const r of missing) run('DELETE FROM items WHERE id=?', r.id);
       for (const s of all(`SELECT id FROM items WHERE library_id=? AND kind='show' AND NOT EXISTS(SELECT 1 FROM items e WHERE e.parent_id=items.id)`, lib.id)) {
         run('DELETE FROM items WHERE id=?', s.id); missing.push(s);
@@ -387,6 +484,8 @@ async function scanLibrary(lib) {
   }
   // Filmfiler med samma titel och år blir versioner av samma film (inte hemvideor: "IMG_0001" i två mappar är olika klipp)
   if (!home) groupVersions(lib, parseMovie);
+  // Samma serie i flera mappar (redan matchade, eller samma mappnamn med annan stavning) blir en serie
+  if (lib.type === 'show') mergeShows(lib);
   // NFO-filer och lokala bilder (före TMDB, som inte skriver över dem)
   status.phase = 'Läser lokal metadata';
   const fileTitle = (row) => row.kind === 'show' ? (row.src_name ? { title: row.src_name.replace(/\s\((?:19|20)\d\d\)$/, ''), year: null } : null)
@@ -401,6 +500,11 @@ async function scanLibrary(lib) {
   await metadata(lib);
   // Nyss matchade filer kan vara samma TMDB-film som en annan fil (t.ex. svensk och engelsk titel) – slå ihop dem
   if (!home) groupVersions(lib, parseMovie);
+  // Nyss matchade serier i olika mappar med samma TMDB-id (t.ex. "Clarkson's Farm" och "Clarksons gård"): avsnitten får metadata direkt
+  if (lib.type === 'show' && tmdbKey()) for (const id of mergeShows(lib)) {
+    const it = get('SELECT * FROM items WHERE id=?', id);
+    if (it) await refreshItem(it, it.tmdb_id).catch(e => console.warn('[meta]', it.title, e.message));
+  }
   if (tmdbKey()) await people.backfill(lib, tmdb, { max: Math.max(0, +(process.env.CREDITS_PER_SCAN || 40)), status, apply: saveTrailerKey });
   // Efter metadata så att notisen får avsnittens riktiga namn
   if (newEpisodes.length) { try { hooks.newEpisodes?.(newEpisodes.filter(id => get('SELECT 1 FROM items WHERE id=?', id))); } catch (e) { console.warn('[scan] notiser om nya avsnitt:', e.message); } }
@@ -430,9 +534,11 @@ async function analyzeLibrary(lib, st) {
 }
 /** Serien som en mapp i seriebiblioteket hör till (för extramaterial och temamusik i seriens mapp) */
 function showIdOfFolder(lib, folder) {
+  const n = showName(folder), key = showKey(n.show, n.year);
   const y = folder.match(/^(.*?)[\s._(\[-]+((?:19|20)\d\d)[)\]]?$/);
-  const key = y ? showKey(clean(y[1]), +y[2]) : showKey(clean(folder), null);
-  return get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name=? COLLATE NOCASE`, lib.id, key)?.id || null;
+  const old = y ? showKey(clean(y[1]), +y[2]) : showKey(clean(folder), null);
+  return get(`SELECT id FROM items WHERE library_id=? AND kind='show' AND src_name IN (?, ?) COLLATE NOCASE`, lib.id, key, old)?.id
+    || showIndex(lib).get(nkey(key)) || null;
 }
 // Kopplas in från stream.js / intro.js för att undvika cirkulära importer
 export const hooks = {};
@@ -619,16 +725,21 @@ async function cachedTmdb(p, params) {
   return v;
 }
 const matchApi = {
-  search: (kind, query, year, lang) => cachedTmdb(kind === 'show' ? '/search/tv' : '/search/movie',
-    { query, ...(year ? (kind === 'show' ? { first_air_date_year: year } : { year }) : {}), ...(lang === 'en' ? { language: 'en-US' } : {}) }).then(s => s.results || []),
+  // Sökningen på svenska (inställt språk) och engelska; year= för filmer träffar även svenska premiärår (release_dates)
+  search: (kind, query, year, lang, page = 1) => cachedTmdb(kind === 'show' ? '/search/tv' : '/search/movie',
+    { query, ...(year ? (kind === 'show' ? { first_air_date_year: year } : { year }) : {}), ...(lang === 'en' ? { language: 'en-US' } : {}), ...(page > 1 ? { page } : {}) })
+    .then(s => Object.assign([...(s.results || [])], { pages: +s.total_pages || 1 })),
   alternatives: (kind, id) => cachedTmdb(`/${kind === 'show' ? 'tv' : 'movie'}/${+id}/alternative_titles`, {}).then(r => (r.titles || r.results || []).map(x => x.title)),
-  details: (kind, id) => cachedTmdb(`/${kind === 'show' ? 'tv' : 'movie'}/${+id}`, {}),
+  details: (kind, id) => cachedTmdb(`/${kind === 'show' ? 'tv' : 'movie'}/${+id}`, kind === 'show' ? {} : { append_to_response: 'release_dates' }),
+  groups: (id) => cachedTmdb(`/tv/${+id}/episode_groups`, {}).then(r => r.results || []),
 };
-/** Bästa TMDB-träffen (match.js findMatch) via TMDB:s API med cache */
-export const matchTmdb = (q) => findMatch(matchApi, q);
+/** Bästa TMDB-träffen med förslag (match.js matchDetail) via TMDB:s API med cache */
+export const matchTmdb = (q) => matchDetail(matchApi, q);
 // Barnbibliotek och tecknat (bibliotekets namn eller mapparna): animerat/familj går före spelfilm med samma titel
 const KIDS_RE = /(?:^|[^\p{L}])(barn\p{L}*|kids?|children|familj\p{L}*|family|disney|pixar|dreamworks|ghibli)(?![\p{L}])/iu;
-const ANIM_RE = /(?:^|[^\p{L}])(anime|tecknat|tecknade?|animerat|animerade?|animation|animated|cartoons?)(?![\p{L}])/iu;
+const ANIM_RE = /(?:^|[^\p{L}])(anime|tecknat|tecknade?|animerat|animerade?|animation|animated|cartoons?|disneys?[\s._-]*klassiker)(?![\p{L}])/iu;
+// Svensk språktagg i sökvägen: en svensk originalserie går före en utländsk med samma svenska titel (match.js)
+const SV_RE = /(?:^|[^\p{L}])(swedish|svenskt?[\s._-]*tal|sv[\s._-]*tal|swe|svenska)(?![\p{L}])/iu;
 /** Vad filen/mappen säger om en film eller serie: tolkade titlar, år, längd, id:n, barn/tecknat och säsonger */
 export function matchQuery(item) {
   const lib = get('SELECT * FROM libraries WHERE id=?', item.library_id) || { name: '' };
@@ -641,9 +752,11 @@ export function matchQuery(item) {
   }
   const relPath = file ? relOf(roots, file) : '';
   const where = `${lib.name || ''}/${relPath}`;
-  const q = { kind: item.kind, kids: KIDS_RE.test(where), anim: !!lib.anime || ANIM_RE.test(where), ids: parsed?.ids || null };
+  const q = { kind: item.kind, kids: KIDS_RE.test(where), anim: !!lib.anime || ANIM_RE.test(where), anime: !!lib.anime, ids: parsed?.ids || null,
+    lang: SV_RE.test(relPath) ? 'sv' : null };
   if (item.kind === 'movie') {
-    q.titles = [parsed?.title, item.title];
+    // Mappens namn vägs alltid in ("Barnfilmer/Hitta Nemo (2003)/hn-sv.avi")
+    q.titles = [parsed?.title, item.title, file && relPath.includes(path.sep) ? movieFolderTitle(file) : null];
     q.year = item.year || parsed?.year || null;
     q.duration = item.duration || null;
   } else {
@@ -652,8 +765,28 @@ export function matchQuery(item) {
     // Säsonger och avsnitt i filerna (inte absolut numrerade, specialavsnitt eller datumavsnitt)
     const eps = all('SELECT season, MAX(episode) AS ep FROM items WHERE parent_id=? AND ep_guess=0 AND abs_episode IS NULL AND season BETWEEN 1 AND 1000 GROUP BY season', item.id);
     q.seasons = eps.length ? { max: Math.max(...eps.map(e => e.season)), eps: lib.anime ? {} : Object.fromEntries(eps.map(e => [e.season, e.ep])) } : null;
+    // Antal avsnitt (utan versioner och specialavsnitt): 279 avsnitt i 12 säsonger är ett starkt kännetecken
+    q.count = get('SELECT COUNT(*) AS n FROM items WHERE parent_id=? AND version_of IS NULL AND season > 0 AND segment IS NULL', item.id).n || 0;
   }
   return q;
+}
+/**
+ * Automatisk matchning med förslag: sparar poängen, om träffen är osäker och förslagen (Administration → Osäkra matchningar).
+ * En titel som redan är matchad (inte låst) byter bara träff när den nya är klart bättre än den nuvarande – en sämre
+ * eller lika bra sökning ändrar aldrig något som fungerar. Returnerar TMDB-id eller null.
+ */
+async function autoMatch(item, mq) {
+  const { match, cands } = await matchTmdb(mq);
+  let id = match?.id ?? null, score = match?.score ?? null, unsure = match?.uncertain ? 1 : 0;
+  if (item.tmdb_id && item.meta_done !== 2 && id !== item.tmdb_id) {
+    const cur = cands.find(c => c.id === item.tmdb_id);
+    const better = match && (cur ? match.score >= cur.score + 0.08 : match.score >= GOOD + 0.1 && !match.uncertain);
+    if (!better) { id = item.tmdb_id; score = cur?.score ?? null; unsure = match ? 1 : 0; }
+    else console.log(`[meta] ${item.title}: byter träff ${item.tmdb_id} → ${id} (${match.score.toFixed(2)} mot ${cur ? cur.score.toFixed(2) : 'ingen'})`);
+  }
+  const keep = cands.filter(c => c.id !== id).slice(0, 4);
+  run('UPDATE items SET match_score=?, match_unsure=?, match_cands=? WHERE id=?', score, id ? unsure : 0, keep.length ? JSON.stringify(keep) : null, item.id);
+  return id;
 }
 /**
  * Hämtar titelns metadata från TMDB (och NFO:ns värden efteråt). Fält som administratören låst (items.locked,
@@ -664,10 +797,13 @@ export async function refreshItem(item, tmdbId = null) {
   // Låst matchning ("Fel titel?"): alltid den valda titeln, aldrig en ny sökning
   if (!tmdbId && item.match_locked && item.tmdb_id) tmdbId = item.tmdb_id;
   const mq = !tmdbId && (item.kind === 'movie' || item.kind === 'show') ? matchQuery(item) : null;
-  if (!tmdbId && !item.match_locked) tmdbId = await knownTmdb(item, mq?.ids);
+  if (!tmdbId && !item.match_locked) {
+    tmdbId = await knownTmdb(item, mq?.ids);
+    if (tmdbId) run('UPDATE items SET match_score=1, match_unsure=0, match_cands=NULL WHERE id=?', item.id);
+  }
   if (item.kind === 'movie') {
     let id = tmdbId;
-    if (!id) id = (await matchTmdb(mq))?.id;
+    if (!id) id = await autoMatch(item, mq);
     if (!id) return false;
     const d = await tmdb(`/movie/${id}`, { append_to_response: 'release_dates,credits,videos,images', ...people.videoLangs(), ...imageLangs() });
     const poster = await image(d.poster_path, 'w500', item.id, 'poster');
@@ -688,7 +824,7 @@ export async function refreshItem(item, tmdbId = null) {
   }
   if (item.kind === 'show') {
     let id = tmdbId;
-    if (!id) id = (await matchTmdb(mq))?.id;
+    if (!id) id = await autoMatch(item, mq);
     if (!id) return false;
     const d = await tmdb(`/tv/${id}`, { append_to_response: 'content_ratings,aggregate_credits,videos,images', ...people.videoLangs(), ...imageLangs() });
     const { cert, age } = pickCert((d.content_ratings?.results || []).map(r => ({ iso_3166_1: r.iso_3166_1, cert: r.rating })));
@@ -711,11 +847,47 @@ export async function refreshItem(item, tmdbId = null) {
 }
 
 // TMDB "Avsnitt 12" / "Episode 12" = ingen riktig titel (översättning saknas)
+/**
+ * En gång per bibliotek efter förbättrad tolkning (parse.js v4): avsnitt vars fil nu ger ett nummer ("03a - Titel",
+ * "Serie 103 dvdrip-grupp") eller ett annat nummer än raden har får det – utan att filerna läses om. Avsnitt som numrerats
+ * om av TMDB (absolut numrering, titelmatchning) behålls. Seriernas metadata hämtas om.
+ */
+function reparseEpisodes(lib) {
+  const flag = `parse_v4_${lib.id}`;
+  if (lib.type !== 'show' || getSetting(flag, '0') === '1') return;
+  const rows = all(`SELECT id, path, parent_id, season, episode, abs_episode, ep_guess, title FROM items WHERE library_id=? AND kind='episode' AND path IS NOT NULL AND ep_guess != 2`, lib.id);
+  const shows = new Set();
+  tx(() => {
+    for (const r of rows) {
+      const p = parseEpisode(rel(lib, r.path));
+      if (!p || p.episode == null) continue;
+      if (r.abs_episode != null && p.absolute && p.episode === r.abs_episode) continue;
+      if (!r.ep_guess && r.season === p.season && r.episode === p.episode && !p.segment && p.absAlt == null) continue;
+      const title = r.ep_guess ? (p.epTitle || `Avsnitt ${p.episode}`) : r.title;
+      run('UPDATE items SET season=?, episode=?, abs_episode=?, abs_alt=?, segment=?, ep_guess=0, title=?, sort_title=? WHERE id=?',
+        p.season, p.episode, p.absolute ? p.episode : null, p.absAlt ?? null, p.segment ?? null, title, sortTitle(title), r.id);
+      shows.add(r.parent_id);
+    }
+    for (const id of shows) run('UPDATE items SET meta_done=0 WHERE id=? AND meta_done IN (1,2)', id);
+  });
+  setSetting(flag, '1');
+  if (shows.size) console.log(`[scan] ${lib.name}: avsnittsnummer tolkades om i ${shows.size} serier`);
+}
 const placeholder = (name) => !name || /^(avsnitt|episode|afsnit|episodi|folge|épisode)\s*\d+$/i.test(name.trim());
 /** Avsnitt → TMDB: först på säsong/avsnittsnummer, sedan på titel för avsnitt utan nummer i filnamnet
  *  (eller med ett nummer som TMDB inte har). Titeln jämförs mot alla säsonger, även specialavsnitt. */
+// Segment i ett avsnitt ("03a"/"03b"): TMDB har ofta alla delar i namnet ("Dexter's Rival / Simion / Dee Dee's Room")
+const partsOf = (name) => String(name || '').split(/\s+\/\s+/).map(x => x.trim()).filter(Boolean);
+function segmentName(e, name) {
+  const parts = partsOf(name);
+  if (parts.length < 2) return null;
+  let best = null, bs = 0;
+  for (const p of parts) { const s = similarity(e.title || '', p); if (s > bs) { bs = s; best = p; } }
+  if (bs >= 0.5) return best;
+  return parts['abc'.indexOf(e.segment)] || null;
+}
 async function matchEpisodes(item, id, tmdbSeasons) {
-  const local = all('SELECT id, season, episode, title, thumb, ep_guess, released FROM items WHERE parent_id=?', item.id);
+  const local = all('SELECT id, season, episode, title, thumb, ep_guess, released, segment FROM items WHERE parent_id=?', item.id);
   const cache = new Map();
   const season = async (sn) => {
     if (!cache.has(sn)) { let sd = null; try { sd = await tmdb(`/tv/${id}/season/${sn}`); } catch {} cache.set(sn, sd?.episodes || []); }
@@ -723,16 +895,50 @@ async function matchEpisodes(item, id, tmdbSeasons) {
   };
   const apply = async (e, ep) => {
     const still = e.thumb ? 0 : await image(ep.still_path, 'w300', e.id, 'thumb');
-    const name = placeholder(ep.name) ? null : ep.name;
+    const name = placeholder(ep.name) ? null : (e.segment && segmentName(e, ep.name)) || ep.name;
     run(`UPDATE items SET title=COALESCE(?,title),sort_title=COALESCE(?,sort_title),overview=?,rating=?,thumb=MAX(thumb,?),meta_done=1 WHERE id=?`,
       name, name ? sortTitle(name) : null, ep.overview || null, ep.vote_average || null, still, e.id);
     localMeta.reapplyNfo(e.id);
   };
   const done = new Set();
+  // Segment vars namn i filen stämmer med ett annat avsnitt än numret ("06a - EgoTrip" är avsnitt 11 hos TMDB): flytta dit
+  const segs = local.filter(e => !e.ep_guess && e.segment && e.title && !/^Avsnitt \d+$/.test(e.title));
+  if (segs.length) {
+    const all1 = [];
+    for (const sn of new Set(segs.map(e => e.season))) for (const ep of await season(sn)) all1.push({ ...ep, season: sn });
+    for (const e of segs) {
+      const at = all1.find(x => x.episode_number === e.episode);
+      const here = at ? Math.max(0, ...partsOf(at.name).map(p => similarity(e.title, p))) : 0;
+      let best = null, bs = 0;
+      for (const x of all1) for (const p of partsOf(x.name)) { const s = similarity(e.title, p); if (s > bs) { bs = s; best = x; } }
+      if (best && bs >= 0.9 && here < 0.3 && best.episode_number !== e.episode) {
+        run('UPDATE items SET episode=? WHERE id=?', best.episode_number, e.id);
+        e.episode = best.episode_number;
+      }
+    }
+  }
   for (const sn of new Set(local.filter(e => !e.ep_guess).map(e => e.season))) {
     for (const ep of await season(sn)) {
-      const e = local.find(x => !x.ep_guess && x.season === sn && x.episode === ep.episode_number);
-      if (e) { await apply(e, ep); done.add(e.id); }
+      for (const e of local.filter(x => !x.ep_guess && x.season === sn && x.episode === ep.episode_number)) { await apply(e, ep); done.add(e.id); }
+    }
+  }
+  // Avsnitt som TMDB:s standardordning saknar (SvampBob S14E04 när TMDB har 13 säsonger): en episode group där numreringen
+  // finns (helst sändningsordningen) ger rätt TMDB-avsnitt
+  const rest0 = local.filter(e => !done.has(e.id) && !e.ep_guess && e.season > 0);
+  if (rest0.length) {
+    let groups = [];
+    try { groups = (await tmdb(`/tv/${id}/episode_groups`)).results || []; } catch {}
+    groups.sort((a, b) => (a.type === 1 ? 0 : 1) - (b.type === 1 ? 0 : 1));
+    for (const g of groups.filter(g => g.group_count >= Math.max(...rest0.map(e => e.season))).slice(0, 2)) {
+      let gd = null; try { gd = await tmdb(`/tv/episode_group/${encodeURIComponent(g.id)}`); } catch {}
+      const gs = (gd?.groups || []).slice().sort((a, b) => a.order - b.order);
+      const slot = (e) => { const x = gs[e.season - 1]?.episodes?.slice().sort((a, b) => a.order - b.order)[e.episode - 1]; return x || null; };
+      if (!rest0.every(e => slot(e))) continue;
+      for (const e of rest0) {
+        const x = slot(e), ep = (await season(x.season_number)).find(y => y.episode_number === x.episode_number) || x;
+        await apply(e, ep); done.add(e.id);
+      }
+      break;
     }
   }
   // Datumavsnitt utan nummer: TMDB-avsnittet med samma sändningsdatum (säsongerna som sändes det året)
@@ -794,10 +1000,19 @@ export function mapAbsolute(n, seasons) {
 function remapAbsolute(show, seasons) {
   const lib = get('SELECT anime FROM libraries WHERE id=?', show.library_id);
   const s1 = seasons.find(s => s.season_number === 1)?.episode_count || 0;
-  const eps = all('SELECT id, season, episode, abs_episode FROM items WHERE parent_id=?', show.id);
+  const eps = all('SELECT id, season, episode, abs_episode, abs_alt FROM items WHERE parent_id=?', show.id);
+  // "Serie 103" (abs_alt): säsong 1 avsnitt 3 om den platsen finns hos TMDB – men absolut 103 om serien numreras absolut
+  // (anime-bibliotek, ett annat avsnitt med ett absolut nummer större än säsong 1, eller ett nummer som inte går som SxEE)
+  const fits = (n) => { const x = seasons.find(s => s.season_number === Math.floor(n / 100)); return !!x && n % 100 >= 1 && n % 100 <= x.episode_count; };
+  const absShow = !!lib?.anime || eps.some(e => e.abs_alt == null && e.abs_episode != null && e.abs_episode > s1) || eps.some(e => e.abs_alt != null && !fits(e.abs_alt));
   tx(() => { for (const e of eps) {
+    if (e.abs_alt != null && !absShow) {
+      const sn = Math.floor(e.abs_alt / 100), en = e.abs_alt % 100;
+      if (e.season !== sn || e.episode !== en) run('UPDATE items SET season=?, episode=?, abs_episode=NULL WHERE id=?', sn, en, e.id);
+      continue;
+    }
     // Absolut numrerade filer, eller i anime-bibliotek "S01E30" när säsong 1 bara har 12 avsnitt
-    const abs = e.abs_episode ?? (lib?.anime && e.season === 1 && e.episode > s1 ? e.episode : null);
+    const abs = e.abs_alt ?? e.abs_episode ?? (lib?.anime && e.season === 1 && e.episode > s1 ? e.episode : null);
     if (abs == null) continue;
     const m = mapAbsolute(abs, seasons);
     if (m && (m.season !== e.season || m.episode !== e.episode)) run('UPDATE items SET season=?, episode=?, abs_episode=? WHERE id=?', m.season, m.episode, abs, e.id);
@@ -864,8 +1079,11 @@ async function metadata(lib) {
   if (!tmdbKey() || (lib.type === 'movie' && lib.home_video)) return;
   // Bättre matchning (match.js): titlar som tidigare inte hittades får ett nytt försök en gång
   // Matchning v3 (parse.js, findMatch: svenska/engelska/alternativa titlar, barn/tecknat, längd, säsonger): samma sak en gång till
-  for (const v of ['match_v2', 'match_v3']) if (getSetting(v, '0') !== '1') {
+  for (const v of ['match_v2', 'match_v3', 'match_v4']) if (getSetting(v, '0') !== '1') {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
+    // Matchning v4 (svensk korpus: mappnamn, felstavning, säsongs-/avsnittsantal, flera sidor): serier som matchats av en äldre
+    // version prövas en gång till – träffen byts bara om den nya är klart bättre (autoMatch), låsta rörs aldrig
+    if (v === 'match_v4') run("UPDATE items SET meta_done=0 WHERE kind='show' AND meta_done=1 AND match_locked=0 AND match_score IS NULL AND tmdb_id IS NOT NULL");
     setSetting(v, '1');
   }
   clearMatchCache();

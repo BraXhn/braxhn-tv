@@ -72,7 +72,52 @@ function editLibrary(l, mediaRoot) {
   browse(mediaRoot);
 }
 
-/** Omatchade filmer och serier: filnamnet, vad som tolkades och "Matcha" (samma dialog som "Fel titel?") */
+/** Förslag från matchningen som knappar: "Välj Titel (år)" låser titeln på det förslaget */
+const suggestionButtons = (x, i) => (x.suggestions || []).map((s, j) => `<button class="ghost small" data-sug="${i}:${j}"
+  aria-label="${t('Välj {title}', { title: esc(s.title) })}">${esc(s.title)}${s.year ? ` (${+s.year})` : ''}</button>`).join(' ');
+function bindSuggestions(box, items, reload) {
+  $$('[data-sug]', box).forEach(b => b.onclick = act(async () => {
+    const [i, j] = b.dataset.sug.split(':').map(Number), x = items[i], s = x.suggestions[j];
+    await api(`/matches/${x.id}/approve`, { method: 'POST', body: { tmdbId: s.tmdbId } });
+    toast(t('{title} matchades och låstes', { title: s.title }));
+    reload();
+  }));
+}
+
+/** Osäkra matchningar: automatiskt matchade med låg poäng eller en nära konkurrent – godkänn, välj ett förslag eller sök själv */
+async function unsureAdmin(panel) {
+  const box = $('#uns', panel);
+  let r;
+  try { r = await api('/matches/unsure'); } catch (e) { if (box.isConnected) box.innerHTML = errorState(e, { compact: true }); return; }
+  if (!box.isConnected) return;
+  if (!r.items.length) { box.innerHTML = emptyState({ compact: true, icon: '✓', title: t('Inga osäkra matchningar'), text: t('Alla automatiska träffar är säkra eller godkända.') }); return; }
+  const reload = () => unsureAdmin(panel);
+  box.innerHTML = `<p class="muted small">${t('Titlar som matchades men där filnamnet passar flera träffar eller passar dåligt. Godkänn träffen, välj ett förslag eller sök med "Fel titel?". Godkända och handvalda titlar låses och ändras aldrig av en omskanning.')}</p>
+    <div class="row" style="margin:8px 0 12px"><button class="ghost" id="uns-retry"${r.tmdb ? '' : ' disabled'}>${t('Matcha omatchade och osäkra igen')}</button>
+    <span class="muted small">${r.total > r.items.length ? t('Visar {itemsN} av {total}', { itemsN: r.items.length, total: r.total }) : `${r.total} ${r.total === 1 ? t('titel') : t('titlar')}`}</span></div>
+    <ul style="list-style:none;margin:0;padding:0">${r.items.map((x, i) => `<li style="padding:10px 0;border-top:1px solid var(--line)">
+      <div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:12px"><div style="min-width:0">
+        <b>${esc(x.title)}</b>${x.year ? ` <span class="muted">(${+x.year})</span>` : ''} <span class="warn-badge">${t('osäker')}</span>
+        <div class="muted small">${esc(x.library)} · ${x.kind === 'show' ? t('Serie') : 'Film'} · ${t('tolkat som {title}', { title: esc(x.parsed.title) })}</div>
+        <div class="muted small" style="overflow-wrap:anywhere">${esc(x.file || '')}</div></div>
+        <div class="row" style="flex-wrap:nowrap;gap:6px"><button class="primary small" data-uok="${i}" aria-label="${t('Godkänn {title}', { title: esc(x.title) })}">${t('Godkänn')}</button>
+        <button class="ghost small" style="white-space:nowrap" data-uwrong="${i}"${r.tmdb ? '' : ' disabled'} aria-label="${t('Fel titel för {title}', { title: esc(x.title) })}">${t('Fel titel?')}</button></div></div>
+      ${x.suggestions.length ? `<div class="row small" style="gap:6px;margin-top:6px"><span class="muted">${t('Andra förslag:')}</span> ${suggestionButtons(x, i)}</div>` : ''}</li>`).join('')}</ul>`;
+  $$('[data-uok]', box).forEach(b => b.onclick = act(async () => {
+    const x = r.items[+b.dataset.uok];
+    await api(`/matches/${x.id}/approve`, { method: 'POST', body: {} });
+    toast(t('{title} godkändes', { title: x.title }));
+    reload();
+  }));
+  $$('[data-uwrong]', box).forEach(b => b.onclick = () => { const x = r.items[+b.dataset.uwrong]; matchItem({ id: x.id, kind: x.kind, title: x.parsed.title, year: x.parsed.year }); });
+  bindSuggestions(box, r.items, reload);
+  $('#uns-retry', box).onclick = act(async () => {
+    const res = await api('/unmatched/retry', { method: 'POST', body: { unsure: true } });
+    toast(t('{count} {v} matchas på nytt – skanningen har startat', { count: res.count, v: res.count === 1 ? t('titel') : t('titlar') }));
+  });
+}
+
+/** Omatchade filmer och serier: filnamnet, vad som tolkades, förslag och "Matcha" (samma dialog som "Fel titel?") */
 async function unmatchedAdmin(panel) {
   const box = $('#unm', panel);
   let r;
@@ -85,9 +130,11 @@ async function unmatchedAdmin(panel) {
     <ul class="unm-list" style="list-style:none;margin:0;padding:0">${r.items.map((x, i) => `<li class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:12px;padding:10px 0;border-top:1px solid var(--line)">
       <div style="min-width:0"><b>${esc(x.parsed.title)}</b>${x.parsed.year ? ` <span class="muted">(${+x.parsed.year})</span>` : ''}
         <div class="muted small">${esc(x.library)} · ${x.kind === 'show' ? t('Serie') : 'Film'}</div>
-        <div class="muted small" style="overflow-wrap:anywhere">${esc(x.file || x.title)}</div></div>
+        <div class="muted small" style="overflow-wrap:anywhere">${esc(x.file || x.title)}</div>
+        ${x.suggestions?.length ? `<div class="row small" style="gap:6px;margin-top:6px"><span class="muted">${t('Förslag:')}</span> ${suggestionButtons(x, i)}</div>` : ''}</div>
       <button class="primary small" data-um="${i}"${r.tmdb ? '' : ' disabled'} aria-label="${t('Matcha {title}', { title: esc(x.parsed.title) })}">${t('Matcha')}</button></li>`).join('')}</ul>`;
   $$('[data-um]', box).forEach(b => b.onclick = () => { const x = r.items[+b.dataset.um]; matchItem({ id: x.id, kind: x.kind, title: x.parsed.title, year: x.parsed.year }); });
+  bindSuggestions(box, r.items, () => unmatchedAdmin(panel));
   $('#unm-retry', box).onclick = act(async () => {
     const res = await api('/unmatched/retry', { method: 'POST' });
     toast(t('{count} {v} matchas på nytt – skanningen har startat', { count: res.count, v: res.count === 1 ? t('titel') : t('titlar') }));
@@ -124,6 +171,7 @@ views.admin = async (sec) => {
       <div class="row" style="margin-top:14px"><button class="primary">${t('Lägg till och skanna')}</button><button type="button" class="ghost" id="scanall">${t('Skanna alla nu')}</button></div></form>
   </div>
   <div class="panel" id="adm-unmatched"><h2>${t('Omatchade titlar')}</h2><div id="unm">${loadingState({ kind: 'inline', label: t('Läser…') })}</div></div>
+  <div class="panel" id="adm-unsure"><h2>${t('Osäkra matchningar')}</h2><div id="uns">${loadingState({ kind: 'inline', label: t('Läser…') })}</div></div>
   <div class="panel"><h2>${t('Användare')}</h2>
     <p class="muted small">${t('Rättigheter styr vilka bibliotek var och en ser (som delning i Plex), nedladdning, högsta kvalitet utanför hemmet och hur många strömmar som får spelas samtidigt. Profiler ärver kontots rättigheter.')}</p>
     <table><tr><th>${t('Namn')}</th><th>${t('Roll')}</th><th>2FA</th><th>${t('Utanför hemmet')}</th><th>${t('Rättigheter')}</th><th>${t('Senast aktiv')}</th><th></th></tr>
@@ -284,6 +332,7 @@ views.admin = async (sec) => {
 
   // Ljudanalysens förlopp (x av y låtar) och inställningar laddas för sig
   unmatchedAdmin($('#adm-unmatched'));
+  unsureAdmin($('#adm-unsure'));
   renderFamilyAdmin($('#adm-family')).catch(e => { if (!e?.aborted && $('#adm-family')) $('#adm-family').hidden = true; });
   if (L.some(l => l.type === 'music')) { sonicAdmin($('#adm-sonic')); musicMetaAdmin($('#adm-mmeta')); } else { $('#adm-sonic').remove(); $('#adm-mmeta').remove(); }
   // Mappväljare

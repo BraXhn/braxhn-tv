@@ -566,6 +566,16 @@ addCol('items', 'tagline', 'TEXT');
 addCol('items', 'locked', 'TEXT');
 addCol('items', 'img_locked', 'TEXT');
 addCol('items', 'logo', 'INTEGER NOT NULL DEFAULT 0');
+// Matchningen (scanner.js refreshItem, match.js matchDetail): match_score = poängen för den valda TMDB-träffen (NULL = matchad av
+// en äldre version), match_unsure = 1 när träffen är osäker, match_cands = JSON med förslag [{ id, title, year, score }] (även för
+// omatchade). src_alias = JSON med fler mappnycklar (src_name) för en serie som slagits ihop av två mappar. abs_alt = numret i
+// "Serie 103" (S01E03 eller absolut 103 – avgörs mot TMDB), segment = 'a'/'b' för "03a"/"03b" (tecknade serier med delavsnitt).
+addCol('items', 'match_score', 'REAL');
+addCol('items', 'match_unsure', 'INTEGER NOT NULL DEFAULT 0');
+addCol('items', 'match_cands', 'TEXT');
+addCol('items', 'src_alias', 'TEXT');
+addCol('items', 'abs_alt', 'INTEGER');
+addCol('items', 'segment', 'TEXT');
 {
   const F = ['title', 'sort_title', 'original_title', 'year', 'released', 'premiered', 'overview', 'genres', 'studio', 'cert', 'age', 'rating', 'tagline', 'season', 'episode'];
   const set = F.map(f => `${f}=CASE WHEN json_type(NEW.locked,'$.${f}') IS NULL THEN ${f} ELSE json_extract(NEW.locked,'$.${f}') END`).join(', ');
