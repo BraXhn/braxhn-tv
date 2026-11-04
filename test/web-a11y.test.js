@@ -168,7 +168,7 @@ const VIEWS = () => [
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'], ['shrink', 'Diskrådgivaren'],
-  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet']
+  ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet'], ['family', 'Föräldraöversikt']
 ];
 
 /** Tab genom sidan: varje stopp ska synas på skärmen, ha synlig fokus och inte ligga i något dolt */

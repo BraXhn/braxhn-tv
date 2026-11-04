@@ -613,6 +613,15 @@ Bara webbens administration använder dem (inte apparna). Token, API-nycklar och
 - `GET /api/import/sync` → `{ on, hours, mode, url, dbPath, configured, tokenSet, last, result, error, running, links: [{ key, name, userId, userName, syncedAt }] }`;
   `PUT /api/import/sync` `{ on?, hours? }` (1–168 timmar); `POST /api/import/sync/run` kör nu och ger samma svar plus `ran`.
 
+## Föräldraöversikt: `/api/parents*`
+
+Bara webben. Huvudkontot (ingen `parent_id`, ingen åldersgräns) ser sina barnprofiler; alla andra får `owner: false` och en tom lista, och 404 på en profil.
+
+- `GET /api/parents` → `{ owner, kids: [{ id, name, maxAge, color, today: { video, audio, titles }, screen (som /api/screentime eller null), now: [{ key, itemId, title, device, remote, paused, position, duration, started }], last: { title, ts } | null }] }` (sekunder).
+- `GET /api/parents/:pid?days=7|30` → `{ id, name, maxAge, days, lateHour, perDay: [{ day, video, audio, screen }], totals: { video, audio, plays, titles, late, remote, avgPerDay }, top: [{ id, title, kind, seconds, plays, episodes, last, item }], books: [{ id, title, seconds }], recent: [{ id, ts, ended, itemId|null, showId, title, kind, played, percent, device, remote, late }], screen: { rules, status }, now }`. En serie räknas som en titel i `top`; `item` är kortet (`null` om titeln är borttagen).
+- `POST /api/parents/:pid/stop` → `{ stopped }`: stoppar barnets pågående uppspelningar (som administratörens stopp – spelaren får `stop: true` i framstegssvaret).
+- `/api/status` → `user.kidProfiles` (nytt fält): antal barnprofiler under huvudkontot, 0 för profiler.
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

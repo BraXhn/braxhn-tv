@@ -1684,3 +1684,38 @@ html.tv .mi:focus-visible{box-shadow:inset 0 0 0 3px var(--focus);background:var
 @media (prefers-reduced-motion:reduce){html.tv .card>.clink:focus-visible .art{transform:none}}
 html.reduce-motion.tv .card>.clink:focus-visible .art{transform:none}
 @media (forced-colors:active){html.tv .card>.clink:focus-visible .art{outline-color:Highlight}}
+/* Föräldraöversikt (views/family.js): Just nu och skärmtid bredvid varandra på bred skärm, listor med affisch och stapel */
+.fam-intro{margin:-6px 0 16px;max-width:70ch}
+.fam-top2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:var(--sp-4);margin-bottom:var(--sp-4);align-items:start;max-width:1200px}
+.fam-top2 .panel{margin:0}
+.fam-card h2{margin-top:0}
+.fam-now{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:10px}
+.fam-now li{display:flex;gap:10px;align-items:flex-start}
+.fam-now li>span:last-child{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.fam-live{flex:none;width:10px;height:10px;border-radius:50%;background:var(--ok);margin-top:.4em}
+@media (prefers-reduced-motion:no-preference){html:not(.reduce-motion) .fam-live{animation:fam-pulse 2s ease-in-out infinite}}
+@keyframes fam-pulse{50%{opacity:.35}}
+.fam-big{font-size:1.375rem;font-weight:700;margin:0 0 8px}
+.fam-big.off{color:var(--warn)}
+.fam-meter{height:10px;border-radius:var(--r-pill);background:var(--bg3);overflow:hidden;margin-bottom:8px;max-width:420px}
+.fam-meter>span{display:block;height:100%;background:var(--ok);border-radius:inherit}
+.fam-meter.low>span{background:var(--warn)}
+.fam-ex{margin:8px 0}
+.fam-tiles{max-width:none}
+.tile.warn b{color:var(--warn)}
+.fam-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}
+.fam-row{display:flex;gap:12px;align-items:center;padding:8px;border-radius:var(--r);color:inherit;text-decoration:none;min-height:var(--touch)}
+a.fam-row:hover{background:var(--bg3)}
+.fam-row img,.fam-ph{flex:none;width:48px;height:72px;object-fit:cover;border-radius:var(--r-sm);background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:1.25rem}
+.fam-txt{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;overflow-wrap:anywhere}
+.fam-t{font-weight:600}
+.fam-bar{display:block;height:6px;border-radius:var(--r-pill);background:var(--bg3);overflow:hidden;margin-top:4px}
+.fam-bar>span{display:block;height:100%;background:var(--accent)}
+.fam-day{font-size:.9375rem;margin:16px 0 6px;text-transform:capitalize}
+.fam-hist{list-style:none;margin:0;padding:0}
+.fam-hist li{display:flex;gap:12px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.fam-hist li:first-child{border-top:0}
+.fam-hist a{color:inherit}
+.fam-clock{flex:none;font-variant-numeric:tabular-nums;color:var(--dim);min-width:3.2em}
+html.tv .fam-row:focus-visible{outline:4px solid var(--focus);outline-offset:2px}
+@media (forced-colors:active){.fam-meter>span,.fam-bar>span{background:Highlight}.fam-live{background:Highlight}}

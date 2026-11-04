@@ -53,6 +53,7 @@ import './routes/moments.js'; // Ögonblick: klipp som hushållet delar, reaktio
 import './routes/recap.js'; // "Det här har hänt": sammanfattning av förra säsongen ur de egna filerna (/api/items/:id/recap, /api/recaps/*)
 import './routes/familyfilter.js'; // familjefilter: profilens läge, scener att hoppa över, ordlistor (admin)
 import './routes/social.js';
+import './routes/parents.js'; // Föräldraöversikt: barnprofilernas tittande och skärmtid för huvudkontot (/api/parents*)
 import './routes/books.js';
 import './routes/integrations.js';
 import './routes/livetv.js';

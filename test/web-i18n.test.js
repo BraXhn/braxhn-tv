@@ -218,7 +218,7 @@ const VIEWS = () => [
   ['quickconnect', 'Godkänn TV'], ['streaming', 'Strömmande'], ['setup', 'Installation'], ['setup/libraries', 'Installation: bibliotek'],
   ['setup/transcode', 'Installation: omkodning'], ['setup/household', 'Installation: hushållet'], ['iptvadmin/channels', 'IPTV: kanaler'], ['dvr/rules', 'Inspelningar: serier'],
   ['shrink', 'Diskrådgivaren'], ['shrink/titles', 'Diskrådgivaren: titlar'], ['shrink/versions', 'Diskrådgivaren: versioner'], ['shrink/jobs', 'Diskrådgivaren: kö'], ['shrink/settings', 'Diskrådgivaren: inställningar'],
-  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet'],
+  ['tonight', 'Kvällsvalet'], [`tonight/${S.tonight}`, 'Kvällsvalet: lobby'], ['vocab', 'Ordlista'], ['moments', 'Ögonblick'], [`moments/${S.moment}`, 'Ögonblick: klippet'], ['family', 'Föräldraöversikt'],
   ['sso', 'Enkel inloggning'], ['sso/new-oidc', 'Enkel inloggning: OIDC'], ['sso/new-ldap', 'Enkel inloggning: LDAP']
 ];
 const MODES = {

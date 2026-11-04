@@ -190,7 +190,8 @@ views.account = async () => {
     $('#proflist').innerHTML = `<table>${P2.profiles.map(p => `<tr><td>${esc(p.name)}${p.owner ? t(' <span class="muted small">(huvudkonto)</span>') : ''}</td>
       <td class="muted small">${p.kid ? (p.maxAge === 0 ? t('Barntillåten') : 'max ' + p.maxAge + t(' år')) : t('Vuxen')}${p.hasPin ? ' · PIN' : ''}${p.familyMode && p.familyMode !== 'off' ? t(' · familjefilter') : ''}</td>
       <td class="r">${p.owner ? '' : `<button class="ghost small" data-pst="${p.id}">${t('Skärmtid')}</button>`}<button class="ghost small" data-pff="${p.id}">${t('Familjefilter')}</button><button class="ghost small" data-ppin="${p.id}">${p.hasPin ? t('Byt/ta bort PIN') : t('Sätt PIN')}</button>
-      ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">${t('Ta bort')}</button>`}</td></tr>`).join('')}</table>`;
+      ${p.owner ? '' : `<button class="danger small" data-pdel="${p.id}">${t('Ta bort')}</button>`}</td></tr>`).join('')}</table>`
+      + (me.kidProfiles ? `<p class="small" style="margin-top:10px"><a class="btn small" href="#/family">${t('Föräldraöversikt')}</a> <span class="muted">${t('Vad barnen tittat på, hur länge och när.')}</span></p>` : '');
     $$('[data-ppin]').forEach(b => b.onclick = async () => {
       const pin = await promptDialog(t('Ny PIN (4–8 siffror)'), { type: 'pin', hint: t('Lämna tomt för att ta bort PIN.'), pattern: '[0-9]{4,8}', maxlength: 8, okLabel: t('Spara') }); if (pin === null) return;
       try { await api('/profiles/' + b.dataset.ppin, { method: 'PUT', body: { pin } }); toast(t('Sparat')); route(); } catch (e) { toastErr(e); }

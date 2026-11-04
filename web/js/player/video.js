@@ -1,5 +1,5 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, status, store, sxe, toast, toastErr, t } from '../core.js';
+import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
@@ -469,7 +469,7 @@ function sendProgress(final = false) {
   else fetch(`/api/items/${cur.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     .then(r => r.json()).then(d => {
       if (d.screenTime) screenBadge(d.screenTime);
-      if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast(t('Uppspelningen stoppades av administratören')); closePlayer(); } }
+      if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast(me?.kid ? t('En vuxen stoppade uppspelningen') : t('Uppspelningen stoppades av administratören')); closePlayer(); } }
     }).catch(() => {});
 }
 

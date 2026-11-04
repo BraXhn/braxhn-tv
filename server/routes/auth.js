@@ -37,6 +37,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,
+    // Antal barnprofiler under huvudkontot (Föräldraöversikten i menyn, nytt fält) – 0 för profiler och barn
+    kidProfiles: c.user.parent_id == null && c.user.max_age == null ? get('SELECT COUNT(*) AS n FROM users WHERE parent_id=? AND max_age IS NOT NULL', c.user.id).n : 0,
     // Webbklientens språk (nytt fält): 'sv' | 'en', null = inte valt (svenska; sätts från webbläsaren vid första inloggningen)
     lang: c.user.lang || null,
     // Rättigheter per användare (perms.js): webben döljer nedladdning när den inte är tillåten (nytt fält)
