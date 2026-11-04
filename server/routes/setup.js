@@ -37,7 +37,7 @@ function checks(c) {
   const me = c.user.parent_id || c.user.id;
   return {
     tmdb: hasTmdb(), tmdbFromEnv: !getSetting('tmdb_key') && !!process.env.TMDB_API_KEY,
-    language: getSetting('language', 'sv-SE'),
+    language: getSetting('language', 'sv-SE'), languageChosen: !!get("SELECT 1 AS x FROM settings WHERE k='language'"),
     libraries: libs, scanning: !!scanStatus.running,
     hw: { wanted: st.hwStatus.wanted, active: st.hwStatus.active, error: st.hwStatus.error, hint: st.hwStatus.hint || null },
     publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''), https: isHttps(c.req), cert: !!acme.certInfo(),

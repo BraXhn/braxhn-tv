@@ -59,6 +59,52 @@ test('katalogen: varje svensk text i t() har en engelsk översättning med samma
   assert.deepEqual(bad, []);
 });
 
+// Källkoden i web/js utan kommentarer, t()/tn()-nycklar och regex-literaler – det som blir kvar visas som det står
+function plainSource(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ').replace(/(^|[\s;{}),])\/\/ .*$/gm, '$1')
+    .replace(/\btn\([^,()]+,\s*'(?:[^'\\]|\\.)*',\s*'(?:[^'\\]|\\.)*'/g, 'tn(N')
+    .replace(/\bt\('(?:[^'\\\n]|\\.)*'/g, "t(K")
+    .replace(/\bconsole\.\w+\('(?:[^'\\\n]|\\.)*'/g, 'console.log(L') // serverloggen och konsolen är svenska
+    .replace(/\bt\([^()'`\n]*\|\|\s*'(?:[^'\\\n]|\\.)*'\)/g, 't(K)')
+    .replace(/([(,=:?!&|]\s*)\/(?![*/])(?:[^/\\\n[]|\\.|\[(?:[^\]\\\n]|\\.)*\])+\/[dgimsuy]*/g, '$1RE');
+}
+// Svensk text som får stå utanför t(): språknamnet i språkvalet (märkt med lang="sv"/"en")
+const PLAIN_OK = [/lang="\$\{lang === 'en' \? 'sv' : 'en'\}">\$\{lang === 'en' \? 'Språk' : 'Language'\}/];
+test('webben: ingen svensk text utanför t() i web/js (HTML-text, attribut, toast och dialoger)', () => {
+  const found = [];
+  const SVW = new Set([...SV_WORDS, 'hittad', 'hittades', 'av', 'nya', 'ny', 'klar', 'laddar']);
+  for (const f of fs.readdirSync(path.join(WEB, 'js'), { recursive: true }).filter(f => f.endsWith('.js'))) {
+    const src = plainSource(fs.readFileSync(path.join(WEB, 'js', f), 'utf8'));
+    src.split('\n').forEach((line, i) => {
+      let l = line; for (const re of PLAIN_OK) l = l.replace(re, ' ');
+      // Ord med å/ä/ö i strängar och mallar
+      if (/[åäöÅÄÖ]/.test(l)) found.push(`${f}:${i + 1}: ${l.trim().slice(0, 160)}`);
+      // Vanliga svenska ord i synlig HTML-text och i attribut som läses upp
+      const bits = [...l.matchAll(/(?<![=-])>([^<>`$]*?)(?=<|\$\{|`)/g), ...l.matchAll(/\}([^<>`$"='()]*?)(?=<|\$\{|`)/g), ...l.matchAll(/(?:aria-label|title|placeholder|alt)="([^"$]*)"/g)].map(m => m[1]);
+      for (const b of bits) {
+        const w = (b.toLowerCase().match(/\p{L}+/gu) || []).filter(x => SVW.has(x));
+        if (w.length) found.push(`${f}:${i + 1}: [${w.join(', ')}] ${b.trim().slice(0, 120)}`);
+      }
+    });
+  }
+  assert.deepEqual(found, [], `${found.length} svenska texter utanför t():\n${found.join('\n')}`);
+});
+
+test('serverns felmeddelanden som visas i webben (fail()/{ error }) har en engelsk översättning', () => {
+  const cat = catalog(), missing = [];
+  const SRV = path.join(WEB, '..', 'server');
+  for (const f of fs.readdirSync(SRV, { recursive: true }).filter(f => f.endsWith('.js'))) {
+    // Musikappar (Subsonic), DLNA och /metrics visas aldrig i webben
+    if (/^(dlna|metrics)\.js$|^routes[\\/]subsonic\.js$/.test(f)) continue;
+    const src = fs.readFileSync(path.join(SRV, f), 'utf8');
+    for (const m of src.matchAll(/\bfail\([^,]+,\s*\d+,\s*'((?:[^'\\\n]|\\.)+)'\s*\)|\{ error: '((?:[^'\\\n]|\\.)+)'/g)) {
+      const k = unq(m[1] ?? m[2]);
+      if (cat[k] == null) missing.push(`${f}: ${k}`);
+    }
+  }
+  assert.deepEqual(missing, [], `${missing.length} felmeddelanden saknas i web/i18n/en.js:\n${missing.join('\n')}`);
+});
+
 test('t(): svenska nyckeln utan katalog, variabler, blanktecken och plural', async () => {
   // core.js läser document vid start – kör t()/tn() i en minimal sandlåda med och utan katalog
   const src = fs.readFileSync(path.join(WEB, 'js', 'core.js'), 'utf8');
@@ -81,6 +127,12 @@ test('t(): svenska nyckeln utan katalog, variabler, blanktecken och plural', asy
   assert.equal(en.tn(1200, '{n} titel', '{n} titlar'), '1,200 titles');
   // Utan katalog (skriptet kunde inte laddas) blir sidan svensk även om html säger engelska
   assert.equal(run('en', undefined).lang, 'sv');
+  // Datum/tid/tal: webbläsarens engelska variant (en-US: 12-timmarsklocka), annars en-GB
+  const nav = (languages) => vm.runInNewContext(`${body.replace(/export /g, '')}; ({ locale })`, { globalThis: { BX_I18N: {}, document: { documentElement: { lang: 'en' } }, navigator: { languages } }, Intl, Number }).locale;
+  assert.equal(nav(['en-US', 'en']), 'en-US');
+  assert.equal(nav(['en-AU']), 'en-AU');
+  assert.equal(nav(['de-DE', 'en']), 'en-GB');
+  assert.equal(nav([]), 'en-GB');
 });
 
 test('webben: katalogen är inget startberoende – bara ett vanligt skript i den engelska sidan och i service workern', async () => {
@@ -107,7 +159,9 @@ test('webben: katalogen är inget startberoende – bara ett vanligt skript i de
   assert.equal(acceptLang('nb-NO'), 'sv');
   assert.equal(acceptLang('en;q=0.5,da;q=0.9'), 'sv');
   assert.equal(acceptLang(''), 'sv');
-  assert.equal(acceptLang('fr-FR'), 'sv');
+  assert.equal(acceptLang('fr-FR'), 'en'); // andra språk än nordiska → engelska (internationell publik)
+  assert.equal(acceptLang('de-DE,de;q=0.9'), 'en');
+  assert.equal(acceptLang('*'), 'sv');
 });
 
 // ---------- servern och webbläsaren ----------
@@ -165,7 +219,8 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   assert.equal(r.status, 200);
   r = await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW } });
   cookie = /kt=([0-9a-f]+)/.exec(r.headers.get('set-cookie'))[1];
-  // Inget val ännu: null i /api/status och svensk sida även om webbläsaren vill ha engelska
+  // Inget val ännu: null i /api/status och svensk sida även om webbläsaren vill ha engelska (språket sparas på profilen
+  // vid första inloggningen i webben, från inloggningssidan som följer webbläsaren)
   assert.equal((await srv.req('/api/status')).data.user.lang, null);
   const html = async (headers) => String((await srv.req('/', { headers, raw: true })).data);
   assert.match(await html({ 'accept-language': 'en-US' }), /<html lang="sv">/);
@@ -173,6 +228,7 @@ bt('förberedelse: konto, språk per profil och sidans språk från servern', as
   const anon = async (headers) => String(Buffer.from(await (await fetch(srv.base + '/', { headers })).arrayBuffer()));
   assert.match(await anon({ 'accept-language': 'en-US,en;q=0.9' }), /<html lang="en">.*i18n\/en\.js/s);
   assert.match(await anon({ 'accept-language': 'sv-SE' }), /<html lang="sv">/);
+  assert.match(await anon({ 'accept-language': 'fr-FR,fr;q=0.9' }), /<html lang="en">/); // andra språk → engelska
   assert.match(await anon({ 'accept-language': 'en-US', cookie: 'bxlang=sv' }), /<html lang="sv">/);
   assert.match(await anon({ 'accept-language': 'sv', cookie: 'bxlang=en' }), /<html lang="en">/);
   assert.equal((await srv.req('/api/me/lang', { method: 'PUT', body: { lang: 'de' } })).status, 400);

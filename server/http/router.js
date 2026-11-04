@@ -21,8 +21,10 @@ import { serveStatic } from './static.js';
 
 // ---------- webbklientens språk ----------
 // index.html finns på svenska (standard) och engelska (med översättningskatalogen web/i18n/en.js). Inloggad: profilens
-// val (inget val = svenska). Utloggad (inloggningssidan, installationen): kakan bxlang som webben sätter, annars
-// webbläsarens språk (Accept-Language; nordiska språk → svenska, okänt → svenska).
+// val (inget val = svenska). Utloggad (första besöket: inloggningssidan, installationen): kakan bxlang som webben sätter
+// (språkvalet på inloggningssidan), annars webbläsarens språk (Accept-Language; nordiska språk → svenska, engelska och
+// alla andra språk → engelska, ingen header → svenska). Vid första inloggningen sparar webben sidans språk på profilen
+// (web/js/router.js syncLang).
 export function acceptLang(h) {
   const list = String(h || '').split(',').map((p, i) => { const [tag, ...o] = p.trim().toLowerCase().split(';'); const q = o.map(x => /^\s*q=([\d.]+)/.exec(x)?.[1]).find(Boolean); return { tag, q: q ? +q : 1, i }; })
     .filter(x => x.tag).sort((a, b) => b.q - a.q || a.i - b.i);
@@ -30,7 +32,7 @@ export function acceptLang(h) {
     if (/^(sv|nb|nn|no|da)\b/.test(tag)) return 'sv';
     if (/^en\b/.test(tag)) return 'en';
   }
-  return 'sv';
+  return list.some(x => x.tag !== '*') ? 'en' : 'sv';
 }
 export function pageLang(req) {
   try {

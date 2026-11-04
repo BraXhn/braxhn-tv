@@ -5,6 +5,8 @@
 //   POST /api/admin/health/issues/:id/ignore   – { ignored: true|false }
 //   POST /api/admin/health/issues/:id/replace  – be Radarr/Sonarr om en ny version ({ blocklist: true } spärrar den nuvarande)
 //   PUT  /api/admin/health/lang                – { item, track, lang } rätta språkmärkningen (lang '' = ta bort rättelsen)
+//   POST /api/admin/health/diagnostics         – skapa diagnostikpaketet för supporten ({ names }) → innehållet och id
+//   GET  /api/admin/health/diagnostics/:id     – ladda ner just det paketet (tar.gz)
 import path from 'node:path';
 import { route, admin } from '../http/router.js';
 import { ctx } from '../http/context.js';
@@ -16,6 +18,7 @@ import * as arr from '../arr.js';
 import * as health from '../health.js';
 import * as libfilter from '../libfilter.js';
 import { streamsOf, subtitlesOf } from '../stream.js';
+import * as diagnostics from '../diagnostics.js';
 
 const REPLACE = new Set(['broken', 'truncated', 'length', 'decode', 'sync', 'bitrate', 'quality', 'duplicate']);
 const LANG = new Set(['audiolang', 'sublang']);
@@ -117,4 +120,16 @@ route('PUT', '/api/admin/health/lang', admin, async (c) => {
   libfilter.forget(it.id); // bibliotekets filter (ljud-/undertextspråk) räknas om
   audit('health_lang', { ...ctx(c), detail: `${it.title}: ${track} → ${lang || '(filens)'}` });
   send(c.res, 200, { ok: true });
+});
+
+// Diagnostikpaket för supporten (server/diagnostics.js): POST bygger paketet och returnerar innehållet för
+// förhandsvisningen, GET hämtar exakt det arkivet (tar.gz) så länge det finns kvar (15 min).
+route('POST', '/api/admin/health/diagnostics', admin, async (c) => {
+  const b = await readJson(c.req).catch(() => ({}));
+  send(c.res, 200, await diagnostics.build({ names: b?.names === true }));
+});
+route('GET', '/api/admin/health/diagnostics/:id', admin, (c) => {
+  const a = /^[0-9a-f]{24}$/.test(c.p.id) ? diagnostics.archive(c.p.id) : null;
+  if (!a) return fail(c.res, 404, 'Diagnostikpaketet finns inte längre – skapa det igen');
+  send(c.res, 200, a.archive, { 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="${a.filename}"`, 'Cache-Control': 'no-store' });
 });

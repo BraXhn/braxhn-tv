@@ -18,7 +18,16 @@ export const store = {
 const CAT = (globalThis.document?.documentElement.lang === 'en' && globalThis.BX_I18N) || null;
 /** Valt språk ('sv' | 'en') och locale för Intl (datum, tid, tal) */
 export const lang = CAT ? 'en' : 'sv';
-export const locale = CAT ? 'en-GB' : 'sv-SE';
+// Engelska: webbläsarens egen engelska variant (en-US ger 12-timmarsklocka och månad först, en-AU/en-IE … sina format),
+// annars en-GB (24 timmar, dag först – närmast svenskan).
+export const locale = CAT ? englishLocale(globalThis.navigator?.languages || [globalThis.navigator?.language]) : 'sv-SE';
+function englishLocale(list) {
+  for (const x of list || []) {
+    if (!/^en(-[a-z]{2,3})?$/i.test(String(x || ''))) continue;
+    try { if (Intl.DateTimeFormat.supportedLocalesOf([x]).length && x.includes('-')) return Intl.getCanonicalLocales(x)[0]; } catch {}
+  }
+  return 'en-GB';
+}
 const fill = (s, v) => v ? s.replace(/\{(\w+)\}/g, (m, k) => k in v ? String(v[k]) : m) : s;
 /** Översätter en svensk text (nyckeln) – blanktecken först och sist behålls utanför översättningen */
 export function t(s, v) {
@@ -45,13 +54,15 @@ export async function setLang(l, { save = true } = {}) {
   rememberLang(l);
   if (l !== lang) location.reload();
 }
-/** Webbläsarens språk bland dem som finns ('sv' om inget passar) – förval vid första inloggningen */
+/** Webbläsarens språk bland dem som finns – förval vid första besöket: nordiska språk → svenska, engelska och alla
+ *  andra språk → engelska (samma regel som acceptLang i server/http/router.js); inget språk alls → svenska */
 export function browserLang() {
-  for (const x of navigator.languages || [navigator.language || '']) {
+  const list = (navigator.languages || [navigator.language || '']).filter(Boolean);
+  for (const x of list) {
     if (/^(sv|nb|nn|no|da)\b/i.test(x)) return 'sv';
     if (/^en\b/i.test(x)) return 'en';
   }
-  return 'sv';
+  return list.length ? 'en' : 'sv';
 }
 
 export let me = null, libs = [], status = {};

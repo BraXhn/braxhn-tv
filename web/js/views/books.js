@@ -173,7 +173,7 @@ views.podcasts = async () => {
     ${D.canAdd ? `<form id="padd" class="row panel" style="align-items:flex-end" role="search"><div style="flex:1;min-width:220px"><label for="purl">${t('Hitta en podd – sök på namnet eller klistra in RSS-adressen')}</label><input id="purl" type="search" style="width:100%" placeholder="${t('t.ex. Sommar i P1 eller https://…/feed.xml')}" autocomplete="off"></div><button class="primary">${t('Sök')}</button></form>
       <div id="pres" aria-live="polite"></div>
       <p class="muted small">${t('De senaste avsnitten laddas ner automatiskt när du prenumererar.')}</p>` : ''}
-    ${D.podcasts.length ? `<div class="grid">${D.podcasts.map(p => `<a class="card mcard" href="#/podcast/${p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${p.unplayed ? `${p.unplayed} nya` : esc(p.author || '')}${p.error ? ' · ⚠' : ''}</div></a>`).join('')}</div>` : emptyState({ icon: '🎙', title: t('Inga poddar ännu'), text: D.canAdd ? t('Sök efter en podd ovan och tryck Prenumerera.') : '' })}
+    ${D.podcasts.length ? `<div class="grid">${D.podcasts.map(p => `<a class="card mcard" href="#/podcast/${p.id}">${podCover(p)}<div class="t">${esc(p.title || '…')}</div><div class="s">${p.unplayed ? t('{n} nya', { n: p.unplayed }) : esc(p.author || '')}${p.error ? ' · ⚠' : ''}</div></a>`).join('')}</div>` : emptyState({ icon: '🎙', title: t('Inga poddar ännu'), text: D.canAdd ? t('Sök efter en podd ovan och tryck Prenumerera.') : '' })}
     ${D.latest.length ? `<section class="section"><h2>${t('Senaste avsnitten')}</h2>${epRows(D.latest, true)}</section>` : ''}`;
   bindEps(D.latest);
   const subscribe = async (url, b) => {

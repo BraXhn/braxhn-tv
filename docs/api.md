@@ -194,6 +194,10 @@ där, 429 vid upprepning inom 5 min) och `PUT /lang` (`{ item, track, lang }`, `
 inbäddad undertext, `<källa>:<filnamn>` undertextfil; `lang` = tre bokstäver, tomt = ta bort). **För apparna:** en
 rättad märkning syns som vanligt `lang` i `/api/items/:id/playback` (`audio`, `subtitles`) och `/api/items/:id` – inga
 nya fält; filen ändras aldrig och rättelsen gäller bara så länge filen är oförändrad (mtime/storlek).
+
+**Diagnostikpaket** (`server/diagnostics.js`): `POST /api/admin/health/diagnostics` (`{ names }` – `true` = ta med fil- och
+mappnamn) → `{ id, filename, names, bytes, files: [{ name, text, bytes }] }`, maskerat (token, lösenord, e-post, IP);
+`GET /api/admin/health/diagnostics/:id` → exakt det arkivet (`application/gzip`, tar.gz) i 15 minuter, sedan 404.
 ## Diskrådgivaren: `/api/admin/shrink*`
 
 Bara för administratören på betrott nät (webbens `#/shrink`, `server/shrink.js`); apparna använder det inte.

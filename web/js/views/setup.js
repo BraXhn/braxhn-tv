@@ -3,7 +3,7 @@
 // hårdvaruomkodning, åtkomst utanför hemmet och hushållet. Läget (aktuellt steg, klarade/överhoppade steg och
 // om guiden är klar) sparas på servern: server/routes/setup.js. Kan köras igen från Administration.
 // Fungerar med fjärrkontroll/tangentbord: ↑/↓ flyttar mellan kontrollerna, ←/→ mellan stegen i stegindikatorn.
-import { $, $$, act, api, esc, keyClick, later, main, me, toast, toastErr, views, t, tn, locale } from '../core.js';
+import { $, $$, act, api, esc, keyClick, later, main, me, toast, toastErr, views, t, tn, lang, locale } from '../core.js';
 import { boot, loadLibs } from '../router.js';
 import { confirmDialog, choiceDialog } from '../ui/dialog.js';
 import { emptyState, errorState, bindRetry, loadingState } from '../ui/states.js';
@@ -124,13 +124,17 @@ const STEP = {
   // ---------- 1. Välkommen + språk/region ----------
   async welcome(el, S) {
     const set = await api('/settings');
+    // Webben på engelska och inget valt språk för metadata än: föreslå engelska (standard är svenska) – sparas direkt
+    if (lang === 'en' && !S.checks?.languageChosen && set.language === 'sv-SE') {
+      try { await api('/settings', { method: 'PUT', body: { language: 'en-US' } }); set.language = 'en-US'; S.checks.languageChosen = true; } catch {}
+    }
     const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     let serverTime = '';
     try { serverTime = new Date().toLocaleString(locale, { timeZone: S.timezone, dateStyle: 'medium', timeStyle: 'short' }); } catch {}
     el.innerHTML = `<p>${t('Hej {name}! Guiden tar ungefär fem minuter och hjälper dig att hitta dina filmer, serier, musik och ljudböcker,\n      få snygga affischer och beskrivningar, och ge resten av hushållet egna konton. Allt går att ändra senare under <b>Administration</b>.', { name: esc(me.name) })}</p>
       <label for="stlang">${t('Språk för titlar, beskrivningar och affischer')}</label>
       <select id="stlang">${LANGS.map(([v, n]) => `<option value="${v}" ${set.language === v ? 'selected' : ''}>${n}</option>`).join('')}</select>
-      <p class="muted small">${t('Svenska är standard. Saknas en svensk beskrivning används den engelska. Appens eget språk väljer var och en under Mitt konto.')}</p>
+      <p class="muted small">${t('Saknas en beskrivning på det valda språket används den engelska. Appens eget språk väljer var och en under Mitt konto.')}</p>
       <h3>${t('Tidszon')}</h3>
       <p>${t('Servern använder <b>{timezone}</b>{v}. Den används för TV-guiden, inspelningar, kalendern och loggen.', { timezone: esc(S.timezone), v: serverTime ? ` ${t('(klockan är {serverTime} där)', { serverTime: esc(serverTime) })}` : '' })}</p>
       ${browserTz && browserTz !== S.timezone ? `<p class="setup-res bad">${t('Din enhet använder {browserTz}. Sätt variabeln <code>TZ</code> i Unraid-mallen (Docker → BraXhn TV → Edit), t.ex. <code>TZ=Europe/Stockholm</code>, och starta om containern.', { browserTz: esc(browserTz) })}</p>` : t('<p class="setup-res ok">✓ Samma tidszon som din enhet.</p>')}

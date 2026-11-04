@@ -444,7 +444,7 @@ async function showAt(v, i, { fade = false } = {}) {
   setFront(v, back);
   // Rubriken: datum och tid, plats i listan
   $('#pvwhen', v.el).textContent = innerWidth < 600 ? fmtShort(it.t) : fmtWhen(it.t);
-  $('#pvpos', v.el).textContent = `${(i + 1).toLocaleString(locale)} av ${v.seq.total.toLocaleString(locale)}${it.v ? ' · video ' + dur(it.d || 0) : ''}`;
+  $('#pvpos', v.el).textContent = `${t('{pos} av {dur}', { pos: (i + 1).toLocaleString(locale), dur: v.seq.total.toLocaleString(locale) })}${it.v ? ' · ' + t('video {v}', { v: dur(it.d || 0) }) : ''}`;
   const fb = $('#pvfav', v.el);
   setIconButton(fb, it.fav ? '♥' : '♡', it.fav ? t('Ta bort från favoriter (f)') : t('Lägg till i favoriter (f)')); fb.setAttribute('aria-pressed', String(!!it.fav));
   $('.pv-play', v.el).hidden = !it.v || !it.item;
@@ -602,7 +602,7 @@ function toggleInfo(v) {
   if (!p.hidden) fillInfo(v);
 }
 const num = (x, d = 1) => Number(x).toLocaleString(locale, { maximumFractionDigits: d });
-const coordTxt = (lat, lon) => `${num(Math.abs(lat), 6)}° ${lat < 0 ? 'S' : 'N'}, ${num(Math.abs(lon), 6)}° ${lon < 0 ? 'V' : 'Ö'}`;
+const coordTxt = (lat, lon) => `${num(Math.abs(lat), 6)}° ${lat < 0 ? t('S') : t('N')}, ${num(Math.abs(lon), 6)}° ${lon < 0 ? t('V') : t('Ö')}`;
 const exposureTxt = (s) => s >= 1 ? `${num(s, 1)} s` : `1/${Math.round(1 / s)} s`;
 const sizeTxt = (b) => b >= 1e6 ? `${num(b / 1e6, 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} kB`;
 async function fillInfo(v) {
@@ -619,8 +619,8 @@ async function fillInfo(v) {
     [t('När'), fmtWhen(x.t)],
     [t('Fil'), x.name + (x.size ? ` · ${sizeTxt(x.size)}` : '') + (x.format ? ` · ${x.format.toUpperCase()}` : '')],
     [t('Storlek'), mp + (x.kind === 'video' && x.duration ? ` · ${dur(x.duration)}` : '')],
-    [t('Kamera'), cam], [t('Objektiv'), x.lens || ''], ['Exponering', expo],
-    ['Position', x.gps ? coordTxt(x.gps.lat, x.gps.lon) + (x.gps.alt != null ? ` · ${num(x.gps.alt, 0)} m ö.h.` : '') : ''],
+    [t('Kamera'), cam], [t('Objektiv'), x.lens || ''], [t('Exponering'), expo],
+    [t('Position'), x.gps ? coordTxt(x.gps.lat, x.gps.lon) + (x.gps.alt != null ? ` · ${t('{v} m ö.h.', { v: num(x.gps.alt, 0) })}` : '') : ''],
   ].filter(([, t]) => t);
   const lib = x.library;
   p.innerHTML = `<h2>Information</h2><dl>${rows.map(([k, t]) => `<dt>${esc(k)}</dt><dd>${esc(t)}</dd>`).join('')}

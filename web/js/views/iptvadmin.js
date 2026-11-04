@@ -63,7 +63,7 @@ function sourceDialog(s) {
   const xt = s.type === 'xtream', isNew = !s.id;
   let n = 0;
   const f = (o) => fieldHtml(o, 'sf' + (++n));
-  const body = (xt ? f({ name: 'server', label: 'Server', type: 'url', value: s.id ? '' : '', placeholder: s.id ? s.url : 'http://leverantör.example:8080', required: isNew, hint: s.id ? t('Tomt = behåll.') : t('Adressen du fått av leverantören (utan /player_api.php).') })
+  const body = (xt ? f({ name: 'server', label: 'Server', type: 'url', value: s.id ? '' : '', placeholder: s.id ? s.url : 'http://provider.example:8080', required: isNew, hint: s.id ? t('Tomt = behåll.') : t('Adressen du fått av leverantören (utan /player_api.php).') })
       + f({ name: 'username', label: t('Användarnamn'), value: s.username || '', required: true, autocomplete: 'off' })
       + f({ name: 'password', label: t('Lösenord'), type: 'password', autocomplete: 'new-password', required: isNew, hint: s.id ? t('Tomt = behåll det sparade lösenordet.') : '' })
     : f({ name: 'url', label: t('Adress till M3U-listan'), value: '', placeholder: s.id ? s.url : 'https://…/lista.m3u eller /config/lista.m3u', required: isNew, hint: s.id ? t('Tomt = behåll.') : '' }))

@@ -27,6 +27,7 @@ import * as cinema from '../cinema.js';
 import * as jobs from '../jobs.js';
 import * as subsonic from '../subsonic.js';
 import * as logs from '../logs.js';
+import { maskSupport } from '../supportpack.js';
 import * as bookmeta from '../bookmeta.js';
 import * as invites from '../invites.js';
 import * as listen from '../listening.js';
@@ -506,8 +507,9 @@ route('GET', '/api/logs/diagnostics', admin, async (c) => {
       .filter(k => process.env[k] != null).map(k => [k, process.env[k]])),
     disk: diskmon.snapshot(), jobb: jobs.list()
   };
-  const body = `BraXhn TV – diagnostik ${new Date().toISOString()}\n\n${logs.mask(JSON.stringify(info, null, 2))}\n\n--- Logg (senaste ${logs.lines({ limit: 2000 }).length} raderna) ---\n`
-    + logs.lines({ limit: 2000 }).map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(5)} ${l.msg}`).join('\n') + '\n';
+  // Samma maskering som diagnostikpaketet i Hälsokontrollen (token, lösenord, e-post, IP-adresser) – filnamnen behålls här
+  const body = maskSupport(`BraXhn TV – diagnostik ${new Date().toISOString()}\n\n${JSON.stringify(info, null, 2)}\n\n--- Logg (senaste ${logs.lines({ limit: 2000 }).length} raderna) ---\n`
+    + logs.lines({ limit: 2000 }).map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(5)} ${l.msg}`).join('\n') + '\n', { names: true });
   send(c.res, 200, Buffer.from(body), { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="braxhn-diagnostik-${new Date().toISOString().slice(0, 10)}.txt"` });
 });
 // Fel i webbappen hos användarna hamnar i serverloggen (Safari/iPhone, TV-webbläsare … som CI inte kör).

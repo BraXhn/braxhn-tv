@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (privately) / Rapportera en säkerhetsbrist
+    url: https://github.com/BraXhn/braxhn-tv/security/advisories/new
+    about: Please don't open a public issue for security problems – see SECURITY.md.
+  - name: Documentation (English) / Dokumentation (svenska)
+    url: https://github.com/BraXhn/braxhn-tv/blob/main/README.en.md
+    about: Installation, troubleshooting, FAQ and environment variables.

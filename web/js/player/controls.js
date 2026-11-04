@@ -23,9 +23,9 @@ export function bindControls(cur, v) {
   const scrub = q('#scrub');
   const syncScrub = () => {
     if (!scrub) return;
-    const d = Math.round(dur()), t = Math.min(d || Infinity, Math.round(v.currentTime || 0));
-    scrub.setAttribute('aria-valuemax', String(d)); scrub.setAttribute('aria-valuenow', String(t));
-    scrub.setAttribute('aria-valuetext', `${fmtTime(t)} av ${fmtTime(d)}`);
+    const d = Math.round(dur()), pos = Math.min(d || Infinity, Math.round(v.currentTime || 0));
+    scrub.setAttribute('aria-valuemax', String(d)); scrub.setAttribute('aria-valuenow', String(pos));
+    scrub.setAttribute('aria-valuetext', t('{pos} av {dur}', { pos: fmtTime(pos), dur: fmtTime(d) }));
   };
   v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; syncScrub(); });
   v.addEventListener('durationchange', syncScrub);

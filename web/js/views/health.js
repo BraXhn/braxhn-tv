@@ -3,7 +3,7 @@
 // be Radarr/Sonarr om en ny version (ev. spärra den nuvarande), rätta språkmärkningen (filen ändras inte) och ignorera.
 // #/health/<flik>; biblioteksfiltret sparas per webbläsare (store).
 // @lazy – laddas vid behov (LAZY i js/router.js)
-import { $, act, api, esc, fmtDate, later, main, me, store, toast, views, t } from '../core.js';
+import { $, act, api, esc, fmtDate, fmtNum, later, main, me, store, toast, views, t } from '../core.js';
 import { openDialog } from '../ui/dialog.js';
 import { emptyState } from '../ui/states.js';
 import { tabsHtml } from '../ui/tabs.js';
@@ -32,6 +32,7 @@ views.health = async (tab = 'all') => {
   const list = of(tab), s = D.status;
   main.innerHTML = `<div id="hroot"><div class="toolbar"><h1>${t('Hälsokontroll')}</h1>
       <button class="primary small" id="hrun" ${s.enabled ? '' : 'disabled'}>${t('Kontrollera nu')}</button><button class="ghost small" id="hfull" ${s.enabled ? '' : 'disabled'}>${t('Kontrollera allt igen')}</button>
+      <button class="ghost small" id="hdiag" aria-haspopup="dialog">${t('Skapa diagnostikpaket')}</button>
       <a class="btn ghost small" href="#/admin">Administration</a></div>
     <div class="panel"><p class="muted small">${t('Servern går igenom biblioteket i bakgrunden med lägsta prioritet och pausar medan något spelas eller kodas om.\n      Varje fil kontrolleras en gång – därefter bara när den ändrats. Inget i dina filer ändras: rättad språkmärkning sparas i BraXhn TV och används vid uppspelningen.')}</p>
       <p>${s.running ? `<b>${t('Kontrollerar…')}</b> ${s.progress ? t('{done} av {total} filer', { done: s.progress.done, total: s.progress.total }) : ''}` : s.enabled ? t('{files} filer kontrollerade{v}', { files: s.files, v: s.checked ? ` ${t('· senast {v}', { v: esc(fmtDate(s.checked)) })}` : '' }) : t('<span class="warn-badge">Avstängd</span>')}</p>
@@ -45,7 +46,7 @@ views.health = async (tab = 'all') => {
     <div class="panel">${list.length ? `<ul class="hlist">${list.map(i => `<li>
         <span class="${SEV[i.severity]?.[0] || 'warn-badge'}">${esc(KIND[i.kind] || i.kind)}</span>
         <div class="hmain"><a href="#/item/${+i.link}"><b>${esc(titleOf(i))}</b></a><div>${esc(i.detail.msg || '')}</div>
-          <div class="muted small">${esc(i.library || '')}${i.file && i.kind !== 'missing' ? ' · ' + esc(i.file) : ''} · hittad ${esc(fmtDate(i.found))}${i.action ? ` · <b>${esc(ACTION[i.action] || i.action)}</b> ${esc(fmtDate(i.actionAt))}` : ''}</div></div>
+          <div class="muted small">${esc(i.library || '')}${i.file && i.kind !== 'missing' ? ' · ' + esc(i.file) : ''} · ${t('hittad {v}', { v: esc(fmtDate(i.found)) })}${i.action ? ` · <b>${esc(ACTION[i.action] || i.action)}</b> ${esc(fmtDate(i.actionAt))}` : ''}</div></div>
         <div class="hact">${i.actions.includes('replace') ? `<button class="ghost small" data-rep="${i.id}">${i.kind === 'missing' ? t('Be Sonarr söka') : t('Ny version…')}</button>` : ''}
           ${i.actions.includes('lang') ? `<button class="ghost small" data-lang="${i.id}">${t('Rätta språk…')}</button>` : ''}
           <button class="ghost small" data-ign="${i.id}">${i.ignored ? t('Visa igen') : t('Ignorera')}</button></div></li>`).join('')}</ul>`
@@ -65,6 +66,7 @@ views.health = async (tab = 'all') => {
   $('#hlib')?.addEventListener('change', (e) => { store.set('health.lib', e.target.value); reload(); });
   $('#hrun').onclick = act(async () => { await api('/admin/health/run', { method: 'POST', body: {} }); toast(t('Kontrollen startar')); later(reload, 1500); });
   $('#hfull').onclick = act(async () => { await api('/admin/health/run', { method: 'POST', body: { full: true } }); toast(t('Alla filer kontrolleras igen i bakgrunden')); later(reload, 1500); });
+  $('#hdiag').onclick = () => diagDialog();
   $('#hset').onsubmit = act(async (e) => {
     e.preventDefault();
     await api('/admin/health/settings', { method: 'PUT', body: { enabled: $('#hen').checked, samples: +$('#hsm').value, maxMbps: +$('#hmb').value } });
@@ -108,4 +110,38 @@ function langDialog(i, reload) {
       await api('/admin/health/lang', { method: 'PUT', body: { item: i.item, track: i.detail.track, lang: h.$('#hlsel').value } });
       toast(t('Språket är rättat')); reload();
     } }] });
+}
+
+// Diagnostikpaketet för supporten: innehållet visas först (exakt det som laddas ner), valet "fil- och mappnamn" bygger om
+function diagDialog() {
+  let pack = null, gen = 0;
+  const kb = (b) => `${fmtNum(Math.max(1, Math.round(b / 1024)))} kB`;
+  const d = openDialog({ title: t('Diagnostikpaket'), size: 'wide',
+    body: `<p>${t('Paketet hjälper den som felsöker din installation: version, miljö, hårdvaruacceleration, de senaste loggraderna, databasens storlek och bibliotekens storlek. Token, lösenord, nycklar, e-postadresser och IP-adresser maskeras. Läs igenom innehållet innan du delar det, t.ex. i en buggrapport på GitHub.')}</p>
+      <label class="switch"><input type="checkbox" id="dgnames"> ${t('Ta med fil- och mappnamn (bibliotekens namn och mappar, sökvägar i loggen)')}</label>
+      <div id="dgfiles" aria-live="polite"></div>`,
+    actions: [{ label: t('Stäng') }, { label: t('Ladda ner'), kind: 'primary', id: 'dgdl', onClick: () => {
+      if (!pack) return false;
+      const a = document.createElement('a');
+      a.href = `/api/admin/health/diagnostics/${encodeURIComponent(pack.id)}`; a.download = pack.filename;
+      document.body.append(a); a.click(); a.remove();
+      toast(t('Diagnostikpaketet laddas ner – {name}', { name: pack.filename }));
+    } }] });
+  const box = d.$('#dgfiles'), dl = d.$('#dgdl');
+  const load = async () => {
+    const my = ++gen; pack = null; dl.disabled = true;
+    box.setAttribute('aria-busy', 'true');
+    box.innerHTML = `<p class="muted">${t('Skapar paketet…')}</p>`;
+    try {
+      const p = await api('/admin/health/diagnostics', { method: 'POST', body: { names: d.$('#dgnames').checked } });
+      if (my !== gen) return;
+      pack = p; dl.disabled = false;
+      box.innerHTML = `<p class="muted small">${t('{n} filer i {name} · {size}', { n: p.files.length, name: esc(p.filename), size: kb(p.bytes) })}</p>
+        ${p.files.map(f => `<details class="dgfile"><summary>${esc(f.name)} <span class="muted small">· ${kb(f.bytes)}</span></summary>
+          <pre class="dgpre" tabindex="0" translate="no" aria-label="${esc(f.name)}">${esc(f.text)}</pre></details>`).join('')}`;
+    } catch (e) { if (my === gen) box.innerHTML = `<p class="err" role="alert">${esc(e.message)}</p>`; }
+    finally { if (my === gen) box.setAttribute('aria-busy', 'false'); }
+  };
+  d.$('#dgnames').onchange = load;
+  load();
 }

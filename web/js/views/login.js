@@ -1,6 +1,6 @@
 // Vyer: inloggning, första kontot och profilval ("Vem tittar?")
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, store, toast, views, t, locale } from '../core.js';
+import { $, $$, act, api, esc, hue, main, me, pageAfterLogin, safeColor, store, toast, views, t, locale, lang, setLang } from '../core.js';
 import { closeAllPlayers, stopAudio } from '../lazy.js';
 import { passkeyLogin, passkeyOk } from '../passkeys.js';
 import { boot } from '../router.js';
@@ -22,6 +22,11 @@ const SSO_ERR = {
   disabled: () => t('Den här inloggningen är avstängd.'),
   blocked: () => t('För många försök – vänta en stund och försök igen')
 };
+
+// Språkval före inloggningen (sparas i kakan bxlang för den här enheten; profilen får språket vid inloggningen)
+const langSwitch = () => `<div class="row" style="justify-content:center;margin-top:14px"><label for="lglang" class="sr-only">${t('Språk')}</label>
+  <select id="lglang"><option value="sv" lang="sv"${lang === 'sv' ? ' selected' : ''}>Svenska</option><option value="en" lang="en"${lang === 'en' ? ' selected' : ''}>English</option></select></div>`;
+const bindLangSwitch = () => { const s = $('#lglang'); if (s) s.onchange = () => setLang(s.value, { save: false }); };
 
 views.login = async (arg, arg2) => {
   // Tillbaka från enkel inloggning: inloggad (kakan är satt) – vidare som efter en vanlig inloggning
@@ -54,7 +59,9 @@ views.login = async (arg, arg2) => {
     <button class="primary">${setup ? t('Skapa konto') : t('Logga in')}</button>
     ${reserve ? '</details>' : ''}
     ${!setup && passkeyOk() ? t('<button type="button" class="ghost" id="pkl" style="width:100%;margin-top:10px">Logga in med passkey</button>') : ''}
-    ${!setup && st.quickConnect ? t('<button type="button" class="ghost" id="qcl" style="width:100%;margin-top:10px">Logga in med kod</button><p class="muted small" style="margin-top:6px">Bra på TV: godkänn en kod från telefonen i stället för att skriva lösenord.</p>') : ''}</form>`;
+    ${!setup && st.quickConnect ? t('<button type="button" class="ghost" id="qcl" style="width:100%;margin-top:10px">Logga in med kod</button><p class="muted small" style="margin-top:6px">Bra på TV: godkänn en kod från telefonen i stället för att skriva lösenord.</p>') : ''}
+    ${langSwitch()}</form>`;
+  bindLangSwitch();
   if ($('#qcl')) $('#qcl').onclick = () => codeLogin({ remember: remember(), onCancel: () => views.login() });
   if ($('#pkl')) $('#pkl').onclick = async () => {
     try { await passkeyLogin(remember()); await boot(); location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); }

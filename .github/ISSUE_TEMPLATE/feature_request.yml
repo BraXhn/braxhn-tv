@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an idea or an improvement. / Föreslå en funktion eller en förbättring.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome! Describe the problem you want solved rather than only the solution – there may be a simpler way.
+        *Svenska går lika bra.*
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve? / Vilket problem löser det?
+      placeholder: "My kids watch on a tablet in the car and …"
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea / Ditt förslag
+      description: How would it work? Mention how Plex, Jellyfin, Emby or another app does it, if that helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: BraXhn TV version
+      placeholder: "0.9.3"
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        BraXhn TV has no npm dependencies and keeps everything on your own server, so features that need a cloud service or a third-party account are only added when they are optional.

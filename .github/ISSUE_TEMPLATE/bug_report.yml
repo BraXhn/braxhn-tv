@@ -1,0 +1,83 @@
+name: Bug report
+description: Something doesn't work as expected. / Något fungerar inte som det ska.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in what you can – the diagnostics bundle answers most questions at once.
+        *Svenska går lika bra – skriv på det språk du föredrar.*
+
+        **Security vulnerability?** Don't open a public issue – see [SECURITY.md](https://github.com/BraXhn/braxhn-tv/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Vad hände?
+      description: What did you do, what did you expect, and what happened instead? Include error messages shown on screen.
+      placeholder: "1. Open a movie on the iPhone web app\n2. Press Play\n3. The player shows \"The format is not supported\""
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics bundle / Diagnostikpaket
+      description: |
+        In BraXhn TV: **Administration → Health check → Create diagnostics bundle** (*Administration → Hälsokontroll → Skapa diagnostikpaket*).
+        It shows exactly what's included; tokens, passwords, email and IP addresses are masked. Drag the downloaded `.tar.gz` here.
+        Can't create it (e.g. the server doesn't start)? Paste the last lines of the container log from Unraid's Docker tab instead.
+      placeholder: Drag and drop braxhn-diagnostik-YYYY-MM-DD.tar.gz here
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BraXhn TV version
+      description: Shown under Administration (and in the diagnostics bundle). Image tag if you know it (latest, beta, edge, sha-…).
+      placeholder: "0.9.3 (latest)"
+    validations:
+      required: true
+  - type: input
+    id: unraid
+    attributes:
+      label: Unraid version / host OS
+      description: Unraid version (Tools → Update OS), or the OS and Docker version if you don't use Unraid.
+      placeholder: "Unraid 7.1.4"
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and transcoding
+      description: CPU, GPU (Intel iGPU, AMD, NVIDIA model and driver version), and the `HWACCEL` setting. Did it work with `HWACCEL=none`?
+      placeholder: "Intel i5-12400 (UHD 730), HWACCEL=qsv, /dev/dri passed through"
+    validations:
+      required: false
+  - type: input
+    id: client
+    attributes:
+      label: Client / Klient
+      description: Where does it happen? Browser and device, or app (iOS/tvOS, Android/Google TV, car), music app, Chromecast …
+      placeholder: "Safari on iPhone 15, iOS 18.1 / Chrome on Google TV"
+    validations:
+      required: false
+  - type: dropdown
+    id: access
+    attributes:
+      label: Network / Nätverk
+      options:
+        - At home (LAN)
+        - VPN (Tailscale, NetBird, WireGuard …)
+        - Reverse proxy (Nginx Proxy Manager, SWAG, Caddy, Traefik …)
+        - Built-in HTTPS (Let's Encrypt)
+        - Don't know
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and the Troubleshooting section of the README.
+          required: true
+        - label: I read through the diagnostics bundle before attaching it.
+          required: false
