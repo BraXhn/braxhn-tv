@@ -621,6 +621,29 @@ Bara webben. Huvudkontot (ingen `parent_id`, ingen åldersgräns) ser sina barnp
 - `GET /api/parents/:pid?days=7|30` → `{ id, name, maxAge, days, lateHour, perDay: [{ day, video, audio, screen }], totals: { video, audio, plays, titles, late, remote, avgPerDay }, top: [{ id, title, kind, seconds, plays, episodes, last, item }], books: [{ id, title, seconds }], recent: [{ id, ts, ended, itemId|null, showId, title, kind, played, percent, device, remote, late }], screen: { rules, status }, now }`. En serie räknas som en titel i `top`; `item` är kortet (`null` om titeln är borttagen).
 - `POST /api/parents/:pid/stop` → `{ stopped }`: stoppar barnets pågående uppspelningar (som administratörens stopp – spelaren får `stop: true` i framstegssvaret).
 - `/api/status` → `user.kidProfiles` (nytt fält): antal barnprofiler under huvudkontot, 0 för profiler.
+## Fjärråtkomst via BraXhn Relay: `/api/relay*` (admin, betrott nät) och apparna genom reläet
+
+**Apparna behöver ingen ändring.** Genom reläet (`https://<reläets domän>`) är API:t exakt detsamma som direkt mot
+servern – samma sökvägar, token, kakor, Range/206, HLS, SSE och CORS för `/api/stream/`. Skillnaden är att allt via reläet
+räknas som utanför hemmet: `remote: true` i `/api/status`, `adminHere: false`, kvalitetsgränsen utanför hemmet, och
+admin-routes ger 403. Sökvägar som börjar med `/_relay/` hör till reläet själv och når aldrig servern. WebSocket används
+inte av servern och släpps inte igenom.
+
+Bara webbens administration använder routes nedan. Hemligheten lämnas aldrig ut i något svar.
+
+- `GET /api/relay` → `{ paired, url, publicUrl, serverId, name, insecure, connected, connecting, since, lastError, lastErrorAt, nextRetryAt,
+  reconnects, requests, active, bytesIn, bytesOut }`. `insecure` = reläet nås med `http://` på en publik adress. Tider i millisekunder.
+- `POST /api/relay/pair` `{ url, code, name? }` → samma som `GET`. `url` = reläets adress (bara origin, `https://` eller `http://`), `code` =
+  parningskoden (16 tecken, bindestreck och gemener tillåts). 400 med `error` vid fel kod/adress, 502 när reläet inte nås eller inte kan
+  verifieras. En befintlig parning ersätts bara när den nya lyckas (och den gamla glöms då på det gamla reläet).
+- `POST /api/relay/reconnect` → anslut direkt igen (samma svar som `GET`).
+- `DELETE /api/relay` → `{ ...status, relayForgot }` – tunneln stängs, inställningarna raderas och reläet ombeds glömma servern
+  (`relayForgot: false` om reläet inte kunde nås – ta då bort servern på reläets adminsida).
+
+Reläets egna adresser (det separata reläpaketet, `server.js`): `GET /_relay/health`, `GET /_relay/admin` (adminsida), `GET /_relay/challenge?server=`,
+`GET /_relay/tunnel` (uppgradering, se BRAIN.md bro 35), `POST /_relay/pair`, `POST /_relay/unpair` och adminens API med
+`Authorization: Bearer <RELAY_ADMIN_TOKEN>`: `GET /_relay/api/status`, `POST /_relay/api/codes` `{ host? }` → `{ code, expires }`,
+`PUT /_relay/api/servers/:id` `{ hosts: [] }`, `DELETE /_relay/api/servers/:id`.
 
 ## Kontraktstestet
 

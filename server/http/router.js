@@ -10,7 +10,7 @@
 // routefilerna i en fast ordning; mönster som kan överlappa (t.ex. /api/music/:lib/albums och
 // /api/music/albums/:aid) ligger i samma fil och i samma inbördes ordning.
 import { getSetting, get } from '../db.js';
-import { clientIp, isPrivate, inCidr, fail, isHttps, send } from '../util.js';
+import { clientIp, isPrivate, inCidr, fail, isHttps, send, viaRelay } from '../util.js';
 import { userFromReq, calendarUser, require2faRemote, audit, cookieHeader } from '../auth.js';
 import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
@@ -95,7 +95,7 @@ function trustedNets() {
 // NetBird/Tailscale-routing via OPNsense maskerar normalt till en LAN-adress och behöver det inte.
 export const trustVpn = () => getSetting('trust_vpn_range', process.env.TRUST_VPN_RANGE || '0') === '1';
 /** Kommer förfrågan från ett betrott nät? (klientens adress enligt clientIp i util.js) */
-export const isTrusted = (req) => { const ip = clientIp(req); return isPrivate(ip) || (trustVpn() && inCidr(ip, '100.64.0.0/10')) || trustedNets().some(n => inCidr(ip, n)); };
+export const isTrusted = (req) => { if (viaRelay(req)) return false; const ip = clientIp(req); return isPrivate(ip) || (trustVpn() && inCidr(ip, '100.64.0.0/10')) || trustedNets().some(n => inCidr(ip, n)); };
 /** Får administratörer administrera utanför betrott nät? (avstängt som standard) */
 export const adminAnywhere = () => getSetting('admin_anywhere', process.env.ADMIN_ANYWHERE || '0') === '1';
 /** Får administratörer med tvåstegsverifiering rätta matchning/metadata utifrån? (på som standard) */

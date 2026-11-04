@@ -105,11 +105,17 @@ function isProxy(ip) {
   const list = String(process.env.TRUSTED_PROXIES || '').split(',').map(s => s.trim()).filter(Boolean);
   return list.length ? list.some(c => inCidr(ip, c)) : isPrivate(ip);
 }
+// BraXhn Relay (server/relay.js): strömmar genom tunneln märks med RELAY = { ip, https } från reläet. Sådana
+// förfrågningar kommer alltid UTIFRÅN – aldrig betrott nät eller hemnät, oavsett vilken adress som uppges.
+export const RELAY = Symbol.for('braxhn.relay');
+export const viaRelay = (req) => !!req?.socket?.[RELAY];
 /**
  * Klientens riktiga IP. X-Forwarded-For läses från HÖGER: proxyn lägger till klientens adress sist,
  * allt till vänster kan klienten ha hittat på själv. Vi går bakåt så länge hoppet är en betrodd proxy.
  */
 export function clientIp(req) {
+  const relayed = req.socket?.[RELAY];
+  if (relayed) return relayed.ip; // BraXhn Relay: adressen reläet uppgav, aldrig X-Forwarded-For
   let ip = norm(req.socket.remoteAddress);
   const hops = String(req.headers['x-forwarded-for'] || '').split(',').map(norm).filter(Boolean);
   while (isProxy(ip) && hops.length) {
@@ -129,12 +135,14 @@ export const peerIp = (req) => norm(req.socket.remoteAddress);
  */
 export function rateIp(req) {
   const ip = clientIp(req), peer = peerIp(req);
+  // Via reläet kommer adressen från reläets egen rubrik i tunneln (klienten når den aldrig)
+  if (viaRelay(req)) return ip;
   // Med en uttrycklig proxylista (TRUSTED_PROXIES) kan bara proxyn ange adressen – då gäller den som vanligt
   if (String(process.env.TRUSTED_PROXIES || '').trim()) return ip;
   return ip !== peer && (isPrivate(ip) || inCidr(ip, '100.64.0.0/10')) ? peer : ip;
 }
-export const isLocalReq = (req) => isPrivate(clientIp(req));
-export const isHttps = (req) => !!req.socket.encrypted || (isProxy(norm(req.socket.remoteAddress)) && String(req.headers['x-forwarded-proto'] || '').split(',').pop().trim() === 'https');
+export const isLocalReq = (req) => !viaRelay(req) && isPrivate(clientIp(req));
+export const isHttps = (req) => viaRelay(req) ? !!req.socket[RELAY].https : !!req.socket.encrypted || (isProxy(norm(req.socket.remoteAddress)) && String(req.headers['x-forwarded-proto'] || '').split(',').pop().trim() === 'https');
 
 /** IPv4-CIDR-matchning, t.ex. inCidr('100.70.1.2', '100.64.0.0/10'). IPv6 stöds för exakta adresser. */
 export function inCidr(ip, cidr) {

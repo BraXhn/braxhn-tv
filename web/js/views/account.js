@@ -357,6 +357,8 @@ async function renderSubsonic(el, data) {
 // ---------- läsappar (OPDS): eget lösenord ----------
 Object.assign(EVENTS, { opds_password_created: t('Lösenord för läsappar skapat'), opds_password_revoked: t('Lösenord för läsappar återkallat'),
   opds_login_fail: t('Fel lösenord från läsapp'), opds_denied: t('Läsapp nekad') });
+// Fjärråtkomst via BraXhn Relay (views/admin-relay.js)
+Object.assign(EVENTS, { relay_paired: t('Parad med relä'), relay_unpaired: t('Bortkopplad från relä') });
 async function renderOpds(el, data) {
   const O = data || await api('/me/opds');
   if (!el.isConnected || !O.libraries) return;

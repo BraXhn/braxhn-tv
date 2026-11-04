@@ -1,7 +1,7 @@
 // Status, första kontot, inloggning, lösenord, tvåstegsverifiering, sessioner, passkeys och profiler (hushåll).
 import crypto from 'node:crypto';
 import { get, getSetting, setSetting, run, now, all } from '../db.js';
-import { send, fail, readJson, clientIp, rateIp, isHttps, isPrivate } from '../util.js';
+import { send, fail, readJson, clientIp, rateIp, isHttps, isPrivate, isLocalReq } from '../util.js';
 import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey,
   quickConnectOn, qcCreate, qcFind, qcFindCode, qcApprove, qcRemove, QC_TTL } from '../auth.js';
 import { hasTmdb } from '../scanner.js';
@@ -31,7 +31,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   // Avslöja inte för utomstående att servern är nyinstallerad
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',
   // Utanför hemmet: webbspelaren mäter då uppkopplingen och anpassar kvaliteten
-  remote: c.user ? !isPrivate(clientIp(c.req)) : undefined,
+  remote: c.user ? !isLocalReq(c.req) : undefined,
   publicUrl: getSetting('public_url', process.env.PUBLIC_URL || '') || null,
   quickConnect: quickConnectOn(), // "Logga in med kod" på inloggningssidan
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,

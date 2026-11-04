@@ -65,7 +65,14 @@ import './routes/tonight.js'; // Kvällsvalet: hushållet röstar fram filmen
 import './routes/history.js';
 import './routes/photos.js';
 import './routes/ebooks.js'; // e-böcker och serietidningar, lösenord för läsappar och OPDS (/api/opds/*)
-export { handle } from './http/router.js';
+import './routes/relay.js'; // fjärråtkomst via BraXhn Relay: parning och status (/api/relay, admin)
+import { handle } from './http/router.js';
+import * as relay from './relay.js';
+export { handle };
+
+// BraXhn Relay: hemservern ansluter utgående till reläet när den är parad (server/relay.js). Förfrågningarna genom
+// tunneln går till samma handle() men räknas alltid som utanför hemmet.
+relay.start(handle);
 
 // Någon tittar: en HLS-ström hämtas (segment de senaste 20 s) eller en uppspelning (även direkt) skickar framsteg och
 // är inte pausad. Alla bakgrundsjobb väntar då eller går långsamt (jobs.yieldToPlayback, busy-kontrollerna nedan).
