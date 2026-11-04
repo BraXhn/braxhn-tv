@@ -302,7 +302,17 @@ document.addEventListener('keydown', (e) => {
 // Service workern kräver HTTPS (eller localhost); utan den går appen ändå att lägga på hemskärmen
 // Registreras först när sidan är ritad: installationen hämtar hela appen (~100 filer) och skulle annars ta anslutningarna
 // från startsidans moduler, anrop och bilder vid första besöket
-if ('serviceWorker' in navigator && window.isSecureContext) idle(() => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+// Ny version utan att användaren gör något: sw.js hämtas alltid från servern (updateViaCache none), och hemskärmsappen
+// i iOS – som kan ligga i bakgrunden i dagar utan en ny navigering – frågar efter en ny service worker när den kommer
+// fram igen (högst en gång i timmen). Den nya tar över direkt (skipWaiting) och ger nästa start från servern.
+if ('serviceWorker' in navigator && window.isSecureContext) idle(() => navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((reg) => {
+  let asked = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || Date.now() - asked < 3600e3) return;
+    asked = Date.now();
+    reg.update().catch(() => {});
+  });
+}).catch(() => {}));
 const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let installEvt = null;

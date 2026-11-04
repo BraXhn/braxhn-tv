@@ -105,9 +105,41 @@ function load(f, st, lang = 'sv') {
   return e;
 }
 
+// Nödvägen /reset (även /?reset=1): när appen inte startar. Clear-Site-Data rensar webbläsarens cache och lagring för
+// sidan – service workern, Cache Storage (även Nedladdat), localStorage/IndexedDB – men inte kakorna, så inloggningen
+// behålls. ?soft=1 (startskriptets vakthund, web/start.js) rensar bara HTTP-cachen och låter Nedladdat och enhetens
+// inställningar vara. Sidan gör dessutom samma sak med JavaScript (webbläsare som saknar Clear-Site-Data, eller inte
+// tar emot den över vanlig http – där finns ingen service worker heller) och går sedan till /?bxheal=…, så att
+// vakthunden visar felsidan i stället för att läka igen om starten fortfarande inte fungerar.
+const RESET_JS = `(async () => {
+  const soft = /[?&]soft=1/.test(location.search);
+  const wait = (p) => Promise.race([p, new Promise(r => setTimeout(r, 3000))]).catch(() => {});
+  await wait(navigator.serviceWorker?.getRegistrations().then(rs => Promise.all(rs.map(r => r.unregister()))));
+  await wait(self.caches?.keys().then(ks => Promise.all(ks.filter(k => !soft || k.startsWith('braxhn-app-')).map(k => caches.delete(k)))));
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('bxhome')) localStorage.removeItem(k); } catch {}
+  location.replace('/?bxheal=' + Date.now().toString(36) + location.hash);
+})();`;
+const RESET_CSP = `default-src 'none'; script-src ${cspHash(RESET_JS)}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+function serveReset(req, res, soft, lang) {
+  const en = lang === 'en';
+  const html = `<!doctype html><html lang="${en ? 'en' : 'sv'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>BraXhn TV</title><noscript><meta http-equiv="refresh" content="2;url=/?bxheal=1"></noscript></head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;color:#e7eaf3;font:16px system-ui,sans-serif;text-align:center;padding:24px;box-sizing:border-box">
+<p>${en ? 'Clearing saved app files and reloading …' : 'Rensar appens sparade filer och laddar om …'} <a href="/?bxheal=1" style="color:#9aa3bd">${en ? 'Continue' : 'Fortsätt'}</a></p>
+<script>${RESET_JS}</script></body></html>`;
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': RESET_CSP,
+    'Clear-Site-Data': soft ? '"cache"' : '"cache", "storage"' });
+  res.end(req.method === 'HEAD' ? undefined : html);
+}
+
 /** langOf: () => 'sv' | 'en' – sidans språk för index.html (http/router.js, pageLang) */
 export function serveStatic(req, res, pathname, search = '', langOf = null) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, '');
+  if (pathname === '/reset' || (pathname === '/' && /[?&]reset=1(&|$)/.test(search))) {
+    let lang = 'sv';
+    try { lang = langOf?.() || 'sv'; } catch {}
+    return serveReset(req, res, /[?&]soft=1(&|$)/.test(search), lang);
+  }
   // /v/<bygge>/… = samma fil utan prefix. Rätt bygge cachas för alltid; ett gammalt bygge (en flik som stått
   // öppen över en uppdatering) får dagens fil utan cache, så att den inte fastnar i webbläsaren.
   let immutable = false;

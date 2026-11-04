@@ -1,10 +1,16 @@
 // Service worker: gör BraXhn TV installerbar som app och låter den starta även när servern inte svarar.
 // Appens filer har en innehållshash i adressen (/m/<fil>?h=<hash>, server/http/static.js) och ändras aldrig på
 // samma adress – de tas ur cachen direkt. Ett nytt bygge ger en ny sw.js (bygget och hasharna står nedan); vid
-// installationen hämtas bara filer vars hash är ny, resten kopieras från den gamla cachen. Sidan själv hämtas
-// alltid från servern; svarar den inte används sidan från samma bygge ('/' i cachen), så att appen startar och
-// visar Nedladdat (web/js/offline.js, egen cache 'braxhn-dl-v1' som aldrig rensas här). API-anrop, strömmar och
-// bilder går aldrig genom cachen.
+// installationen hämtas bara filer vars hash är ny, resten kopieras från den gamla cachen.
+// Ett bygge i taget: cachen innehåller bara filer och sidor från det här bygget (BUILD). En fil med hash sparas bara
+// när servern bekräftar hashen (immutable – annars har servern hunnit uppdateras och installationen görs om senare),
+// och en sida bara när dess <meta name="bx-build"> är BUILD. Gamla och nya moduler blandas därför aldrig.
+// Sidan själv (navigering) hämtas från servern först; svarar den inte inom NAV_TIMEOUT, eller inte alls, används
+// sidan från samma bygge ur cachen, så att appen startar och visar Nedladdat (web/js/offline.js, egen cache
+// 'braxhn-dl-v1' som aldrig rensas här). En gammal eller trasig sida i cachen visas alltså aldrig när servern svarar,
+// och en ny version tas i bruk vid nästa start utan att något behöver rensas (skipWaiting + clients.claim).
+// Startskriptets vakthund (web/start.js) och /reset (server/http/static.js) är nödvägarna om något ändå fastnar.
+// API-anrop, strömmar och bilder går aldrig genom cachen.
 const BUILD = '{{b}}';
 const V = `/v/${BUILD}`;
 const CACHE = 'braxhn-app-' + BUILD;
@@ -15,14 +21,20 @@ const hashed = (f) => HASH[f.slice(1)] ? `/m${f}?h=${HASH[f.slice(1)]}` : V + f;
 const SHELL = [...['/app.js', '/i18n/en.js', ...MODULES, '/style.css', '/vendor/hls.min.js'].map(hashed),
   '/icon.svg', '/icon.png', '/manifest.webmanifest', '/brand/logo.svg', '/brand/icon-192.png', '/brand/icon-512.png', '/offline.html', '/'];
 const versioned = (p) => p.startsWith('/m/') || p.startsWith(V + '/');
+// Servern svarar immutable bara när hashen/bygget i adressen stämmer med filen (server/http/static.js)
+const confirmed = (res) => res.ok && /immutable/.test(res.headers.get('cache-control') || '');
 
 self.addEventListener('install', (e) => {
-  // Oförändrade filer (samma hash) kopieras från förra versionens cache i stället för att hämtas igen
+  // Oförändrade filer (samma hash) kopieras från förra versionens cache i stället för att hämtas igen. En fil eller
+  // sida från ett annat bygge stoppar installationen (den görs om vid nästa besök) i stället för att blandas in.
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(async (url) => {
     const old = versioned(url) && await caches.match(url);
     if (old) return c.put(url, old);
     const res = await fetch(url, { cache: 'no-cache' });
-    if (url === '/') await savePage(res.clone());
+    if (versioned(url) && !confirmed(res)) throw new Error('annat bygge: ' + url);
+    if (url === '/') {
+      if (!(await savePage(res.clone()))) throw new Error('annat bygge: /');
+    }
     if (res.ok) await c.put(url, res);
   }))).then(() => self.skipWaiting()));
 });
@@ -37,33 +49,52 @@ self.addEventListener('activate', (e) => {
   }))).then(() => self.clients.claim()));
 });
 const RETIRE_MS = 24 * 3600e3;
-// Startsidan ur cachen (varm start utan att vänta på servern): sidan finns i två språk (server/http/static.js), så den
-// sparas per språk och används bara när språket går att läsa ur kakan bxlang (Cookie Store API). Annars, och första
-// gången, hämtas den från servern som förut. Varje gång hämtas en ny i bakgrunden till nästa start.
+// Startsidan: från servern först. Svarar den inte inom NAV_TIMEOUT (eller inte alls) används sidan ur cachen – samma
+// bygge som service workern, per språk (server/http/static.js ger sidan i två språk) när språket går att läsa ur kakan
+// bxlang (Cookie Store API), annars sidan från installationen. Varje svar från servern sparas till nästa gång (bara
+// om det hör till det här bygget). Förr kom sidan ur cachen först: en trasig sida i cachen visades då om och om igen.
+const NAV_TIMEOUT = 3000;
 const pageKey = (l) => '/__page/' + (l === 'en' ? 'en' : 'sv');
 async function wantedLang() {
   try { const c = await self.cookieStore?.get('bxlang'); return c?.value === 'en' || c?.value === 'sv' ? c.value : null; } catch { return null; }
 }
+/** Sparar sidan om den hör till det här bygget – true när den sparats */
 async function savePage(res) {
-  if (res.status !== 200 || res.type !== 'basic' || !/text\/html/.test(res.headers.get('content-type') || '')) return;
+  if (res.status !== 200 || res.type !== 'basic' || !/text\/html/.test(res.headers.get('content-type') || '')) return false;
   const html = await res.clone().text();
   const l = /<html lang="(sv|en)"/.exec(html)?.[1];
-  if (l) await (await caches.open(CACHE)).put(pageKey(l), res);
+  if (!l || !html.includes(`<meta name="bx-build" content="${BUILD}">`)) return false;
+  await (await caches.open(CACHE)).put(pageKey(l), res);
+  return true;
+}
+async function cachedPage() {
+  const l = await wantedLang();
+  return (l && await caches.match(pageKey(l), { cacheName: CACHE })) || caches.match('/', { cacheName: CACHE });
 }
 function startPage(e) {
   const net = fetch(e.request);
   e.waitUntil(net.then(res => savePage(res.clone())).catch(() => {}));
-  return wantedLang().then(l => l && caches.match(pageKey(l), { cacheName: CACHE })).catch(() => null)
-    .then(hit => hit || net)
-    .catch(async () => (await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html'));
+  return new Promise((resolve) => {
+    let done = false;
+    const give = (res) => { if (!done && res) { done = true; clearTimeout(timer); resolve(res); } };
+    const fromCache = () => cachedPage().catch(() => null);
+    // Servern är långsam: sidan ur cachen om den finns, annars vänta vidare på servern
+    const timer = setTimeout(() => fromCache().then(give), NAV_TIMEOUT);
+    net.then((res) => {
+      // Serverfel (502 från en omvänd proxy medan containern startar om …): hellre sidan ur cachen
+      if (res.status >= 500) return fromCache().then(hit => give(hit || res));
+      give(res);
+    }, async () => give((await fromCache()) || (await caches.match('/offline.html')) || Response.error()));
+  });
 }
 self.addEventListener('fetch', (e) => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== 'GET' || u.origin !== location.origin) return;
-  // Sidan själv: från servern, annars en enkel sida om att servern inte nås
   if (r.mode === 'navigate') {
-    if (u.pathname === '/' && !u.search) { e.respondWith(startPage(e)); return; }
-    e.respondWith(fetch(r).catch(async () => (u.pathname !== '/offline.html' && await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html')));
+    // Startsidan (även hemskärmsappens /?app=1 och vakthundens /?bxheal=…): servern först, cachen som reserv
+    if (u.pathname === '/') { e.respondWith(startPage(e)); return; }
+    // /reset (nödvägen) och andra sidor: alltid från servern, annars en enkel sida om att servern inte nås
+    e.respondWith(fetch(r).catch(async () => (u.pathname !== '/offline.html' && u.pathname !== '/reset' && await caches.match('/', { cacheName: CACHE })) || caches.match('/offline.html')));
     return;
   }
   const key = u.pathname + u.search;
@@ -73,11 +104,12 @@ self.addEventListener('fetch', (e) => {
   // Versionerade filer: cachen först (samma adress = samma innehåll)
   if (versioned(u.pathname) && SHELL.includes(key)) {
     e.respondWith(caches.match(key).then(hit => hit || fetch(r).then(res => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(key, copy)); }
+      if (confirmed(res)) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(key, copy)); }
       return res;
     })));
     return;
   }
+  if (u.pathname === '/') return; // sidan sparas bara via savePage (byggkontrollen)
   e.respondWith(fetch(r, { cache: 'no-cache' }).then(res => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(u.pathname, copy)); }
     return res;

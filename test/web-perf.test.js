@@ -261,14 +261,19 @@ test('servern: /api/home och /api/status svarar snabbt med ett större bibliotek
   } finally { srv.kill(); fs.rmSync(ROOT, { recursive: true, force: true }); }
 });
 
-test('service workern: startsidan ur cachen per språk, förra byggets filer finns kvar ett dygn', () => {
+test('service workern: startsidan från servern först (cachen per språk som reserv), ett bygge i taget, förra byggets filer ett dygn', () => {
   const sw = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'sw.js'), 'utf8');
-  // Sidan ur cachen bara när språket går att läsa (kakan bxlang) – annars från servern som förut
+  // Startsidan (även /?app=1): servern först med kort tidsgräns, sidan ur cachen (per språk via kakan bxlang) som reserv.
+  // Förr kom den ur cachen först – en trasig sida där visades om och om igen (incident 2026-11-03, test/web-selfheal.test.js)
   assert.match(sw, /cookieStore\?\.get\('bxlang'\)/);
-  assert.match(sw, /u\.pathname === '\/' && !u\.search\) \{ e\.respondWith\(startPage\(e\)\)/);
+  assert.match(sw, /if \(u\.pathname === '\/'\) \{ e\.respondWith\(startPage\(e\)\)/);
+  assert.match(sw, /const NAV_TIMEOUT = [1-4]\d{3};/);
   assert.match(sw, /e\.waitUntil\(net\.then\(res => savePage/); // alltid en ny i bakgrunden
+  // Bara sidor och filer från det här bygget sparas
+  assert.match(sw, /<meta name="bx-build" content="\$\{BUILD\}">/);
+  assert.match(sw, /versioned\(url\) && !confirmed\(res\)\) throw/);
   assert.match(sw, /'\/__retired'/);
   // Registreras först när sidan är ritad
   const router = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'js', 'router.js'), 'utf8');
-  assert.match(router, /idle\(\(\) => navigator\.serviceWorker\.register\('\/sw\.js'\)/);
+  assert.match(router, /idle\(\(\) => navigator\.serviceWorker\.register\('\/sw\.js', \{ updateViaCache: 'none' \}\)/);
 });

@@ -51,6 +51,7 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
     if (!store.get('dl.last', null)) return location.replace('/offline.html');
     try { (await need('views/downloads.js')).offlineStart(); } catch { location.replace('/offline.html'); }
     pageDrawn();
+    self.__bxBooted?.();
     return;
   }
   // Djuplänk utan inloggning (t.ex. QR-koden för inloggning med kod): öppnas efter inloggningen
@@ -60,6 +61,8 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
   else { if (location.hash === '#/login') location.hash = '#/'; else await route(); }
   // När sidan är ritad: spelaren (med Chromecast), titelsidan och sökningen i förväg – första klicket ska inte vänta
   pageDrawn();
+  // Startskriptets vakthund (web/start.js): appen har startat – ingen läkning, ingen felsida
+  self.__bxBooted?.();
   idle(() => {
     loadPlayer().then(() => need('player/cast.js')).then(m => m.initCast()).catch(() => {});
     if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); cardMenus().catch(() => {}); }
