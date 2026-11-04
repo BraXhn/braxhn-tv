@@ -20,6 +20,8 @@ process.env.CONFIG_DIR = path.join(ROOT, 'config');
 process.env.TRANSCODE_DIR = path.join(ROOT, 'tc');
 process.env.MEDIA_ROOT = path.join(ROOT, 'media');
 process.env.WATCH_FILES = '0';
+// Testerna sprider inloggningarna över påhittade hemadresser (lan()) via proxyn 127.0.0.1 – som en uttryckligen betrodd proxy
+process.env.TRUSTED_PROXIES = '127.0.0.1/32';
 fs.mkdirSync(process.env.MEDIA_ROOT, { recursive: true });
 // Allt som servern skriver i loggen samlas – inga hemligheter får finnas där
 const logged = [];

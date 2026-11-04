@@ -136,9 +136,14 @@ function serveReset(req, res, soft, lang) {
 export function serveStatic(req, res, pathname, search = '', langOf = null) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return fail(res, 405, '');
   if (pathname === '/reset' || (pathname === '/' && /[?&]reset=1(&|$)/.test(search))) {
+    const soft = /[?&]soft=1(&|$)/.test(search);
+    // En länk eller omdirigering från en annan webbplats får inte radera Nedladdat och enhetens inställningar: då bara den
+    // mjuka rensningen (HTTP-cachen och appens filer). Inskriven adress, bokmärke och sidans egen knapp ger none/same-origin.
+    const site = req.headers['sec-fetch-site'];
+    if (!soft && (site === 'cross-site' || site === 'same-site')) { res.writeHead(303, { Location: '/reset?soft=1', 'Cache-Control': 'no-store' }); return res.end(); }
     let lang = 'sv';
     try { lang = langOf?.() || 'sv'; } catch {}
-    return serveReset(req, res, /[?&]soft=1(&|$)/.test(search), lang);
+    return serveReset(req, res, soft, lang);
   }
   // /v/<bygge>/… = samma fil utan prefix. Rätt bygge cachas för alltid; ett gammalt bygge (en flik som stått
   // öppen över en uppdatering) får dagens fil utan cache, så att den inte fastnar i webbläsaren.

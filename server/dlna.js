@@ -8,6 +8,7 @@
 // som släpper in internet inte öppnar biblioteket. Alla på hemnätet kan se det som DLNA visar – därför finns en
 // åldersgräns (standard: samma som huvudkontot, dvs. allt) som döljer titlar över den nivån.
 import dgram from 'node:dgram';
+import net from 'node:net';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -285,11 +286,24 @@ async function readBody(req, limit = 65536) {
   return Buffer.concat(chunks).toString('utf8');
 }
 const viaProxy = (req) => ['x-forwarded-for', 'forwarded', 'x-real-ip', 'x-forwarded-host', 'x-forwarded-proto'].some(h => req.headers[h] != null);
+// DNS-rebinding: en webbplats som en familjemedlem besöker kan peka sitt eget namn på serverns adress i hemnätet och läsa
+// /dlna/ med webbläsaren (förfrågan kommer då från ett betrott nät och är "samma origin" för sidan). DLNA-klienter
+// använder adressen i SSDP-svaret (LOCATION = IP-adress), så Host måste vara en IP-adress, localhost eller datorns namn.
+export function hostOk(h) {
+  if (h == null || h === '') return true; // HTTP/1.0 utan Host
+  const m = /^(\[[0-9a-f:.]+\]|[^:]+)(:\d{1,5})?$/i.exec(String(h).trim());
+  if (!m) return false;
+  const name = m[1].replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  if (net.isIP(name)) return true;
+  const me = os.hostname().toLowerCase();
+  return name === 'localhost' || name === me || name === me + '.local';
+}
 
 /** /dlna/… – trusted = klienten är på ett betrott nät (isTrusted i http/router.js) */
 export async function handle(req, res, url, { trusted }) {
   if (!enabled()) return fail(res, 404, 'Okänd endpoint');
   if (!trusted || viaProxy(req)) return fail(res, 403, 'DLNA är bara tillgängligt på hemnätverket');
+  if (!hostOk(req.headers.host)) return fail(res, 403, 'DLNA nås bara med serverns IP-adress');
   const p = url.pathname, m = req.method;
   res.setHeader('Server', `${os.type()}/${os.release()} UPnP/1.0 BraXhnTV/${VERSION}`);
   if ((m === 'GET' || m === 'HEAD') && p === '/dlna/description.xml') return send(res, 200, m === 'HEAD' ? '' : description(), { 'Content-Type': XML_TYPE });

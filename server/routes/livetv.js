@@ -18,10 +18,20 @@ import { route, user, img, admin } from '../http/router.js';
 // ---------- Live-TV och inspelningar ----------
 const LIVE_SCOPE = 4e9, REC_SCOPE = 5e9;
 // Barnprofiler: kanaler inom åldersgränsen (kanalens/gruppens, server/iptv/channels.js). lists: kanallistan, guiden och
-// sökningen (filtreras per kanal) – inspelningarna som förut bara med allow_unrated.
+// sökningen (filtreras per kanal) – inspelningarna bara med allow_unrated och dessutom bara från kanaler inom gränsen (recOk nedan).
 const liveOk = (c, lists = false) => {
   if (c.user.max_age != null && !(c.p.cid ? channelAllowed(c.user, +c.p.cid) : allowUnrated() || (lists && kidsHaveChannels(c.user)))) { fail(c.res, 403, 'Live-TV är inte tillgängligt i barnprofiler'); return false; }
   return true;
+};
+// Inspelningar för barnprofiler: bara från kanaler inom åldersgränsen (samma regel som live). Annars kunde en barnprofil
+// boka och spela in en vuxenkanal, eller spela någon annans inspelning från den, fast kanalen inte går att se live.
+// En inspelning vars kanal tagits bort (channel_id NULL) visas inte för barnprofiler.
+const kidRec = (c) => c.user.max_age != null;
+const recOk = (c, r) => !kidRec(c) || (r?.channel_id != null && channelAllowed(c.user, r.channel_id));
+const recFor = (c) => {
+  const r = get('SELECT id, status, channel_id FROM recordings WHERE id=?', +c.p.rid);
+  if (!r || !recOk(c, r)) { fail(c.res, 404, 'Finns inte'); return null; }
+  return r;
 };
 const liveStream = { auth: true, media: true, scope: (p) => LIVE_SCOPE + (+p.cid) };
 const recStream = { auth: true, media: true, scope: (p) => REC_SCOPE + (+p.rid) };
@@ -44,6 +54,8 @@ route('GET', '/api/live/programs/:pid', user, (c) => {
 route('GET', '/api/live/logo/:cid', img, async (c) => {
   const ch = get('SELECT id, logo FROM channels WHERE id=?', +c.p.cid);
   if (!ch?.logo || !/^https?:\/\//.test(ch.logo)) return fail(c.res, 404, 'Ingen logotyp');
+  // Barnprofiler: bara logotyper för kanaler inom åldersgränsen
+  if (c.user.max_age != null && !channelAllowed(c.user, ch.id)) return fail(c.res, 404, 'Ingen logotyp');
   const f = path.join(IMAGES, `ch${ch.id}-${crypto.createHash('sha1').update(ch.logo).digest('hex').slice(0, 10)}.img`);
   if (!fs.existsSync(f)) {
     try {
@@ -75,15 +87,28 @@ route('GET', '/api/live/:cid/seg-:n.ts', liveStream, (c) => {
 });
 // DVR
 const mine = (c, r) => c.user.is_admin || r.created_by === c.user.id;
-route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvr.list(), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
+/** Listan för profilen: barnprofiler ser bara inspelningar och regler för kanaler inom åldersgränsen (och egna regler utan kanal) */
+function dvrFor(c) {
+  const l = dvr.list();
+  if (!kidRec(c)) return l;
+  const scheduled = l.scheduled.filter(r => recOk(c, r));
+  return { ...l, scheduled, done: l.done.filter(r => recOk(c, r)), conflicts: scheduled.filter(r => r.plan !== 'ok').length,
+    rules: l.rules.filter(r => r.channel_id == null ? r.created_by === c.user.id : channelAllowed(c.user, r.channel_id)) };
+}
+route('GET', '/api/dvr', user, (c) => { if (liveOk(c)) send(c.res, 200, { ...dvrFor(c), dir: c.user.is_admin ? dvr.dvrDir() : null, comskip: { enabled: comskip.enabled(), autoSkip: comskip.autoSkipDefault() } }); });
 // Konflikter i förväg: bokningar som börjar sent, avbryts eller missas när tunrarna inte räcker, med alternativa sändningar
-route('GET', '/api/dvr/conflicts', user, (c) => { if (liveOk(c)) send(c.res, 200, { conflicts: dvr.conflictList() }); });
+route('GET', '/api/dvr/conflicts', user, (c) => {
+  if (!liveOk(c)) return;
+  const list = dvr.conflictList();
+  const ok = (id) => recOk(c, get('SELECT channel_id FROM recordings WHERE id=?', id));
+  send(c.res, 200, { conflicts: kidRec(c) ? list.filter(x => ok(x.recording.id)).map(x => ({ ...x, with: x.with.filter(w => ok(w.id)) })) : list });
+});
 route('POST', '/api/dvr/program', user, async (c) => {
   if (!liveOk(c)) return;
   const b = await readJson(c.req);
   const { programId, series, newOnly } = b;
   try {
-    const p = live.program(+programId); if (!p) return fail(c.res, 404, 'Finns inte');
+    const p = live.program(+programId); if (!p || !recOk(c, p)) return fail(c.res, 404, 'Finns inte');
     if (series) {
       const id = dvr.addRule({ ...b, title: p.title, channelId: c.q.get('anyChannel') === '1' || b.anyChannel ? null : p.channel_id, newOnly: newOnly !== false }, c.user);
       dvr.scheduleProgram(+programId, c.user, id);
@@ -99,6 +124,7 @@ route('POST', '/api/dvr/program', user, async (c) => {
 route('POST', '/api/dvr/manual', user, async (c) => {
   if (!liveOk(c)) return;
   const b = await readJson(c.req);
+  if (!recOk(c, { channel_id: +b.channelId || null })) return fail(c.res, 404, 'Kanalen finns inte');
   try {
     const conflict = dvr.conflicts(+b.start, +b.stop, { channelId: +b.channelId }).find(x => x.conflict) || null;
     const id = dvr.scheduleManual({ ...b, channelId: +b.channelId, start: +b.start, stop: +b.stop }, c.user);
@@ -137,6 +163,7 @@ route('POST', '/api/dvr/recordings/:rid/swap', user, async (c) => {
   const r = get('SELECT * FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
   if (!mine(c, r)) return fail(c.res, 403, 'Bara den som bokade inspelningen eller en administratör kan flytta den');
   const { programId } = await readJson(c.req);
+  if (!recOk(c, live.program(+programId))) return fail(c.res, 404, 'Finns inte');
   try { const id = dvr.swapRecording(r.id, +programId, c.user); send(c.res, 200, { id, plan: dvr.plan().get(id)?.outcome || 'ok' }); } catch (e) { fail(c.res, 400, e.message); }
 });
 route('DELETE', '/api/dvr/recordings/:rid', user, (c) => {
@@ -154,17 +181,17 @@ route('POST', '/api/dvr/recordings/:rid/stop', user, (c) => {
 // Spela: en klar inspelning som fil (Range), en pågående som HLS av den växande filen (titta medan den spelas in)
 route('POST', '/api/dvr/recordings/:rid/play', user, (c) => {
   if (!liveOk(c) || screenBlock(c)) return;
-  const r = get('SELECT status FROM recordings WHERE id=?', +c.p.rid); if (!r) return fail(c.res, 404, 'Finns inte');
+  const r = recFor(c); if (!r) return;
   const t = c.user.via !== 'cookie' || c.q.get('cast') === '1' ? createSession(c.user.id, 'media', { item: REC_SCOPE + (+c.p.rid), ip: clientIp(c.req) }) : null;
   const q = t ? '?t=' + t : '';
   if (r.status === 'recording') return send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/live.m3u8${q}`, live: true });
   send(c.res, 200, { url: `/api/dvr/recordings/${+c.p.rid}/stream${q}` });
 });
-route('GET', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
-route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
-route('GET', '/api/dvr/recordings/:rid/live.m3u8', recStream, async (c) => { if (liveOk(c) && !screenBlock(c)) await dvr.serveGrowing(c.res, +c.p.rid, c.q.get('t')); });
+route('GET', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && recFor(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
+route('HEAD', '/api/dvr/recordings/:rid/stream', recStream, (c) => { if (liveOk(c) && recFor(c) && !screenBlock(c)) dvr.serveRecording(c.req, c.res, +c.p.rid); });
+route('GET', '/api/dvr/recordings/:rid/live.m3u8', recStream, async (c) => { if (liveOk(c) && recFor(c) && !screenBlock(c)) await dvr.serveGrowing(c.res, +c.p.rid, c.q.get('t')); });
 route('GET', '/api/dvr/recordings/:rid/seg-:n.ts', recStream, (c) => {
-  if (!liveOk(c) || screenBlock(c)) return;
+  if (!liveOk(c) || !recFor(c) || screenBlock(c)) return;
   screen.heartbeat(c.user.id, 'r:' + (+c.p.rid));
   dvr.serveGrowingSegment(c.req, c.res, +c.p.rid, `seg-${c.p.n}.ts`);
 });

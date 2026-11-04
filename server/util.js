@@ -120,6 +120,19 @@ export function clientIp(req) {
   return ip;
 }
 export const peerIp = (req) => norm(req.socket.remoteAddress);
+/**
+ * Adressen som gissningsspärren (auth.js ipBlocked/noteFail) räknar på. Normalt klientens (clientIp), men en adress i
+ * hemnätet eller VPN-nätet som bara står i X-Forwarded-For räknas på den direkta motparten: varje enhet i hemnätet
+ * räknas som proxy, så den kunde annars skriva en ny påhittad hemadress i varje försök – och från hemnätet gäller
+ * ingen kontospärr. En riktig proxy lägger till den verkliga (publika) adressen sist, så internet påverkas inte. Med
+ * TRUSTED_PROXIES räknas hemadresser via proxyn för sig (t.ex. hemmet via domänen genom proxyn).
+ */
+export function rateIp(req) {
+  const ip = clientIp(req), peer = peerIp(req);
+  // Med en uttrycklig proxylista (TRUSTED_PROXIES) kan bara proxyn ange adressen – då gäller den som vanligt
+  if (String(process.env.TRUSTED_PROXIES || '').trim()) return ip;
+  return ip !== peer && (isPrivate(ip) || inCidr(ip, '100.64.0.0/10')) ? peer : ip;
+}
 export const isLocalReq = (req) => isPrivate(clientIp(req));
 export const isHttps = (req) => !!req.socket.encrypted || (isProxy(norm(req.socket.remoteAddress)) && String(req.headers['x-forwarded-proto'] || '').split(',').pop().trim() === 'https');
 

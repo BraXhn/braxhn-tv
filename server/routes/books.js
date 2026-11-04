@@ -154,7 +154,11 @@ route('GET', '/api/audiobooks/book/:bid/offline', user, (c) => {
     files: b.files.map(f => ({ id: f.id, offset: f.offset, duration: f.duration, url: `/api/audiobooks/files/${f.id}/stream?a=${a}&t=${t}` })) });
 });
 // ---------- Poddar ----------
-route('GET', '/api/podcasts', user, (c) => send(c.res, 200, { podcasts: pods.list(c.user.id), latest: pods.latest(c.user.id, 30), canAdd: c.user.max_age == null }));
+// Barnprofiler får inga poddar (som menyn och sökningen): poddar saknar åldersgräns, så listan är tom och avsnitt,
+// omslag, framsteg och strömmar ger 404 – även för den som skriver adressen själv
+const kidPods = (c) => { if (c.user.max_age == null) return false; fail(c.res, 404, 'Finns inte'); return true; };
+route('GET', '/api/podcasts', user, (c) => send(c.res, 200, c.user.max_age != null ? { podcasts: [], latest: [], canAdd: false }
+  : { podcasts: pods.list(c.user.id), latest: pods.latest(c.user.id, 30), canAdd: true }));
 route('POST', '/api/podcasts', user, async (c) => {
   if (c.user.max_age != null) return fail(c.res, 403, 'Barnprofiler kan inte lägga till poddar');
   const { url } = await readJson(c.req);
@@ -178,6 +182,7 @@ route('GET', '/api/podcasts/search/art', user, async (c) => {
   } catch { fail(c.res, 404, 'Ingen bild'); }
 });
 route('GET', '/api/podcasts/:pid', user, (c) => {
+  if (kidPods(c)) return;
   const p = pods.podcast(+c.p.pid, c.user.id); if (!p) return fail(c.res, 404, 'Finns inte');
   // Flödesadressen kan innehålla en privat nyckel – visas bara för den som lade till podden och administratörer
   const owner = get('SELECT added_by FROM podcasts WHERE id=?', p.id)?.added_by;
@@ -205,11 +210,13 @@ route('DELETE', '/api/podcasts/:pid', user, (c) => {
   pods.unsubscribe(p.id); send(c.res, 200, { ok: true });
 });
 route('GET', '/api/podcasts/:pid/image', img, async (c) => {
+  if (kidPods(c)) return;
   const f = pods.imagePath(+c.p.pid); if (!f) return fail(c.res, 404, 'Ingen bild');
   const out = await sized(f, c.q.get('w'));
   c.res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }); pipeline(fs.createReadStream(out), c.res, () => {});
 });
 route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
+  if (kidPods(c)) return;
   const { position, played } = await readJson(c.req);
   const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); if (!r) return fail(c.res, 404, 'Finns inte');
   const sc = played ? null : screen.heartbeat(c.user.id, 'p:' + (+c.p.eid), +position, { audio: true });
@@ -217,15 +224,16 @@ route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
 });
 route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
 route('GET', '/api/podcasts/episodes/:eid', user, (c) => {
+  if (kidPods(c)) return;
   const e = get(`SELECT e.*, p.title AS ptitle, q.position, q.played FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id
     LEFT JOIN podcast_progress q ON q.episode_id=e.id AND q.user_id=? WHERE e.id=?`, c.user.id, +c.p.eid);
   if (!e) return fail(c.res, 404, 'Finns inte');
   send(c.res, 200, { id: e.id, podcast: e.podcast_id, podcastTitle: e.ptitle, title: e.title, description: e.description, published: e.published, duration: e.duration,
     downloaded: !!e.file, position: e.position || 0, played: !!e.played });
 });
-const podEp = (c) => { const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
+const podEp = (c) => { if (kidPods(c)) return null; const e = pods.episodeRow(+c.p.eid); if (!e) fail(c.res, 404, 'Finns inte'); return e; };
 route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
-  const e = pods.episodeRow(+c.p.eid); if (!e) return fail(c.res, 404, 'Finns inte');
+  const e = podEp(c); if (!e) return;
   if (screenBlock(c, { audio: true })) return;
   send(c.res, 200, { url: `/api/podcasts/episodes/${e.id}/stream?t=${createSession(c.user.id, 'media', { item: POD_SCOPE + e.id, ip: clientIp(c.req) })}` });
 });

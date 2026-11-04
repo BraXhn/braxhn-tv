@@ -8,12 +8,13 @@ import * as books from '../audiobooks.js';
 import * as ebooks from '../ebooks.js';
 import * as pods from '../podcasts.js';
 import * as live from '../livetv.js';
+import { channelAllowed, kidsHaveChannels } from '../iptv/channels.js';
 import { parseQuery, searchItemIds } from '../search.js';
 import * as sublines from '../sublines.js';
 import * as family from '../familyfilter.js';
 import { searchKey, rowScore } from '../searchkey.js';
 import { route, user } from '../http/router.js';
-import { ageFilter, itemsByIds, allowUnrated, allowedFor } from '../http/context.js';
+import { ageFilter, itemsByIds, allowedFor } from '../http/context.js';
 
 const MAX = 60;
 const queryOf = (c) => String(c.q.get('q') || '').slice(0, 100);
@@ -67,7 +68,7 @@ const GROUPS = ['movies', 'shows', 'people', 'episodes', 'artists', 'albums', 't
 const nameOf = { people: 'name', artists: 'name', channels: 'name' };
 /**
  * Universell sökning. ?q= och ?limit= (per grupp, 1–50, standard 12). Barnprofiler: titlar och personer inom
- * åldersgränsen, inga poddar (som i menyn) och live-TV bara om administratören tillåter okända åldersgränser.
+ * åldersgränsen, inga poddar (som i menyn) och bara kanaler och program inom åldersgränsen (channelAllowed).
  */
 route('GET', '/api/search/all', user, (c) => {
   const raw = queryOf(c), Q = parseQuery(raw);
@@ -83,11 +84,14 @@ route('GET', '/api/search/all', user, (c) => {
   // E-böcker och serietidningar: bara bibliotek och åldersgränser profilen får se (ebooks.visible), bara webben
   if (c.user.kind !== 'app') out.ebooks = ebooks.searchEbooks(Q, uid, lim);
   if (!kid) { out.podcasts = pods.searchPodcasts(Q, lim); out.podcastEpisodes = pods.searchEpisodes(Q, uid, lim); }
-  if (!kid || allowUnrated()) {
-    out.channels = live.searchChannels(Q, lim);
+  // Barnprofiler: bara kanaler (och deras program) inom åldersgränsen – samma regel som kanallistan och guiden
+  // (channelAllowed: kanalens, gruppens och vuxenmärkningens ålder). Annars syns t.ex. vuxenkanalers namn och program här.
+  if (!kid || kidsHaveChannels(c.user)) {
+    const ok = (cid) => !kid || channelAllowed(c.user, cid);
+    out.channels = live.searchChannels(Q, kid ? lim * 4 : lim).filter(ch => ok(ch.id)).slice(0, lim);
     // Ett program per titel (nästa sändning), rankat som de andra grupperna
     const seen = new Set();
-    out.programs = live.searchPrograms(Q, { limit: lim * 4, byTime: false }).filter(p => !seen.has(p.title) && seen.add(p.title)).slice(0, lim);
+    out.programs = live.searchPrograms(Q, { limit: lim * 4, byTime: false }).filter(p => ok(p.channel_id) && !seen.has(p.title) && seen.add(p.title)).slice(0, lim);
   }
   // Ordningen: grupper vars bästa träff är på en bättre nivå först (exakt > början av titel/ord > innehåller >
   // stavfel), annars standardordningen – "keanu" visar Personer först, "bamse" Filmer före Avsnitt

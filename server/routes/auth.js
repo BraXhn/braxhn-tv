@@ -1,7 +1,7 @@
 // Status, första kontot, inloggning, lösenord, tvåstegsverifiering, sessioner, passkeys och profiler (hushåll).
 import crypto from 'node:crypto';
 import { get, getSetting, setSetting, run, now, all } from '../db.js';
-import { send, fail, readJson, clientIp, isHttps, isPrivate } from '../util.js';
+import { send, fail, readJson, clientIp, rateIp, isHttps, isPrivate } from '../util.js';
 import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey,
   quickConnectOn, qcCreate, qcFind, qcFindCode, qcApprove, qcRemove, QC_TTL } from '../auth.js';
 import { hasTmdb } from '../scanner.js';
@@ -78,13 +78,13 @@ route('POST', '/api/setup', pub, async (c) => {
 });
 
 route('POST', '/api/login', pub, async (c) => {
-  const ip = clientIp(c.req);
+  const ip = clientIp(c.req), rip = rateIp(c.req); // rip: gissningsspärrens adress (påhittad hemadress räknas på avsändaren)
   const { name, password, app, code, remember } = await readJson(c.req);
   const uname = String(name || '').trim().slice(0, 64);
   const generic = () => fail(c.res, 401, 'Fel namn eller lösenord');
-  if (ipBlocked(ip)) { audit('login_denied', { ip, detail: 'ip-spärr' }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
+  if (ipBlocked(rip)) { audit('login_denied', { ip, detail: 'ip-spärr' }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
   // Kontospärren gäller inte från hemnätet – annars kan en angripare låsa ute dig från ditt eget nät
-  if (userLocked(uname) && !isTrusted(c.req)) { noteFail(ip); audit('login_locked', { ip, user: { name: uname } }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
+  if (userLocked(uname) && !isTrusted(c.req)) { noteFail(rip); audit('login_locked', { ip, user: { name: uname } }); return fail(c.res, 429, 'För många försök – vänta en stund och försök igen'); }
   const u0 = get('SELECT * FROM users WHERE name=?', uname);
   let u = u0 && !u0.parent_id ? u0 : null; // profiler nås bara via profilbyte i sitt hushåll
   let ok = u ? await checkPw(String(password || ''), u.pass) : await dummyCheck(String(password || ''));
@@ -107,7 +107,7 @@ route('POST', '/api/login', pub, async (c) => {
   }
   if (!ok && adminOnly) { audit('login_denied', { ip, user: u0, detail: 'lösenord bara för administratörer' }); return fail(c.res, 403, 'Logga in med enkel inloggning – lösenordsinloggning är bara för administratörer'); }
   if (!ok) {
-    const locked = noteFail(ip, isTrusted(c.req) ? null : uname);
+    const locked = noteFail(rip, isTrusted(c.req) ? null : uname);
     audit('login_fail', { ip, user: { id: u?.id, name: uname }, detail: locked ? 'kontot spärrat tillfälligt för inloggning utifrån' : ldapDown ? 'LDAP-servern svarar inte' : null });
     if (ldapDown && !u) return fail(c.res, 503, 'Inloggningen via katalogtjänsten (LDAP) fungerar inte just nu – försök igen om en stund');
     return generic();
@@ -124,7 +124,7 @@ route('POST', '/api/login', pub, async (c) => {
     if (step > 0) run('UPDATE users SET totp_last=? WHERE id=?', step, u.id);
     else if (useRecoveryCode(u, code)) audit('2fa_recovery_used', { ip, user: u });
     else {
-      const locked = noteFail(ip, uname);
+      const locked = noteFail(rip, uname);
       audit('login_fail', { ip, user: u, detail: 'fel tvåstegskod' + (locked ? ', kontot spärrat tillfälligt' : '') });
       return send(c.res, 401, { error: 'Fel kod', need2fa: true });
     }
@@ -452,6 +452,17 @@ route('DELETE', '/api/profiles/:pid', user, (c) => {
   audit('profile_deleted', { ...ctx(c), detail: p.name });
   send(c.res, 200, { ok: true });
 });
+// Felaktig PIN (eller huvudkontots lösenord från en barnprofil) vid profilbyte, per målprofil: 5 fel → 5 min spärr,
+// därefter dubbelt så länge (högst 24 h); räkningen börjar om efter en timme utan fel. Gäller även på hemnätet.
+const switchFails = new Map(); // målprofilens id → { n, until, last }
+const switchLocked = (id) => (switchFails.get(id)?.until || 0) > Date.now();
+function switchFail(id) {
+  const f = switchFails.get(id) || { n: 0, until: 0, last: 0 };
+  if (Date.now() - f.last > 3600e3) f.n = 0;
+  f.n++; f.last = Date.now();
+  if (f.n >= 5) f.until = Date.now() + Math.min(24 * 3600e3, 5 * 60e3 * 2 ** (f.n - 5));
+  switchFails.set(id, f);
+}
 route('POST', '/api/profiles/switch', user, async (c) => {
   const ip = clientIp(c.req);
   if (ipBlocked(ip)) return fail(c.res, 429, 'För många försök – vänta en stund');
@@ -461,13 +472,22 @@ route('POST', '/api/profiles/switch', user, async (c) => {
   if (!t || (t.id !== root && t.parent_id !== root)) return fail(c.res, 404, 'Profilen finns inte');
   if (t.id !== me.id) {
     if (userLocked(t.name) && !isTrusted(c.req)) { noteFail(ip); return fail(c.res, 429, 'För många försök – vänta en stund'); }
+    // Egen spärr per målprofil som gäller även på hemnätet: där är det en familjemedlem som gissar (fyrsiffrig PIN),
+    // och kontospärren ovan gäller bara utifrån. Egen tabell (inte kontospärrens namn), så att ingen kan spärra
+    // profilbytet genom att logga in fel med ett påhittat användarnamn.
+    const needs = !!t.pin || (me.max_age != null && (t.max_age == null || t.max_age > me.max_age));
+    if (needs && switchLocked(t.id)) { audit('profile_pin_fail', { ip, user: t, detail: 'spärrad efter för många fel' }); return fail(c.res, 429, 'För många felaktiga försök – vänta en stund'); }
     if (t.pin) {
-      if (!pin || !await checkPw(String(pin), t.pin)) { noteFail(ip, t.name); audit('profile_pin_fail', { ip, user: t }); return send(c.res, 401, { error: 'Fel PIN', needPin: true }); }
-    } else if (me.max_age != null && (t.max_age == null || t.max_age > me.max_age)) {
+      // Utan PIN (appen frågar först) räknas inte som ett fel
+      if (!pin) return send(c.res, 401, { error: 'Fel PIN', needPin: true });
+      if (!await checkPw(String(pin), t.pin)) { noteFail(ip); switchFail(t.id); audit('profile_pin_fail', { ip, user: t }); return send(c.res, 401, { error: 'Fel PIN', needPin: true }); }
+    } else if (needs) {
       // Från en barnprofil till en profil med högre åldersgräns utan PIN: kräv huvudkontots lösenord
       const r = get('SELECT * FROM users WHERE id=?', root);
-      if (!password || !await checkPw(String(password), r.pass)) { noteFail(ip, r.name); return send(c.res, 401, { error: 'Ange huvudkontots lösenord', needPassword: true }); }
+      if (!password) return send(c.res, 401, { error: 'Ange huvudkontots lösenord', needPassword: true });
+      if (!await checkPw(String(password), r.pass)) { noteFail(ip, isTrusted(c.req) ? null : r.name); switchFail(t.id); return send(c.res, 401, { error: 'Ange huvudkontots lösenord', needPassword: true }); }
     }
+    if (needs) switchFails.delete(t.id);
   }
   const meta = { ua: c.req.headers['user-agent'], ip };
   run('DELETE FROM sessions WHERE token=?', c.user.tokenHash);
