@@ -12,6 +12,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dumpSql, loadSql, fixtureMeta } from './fixtures/db/make.mjs';
+import { freePort } from './helpers/port.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXDIR = path.join(REPO, 'test', 'fixtures', 'db');
@@ -58,7 +59,7 @@ function openWithDbJs(config) {
 }
 
 async function startServer(config) {
-  const port = 21000 + Math.floor(Math.random() * 900) * 2;
+  const port = await freePort();
   const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
     cwd: REPO, env: { ...env(config), PORT: String(port), HTTPS_PORT: String(port + 1) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; p.stdout.on('data', d => log += d); p.stderr.on('data', d => log += d);

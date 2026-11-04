@@ -19,8 +19,15 @@ export const freshKeys = () => refreshKeys();
  *   cols   kolumner som behövs (gärna _t = rå titel, för å/ä/ö-bonusen)
  *   key    uttryck för nyckeln (t.ex. 'x.skey'), key2 = ev. sekundär nyckel (originaltitel, författare …)
  *   blob   kompakt form av båda för förurvalet (standard: key + 'c', alltså x.skeyc)
+ *   own/via  i stället för blob i villkoren när blob är "egen || ' ' || en annan tabells nyckel": own = den egna
+ *          kompakta kolumnen, via = SQL med ett ? som är sant när den andra tabellens nyckel innehåller ordet (t.ex.
+ *          "t.artist_id IN (SELECT id FROM artists WHERE instr(skeyc, ?) > 0)"). Samma träffar – sökorden saknar
+ *          mellanslag och kan alltså inte gå över skarven – men den andra tabellen läses en gång i stället för en gång
+ *          per rad (50 000 låtar: artistens nyckel slogs upp för varje låt).
  *   year   uttryck för år (då gäller årsfiltret: "matrix 1999"), pop = uttryck för popularitet (vid lika poäng)
  *   colParams  parametrar i cols, pop och from (i den ordningen, före params)
+ *   fetch  (ids) => fullständiga rader: cols/from är då bara det rankningen behöver (id + _t) och de tunga kolumnerna
+ *          hämtas bara för de limit bästa – inte för alla kandidater (tusentals låtar på ett vanligt ord)
  * Returnerar raderna sorterade med poängen i _s.
  */
 export function ranked(spec, Q, limit) {
@@ -31,9 +38,12 @@ export function ranked(spec, Q, limit) {
   const K = spec.key, K2 = spec.key2 || null;
   // Förurvalet på den kompakta kolumnen (skeyc): ett ord som finns i nyckeln finns också i den kompakta formen
   const KC = spec.blob || `${K}c`;
+  // Villkoret "ordet finns i blob" och dess parametrar
+  const has = spec.via ? `(instr(${spec.own}, ?) > 0 OR ${spec.via})` : `instr(${KC}, ?) > 0`;
+  const hp = (w) => spec.via ? [w, w] : [w];
   const conds = [], cp = [];
-  for (const c of new Set([q.compact, Q.all.compact].filter(Boolean))) { conds.push(`instr(${KC}, ?) > 0`); cp.push(c); }
-  if (q.words.length > 1) { conds.push('(' + q.words.map(() => `instr(${KC}, ?) > 0`).join(' AND ') + ')'); cp.push(...q.words); }
+  for (const c of new Set([q.compact, Q.all.compact].filter(Boolean))) { conds.push(has); cp.push(...hp(c)); }
+  if (q.words.length > 1) { conds.push('(' + q.words.map(() => has).join(' AND ') + ')'); cp.push(...q.words.flatMap(hp)); }
   const sel = (extra = '') => `SELECT ${extra}${spec.cols}, ${K} AS _k${K2 ? `, ${K2} AS _k2` : ''}${spec.year ? `, ${spec.year} AS _y` : ''}${spec.pop ? `, ${spec.pop} AS _n` : ''}
     ${spec.from} WHERE (${spec.where || '1'}) AND ${K} IS NOT NULL`;
   const P = [...(spec.colParams || []), ...(spec.params || [])];
@@ -50,16 +60,19 @@ export function ranked(spec, Q, limit) {
     let need = 0;
     for (const w of q.words) {
       const t = typosFor(w);
-      if (!t) { fc.push(`(instr(${KC}, ?) > 0)`); fp.push(w); need++; continue; }
+      if (!t) { fc.push(`(${has})`); fp.push(...hp(w)); need++; continue; }
       const bg = bigrams(w);
       need += Math.max(1, bg.length - 3 * t);
-      for (const b of bg) { fc.push(`(instr(${KC}, ?) > 0)`); fp.push(b); }
+      for (const b of bg) { fc.push(`(${has})`); fp.push(...hp(b)); }
     }
     out = score(all(`SELECT * FROM (${sel(`${fc.join(' + ')} AS _g, `)}${yc}) WHERE _g >= ? ORDER BY _g DESC LIMIT ${FUZZY_CAP}`,
       ...fp, ...P, ...yp, need), true);
   }
   out.sort((a, b) => (b._s - a._s) || ((b._n ?? 0) - (a._n ?? 0)) || (a._k.length - b._k.length) || (a._k < b._k ? -1 : a._k > b._k ? 1 : 0));
-  return out.slice(0, limit);
+  out = out.slice(0, limit);
+  if (!spec.fetch || !out.length) return out;
+  const full = new Map(spec.fetch(out.map(r => r.id)).map(r => [r.id, r]));
+  return out.filter(r => full.has(r.id)).map(r => Object.assign(full.get(r.id), { _s: r._s }));
 }
 
 /** Titlar (filmer, serier, avsnitt) som matchar. age = ageFilter(uid) (alias i = titeln, s = ev. serie). Ger [{id, kind, _s}] */

@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { auditPage } from './helpers/a11y-audit.js';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -21,7 +22,7 @@ for (const p of [process.env.PLAYWRIGHT, '/opt/node22/lib/node_modules/playwrigh
 }
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-learn-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 31000 + Math.floor(Math.random() * 900);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const SHOTS = process.env.SHOTS || '';

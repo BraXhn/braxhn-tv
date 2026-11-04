@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
 import { HLS_VOD, hlsConfig, abrClass, holdEmergency, fromFirstByte, TTFB_CAP } from '../web/js/player/hlsconfig.js';
 import { stallCause } from '../server/stalls.js';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -22,7 +23,7 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-smooth-'));
 process.env.CONFIG_DIR = path.join(ROOT, 'unitconfig');
 fs.mkdirSync(process.env.CONFIG_DIR, { recursive: true });
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 19000 + Math.floor(Math.random() * 900);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const BIG = +(process.env.SMOOTH_BIG || 600); // filmer i störbiblioteket

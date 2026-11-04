@@ -13,12 +13,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const hasX265 = hasFfmpeg && /libx265/.test(spawnSync('ffmpeg', ['-hide_banner', '-encoders']).stdout?.toString() || '');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-shrink-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 29000 + Math.floor(Math.random() * 1000);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 process.env.CONFIG_DIR = path.join(ROOT, 'unitconfig');

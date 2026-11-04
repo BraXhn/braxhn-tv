@@ -8,6 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
+// Före första test(): en top-level await mellan testerna lät node:test köra after() innan de sista testerna
+const PORT = await freePort();
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-search-'));
 process.env.CONFIG_DIR = path.join(ROOT, 'unit');
@@ -146,7 +149,6 @@ test('prestanda: 10 000 titlar söks på under 50 ms', () => {
 });
 
 // ---- mot en riktig server ----
-const PORT = 21000 + Math.floor(Math.random() * 1000);
 const B = `http://127.0.0.1:${PORT}`, CONFIG = path.join(ROOT, 'config'), PW = 'Testlösen-2026!';
 let token = '';
 async function req(p, { method = 'GET', body, tok = token } = {}) {

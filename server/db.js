@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { searchKey, compactKey } from './searchkey.js';
 
+// Testerna får aldrig röra den riktiga /config (node --test sätter NODE_TEST_CONTEXT i varje testfils process). Som
+// root syns det inte lokalt, men GitHub Actions kör som vanlig användare och bygget av Docker-imagen föll. Sätt
+// CONFIG_DIR innan servermoduler importeras (dynamisk import efter process.env.CONFIG_DIR = …).
+if (!process.env.CONFIG_DIR && process.env.NODE_TEST_CONTEXT) throw new Error('CONFIG_DIR saknas i testet – sätt process.env.CONFIG_DIR till en tillfällig mapp innan servermoduler importeras');
 export const CONFIG = process.env.CONFIG_DIR || '/config';
 export const IMAGES = path.join(CONFIG, 'images');
 fs.mkdirSync(IMAGES, { recursive: true });
@@ -188,7 +192,11 @@ addCol('items', 'version_of', 'INTEGER REFERENCES items(id) ON DELETE SET NULL')
 addCol('items', 'ep_guess', 'INTEGER NOT NULL DEFAULT 0');
 // Webbinloggning: 1 = håll inloggad i 30 dagar, 0 = bara tills webbläsaren stängs (och högst 12 h utan aktivitet)
 addCol('sessions', 'remember', 'INTEGER NOT NULL DEFAULT 1');
-db.exec('CREATE INDEX IF NOT EXISTS items_version ON items(version_of)');
+// Delindex (bara versionerna): som vanligt index räknade statistiken (sqlite_stat1) NULL som många olika värden, så
+// med några hundra versioner trodde SQLite att version_of IS NULL gav ~200 rader och valde indexet för alla listor –
+// hela items i stället för bibliotekets index (5 000 filmer: 31 → 7 ms för id-listan). version_of=? använder det ändå.
+if (!/WHERE/i.test(db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='items_version'").get()?.sql ?? 'WHERE')) db.exec('DROP INDEX items_version');
+db.exec('CREATE INDEX IF NOT EXISTS items_version ON items(version_of) WHERE version_of IS NOT NULL');
 // Lyssningsfunktioner – jämn ljudnivå: ReplayGain i dB mot -18 LUFS, toppvärde (linjärt) och källa ('tag', 'mätt', 'fel'; NULL = inte kontrollerat)
 addCol('tracks', 'rg_track', 'REAL');
 addCol('tracks', 'rg_album', 'REAL');
@@ -846,7 +854,9 @@ export function refreshKeys(only = null, max = 20000) {
   for (const [t, { a, b }] of SEARCH_TABLES) {
     if (only && t !== only) continue;
     for (let left = max; left > 0;) {
-      const rows = stmt(`SELECT rowid AS _id, ${[...a, ...b].join(', ')} FROM ${t} WHERE skey IS NULL LIMIT ?`).all(Math.min(5000, left));
+      // INDEXED BY: med statistik från när nycklarna saknades (t.ex. tagen direkt efter en första skanning) valde SQLite
+      // annars att gå igenom hela tabellen – före varje sökning (50 000 låtar + 68 000 titlar: 37 → 0,1 ms)
+      const rows = stmt(`SELECT rowid AS _id, ${[...a, ...b].join(', ')} FROM ${t} INDEXED BY ${t}_skey WHERE skey IS NULL LIMIT ?`).all(Math.min(5000, left));
       if (!rows.length) break;
       tx(() => {
         const st = b.length ? stmt(`UPDATE ${t} SET skey=?, skeyc=?, skey2=? WHERE rowid=?`) : stmt(`UPDATE ${t} SET skey=?, skeyc=? WHERE rowid=?`);

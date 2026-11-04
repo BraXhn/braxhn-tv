@@ -6,11 +6,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-pbp-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 23000 + Math.floor(Math.random() * 1000);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 let srv, cookie = '';

@@ -11,6 +11,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-scrobble-'));
 const LB_TOKEN = 'lb-token-0123456789abcdef', LF_KEY = 'lfkey-test', LF_SECRET = 'lfsecret-test', LF_SK = 'lf-session-key-hemlig';
@@ -217,7 +218,7 @@ test('koppla från tar bort kopplingen och dess kö', () => {
 
 // ---------- HTTP: routes och kopplingen till /played (webben och apparna) ----------
 test('http: Mitt konto-routes, /played skickar "spelas nu", barnprofil nekas, hemligheter syns inte', async () => {
-  const PORT = 19900 + Math.floor(Math.random() * 90), B = `http://127.0.0.1:${PORT}`;
+  const PORT = await freePort(), B = `http://127.0.0.1:${PORT}`;
   const cfg = path.join(ROOT, 'srv');
   const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
     env: { ...process.env, ...ENV, LASTFM_API_KEY: '', LASTFM_SECRET: '', PORT: String(PORT), HTTPS_PORT: String(PORT + 1), CONFIG_DIR: cfg, MEDIA_ROOT: path.join(ROOT, 'media'),

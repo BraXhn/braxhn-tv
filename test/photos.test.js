@@ -10,11 +10,12 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { parseImage, parseTiff, exifDate, sniff, heicFromVersion, iso6709 } from '../server/exif.js';
 import { tiff, phoneExif, jpegWithExif, pngWithExif, webpWithExif, heifWithExif, heifIlocBomb } from './helpers/exif-builder.js';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-photo-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config'), PICS = path.join(MEDIA, 'Foton'), OTHER = path.join(MEDIA, 'Filmer');
-const PORT = 24000 + Math.floor(Math.random() * 1000);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 let srv, admin = '', webCookie = '';
@@ -121,8 +122,9 @@ test('EXIF-läsaren tål trasiga och fientliga filer', () => {
   assert.equal(exifDate('2021:02:28 10:00:00'), Date.UTC(2021, 1, 28, 10) / 1000);
   const zero = parseTiff(phoneExif({ lat: 0, lon: 0 }));
   assert.equal(zero.lat, undefined, '0,0 är ingen position');
-  // Slumpmässigt skräp
-  for (let i = 0; i < 200; i++) { const b = Buffer.from(Array.from({ length: 64 + i }, () => Math.floor(Math.random() * 256))); b.write(i % 2 ? 'MM\0*' : 'II*\0', 0, 'latin1'); parseTiff(b); parseImage(Buffer.concat([Buffer.from([0xFF, 0xD8]), b])); }
+  // Slumpmässigt skräp – med fast frö, så att ett fel går att återskapa och inte bara syns ibland
+  let seed = 12345; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 200; i++) { const b = Buffer.from(Array.from({ length: 64 + i }, () => Math.floor(rnd() * 256))); b.write(i % 2 ? 'MM\0*' : 'II*\0', 0, 'latin1'); parseTiff(b); parseImage(Buffer.concat([Buffer.from([0xFF, 0xD8]), b])); }
 });
 
 test('EXIF-läsaren: fientlig HEIC med tomma iloc-utsträckningar tar linjär tid (blockerade servern)', () => {

@@ -11,7 +11,7 @@ import { StatementSync } from 'node:sqlite';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-large-'));
 process.env.MEDIA_ROOT = path.join(process.env.CONFIG_DIR, 'media');
-const { db, all, get } = await import('../server/db.js');
+const { db, all, get, refreshKeys } = await import('../server/db.js');
 const C = await import('../server/http/context.js');
 const lf = await import('../server/libfilter.js');
 const music = await import('../server/music.js');
@@ -92,6 +92,30 @@ test('listorna (listItems) använder bibliotekets index – inte sökningens ell
         assert.ok(!p.some(d => /items_search|items_kind_rating|items_color_todo/.test(d)), `${label}, ${name}:\n${p.join('\n')}`);
       }
     }
+  }
+});
+
+test('versioner och inaktuell statistik: listorna tar inte versionsindexet, söknycklarna läser sitt index', () => {
+  // Några hundra versioner: i statistiken räknades NULL som många olika värden, så version_of IS NULL såg ut att ge
+  // ~200 rader och det vanliga indexet på version_of valdes för alla listor (hela items i stället för biblioteket)
+  const vs = movies.slice(0, 300).map(m => Number(db.prepare(`INSERT INTO items(library_id,kind,title,sort_title,added,path,version_of) VALUES(?,'movie','Version','version',1,?,?)`)
+    .run(LM, `/x/Filmer/v${m}.mkv`, m).lastInsertRowid));
+  try {
+    db.exec('ANALYZE');
+    for (const [name, fn] of [['sida', () => C.listItems(uid, 'i.library_id=? AND i.kind=?', [LM, 'movie'], 'i.sort_title', 60, 0, { slim: true })],
+      ['hela', () => C.listItems(uid, 'i.library_id=? AND i.kind=?', [LM, 'movie'], 'i.sort_title', 5000, 0, { slim: true })]]) {
+      const p = plans(fn, 'FROM items i JOIN (SELECT ? AS uid)');
+      assert.ok(p.length && p.every(x => !x.some(d => /items_version/.test(d)) && x.some(d => /items_lib_sort/.test(d))), `${name}:\n${p.flat().join('\n')}`);
+    }
+    // En sida räknas på id först: samma titlar i samma ordning som hela listan
+    const all5000 = C.listItems(uid, 'i.library_id=? AND i.kind=?', [LM, 'movie'], 'i.added DESC', 5000, 0, { slim: true }).map(r => r.id);
+    assert.deepEqual(C.listItems(uid, 'i.library_id=? AND i.kind=?', [LM, 'movie'], 'i.added DESC', 60, 120, { slim: true }).map(r => r.id), all5000.slice(120, 180));
+    // Statistiken togs när alla söknycklar saknades (som direkt efter en första skanning): refreshKeys använder ändå indexet
+    db.exec(`INSERT OR REPLACE INTO sqlite_stat1(tbl, idx, stat) VALUES('items', 'items_skey', '9000 9000'), ('tracks', 'tracks_skey', '6000 6000'); ANALYZE sqlite_schema`);
+    const p = plans(() => refreshKeys(), 'WHERE skey IS NULL');
+    assert.ok(p.length >= 2 && p.every(x => x.some(d => /USING (COVERING )?INDEX \w+_skey/.test(d))), p.flat().join('\n'));
+  } finally {
+    db.exec(`DELETE FROM items WHERE id IN (${vs.join(',')}); ANALYZE`);
   }
 });
 

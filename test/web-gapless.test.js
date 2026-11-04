@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -22,7 +23,7 @@ for (const p of [process.env.PLAYWRIGHT, '/opt/node22/lib/node_modules/playwrigh
 const skip = !hasFfmpeg ? 'ffmpeg saknas' : !chromium ? 'Playwright saknas' : false;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-gapless-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 29000 + Math.floor(Math.random() * 1000);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const SR = 44100;

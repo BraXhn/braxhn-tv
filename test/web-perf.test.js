@@ -8,6 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-perf-'));
@@ -213,7 +214,7 @@ test('servern: /api/home och /api/status svarar snabbt med ett större bibliotek
   const { DatabaseSync } = await import('node:sqlite');
   const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-perfhome-')), CONFIG = path.join(ROOT, 'config'), MEDIA = path.join(ROOT, 'media');
   fs.mkdirSync(MEDIA, { recursive: true });
-  const PORT = 31000 + Math.floor(Math.random() * 900), B = `http://127.0.0.1:${PORT}`, PW = 'Testlösen-2026!';
+  const PORT = await freePort(), B = `http://127.0.0.1:${PORT}`, PW = 'Testlösen-2026!';
   const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], { cwd: path.join(import.meta.dirname, '..'),
     env: { ...process.env, PORT: String(PORT), HTTPS_PORT: String(PORT + 1), CONFIG_DIR: CONFIG, MEDIA_ROOT: MEDIA, TRANSCODE_DIR: path.join(ROOT, 'tc'),
       TMDB_API_KEY: '', WATCH_FILES: '0', UPDATE_CHECK: '0' }, stdio: ['ignore', 'ignore', 'ignore'] });

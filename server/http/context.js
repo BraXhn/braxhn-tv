@@ -107,9 +107,19 @@ export function ageFilter(uid, { photos = false } = {}) {
 }
 // Filmversioner (version_of) listas aldrig – bara huvudraden syns i listor, sök och rekommendationer
 export const MAIN_ONLY = ' AND i.version_of IS NULL';
+const PAGE_MAX = 1000; // listItems: upp till så många rader räknas sidan först på id (se nedan)
 /** slim: utan beskrivning (för stora listor där den inte visas); versions: även filmversioner (bara för uppslag på id) */
 export const listItems = (uid, where, params = [], order = 'i.sort_title', limit = 500, offset = 0, { slim = false, versions = false } = {}) => {
   const age = ageFilter(uid, { photos: versions });
+  if (limit <= PAGE_MAX && !versions) {
+    // En sida: ordningen och urvalet räknas först på id (utan kolumnerna), sedan hämtas bara sidans rader. SQLite
+    // räknar annars ut alla kolumner – även seriernas avsnittsräkning – för varje titel innan den sorterar (3 000
+    // serier i titelordning: 28 → 1,5 ms för en sida). Filtret kan använda PROG:s alias (ep_watched …).
+    const prog = /\bep_/.test(where) ? `, ${PROG}` : '';
+    return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${MY_RATING} AS u_rating, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id
+      WHERE i.id IN (SELECT id FROM (SELECT i.id${prog} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?)) ORDER BY ${order}`,
+    uid, uid, ...params, ...age.params, limit, offset).map(shape);
+  }
   return all(`SELECT ${COLS}${slim ? '' : ', i.overview'}, s.title AS show_title, s.poster AS show_poster, s.thumb AS show_thumb, s.poster_color AS show_poster_color, ${MY_RATING} AS u_rating, ${PROG} ${FROM} LEFT JOIN items s ON s.id=i.parent_id WHERE (${where})${versions ? '' : MAIN_ONLY}${age.sql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     uid, ...params, ...age.params, limit, offset).map(shape);
 };

@@ -14,6 +14,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -22,7 +23,7 @@ for (const p of [process.env.PLAYWRIGHT, '/opt/node22/lib/node_modules/playwrigh
 }
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-moments-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config');
-const PORT = 32000 + Math.floor(Math.random() * 900);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const SHOTS = process.env.SHOTS || '';
@@ -69,8 +70,10 @@ async function req(p, { method = 'GET', body, tok = admin, raw = false, headers 
   return { status: r.status, headers: r.headers, data: raw ? Buffer.from(await r.arrayBuffer()) : ct.includes('json') ? await r.json() : await r.text() };
 }
 const login = async (name) => (await req('/api/login', { method: 'POST', body: { name, password: PW, app: true }, tok: '' })).data.token;
-async function until(fn, what, n = 240) {
-  for (let i = 0; i < n; i++) { const v = await fn(); if (v) return v; await sleep(250); }
+// Väntar på tid, inte antal varv: klippen görs med lägsta prioritet (nice 19 + ionice), så under hög belastning
+// (andra testsviter på samma dator) tar de mycket längre tid än vanligt
+async function until(fn, what, ms = 150000) {
+  for (const end = Date.now() + ms; Date.now() < end;) { const v = await fn(); if (v) return v; await sleep(250); }
   assert.fail('väntade förgäves: ' + what);
 }
 const dbRun = (sql, ...a) => { const db = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db')); db.exec('PRAGMA busy_timeout=5000'); try { return db.prepare(sql)[/^\s*select/i.test(sql) ? 'get' : 'run'](...a); } finally { db.close(); } };
@@ -351,11 +354,16 @@ tw('webben: spara ögonblick i spelaren, flödet, reaktion, kommentar, dela och 
     await page.waitForSelector('#toast >> text=Ögonblicket sparas');
     const mine = await until(async () => { const m = (await req('/api/moments')).data.moments.find(x => x.title === `Från spelaren ${mode}`); return m?.state === 'ready' && m; }, 'klippet från spelaren');
     assert.equal(mine.mode, 'encode'); assert.equal(mine.watermark, true); assert.equal(mine.start, 2);
+    assert.equal((await req(`/api/moments/${mine.id}/thumb`, { raw: true })).status, 200, 'miniatyren finns');
     await page.click('#cstop');
+    // Stängd spelare tar bort sin historikpost med history.back() (asynkront). Kom goto före den hann klart gick
+    // Bakåt från flödet tillbaka till titelsidan – flödet med miniatyren visades aldrig (föll under hög belastning).
+    await page.waitForFunction(() => document.querySelector('#player')?.hidden !== false && !history.state?.overlay);
     // Flödet
     await page.goto(B + '/#/moments');
-    await page.waitForSelector(`.mcard[data-mid="${mine.id}"] img`);
-    await page.waitForFunction((id) => document.querySelector(`.mcard[data-mid="${id}"] img`)?.naturalWidth > 0, mine.id);
+    await page.waitForFunction(() => location.hash === '#/moments');
+    await page.waitForSelector(`.mcard[data-mid="${mine.id}"] img`, { timeout: 60000 });
+    await page.waitForFunction((id) => document.querySelector(`.mcard[data-mid="${id}"] img`)?.naturalWidth > 0, mine.id, { timeout: 60000 });
     assert.equal(await page.textContent('h1'), 'Ögonblick');
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `moments-${mode}.png`), fullPage: true });
     const rb = `.mcard[data-mid="${mine.id}"] [data-react="😂"]`;

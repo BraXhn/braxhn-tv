@@ -15,11 +15,12 @@ import { openZip, safeName } from '../server/ebooks/zip.js';
 import { parseXml, textOf, find } from '../server/ebooks/xml.js';
 import { readEpub, parseComicInfo, seriesFromName, ageFromRating, readPdf, resolveHref, pdfString, imageType } from '../server/ebooks/formats.js';
 import { zip, epub, cbz, pdf, png, paragraphs } from './helpers/ebook-fixtures.js';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-ebook-'));
 const MEDIA = path.join(ROOT, 'media'), CONFIG = path.join(ROOT, 'config'), LIB = path.join(MEDIA, 'Böcker'), LIB2 = path.join(MEDIA, 'Manga');
-const PORT = 25000 + Math.floor(Math.random() * 1000);
+const PORT = await freePort();
 const B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

@@ -189,8 +189,9 @@ export async function make(m) {
       fs.renameSync(ffo + '.tmp', ffo); ffSize = fs.statSync(ffo).size;
     }
     const info = await probe(fileOf(m.id));
-    await ffmpeg(['-ss', Math.min(dur / 2, 2).toFixed(2), '-i', fileOf(m.id), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', '-f', 'image2', fileOf(m.id, 'jpg')], { cwd: DIR, label: 'miniatyren' })
-      .catch(e => console.warn('[ögonblick]', e.message));
+    // Miniatyren: en bild mitt i (högst 2 s in); misslyckas det, första bilden – ett klipp utan miniatyr ser trasigt ut
+    const thumb = (ss) => ffmpeg(['-ss', ss, '-i', fileOf(m.id), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', '-f', 'image2', fileOf(m.id, 'jpg')], { cwd: DIR, label: 'miniatyren' });
+    await thumb(Math.min(dur / 2, 2).toFixed(2)).catch(() => thumb('0')).catch(e => console.warn('[ögonblick]', e.message));
     const size = fs.statSync(fileOf(m.id)).size;
     run('UPDATE moments SET state=1, mode=?, s=?, size=?, ff_size=?, dur=?, width=?, height=?, mute=?, muted=?, burn_prof=?, error=NULL WHERE id=?',
       kf != null ? 'copy' : 'encode', start, size, ffSize, info?.dur || dur, info?.width, info?.height, JSON.stringify(mute), enforced ? 1 : 0, burnProf ? 1 : 0, m.id);

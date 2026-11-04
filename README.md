@@ -553,7 +553,7 @@ Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[
 
 ## Testat och otestat
 
-Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introknappar testades i en webbläsare:
+Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introknappar testades i en webbläsare. Hela testsviten (`npm test`) körs före varje Docker-image och går även som vanlig användare utan skrivrätt till `/config` – ett test som rör den riktiga konfigurationsmappen faller direkt, och testservrarna får kontrollerat lediga portar (`test/hygiene.test.js`):
 
 | Funktion | Resultat i testet |
 |---|---|

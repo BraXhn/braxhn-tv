@@ -120,10 +120,11 @@ const albumNode = (al, base) => container(`A${al.id}`, `L${al.library_id}`, al.t
   (al.artist ? `<upnp:artist>${xml(al.artist)}</upnp:artist><dc:creator>${xml(al.artist)}</dc:creator>` : '') +
   (al.cover ? `<upnp:albumArtURI dlna:profileID="JPEG_TN">${xml(`${base}/dlna/cover/${al.id}.jpg`)}</upnp:albumArtURI>` : ''));
 function showNode(sh, base) {
-  const n = get('SELECT COUNT(DISTINCT season) AS n FROM items WHERE parent_id=? AND kind=\'episode\'', sh.id).n;
+  const n = get('SELECT COUNT(DISTINCT season) AS n FROM items WHERE parent_id=? AND kind=\'episode\' AND version_of IS NULL', sh.id).n;
   return container(`S${sh.id}`, `L${sh.library_id}`, sh.title, n, 'object.container.storageFolder',
     sh.poster ? `<upnp:albumArtURI dlna:profileID="JPEG_TN">${xml(`${base}/dlna/art/${sh.id}.jpg`)}</upnp:albumArtURI>` : '');
 }
+// Avsnittsversioner (version_of, t.ex. samma avsnitt i 4K) visas aldrig som egna avsnitt – bara huvudraden (som i webben)
 const seasonName = (n) => n === 0 ? 'Extramaterial' : `Säsong ${n}`;
 
 /** Barn till ett objekt: { nodes: [xml], total } (null = finns inte). Sidindelning görs här. */
@@ -149,13 +150,13 @@ export function children(id, base, start = 0, count = 0) {
   if ((m = /^S(\d+)$/.exec(id))) {
     const sh = itemAllowed(+m[1], ['show']);
     if (!sh) return null;
-    const seasons = all("SELECT season, COUNT(*) AS n FROM items WHERE parent_id=? AND kind='episode' GROUP BY season ORDER BY season", sh.id);
+    const seasons = all("SELECT season, COUNT(*) AS n FROM items WHERE parent_id=? AND kind='episode' AND version_of IS NULL GROUP BY season ORDER BY season", sh.id);
     return { nodes: seasons.slice(off, off + lim).map(s => container(`E${sh.id}_${s.season ?? 0}`, id, seasonName(s.season ?? 0), s.n)), total: seasons.length };
   }
   if ((m = /^E(\d+)_(\d+)$/.exec(id))) {
     const sh = itemAllowed(+m[1], ['show']);
     if (!sh) return null;
-    const eps = all(`${ITEM_SQL} WHERE i.parent_id=? AND i.kind='episode' AND COALESCE(i.season,0)=? ORDER BY i.episode, i.title`, sh.id, +m[2]);
+    const eps = all(`${ITEM_SQL} WHERE i.parent_id=? AND i.kind='episode' AND i.version_of IS NULL AND COALESCE(i.season,0)=? ORDER BY i.episode, i.title`, sh.id, +m[2]);
     if (!eps.length) return null;
     return { nodes: eps.slice(off, off + lim).map(e => videoItem(e, id, base)), total: eps.length };
   }
@@ -179,7 +180,7 @@ export function metadata(id, base) {
   if ((m = /^S(\d+)$/.exec(id))) { const sh = itemAllowed(+m[1], ['show']); return sh ? showNode(sh, base) : null; }
   if ((m = /^E(\d+)_(\d+)$/.exec(id))) {
     const sh = itemAllowed(+m[1], ['show']);
-    const n = sh ? get("SELECT COUNT(*) AS n FROM items WHERE parent_id=? AND kind='episode' AND COALESCE(season,0)=?", sh.id, +m[2]).n : 0;
+    const n = sh ? get("SELECT COUNT(*) AS n FROM items WHERE parent_id=? AND kind='episode' AND version_of IS NULL AND COALESCE(season,0)=?", sh.id, +m[2]).n : 0;
     return n ? container(id, `S${sh.id}`, seasonName(+m[2]), n) : null;
   }
   if ((m = /^I(\d+)$/.exec(id))) {

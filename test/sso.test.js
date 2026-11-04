@@ -125,6 +125,113 @@ async function oidcLogin(pid, user, { mode = 'ok', ip = lan(), cookie, tamper } 
 }
 const statusWith = async (kt) => (await req('/api/status', { token: null, cookie: kt })).data.user;
 
+// ---------------- simulerad LDAP-server ----------------
+// (Före första test(): servrarna startas med top-level await, och en sådan efter test() kan låta node:test köra after() för tidigt)
+// Egen BER-avkodning (oberoende av klientens) och en liten katalog. Filter utvärderas mot posterna.
+function tlvAt(b, o) {
+  const tag = b[o]; let len = b[o + 1], p = o + 2;
+  if (len & 0x80) { const k = len & 0x7f; len = 0; for (let i = 0; i < k; i++) len = len * 256 + b[p++]; }
+  return { tag, v: b.subarray(p, p + len), next: p + len, end: p + len <= b.length };
+}
+const kids = (v) => { const out = []; for (let o = 0; o < v.length;) { const t = tlvAt(v, o); out.push(t); o = t.next; } return out; };
+const enc = (tag, ...parts) => { const v = Buffer.concat(parts.map(p => Buffer.isBuffer(p) ? p : Buffer.from(String(p)))); const l = v.length < 128 ? [v.length] : v.length < 256 ? [0x81, v.length] : [0x82, v.length >> 8, v.length & 255]; return Buffer.concat([Buffer.from([tag, ...l]), v]); };
+const int = (n, tag = 2) => enc(tag, Buffer.from([n]));
+const os_ = (s) => enc(4, s);
+const result = (id, tag, code) => enc(0x30, int(id), enc(tag, int(code, 0x0a), os_(''), os_('')));
+const DIR = [
+  { dn: 'uid=anna,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['anna'], mail: ['anna@ex.se'], displayname: ['Anna A'], entryuuid: ['11111111-aaaa'], memberof: ['cn=tv-admins,ou=groups,dc=ex'] }, pw: 'Annas-lösen-1' },
+  { dn: 'uid=bertil,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['bertil'], mail: ['bertil@ex.se'], entryuuid: ['22222222-bbbb'] }, pw: 'Bertils-lösen-2' },
+  { dn: 'cn=Cilla (IT)\\2C Ek,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['cilla'], entryuuid: ['33333333-cccc'] }, pw: 'Cillas-lösen-3' },
+  { dn: 'uid=pappa,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['pappa'], entryuuid: ['44444444-dddd'] }, pw: 'LDAP-pappa-4' },
+  { dn: 'uid=utan,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['utan'], entryuuid: ['55555555-eeee'] }, pw: 'Utan-grupp-5' },
+  { dn: 'cn=tv-users,ou=groups,dc=ex', a: { objectclass: ['groupofnames'], cn: ['tv-users'], member: ['uid=bertil,ou=people,dc=ex', 'cn=Cilla (IT)\\2C Ek,ou=people,dc=ex', 'uid=pappa,ou=people,dc=ex'] } },
+  { dn: 'cn=tv-admins,ou=groups,dc=ex', a: { objectclass: ['groupofnames'], cn: ['tv-admins'], member: ['uid=anna,ou=people,dc=ex'] } }
+];
+const SERVICE = { dn: 'cn=svc,dc=ex', pw: BIND_PW };
+const LDAP = { binds: [], filters: [], tls: null };
+/** Filtret som träd (för kontrollen av injektion) och utvärdering mot en post */
+function decodeFilter(t) {
+  const tag = t.tag, c = () => kids(t.v);
+  if (tag === 0xa0) return { and: c().map(decodeFilter) };
+  if (tag === 0xa1) return { or: c().map(decodeFilter) };
+  if (tag === 0xa2) return { not: decodeFilter(c()[0]) };
+  if (tag === 0x87) return { present: t.v.toString() };
+  if (tag === 0xa3) { const [a, v] = c(); return { eq: [a.v.toString().toLowerCase(), v.v.toString()] }; }
+  if (tag === 0xa4) { const [a, s] = c(); return { sub: [a.v.toString().toLowerCase(), kids(s.v).map(x => [x.tag, x.v.toString()])] }; }
+  return { other: tag };
+}
+function match(f, e) {
+  const vals = (a) => (e.a[a] || []).map(String);
+  if (f.and) return f.and.every(x => match(x, e));
+  if (f.or) return f.or.some(x => match(x, e));
+  if (f.not) return !match(f.not, e);
+  if (f.present) return vals(f.present.toLowerCase()).length > 0;
+  if (f.eq) return vals(f.eq[0]).some(v => v.toLowerCase() === f.eq[1].toLowerCase());
+  if (f.sub) return vals(f.sub[0]).some(v => { const re = f.sub[1].map(([tg, s]) => (tg === 0x80 ? '^' : '') + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (tg === 0x82 ? '$' : '')).join('.*'); return new RegExp(re, 'i').test(v); });
+  return false;
+}
+let CERT = null;
+if (spawnSync('openssl', ['version']).status === 0) {
+  const k = path.join(ROOT, 'k.pem'), c = path.join(ROOT, 'c.pem');
+  const r = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', k, '-out', c, '-days', '1', '-subj', '/CN=localhost',
+    '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost']);
+  if (r.status === 0) CERT = { key: fs.readFileSync(k, 'utf8'), cert: fs.readFileSync(c, 'utf8') };
+}
+function ldapHandler(sock0) {
+  let sock = sock0, buf = Buffer.alloc(0), bound = null;
+  const onData = (d) => {
+    buf = Buffer.concat([buf, d]);
+    while (buf.length >= 2) {
+      const m = tlvAt(buf, 0);
+      if (!m.end) break;
+      buf = buf.subarray(m.next);
+      const [idT, op] = kids(m.v);
+      const id = idT.v[idT.v.length - 1];
+      if (op.tag === 0x60) { // bind
+        const [, dnT, pwT] = kids(op.v);
+        const dn = dnT.v.toString(), pw = pwT.v.toString();
+        LDAP.binds.push({ dn, pw: pw ? '***' : '' });
+        const e = DIR.find(x => x.dn === dn);
+        const ok = (dn === SERVICE.dn && pw === SERVICE.pw) || (e && e.pw && pw === e.pw) || (!pw && LDAP.allowUnauth);
+        bound = ok ? dn : null;
+        sock.write(result(id, 0x61, ok ? 0 : 49));
+      } else if (op.tag === 0x63) { // sökning
+        const [baseT, , , , , , filterT, attrsT] = kids(op.v);
+        const f = decodeFilter(filterT);
+        LDAP.filters.push(f);
+        const want = kids(attrsT.v).map(x => x.v.toString().toLowerCase());
+        if (!bound) { sock.write(result(id, 0x65, 50)); continue; }
+        for (const e of DIR.filter(x => x.dn.endsWith(baseT.v.toString()) && match(f, x))) {
+          const attrs = Object.entries(e.a).filter(([k]) => want.includes(k)).map(([k, v]) => enc(0x30, os_(k), enc(0x31, ...v.map(os_))));
+          sock.write(enc(0x30, int(id), enc(0x64, os_(e.dn), enc(0x30, ...attrs))));
+        }
+        sock.write(result(id, 0x65, 0));
+      } else if (op.tag === 0x77) { // StartTLS
+        if (!CERT) { sock.write(result(id, 0x78, 2)); continue; }
+        sock.write(result(id, 0x78, 0));
+        sock.removeListener('data', onData);
+        const t = new tls.TLSSocket(sock, { isServer: true, key: CERT.key, cert: CERT.cert });
+        t.on('secure', () => { LDAP.tls = 'starttls'; });
+        t.on('error', () => {});
+        t.on('data', onData); sock = t;
+      } else if (op.tag === 0x42) { sock.end(); }
+    }
+  };
+  sock.on('data', onData); sock.on('error', () => {});
+}
+const ldapSrv = net.createServer(ldapHandler);
+await new Promise(r => ldapSrv.listen(0, '127.0.0.1', r));
+const ldapsSrv = CERT ? tls.createServer({ key: CERT.key, cert: CERT.cert }, (s) => { LDAP.tls = 'ldaps'; ldapHandler(s); }) : null;
+if (ldapsSrv) await new Promise(r => ldapsSrv.listen(0, '127.0.0.1', r));
+// En server som tar emot anslutningen men aldrig svarar (tidsgränsen)
+const hang = net.createServer((s) => { s.on('error', () => {}); });
+await new Promise(r => hang.listen(0, '127.0.0.1', r));
+const LDAP_URL = `ldap://127.0.0.1:${ldapSrv.address().port}`;
+const LDAP_BASE = { kind: 'ldap', name: 'Katalogen', url: LDAP_URL, bindDn: SERVICE.dn, bindPassword: BIND_PW, baseDn: 'ou=people,dc=ex', userFilter: '(&(objectClass=person)(uid={user}))',
+  groupBaseDn: 'ou=groups,dc=ex', groupFilter: '(&(objectClass=groupOfNames)(member={dn}))', autoCreate: true, groups: { admin: ['tv-admins'], user: ['tv-users'] }, timeout: 2 };
+
+const ldapLogin = (name, password, ip = lan()) => req('/api/login', { method: 'POST', token: null, ip, body: { name, password, app: true } });
+
 after(() => { srv.close(); idp.close(); ldapSrv?.close(); ldapsSrv?.close(); hang?.close(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
 let OIDC;
@@ -280,111 +387,6 @@ test('OIDC: koppla från Mitt konto och ta bort kopplingen', async () => {
   assert.equal((await req('/api/me/sso/' + OIDC, { method: 'DELETE', token: null, cookie: kalle.kt, headers: { origin: B } })).status, 400);
 });
 
-// ---------------- simulerad LDAP-server ----------------
-// Egen BER-avkodning (oberoende av klientens) och en liten katalog. Filter utvärderas mot posterna.
-function tlvAt(b, o) {
-  const tag = b[o]; let len = b[o + 1], p = o + 2;
-  if (len & 0x80) { const k = len & 0x7f; len = 0; for (let i = 0; i < k; i++) len = len * 256 + b[p++]; }
-  return { tag, v: b.subarray(p, p + len), next: p + len, end: p + len <= b.length };
-}
-const kids = (v) => { const out = []; for (let o = 0; o < v.length;) { const t = tlvAt(v, o); out.push(t); o = t.next; } return out; };
-const enc = (tag, ...parts) => { const v = Buffer.concat(parts.map(p => Buffer.isBuffer(p) ? p : Buffer.from(String(p)))); const l = v.length < 128 ? [v.length] : v.length < 256 ? [0x81, v.length] : [0x82, v.length >> 8, v.length & 255]; return Buffer.concat([Buffer.from([tag, ...l]), v]); };
-const int = (n, tag = 2) => enc(tag, Buffer.from([n]));
-const os_ = (s) => enc(4, s);
-const result = (id, tag, code) => enc(0x30, int(id), enc(tag, int(code, 0x0a), os_(''), os_('')));
-const DIR = [
-  { dn: 'uid=anna,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['anna'], mail: ['anna@ex.se'], displayname: ['Anna A'], entryuuid: ['11111111-aaaa'], memberof: ['cn=tv-admins,ou=groups,dc=ex'] }, pw: 'Annas-lösen-1' },
-  { dn: 'uid=bertil,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['bertil'], mail: ['bertil@ex.se'], entryuuid: ['22222222-bbbb'] }, pw: 'Bertils-lösen-2' },
-  { dn: 'cn=Cilla (IT)\\2C Ek,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['cilla'], entryuuid: ['33333333-cccc'] }, pw: 'Cillas-lösen-3' },
-  { dn: 'uid=pappa,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['pappa'], entryuuid: ['44444444-dddd'] }, pw: 'LDAP-pappa-4' },
-  { dn: 'uid=utan,ou=people,dc=ex', a: { objectclass: ['person'], uid: ['utan'], entryuuid: ['55555555-eeee'] }, pw: 'Utan-grupp-5' },
-  { dn: 'cn=tv-users,ou=groups,dc=ex', a: { objectclass: ['groupofnames'], cn: ['tv-users'], member: ['uid=bertil,ou=people,dc=ex', 'cn=Cilla (IT)\\2C Ek,ou=people,dc=ex', 'uid=pappa,ou=people,dc=ex'] } },
-  { dn: 'cn=tv-admins,ou=groups,dc=ex', a: { objectclass: ['groupofnames'], cn: ['tv-admins'], member: ['uid=anna,ou=people,dc=ex'] } }
-];
-const SERVICE = { dn: 'cn=svc,dc=ex', pw: BIND_PW };
-const LDAP = { binds: [], filters: [], tls: null };
-/** Filtret som träd (för kontrollen av injektion) och utvärdering mot en post */
-function decodeFilter(t) {
-  const tag = t.tag, c = () => kids(t.v);
-  if (tag === 0xa0) return { and: c().map(decodeFilter) };
-  if (tag === 0xa1) return { or: c().map(decodeFilter) };
-  if (tag === 0xa2) return { not: decodeFilter(c()[0]) };
-  if (tag === 0x87) return { present: t.v.toString() };
-  if (tag === 0xa3) { const [a, v] = c(); return { eq: [a.v.toString().toLowerCase(), v.v.toString()] }; }
-  if (tag === 0xa4) { const [a, s] = c(); return { sub: [a.v.toString().toLowerCase(), kids(s.v).map(x => [x.tag, x.v.toString()])] }; }
-  return { other: tag };
-}
-function match(f, e) {
-  const vals = (a) => (e.a[a] || []).map(String);
-  if (f.and) return f.and.every(x => match(x, e));
-  if (f.or) return f.or.some(x => match(x, e));
-  if (f.not) return !match(f.not, e);
-  if (f.present) return vals(f.present.toLowerCase()).length > 0;
-  if (f.eq) return vals(f.eq[0]).some(v => v.toLowerCase() === f.eq[1].toLowerCase());
-  if (f.sub) return vals(f.sub[0]).some(v => { const re = f.sub[1].map(([tg, s]) => (tg === 0x80 ? '^' : '') + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (tg === 0x82 ? '$' : '')).join('.*'); return new RegExp(re, 'i').test(v); });
-  return false;
-}
-let CERT = null;
-if (spawnSync('openssl', ['version']).status === 0) {
-  const k = path.join(ROOT, 'k.pem'), c = path.join(ROOT, 'c.pem');
-  const r = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', k, '-out', c, '-days', '1', '-subj', '/CN=localhost',
-    '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost']);
-  if (r.status === 0) CERT = { key: fs.readFileSync(k, 'utf8'), cert: fs.readFileSync(c, 'utf8') };
-}
-function ldapHandler(sock0) {
-  let sock = sock0, buf = Buffer.alloc(0), bound = null;
-  const onData = (d) => {
-    buf = Buffer.concat([buf, d]);
-    while (buf.length >= 2) {
-      const m = tlvAt(buf, 0);
-      if (!m.end) break;
-      buf = buf.subarray(m.next);
-      const [idT, op] = kids(m.v);
-      const id = idT.v[idT.v.length - 1];
-      if (op.tag === 0x60) { // bind
-        const [, dnT, pwT] = kids(op.v);
-        const dn = dnT.v.toString(), pw = pwT.v.toString();
-        LDAP.binds.push({ dn, pw: pw ? '***' : '' });
-        const e = DIR.find(x => x.dn === dn);
-        const ok = (dn === SERVICE.dn && pw === SERVICE.pw) || (e && e.pw && pw === e.pw) || (!pw && LDAP.allowUnauth);
-        bound = ok ? dn : null;
-        sock.write(result(id, 0x61, ok ? 0 : 49));
-      } else if (op.tag === 0x63) { // sökning
-        const [baseT, , , , , , filterT, attrsT] = kids(op.v);
-        const f = decodeFilter(filterT);
-        LDAP.filters.push(f);
-        const want = kids(attrsT.v).map(x => x.v.toString().toLowerCase());
-        if (!bound) { sock.write(result(id, 0x65, 50)); continue; }
-        for (const e of DIR.filter(x => x.dn.endsWith(baseT.v.toString()) && match(f, x))) {
-          const attrs = Object.entries(e.a).filter(([k]) => want.includes(k)).map(([k, v]) => enc(0x30, os_(k), enc(0x31, ...v.map(os_))));
-          sock.write(enc(0x30, int(id), enc(0x64, os_(e.dn), enc(0x30, ...attrs))));
-        }
-        sock.write(result(id, 0x65, 0));
-      } else if (op.tag === 0x77) { // StartTLS
-        if (!CERT) { sock.write(result(id, 0x78, 2)); continue; }
-        sock.write(result(id, 0x78, 0));
-        sock.removeListener('data', onData);
-        const t = new tls.TLSSocket(sock, { isServer: true, key: CERT.key, cert: CERT.cert });
-        t.on('secure', () => { LDAP.tls = 'starttls'; });
-        t.on('error', () => {});
-        t.on('data', onData); sock = t;
-      } else if (op.tag === 0x42) { sock.end(); }
-    }
-  };
-  sock.on('data', onData); sock.on('error', () => {});
-}
-const ldapSrv = net.createServer(ldapHandler);
-await new Promise(r => ldapSrv.listen(0, '127.0.0.1', r));
-const ldapsSrv = CERT ? tls.createServer({ key: CERT.key, cert: CERT.cert }, (s) => { LDAP.tls = 'ldaps'; ldapHandler(s); }) : null;
-if (ldapsSrv) await new Promise(r => ldapsSrv.listen(0, '127.0.0.1', r));
-// En server som tar emot anslutningen men aldrig svarar (tidsgränsen)
-const hang = net.createServer((s) => { s.on('error', () => {}); });
-await new Promise(r => hang.listen(0, '127.0.0.1', r));
-const LDAP_URL = `ldap://127.0.0.1:${ldapSrv.address().port}`;
-const LDAP_BASE = { kind: 'ldap', name: 'Katalogen', url: LDAP_URL, bindDn: SERVICE.dn, bindPassword: BIND_PW, baseDn: 'ou=people,dc=ex', userFilter: '(&(objectClass=person)(uid={user}))',
-  groupBaseDn: 'ou=groups,dc=ex', groupFilter: '(&(objectClass=groupOfNames)(member={dn}))', autoCreate: true, groups: { admin: ['tv-admins'], user: ['tv-users'] }, timeout: 2 };
-
-const ldapLogin = (name, password, ip = lan()) => req('/api/login', { method: 'POST', token: null, ip, body: { name, password, app: true } });
 
 let LDAPID;
 test('LDAP: filtret escapas enligt RFC 4515 och tolkas till BER', () => {

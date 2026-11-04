@@ -7,6 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { freePort } from './helpers/port.js';
+// Före första test(): en top-level await mellan testerna lät node:test köra after() innan de sista testerna
+const PORT = await freePort();
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-ops-'));
 const MEDIA = path.join(ROOT, 'media');
@@ -271,7 +274,11 @@ test('dlna: Browse av bibliotek, serier → säsonger → avsnitt, metadata och 
   // Sidindelning
   r = browse('L1', 'BrowseDirectChildren', '<StartingIndex>1</StartingIndex><RequestedCount>2</RequestedCount>');
   assert.equal(num(r, 'NumberReturned'), 2); assert.equal(num(r, 'TotalMatches'), 4);
-  // Serie → säsong → avsnitt
+  // Serie → säsong → avsnitt. Avsnittsversioner (samma avsnitt i 4K) är inga egna avsnitt och ger ingen egen säsong
+  const v4k = [[ep[0], 1], [ep[1], 2]].map(([main, season]) => {
+    const v = item({ lib: 2, kind: 'episode', title: `Version ${season}`, parent: bron, season, episode: 1, path: path.join(TV, 'Bron', `Bron 4K ${season}.mkv`), duration: 3600 });
+    run('UPDATE items SET version_of=? WHERE id=?', main, v); return v;
+  });
   d = result(browse('L2'));
   assert.match(d, new RegExp(`<container id="S${bron}" parentID="L2"[^>]*childCount="1">`));
   d = result(browse(`S${bron}`));
@@ -279,6 +286,10 @@ test('dlna: Browse av bibliotek, serier → säsonger → avsnitt, metadata och 
   d = result(browse(`E${bron}_1`));
   assert.equal((d.match(/<item /g) || []).length, 3);
   assert.match(d, /<dc:title>1\. Avsnitt 1<\/dc:title><upnp:class>object\.item\.videoItem<\/upnp:class>/);
+  assert.ok(!d.includes('Version'));
+  assert.equal(browse(`E${bron}_2`).status, 500, 'säsongen med bara en version finns inte');
+  assert.match(result(browse(`E${bron}_1`, 'BrowseMetadata')), /childCount="3"/);
+  for (const v of v4k) run('DELETE FROM items WHERE id=?', v);
   // Metadata för ett avsnitt pekar på rätt förälder
   d = result(browse(`I${ep[1]}`, 'BrowseMetadata'));
   assert.match(d, new RegExp(`<item id="I${ep[1]}" parentID="E${bron}_1"`));
@@ -325,7 +336,6 @@ test('dlna: enhetsbeskrivning, tjänstebeskrivningar och SSDP-meddelanden', () =
 });
 
 // ---------- HTTP: skydd mot obehöriga ----------
-const PORT = 19000 + Math.floor(Math.random() * 900);
 const B = `http://127.0.0.1:${PORT}`;
 test('http: /metrics kräver token, DLNA och driftsidan bara från hemnätet', async () => {
   const cfg = path.join(ROOT, 'srv');

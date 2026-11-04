@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import util from 'node:util';
 
+// Som i db.js: ett test utan egen CONFIG_DIR får inte skriva loggfiler i /config
+if (!process.env.CONFIG_DIR && process.env.NODE_TEST_CONTEXT) throw new Error('CONFIG_DIR saknas i testet – sätt process.env.CONFIG_DIR innan servermoduler importeras');
 const DIR = path.join(process.env.CONFIG_DIR || '/config', 'logs');
 const KEEP_DAYS = 7, MAX_LINES = 3000;
 const ring = [];

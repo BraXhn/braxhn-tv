@@ -11,6 +11,9 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { freePort } from './helpers/port.js';
+// Före första test(): en top-level await mellan testerna lät node:test köra after() innan de sista testerna
+const PORT = await freePort();
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-plexsync-'));
 const MEDIA = path.join(ROOT, 'media');
@@ -365,7 +368,6 @@ test('plex-db: två schemavarianter, flera konton, -wal och borttagna titlar', a
 });
 
 // ---------- HTTP: bara admin på betrott nät, inga hemligheter i svar eller loggar ----------
-const PORT = 19900 + Math.floor(Math.random() * 90);
 const B = `http://127.0.0.1:${PORT}`;
 test('http: importen kräver admin på hemnätet; token och PIN syns aldrig i svar eller logg', async () => {
   const cfg = path.join(ROOT, 'srv');

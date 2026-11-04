@@ -10,13 +10,14 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { parseXml, find, kids, textOf } from '../server/ebooks/xml.js';
+import { freePort } from './helpers/port.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const st = (name, fn) => test(name, { skip: !hasFfmpeg && 'ffmpeg saknas' }, fn);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-booktools-'));
 const MEDIA = path.join(ROOT, 'media'), LIB = path.join(MEDIA, 'Ljudböcker'), CONFIG = path.join(ROOT, 'config');
-const PORT = 21000 + Math.floor(Math.random() * 20000), B = `http://127.0.0.1:${PORT}`;
+const PORT = await freePort(), B = `http://127.0.0.1:${PORT}`;
 const PW = 'Testlösen-2026!';
 const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a]);
 // Strikt kontroll av XML:en med xmllint när det finns (libxml2), annars bara den egna tolken

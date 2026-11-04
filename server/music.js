@@ -215,14 +215,19 @@ export function searchMusic(q, uid, libId = null, limits = { artists: 20, albums
   const lib = (a) => { const f = libFilter(uid, `${a}.library_id`); return libId == null ? { where: '1' + f.sql, params: f.params } : { where: `${a}.library_id=?${f.sql}`, params: [libId, ...f.params] }; };
   const favs = new Set(all('SELECT track_id FROM favorites WHERE user_id=?', uid).map(r => r.track_id));
   const la = lib('ar'), lb = lib('al'), lt = lib('t');
+  // Album och låtar: rankningen på id och nycklar; de fullständiga raderna (antal spår, musikvideo …) bara för de bästa
   return {
     artists: ranked({ from: 'FROM artists ar', cols: 'ar.id, ar.name, ar.name AS _t', key: 'ar.skey',
       pop: '(SELECT COUNT(*) FROM albums a WHERE a.artist_id=ar.id)',
       where: `${la.where} AND EXISTS (SELECT 1 FROM albums a WHERE a.artist_id=ar.id)`, params: la.params }, Q, limits.artists)
       .map(r => ({ id: r.id, name: r.name })),
-    albums: ranked({ from: ALBUM_FROM, cols: `${ALBUM_COLS}, al.title AS _t`, key: 'al.skey', key2: 'ar.skey', blob: "al.skeyc || ' ' || COALESCE(ar.skeyc, '')", year: 'al.year',
+    albums: ranked({ from: ALBUM_FROM, cols: 'al.id, al.title AS _t', key: 'al.skey', key2: 'ar.skey', blob: "al.skeyc || ' ' || COALESCE(ar.skeyc, '')", year: 'al.year',
+      own: 'al.skeyc', via: 'al.artist_id IN (SELECT id FROM artists WHERE instr(skeyc, ?) > 0)',
+      fetch: (ids) => all(`${ALBUM_SQL} WHERE al.id IN (${ids.map(() => '?').join(',')})`, ...ids),
       where: lb.where, params: lb.params }, Q, limits.albums).map(shapeAlbum),
-    tracks: ranked({ from: TRACK_FROM, cols: `${TRACK_COLS}, t.title AS _t`, key: 't.skey', key2: "COALESCE(ar.skey, '') || ' ' || t.skey", blob: "t.skeyc || ' ' || COALESCE(ar.skeyc, '')",
+    tracks: ranked({ from: 'FROM tracks t LEFT JOIN artists ar ON ar.id=t.artist_id', cols: 't.id, t.title AS _t', key: 't.skey', key2: "COALESCE(ar.skey, '') || ' ' || t.skey", blob: "t.skeyc || ' ' || COALESCE(ar.skeyc, '')",
+      own: 't.skeyc', via: 't.artist_id IN (SELECT id FROM artists WHERE instr(skeyc, ?) > 0)',
+      fetch: (ids) => all(`${TRACK_SQL} WHERE t.id IN (${ids.map(() => '?').join(',')})`, ...ids),
       where: lt.where, params: lt.params }, Q, limits.tracks).map(t => shapeTrack(t, favs))
   };
 }
