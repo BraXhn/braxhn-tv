@@ -264,7 +264,15 @@ export async function play(id, start = 0, opts = {}) {
   const wake = () => { el.classList.remove('idle'); clearTimeout(idle); idle = setTimeout(tryIdle, 3000); };
   el.addEventListener('pointerdown', (e) => { touch = e.pointerType === 'touch'; });
   el.onmousemove = (e) => { if (!e.sourceCapabilities?.firesTouchEvents) touch = false; wake(); };
-  el.ontouchstart = wake; el.onkeydown = wake; wake();
+  el.ontouchstart = wake; wake();
+  // Tangenter visar kontrollerna. keyHidden = de var dolda när tangenten trycktes (controls.js: pilarna spolar då i
+  // stället för att flytta fokus); ↑/↓ med dolda kontroller ändrar bara volymen och lämnar dem dolda.
+  cur.keyWake = (e) => {
+    if (P !== cur || cur.mini) return;
+    cur.keyHidden = el.classList.contains('idle');
+    if (!(cur.keyHidden && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) wake();
+  };
+  document.addEventListener('keydown', cur.keyWake, true);
   v.addEventListener('pause', wake); v.addEventListener('play', wake);
   videoSession(v);
   document.addEventListener('keydown', keys);
@@ -500,7 +508,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   sendProgress(true);
   clearInterval(P.nextTimer); clearInterval(P.skipTimer);
   if (P.hls) { P.hls.destroy(); P.hls = null; }
-  const el = P.el, v = $('#vid', el), id = P.it.id;
+  const el = P.el, v = $('#vid', el), id = P.it.id, P0 = P;
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
@@ -510,6 +518,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   stopVideo(v);
   if (pid || !cast) fetch(`/api/stream/${id}/stop${pid ? '?pid=' + encodeURIComponent(pid) : ''}`, { method: 'POST' }).catch(() => {});
   document.removeEventListener('keydown', keys);
+  if (P0.keyWake) document.removeEventListener('keydown', P0.keyWake, true);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.remove('hasmini'); el.classList.remove('mini');
   overlayClose(el);

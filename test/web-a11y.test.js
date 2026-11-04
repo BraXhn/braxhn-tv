@@ -370,6 +370,8 @@ t('spelaren: fokus i spelaren, sidan bakom inert, kortkommandon, tidslinje som r
     await press(page, 'k');
     await page.waitForFunction(() => document.querySelector('#vid').paused);
     await page.waitForFunction(() => document.querySelector('#pstate').textContent === 'Pausad');
+    // Med synligt fokus på en knapp flyttar pilarna fokus (fjärrkontroll) – utan fokus i spelaren ändrar ↑ volymen
+    await page.evaluate(() => document.activeElement.blur());
     await press(page, 'ArrowUp');
     await page.waitForFunction(() => /^Volym \d+ %$/.test(document.querySelector('#pstate').textContent));
     await press(page, 'c');

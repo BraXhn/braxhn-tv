@@ -1,7 +1,7 @@
 // Utvalt överst på startsidan: en stor bakgrundsbild med titel, beskrivning, Spela och Mer info för upp till fem
 // osedda titlar (fältet featured i /api/home). Bläddrar långsamt av sig själv, men aldrig med prefers-reduced-motion,
 // och står still medan muspekaren är över eller fokus är inuti, eller när användaren pausat (WCAG 2.2.2).
-// Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit, data-nav-up).
+// Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit – rumslig navigering, ui/spatial.js).
 import { api, esc, fmtDur, heroUrl, later, resumeAt, toast, t } from '../core.js';
 import { startPlay } from '../lazy.js';
 

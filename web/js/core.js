@@ -119,6 +119,30 @@ export function keyClick(el) {
   el.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); el.click(); } };
   return el;
 }
+// ---------- fjärrkontroll ----------
+// TV-läge: en TV-webbläsare (Google TV, Fire TV, LG, Samsung, Sony …) eller ?tv=1 i adressen (sparas, ?tv=0 tar bort).
+// Pilarna styr då alltid med rumslig navigering (ui/spatial.js), fokus är tydligare och Bakåt går till förra sidan.
+export const tvMode = (() => {
+  const q = /[?&]tv=([01])/.exec(globalThis.location?.search || '')?.[1];
+  if (q) store.set('tv', q === '1' ? 1 : null);
+  return /SMART-TV|SmartTV|Tizen|Web0S|webOS|BRAVIA|\bAFT[A-Z]|Android TV|GoogleTV|CrKey|HbbTV|NetCast|Viera|AQUOS|PhilipsTV|Roku/i.test(globalThis.navigator?.userAgent || '') || store.get('tv', null) === 1;
+})();
+const root = globalThis.document?.documentElement; // (core.js importeras även av testerna i Node)
+root?.classList.toggle('tv', tvMode);
+// Rumslig navigering påslagen: alltid i TV-läge, annars från första piltrycket utan fokus (router.js)
+export let spatialOn = tvMode;
+export function setSpatialOn() { spatialOn = true; root?.classList.add('kbnav'); }
+if (tvMode) root?.classList.add('kbnav');
+// TV-webbläsare skickar ofta bara keyCode (key = "Unidentified"): Samsung Tizen och LG webOS har egna koder
+const MEDIA_CODES = { 10252: 'MediaPlayPause', 415: 'MediaPlay', 19: 'MediaPause', 413: 'MediaStop', 417: 'MediaFastForward', 412: 'MediaRewind', 10233: 'MediaTrackNext', 10232: 'MediaTrackPrevious' };
+/** Mediaknappens namn ('MediaPlayPause', 'MediaTrackNext' …) eller '' */
+export const mediaKey = (e) => (e.key?.startsWith('Media') ? e.key : MEDIA_CODES[e.keyCode]) || '';
+/** Bakåt-knappen på fjärrkontrollen (inte Escape/Backspace – dem tolkar router.js efter sammanhanget) */
+export const isBackKey = (e) => e.key === 'GoBack' || e.key === 'BrowserBack' || e.key === 'Back' || e.key === 'XF86Back' || e.keyCode === 10009 || e.keyCode === 461;
+/** Fält där tangenterna skriver text (pilarna flyttar markören) */
+export const isTyping = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA'
+  || (el.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|range|color|file|image|hidden)$/.test(el.type)));
+
 /**
  * Kort meddelande längst ner på skärmen. Läses upp av skärmläsare (role=status, fel med role=alert).
  * @param {string} msg

@@ -126,7 +126,7 @@ views.album = async (id) => {
   const released = a.info?.released && /^\d{4}-\d{2}-\d{2}$/.test(a.info.released) ? a.info.released : null;
   main.innerHTML = `<div class="mhero">${cover(a.id, a.cover, 'big')}<div><div class="muted small">${esc((kind || 'Album').toUpperCase())}</div><h1>${esc(a.title)}</h1>
     <div class="meta"><a href="#/artist/${a.artistId}">${esc(a.artist || '')}</a>${a.year ? `<span>${a.year}</span>` : ''}<span>${t('{tracks} låtar · {duration}', { tracks: a.tracks, duration: fmtDur(a.duration) })}</span>${a.genre ? `<span>${esc(a.genre)}</span>` : ''}</div>
-    <div class="row"><button class="primary" id="pa">${t('▶ Spela')}</button><button class="ghost" id="sa">${t('⤨ Blanda')}</button><button class="ghost" id="aa">${t('+ Spellista')}</button><button class="ghost" id="ar">${t('📻 Låtradio')}</button>${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="aoff" title="${t('Spara i webbläsaren och lyssna utan nät')}">${stateOf('album', a.id) === 'done' ? t('✓ Sparat offline') : t('⤓ Spara offline')}</button>`}</div>
+    <div class="row"><button class="primary" id="pa" data-tvfocus>${t('▶ Spela')}</button><button class="ghost" id="sa">${t('⤨ Blanda')}</button><button class="ghost" id="aa">${t('+ Spellista')}</button><button class="ghost" id="ar">${t('📻 Låtradio')}</button>${me?.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="aoff" title="${t('Spara i webbläsaren och lyssna utan nät')}">${stateOf('album', a.id) === 'done' ? t('✓ Sparat offline') : t('⤓ Spara offline')}</button>`}</div>
     <div class="myrating"><span class="muted small">${t('Mitt betyg')}</span>${starsHtml(a.userRating, { id: 'albrate', label: t('Mitt betyg för albumet') })}</div></div></div>
     ${a.info?.description ? bioHtml(a.info.description, a.info.descLang, a.info.descUrl, 'albio') : ''}
     ${trackRows(a.trackList, { showArtist: a.trackList.some(t => t.artist !== a.artist) })}
@@ -151,7 +151,7 @@ views.artist = async (id) => {
   const allTracks = () => a.popular;
   main.innerHTML = `<div class="arhero${a.backdrop ? ' hasbg' : ''}">${heroBg(a)}<div class="mhero">${artistArt({ ...a, cover_album: a.albums.find(x => x.cover)?.id }, 'big round')}<div><div class="muted small">ARTIST</div><h1>${esc(a.name)}</h1>
     ${f.length || i?.genres?.length ? `<div class="meta">${f.map(x => `<span>${esc(x)}</span>`).join('')}${(i?.genres || []).slice(0, 4).map(g => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
-    <div class="row"><button class="primary" id="pp">${t('▶ Spela populära')}</button><button class="ghost" id="arr">${t('📻 Låtradio')}</button>${a.albums.length > 1 ? t('<button class="ghost" id="ash">⤨ Blanda allt</button>') : ''}${isAdmin() ? t('<button class="ghost" id="amatch">Fel artist?</button>') : ''}</div></div></div></div>
+    <div class="row"><button class="primary" id="pp" data-tvfocus>${t('▶ Spela populära')}</button><button class="ghost" id="arr">${t('📻 Låtradio')}</button>${a.albums.length > 1 ? t('<button class="ghost" id="ash">⤨ Blanda allt</button>') : ''}${isAdmin() ? t('<button class="ghost" id="amatch">Fel artist?</button>') : ''}</div></div></div></div>
     ${i?.bio ? bioHtml(i.bio, i.bioLang, i.bioUrl) : ''}
     ${a.popular.length ? `<section class="section"><h2>${t('Populärt')}</h2><div id="poprows">${trackRows(a.popular.slice(0, POP), { showCover: true })}</div>${a.popular.length > POP ? t('<button class="ghost small" id="popmore" aria-expanded="false">Visa fler</button>') : ''}</section>` : ''}
     ${albumGroups(a.albums, albumCard)}
@@ -179,7 +179,7 @@ views.playlist = async (id) => {
   const p = await api('/music/playlists/' + id);
   main.innerHTML = `<div class="mhero"><div class="cover big plcover">♫</div><div><div class="muted small">${t('SPELLISTA')}</div><h1>${esc(p.name)}</h1>
     <div class="meta"><span>${t('{trackListN} låtar · {v}', { trackListN: p.trackList.length, v: fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0)) })}</span></div>
-    <div class="row"><button class="primary" id="pp">${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="rn">${t('Byt namn')}</button><button class="danger" id="dl">${t('Ta bort')}</button></div></div></div>
+    <div class="row"><button class="primary" id="pp" data-tvfocus>${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="rn">${t('Byt namn')}</button><button class="danger" id="dl">${t('Ta bort')}</button></div></div></div>
     <div id="pltracks">${trackRows(p.trackList, { showCover: true })}</div>`;
   bindTracks(p.trackList);
   // Ta bort enskilda låtar
@@ -207,7 +207,7 @@ views.smart = async (lid, sid) => {
   const station = /^sonic-/.test(String(sid)); // stämningsstation eller låtradio från ljudanalysen
   main.innerHTML = `<div class="mhero"><div class="cover big plcover">${station ? '📻' : '✦'}</div><div><div class="muted small">${station ? 'STATION' : t('SMART LISTA')}</div><h1>${esc(smartName({ id: sid, name: p.name }))}</h1>
     <div class="meta"><span>${t('{trackListN} låtar · {v}', { trackListN: p.trackList.length, v: fmtDur(p.trackList.reduce((s, t) => s + (t.duration || 0), 0)) })}</span><span>${t('Uppdateras automatiskt')}</span>${p.custom && !p.mine ? `<span>${t('Delad av {v}', { v: esc(p.owner || t('någon')) })}</span>` : p.shared ? t('<span>Delad</span>') : ''}</div>
-    <div class="row"><button class="primary" id="pp">${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="ap">${t('+ Spellista')}</button>${p.custom && p.mine ? `${t('<a class="btn ghost" href="#/smartedit/{lid}/{listId}">Redigera regler</a>', { lid: +lid, listId: +p.listId })}` : ''}</div></div></div>
+    <div class="row"><button class="primary" id="pp" data-tvfocus>${t('▶ Spela')}</button><button class="ghost" id="sp">${t('⤨ Blanda')}</button><button class="ghost" id="ap">${t('+ Spellista')}</button>${p.custom && p.mine ? `${t('<a class="btn ghost" href="#/smartedit/{lid}/{listId}">Redigera regler</a>', { lid: +lid, listId: +p.listId })}` : ''}</div></div></div>
     ${p.trackList.length ? trackRows(p.trackList, { showCover: true }) : emptyState({ compact: true, title: t('Listan är tom just nu'), text: p.custom ? t('Inga låtar matchar reglerna just nu.') : station ? t('Stationen fylls på när ljudanalysen hunnit längre.') : t('Den fylls på automatiskt när du lyssnar.') })}`;
   bindTracks(p.trackList);
   $('#pp').onclick = () => playQueue(p.trackList, 0);

@@ -1,7 +1,7 @@
 // Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå.
 // Musik spelas glapplöst/med övertoning av Web Audio-motorn (audioengine.js) när det går, annars av <audio id="maudio">.
 // M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
-import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, routeGen, store, toast, t } from './core.js';
+import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, mediaKey, routeGen, store, toast, t } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
 import { castAudio, castReady } from './player/cast.js';
@@ -111,6 +111,22 @@ function ensureBar() {
   $('#mcast').onclick = castAudio;
   if (!P && !LP && !RP) musicSession();
 }
+// Mediaknapparna som tangenter (TV-fjärrkontroller, tangentbord utan Media Session): ljudspelaren när ingen video spelas
+document.addEventListener('keydown', (e) => {
+  const k = mediaKey(e), a = M.audio;
+  if (!k || e.defaultPrevented || !a || $('#mbar')?.hidden !== false || P || LP || RP) return;
+  const click = (s) => $(s)?.click();
+  if (k === 'MediaPlayPause') click('#mplay');
+  else if (k === 'MediaPlay') a.play().catch(() => {});
+  else if (k === 'MediaPause') a.pause();
+  else if (k === 'MediaStop') stopAudio();
+  else if (k === 'MediaTrackNext') click('#mnext');
+  else if (k === 'MediaTrackPrevious') click('#mprev');
+  else if (k === 'MediaFastForward') M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : seekTo(a.currentTime + (M.offset || 0) + 30);
+  else if (k === 'MediaRewind') M.spoken ? spokenSeek(spokenPos() - LPREFS.skipBack) : seekTo(Math.max(0, a.currentTime + (M.offset || 0) - 10));
+  else return;
+  e.preventDefault();
+});
 // Mediatangenter (tangentbord, hörlurar, låsskärm) styr den spelare som är aktiv
 const MS_ACTIONS = ['play', 'pause', 'nexttrack', 'previoustrack', 'seekto', 'seekbackward', 'seekforward', 'stop'];
 function setSession(h) {

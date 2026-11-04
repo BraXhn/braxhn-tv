@@ -1,6 +1,5 @@
-// Hyllor och kortstorlek: ‹ › på varje vågrät rad (bläddrar en sida, inaktiva vid ändarna), piltangenter/D-pad
-// mellan korten (i sidled inom en rad, upp/ner till närmaste kort i raden ovanför/under) och reglaget för
-// kortstorlek i menyraden (sparas i webbläsaren).
+// Hyllor och kortstorlek: ‹ › på varje vågrät rad (bläddrar en sida, inaktiva vid ändarna) och reglaget för
+// kortstorlek i menyraden (sparas i webbläsaren). Piltangenter/D-pad mellan korten: ui/spatial.js.
 import { $, esc, main, store, t } from '../core.js';
 
 const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('reduce-motion');
@@ -55,58 +54,11 @@ function enhance() {
   }
 }
 
-// ---------- piltangenter mellan korten ----------
-const KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-/** Närmaste kort i pilens riktning (geometriskt – fungerar i rutnät, hyllor och avsnittslistor) */
-function nearest(from, [dx, dy]) {
-  const r = from.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const sameShelf = from.closest('.shelf');
-  const cands = [];
-  for (const el of main.querySelectorAll('.card > .clink')) {
-    if (el === from) continue;
-    const q = el.getBoundingClientRect();
-    if (!q.width) continue;
-    const ox = q.left + q.width / 2 - cx, oy = q.top + q.height / 2 - cy;
-    if (dx) {
-      // I sidled: bara kort på samma rad (överlappar höjdmässigt), i en hylla bara samma hylla
-      if (ox * dx <= r.width / 4 || q.bottom <= r.top + 4 || q.top >= r.bottom - 4) continue;
-      if (sameShelf && el.closest('.shelf') !== sameShelf) continue;
-      cands.push({ el, d: Math.abs(ox) + Math.abs(oy) * 4 });
-    } else {
-      if (oy * dy <= r.height / 4) continue;
-      cands.push({ el, oy: Math.abs(oy), ox: Math.abs(ox) });
-    }
-  }
-  if (!cands.length) return null;
-  if (dx) return cands.reduce((a, b) => b.d < a.d ? b : a).el;
-  // Upp/ner: närmaste raden först (även en kort rad med ett enda kort), sedan kortet närmast i sidled
-  const row = Math.min(...cands.map(c => c.oy));
-  return cands.filter(c => c.oy <= row + r.height / 2).reduce((a, b) => b.ox < a.ox ? b : a).el;
-}
-function onKey(e) {
-  const d = KEYS[e.key];
-  if (!d || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-  const from = e.target;
-  if (!from?.matches?.('.card > .clink') || !main.contains(from)) return;
-  const to = nearest(from, d);
-  if (!to) {
-    // ↑ från översta raden: till området ovanför korten som tar emot fokus (data-nav-up, t.ex. Utvalt på startsidan)
-    const up = e.key === 'ArrowUp' && main.querySelector('[data-nav-up]');
-    const t = up && [...up.querySelectorAll('button, a[href]')].find(x => !x.disabled && !x.closest('[inert]'));
-    if (t) { e.preventDefault(); t.focus({ preventScroll: true }); up.scrollIntoView({ block: 'nearest', behavior: reduce() ? 'auto' : 'smooth' }); }
-    return;
-  }
-  e.preventDefault();
-  to.focus({ preventScroll: true });
-  to.closest('.card').scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduce() ? 'auto' : 'smooth' });
-}
-
-/** Startar hyllornas pilar och tangentbordsnavigeringen (anropas en gång från app.js) */
+/** Startar hyllornas pilar (anropas en gång från app.js). Piltangenterna mellan korten sköts av ui/spatial.js (router.js). */
 export function initShelves() {
   let queued = false;
   new MutationObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; enhance(); }); })
     .observe(main, { childList: true, subtree: true });
-  document.addEventListener('keydown', onKey);
 }
 
 // ---------- kortstorlek ----------

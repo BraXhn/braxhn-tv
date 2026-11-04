@@ -1668,3 +1668,19 @@ body.rd-open{overflow:hidden}
 @media (max-width:600px){#player .pbar .pmlabel{display:none}.mgrid{grid-template-columns:1fr}.mcform{flex-direction:column;align-items:stretch}}
 .mcard .mreacts{gap:4px}
 .mcard .mreact{min-width:36px;min-height:36px;padding:2px 6px}
+/* Fjärrkontroll och TV-läge (ui/spatial.js, html.tv/html.kbnav sätts i core.js/router.js): fokus som syns på tre
+   meters avstånd – tjockare ram, glorian runt kortet och kortet lite större. Hyllorna får plats för det, och fäster
+   inte vid korten medan pilarna rullar dem (scroll-snap gav annars halva kort vid kanten). */
+html.kbnav .shelf{scroll-snap-type:none}
+/* Reglaget för kortstorlek fångar ← → mitt i menyraden – fjärrkontrollen klarar sig utan det */
+html.tv .cardsize{display:none}
+html.tv :focus-visible{outline-width:4px;outline-offset:4px}
+html.tv .shelf{padding:14px 14px 18px;margin:-10px -14px 0;scroll-padding-inline:14px}
+html.tv .card .art{transition:transform var(--dur),box-shadow var(--dur)}
+html.tv .card .t{margin-top:12px}
+html.tv .card>.clink:focus-visible .art{outline:4px solid var(--focus);outline-offset:3px;box-shadow:0 0 0 7px rgba(0,0,0,.55),0 0 28px 6px color-mix(in srgb,var(--focus) 55%,transparent);transform:scale(1.06)}
+html.tv #player .ctl button:focus-visible,html.tv #player .pbar button:focus-visible{outline-width:4px;box-shadow:0 0 0 8px rgba(0,0,0,.5)}
+html.tv .mi:focus-visible{box-shadow:inset 0 0 0 3px var(--focus);background:var(--bg3)}
+@media (prefers-reduced-motion:reduce){html.tv .card>.clink:focus-visible .art{transform:none}}
+html.reduce-motion.tv .card>.clink:focus-visible .art{transform:none}
+@media (forced-colors:active){html.tv .card>.clink:focus-visible .art{outline-color:Highlight}}

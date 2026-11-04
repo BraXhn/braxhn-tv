@@ -29,7 +29,7 @@ export function overlayOpen(el) {
   }
   el.hidden = false; document.body.style.overflow = 'hidden';
   // Fokus in i spelaren (Spela/pausa), så att tangentbord och skärmläsare hamnar där bilden är
-  setTimeout(() => { if (!el.hidden && !el.contains(document.activeElement)) el.querySelector('#cplay, #ctl button, button')?.focus({ preventScroll: true }); }, 0);
+  setTimeout(() => { if (!el.hidden && !el.contains(document.activeElement)) (el.querySelector('#cplay') || el.querySelector('#ctl button, button'))?.focus({ preventScroll: true }); }, 0);
   if (!history.state?.overlay) history.pushState({ overlay: 1 }, '');
   overlayHist = true;
 }

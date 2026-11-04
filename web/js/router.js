@@ -1,6 +1,6 @@
 // Routing och appens skal: inloggning vid start (boot), route() med navigeringsgeneration, bibliotekslänkar,
 // användarmenyn, sökfältet, flikmenyn och installation som app
-import { $, $$, api, esc, lang, leaveFns, store, libs, main, me, nextRoute, rememberLang, rememberPage, routeGen, setLibs, setLogin, setMe, toast, views, t } from './core.js';
+import { $, $$, api, esc, isBackKey, isTyping, lang, leaveFns, store, libs, main, me, nextRoute, rememberLang, rememberPage, routeGen, setLibs, setLogin, setMe, setSpatialOn, spatialOn, toast, tvMode, views, t } from './core.js';
 import { closeAllPlayers, closeLiveAndRec, curPlayer, idle, loadPlayer, need, startRemote, stopAudio, stopRemote } from './lazy.js';
 import { refreshScreen, screenBadge } from './screentime.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
@@ -226,7 +226,7 @@ export async function route() {
     if (me) { main.innerHTML = errorState(e, { retry: true }); bindRetry(main, () => route()); }
   }
 }
-window.addEventListener('hashchange', () => { navigated = true; route(); });
+window.addEventListener('hashchange', () => { navigated = true; saveFocus(); entry(); route(); });
 
 // Tillgänglighet efter varje sidbyte: en h1 (dold om vyn inte har en egen – menyradens rubrik visar namnet),
 // flikens titel efter sidan (2.4.2) och fokus till rubriken när fokus annars tappats eller låg i menyerna,
@@ -245,8 +245,131 @@ function announcePage(name) {
   navigated = false;
   const a = document.activeElement;
   if (a && a !== document.body && a.isConnected && !a.closest('#rail, #toptabs, #tabbar, #usermenu, .pop')) return;
+  // Fjärrkontroll: fokus på kortet man kom ifrån (Bakåt) eller på första vettiga elementet – inte på rubriken
+  if (spatialOn) return tvFocus();
   if (!h.hasAttribute('tabindex')) h.tabIndex = -1;
   h.focus({ preventScroll: true });
+}
+
+// ---------- fjärrkontroll: rumslig navigering, Bakåt och fokus per sida ----------
+// Pilarna går till ui/spatial.js (laddas i förväg i TV-läge, annars vid första piltrycket utan fokus). Komponenter med
+// egna piltangenter (menyer, flikar, reglage, TV-guiden, spelaren) anropar preventDefault() – då gör navigeringen
+// inget. Lyssnaren sitter på window så att den kommer efter alla lyssnare på dokumentet.
+let spatial = null;
+const loadSpatial = () => need('ui/spatial.js').then(m => (spatial = m));
+if (tvMode) idle(() => loadSpatial().catch(() => {}));
+const ARROW = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+const withSpatial = (fn) => { if (spatial) fn(spatial); else loadSpatial().then(fn).catch(() => {}); };
+/** Inget egentligt fokus: body, huvudytan eller sidans rubrik (fokus efter sidbyte) */
+const noFocus = (a) => !a || a === document.body || a === document.documentElement || a === main || a.matches('.pageh, h1[tabindex="-1"]');
+/** Lämnar pilen textfältet? Upp/ner alltid (i flerradiga fält vid första/sista raden), vänster/höger vid kanten */
+function leavesField(el, dir) {
+  let s = null, e = null, n = (el.value || '').length;
+  try { s = el.selectionStart; e = el.selectionEnd; } catch {}
+  if (el.isContentEditable) return dir === 'up' || dir === 'down';
+  if (el.tagName === 'TEXTAREA') return s === e && ((dir === 'up' && !el.value.slice(0, s).includes('\n')) || (dir === 'down' && !el.value.slice(s).includes('\n')));
+  if (dir === 'up' || dir === 'down') return true;
+  return s != null && s === e && (dir === 'left' ? s === 0 : s === n);
+}
+window.addEventListener('keydown', (e) => {
+  const dir = ARROW[e.key];
+  if (!dir || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const P = curPlayer();
+  if (P && !P.mini) return; // helskärmsspelaren sköter pilarna själv (player/controls.js)
+  const a = document.activeElement;
+  // Utan påslagen navigering: bara när inget har fokus, och mellan korten (som förut)
+  if (!spatialOn && !noFocus(a) && !a.matches('.card > .clink')) return;
+  if (isTyping(a) && !leavesField(a, dir)) return;
+  // Reglage och video: ←/→ ändrar värdet (vid änden av ett reglage går pilen vidare), ↑/↓ navigerar
+  if ((dir === 'left' || dir === 'right') && a?.matches('input[type=range], [role=slider], video')
+    && !(a.type === 'range' && +a.value === +(dir === 'left' ? a.min || 0 : a.max || 100))) return;
+  if (!spatialOn) setSpatialOn();
+  e.preventDefault();
+  withSpatial(m => m.move(dir));
+});
+// Fokus per historikpost: kortet man öppnade får fokus igen när man går Bakåt till listan. Varje post får ett
+// löpnummer i history.state (bxi, och föregående post i bxprev – finns den kan Bakåt gå dit i appen).
+const focusMem = new Map();
+let curEntry = 0, wentBack = false;
+function entry() {
+  if (!globalThis.history) return; // (testerna laddar modulen utan webbläsare)
+  let s = history.state;
+  if (s?.bxi) wentBack = s.bxi < curEntry;
+  else {
+    s = { ...(s || {}), bxi: Math.max(Date.now(), curEntry + 1), bxprev: curEntry };
+    try { history.replaceState(s, ''); } catch {}
+    wentBack = false;
+  }
+  curEntry = s.bxi;
+}
+entry();
+function saveFocus() {
+  const a = document.activeElement;
+  if (!curEntry || !a || !main.contains(a)) return;
+  const c = a.closest('.card');
+  const id = c?.dataset.id ? `.card[data-id="${CSS.escape(c.dataset.id)}"]` : c?.dataset.season ? `.card[data-season="${CSS.escape(c.dataset.season)}"]`
+    : a.id ? '#' + CSS.escape(a.id) : a.getAttribute('href') ? `a[href="${CSS.escape(a.getAttribute('href'))}"]` : null;
+  if (id) focusMem.set(curEntry, { id, n: [...main.querySelectorAll(id)].indexOf(c || a), y: scrollY });
+  if (focusMem.size > 50) focusMem.delete(focusMem.keys().next().value);
+}
+/** Fokus efter sidbyte med fjärrkontroll: det sparade elementet (Bakåt), annars första vettiga på sidan */
+function tvFocus() {
+  const gen = routeGen, m = wentBack ? focusMem.get(curEntry) : null;
+  withSpatial((sp) => {
+    let tries = 0;
+    const attempt = () => {
+      if (gen !== routeGen || (!noFocus(document.activeElement) && main.contains(document.activeElement))) return;
+      if (m) {
+        // Startsidan ritar hyllorna efter hand – vänta en stund på kortet
+        const all = main.querySelectorAll(m.id), el = all[m.n] || all[0];
+        const target = el?.matches('.card') ? el.querySelector('.clink') || el : el;
+        if (target) { window.scrollTo(0, m.y); sp.focusEl(target); return; }
+        if (++tries < 20) return setTimeout(attempt, 100);
+      }
+      sp.focusFirst();
+    };
+    attempt();
+  });
+}
+// Bakåt: Escape (och Backspace utanför fält) när navigeringen är på, och fjärrkontrollens Bakåt-knapp alltid.
+// Ordningen: det som är öppet stängs av sin egen Escape-hantering (dialog, meny, spelare → litet fönster, panel);
+// är inget öppet och ingen komponent tog tangenten (preventDefault) går appen till förra sidan.
+let openAtKey = false;
+const somethingOpen = () => !!(document.querySelector('dialog[open], .pop') || document.fullscreenElement || !$('#usermenu').hidden
+  || ($('#player') && !$('#player').hidden && !$('#player').classList.contains('mini')));
+/** Skickar en Escape dit fokus är (TV-plattformarnas Bakåt-knapp och Backspace) */
+function sendBack(target) {
+  const ev = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true });
+  ev.bxBack = true;
+  (target?.isConnected ? target : document.activeElement || document.body).dispatchEvent(ev);
+}
+window.addEventListener('keydown', (e) => {
+  if (isBackKey(e)) { e.preventDefault(); e.stopImmediatePropagation(); sendBack(e.target); return; }
+  if (e.key !== 'Escape') return;
+  openAtKey = somethingOpen();
+  if (e.isTrusted) return;
+  // Vår egen Escape: det webbläsaren annars gör själv (modal dialog, helskärm) görs här
+  if (document.querySelector('.pop') && e.target.closest?.('.pop')) return; // menyn stänger sig själv
+  const d = [...document.querySelectorAll('dialog[open]')].pop();
+  if (d) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (d.dispatchEvent(new Event('cancel', { cancelable: true }))) d.close();
+  } else if (document.fullscreenElement) { e.preventDefault(); e.stopImmediatePropagation(); document.exitFullscreen().catch(() => {}); }
+}, true);
+window.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === 'Backspace' && spatialOn && !isTyping(e.target)) { e.preventDefault(); sendBack(e.target); return; }
+  if (e.key !== 'Escape' || openAtKey || !(spatialOn || e.bxBack)) return;
+  // I ett textfält: Escape stänger förslag/tömmer sökfältet – bara fjärrkontrollens Bakåt i ett tomt fält byter sida
+  if (isTyping(e.target) && (!e.bxBack || e.target.value || e.target.isContentEditable)) return;
+  e.preventDefault();
+  goBack();
+});
+/** Förra sidan i appen; på startsidan händer inget, och från en djuplänk går Bakåt till startsidan */
+export function goBack() {
+  const h = location.hash;
+  if (!h || h === '#/' || h === '#') return;
+  if (history.state?.bxprev) history.back(); else location.hash = '#/';
 }
 // Hoppa till innehållet: länken först på sidan (hash-adresserna styr routern, därför flyttas fokus här)
 $('#skiplink').onclick = (e) => { e.preventDefault(); const h = main.querySelector('h1'); (h || main).tabIndex = -1; (h || main).focus(); };
@@ -276,12 +399,12 @@ document.addEventListener('click', () => userMenu(false));
 $('#usermenu').addEventListener('keydown', (e) => { if (e.key === 'Escape') { userMenu(false); $('#userbtn').focus(); } });
 // ---------- tangentbordsgenvägar ----------
 // ? visar alla genvägar, / går till sökrutan. Inte när man skriver i ett fält eller en dialog är öppen.
-const SHORTCUTS = [[t('Överallt'), [['?', t('Visa den här listan')], ['/', t('Sök')], ['Tab', t('Första tabbstoppet: Hoppa till innehållet')], ['← → ↑ ↓', t('Flytta mellan korten i en hylla eller ett rutnät')],
-    ['Enter', t('Öppna det markerade kortet')], [t('Shift+F10 eller Menu'), t('Kortets meny (spela, Min lista, sedd …)')], ['Esc', t('Stäng dialog, meny eller panel')]]],
+const SHORTCUTS = [[t('Överallt'), [['?', t('Visa den här listan')], ['/', t('Sök')], ['Tab', t('Första tabbstoppet: Hoppa till innehållet')], ['← → ↑ ↓', t('Flytta fokus till det närmaste i pilens riktning (kort, knappar, menyer)')],
+    ['Enter', t('Öppna det markerade kortet')], [t('Shift+F10 eller Menu'), t('Kortets meny (spela, Min lista, sedd …)')], ['Esc', t('Stäng dialog, meny eller panel')], [t('Bakåt eller Esc'), t('Med fjärrkontroll: förra sidan när inget är öppet')]]],
   [t('Spelaren'), [[t('Mellanslag eller k'), t('Spela/pausa')], [t('← eller j'), t('10 sekunder bakåt')], [t('→ eller l'), t('10 sekunder framåt')], ['↑ ↓', t('Volym')],
     ['m', t('Ljud av/på')], ['c', t('Undertexter av/på')], ['< >', t('Långsammare/snabbare')], ['f', t('Helskärm')], ['0–9', t('Hoppa till 0 %, 10 % … 90 %')],
     ['Home End', t('Början/slutet (på tidslinjen)')], ['PageUp PageDown', t('En minut framåt/bakåt (på tidslinjen)')],
-    ['s', t('Hoppa över intro/eftertexter (när knappen visas)')], ['Esc', t('Litet fönster')]]],
+    ['s', t('Hoppa över intro/eftertexter (när knappen visas)')], ['Esc', t('Litet fönster')], [t('Mediaknapparna'), t('Spela/pausa, spola, nästa/föregående')]]],
   [t('Språkinlärning (⚙ i spelaren)'), [['a d', t('Föregående/nästa replik')], ['r', t('Upprepa repliken')], ['x', t('Upprepa repliken långsamt')],
     ['p', t('Pausa efter varje replik av/på')], ['w', t('Välj ord i repliken (← → mellan orden, Enter sparar)')]]],
   [t('TV-guiden och foton'), [['← → ↑ ↓', t('Flytta mellan program/kanaler och foton')], ['PageUp PageDown', t('En skärm i taget')], ['Enter', t('Öppna programmet eller fotot')], ['Esc', t('Stäng fotovisaren')]]],

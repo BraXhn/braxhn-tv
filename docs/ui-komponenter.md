@@ -14,7 +14,8 @@ i själva filen – den här sidan är översikten.
 | `ui/tabs.js` | `tabsHtml`, `bindTabs` | `.tabs` med knappar/länkar utan roller |
 | `ui/menu.js` | `openMenu`, `openPopover`, `closeMenu`, `contextMenu` | – (nytt) |
 | `ui/cards.js` | `card`, `seasonCard`, `art`, `shelf`, `shelfHtml`, `colCard`, `personCard`, `cardItem`, `ebookCard`, `ebookCover` | – |
-| `ui/shelves.js` | `initShelves`, `initCardSize` | – (‹ › på hyllor, piltangenter mellan kort, kortstorlek) |
+| `ui/shelves.js` | `initShelves`, `initCardSize` | – (‹ › på hyllor, kortstorlek) |
+| `ui/spatial.js` | `move`, `focusFirst`, `firstIn`, `focusEl`, `reveal`, `scopeOf` | – (rumslig navigering med fjärrkontroll/piltangenter, laddas vid behov) |
 | `ui/cardmenu.js` | `initCardMenus`, `openCardMenu`, `cardActions` | – (snabbåtgärder på korten) |
 | `ui/activity.js` | `startActivity`, `stopActivity` | – (aktivitetsindikatorn för administratörer) |
 
@@ -168,7 +169,7 @@ undertitel och läge, t.ex. "Alfa Film, 2020, 40 % sett") och en `⋮`-knapp (`a
 serverns fasta bredder (160–1280, `server/imgsize.js`) efter bredden × pixeltätheten (högst 2×). Kortens bredd
 följer `--cw` via `cardW()`. Servern förstorar aldrig och skickar originalet om `w` saknas eller är ogiltigt.
 
-Ovanpå bilden finns ▶ (`.cplay`, spelar direkt), ✎ (`.cedit`, bara administratörer) och ⋮ nere till höger; knapparna kopplas delegerat i `ui/cardmenu.js`. `seasonCard(g)` ritar ett säsongskort från `/api/home` (`rows[].seasons`) med en egen meny. Hyllor (`.section > h2 + .shelf`) får ‹ › automatiskt av `ui/shelves.js`, som också flyttar fokus mellan kort med piltangenterna; kortbredden styrs av `--card-w` (reglaget `#cardsize`).
+Ovanpå bilden finns ▶ (`.cplay`, spelar direkt), ✎ (`.cedit`, bara administratörer) och ⋮ nere till höger; knapparna kopplas delegerat i `ui/cardmenu.js`. `seasonCard(g)` ritar ett säsongskort från `/api/home` (`rows[].seasons`) med en egen meny. Hyllor (`.section > h2 + .shelf`) får ‹ › automatiskt av `ui/shelves.js`; piltangenterna mellan korten sköts av den rumsliga navigeringen (`ui/spatial.js`, se nedan). Kortbredden styrs av `--card-w` (reglaget `#cardsize`, dolt i TV-läge).
 
 Ange vilken rad korten ligger i med `data-row` (`continue`, `watchlist`, `foryou`) – `shelf(title, items, land, more, row)`
 gör det. Kortmenyn visar då t.ex. "Ta bort från Fortsätt titta" och tar bort kortet ur Min lista-raden.
@@ -178,6 +179,64 @@ serie, säsong), Min lista, lägg till i samling (`ui/collections.js`: `addToCol
 `deleteCollection(col)`), ta bort från samlingen (kort i en egen samling man får ändra: `data-ucol` + `data-edit` på rutnätet), betygsätt (`ui/rating.js`), ta bort från Fortsätt titta, följ serien, titta tillsammans, ladda ner, visa
 information/gå till serien och för administratörer metadataverktygen. Läget som korten inte känner till hämtas
 från `GET /api/items/:id/state`. Kortet uppdateras direkt och ångringsbara val får "Ångra" i toasten.
+
+## Rumslig navigering och fjärrkontroll – `ui/spatial.js`
+
+TV-webbläsare (Google TV, Fire TV, LG webOS, Samsung Tizen, webbappen i en TV-låda) har bara pilar, OK/Enter och
+Bakåt. Pilarna väljer därför det närmaste fokuserbara elementet i pilens riktning utifrån `getBoundingClientRect`.
+
+**När den är på:** alltid i *TV-läge* (`tvMode` i `core.js`: TV-webbläsarens User-Agent eller `?tv=1` i adressen, som
+sparas – `?tv=0` tar bort; `html.tv`), och annars från första piltrycket när inget har fokus eller fokus står på ett
+kort (`setSpatialOn()`, `html.kbnav`). Lyssnaren sitter i `router.js` på `window`, så den kommer efter alla lyssnare
+på dokumentet. Modulen laddas i förväg i TV-läge (`idle`), annars vid första trycket – startmodulerna importerar
+den aldrig.
+
+**Så deltar en komponent:**
+- **Egna piltangenter:** anropa `e.preventDefault()` när komponenten använder pilen (menyer, flikar, stjärnorna,
+  TV-guidens rutnät, fotovisaren, kvällsvalet, karusellen på startsidan gör det). Då gör navigeringen ingenting.
+  Använder komponenten inte pilen (t.ex. vid änden av en lista) – låt bli, så går fokus vidare rumsligt.
+- **Textfält:** ← → flyttar markören och lämnar fältet bara vid kanten av texten; ↑ ↓ lämnar fältet (flerradiga
+  fält vid första/sista raden). Reglage (`input[type=range]`, `role=slider`) och video behåller ← →; ett reglage
+  vid sitt min/max släpper pilen vidare. Rullistor (`select`) navigeras som knappar – Enter öppnar dem.
+- **Mål:** synliga, fokuserbara element som inte ligger i något `inert`. I ett `.card` är bara `.clink` ett mål;
+  `data-nav-skip` tar bort ett element (och allt i det). Element med `tabindex="-1"` (roving tabindex i flikar,
+  menyer och rutnät) är inga mål – bara det valda.
+- **Område:** översta öppna `<dialog>` (fokusfällan gäller även pilarna), helskärmsspelaren (en öppen panel i den:
+  inställningar, kapitel), annars hela sidan. Öppna menyer (`.pop`) sköter sina pilar själva.
+- **Grupper:** i menyraden, sidomenyn, knapprader (`.row`, `.crow`, `.pbar`, `.tabs`) går pilen längs gruppen så länge
+  det finns ett mål i samma rad/kolumn där. I en hylla (`.shelf` eller annan vågrät rullning) stannar ← → i hyllan;
+  → vid slutet gör ingenting, ← vid början går vidare (sidomenyn).
+- **Föredragen rad/kolumn:** följer med när man trycker flera gånger längs samma axel, och pilen åt motsatt håll går
+  tillbaka till elementet man kom ifrån (ner och upp igen = samma kort).
+- **Första fokus:** första piltrycket utan fokus och varje sidbyte med navigeringen på sätter fokus på `[data-tvfocus]`
+  (Spela på titelsidan, albumet, artisten), annars första hyllans första kort, första kortet eller det första som syns.
+  Bakåt till en lista ger fokus på kortet man öppnade (per historikpost, `history.state.bxi` i `router.js`).
+- **Rullning:** fokus hamnar aldrig utanför skärmen. Hyllan och dialogens innehåll rullar så att målet syns med lite
+  marginal, och sidan så att målet ligger innanför menyraden och de fasta raderna i nederkant (TV: mitt på skärmen).
+  Finns inget mål upp/ner rullar sidan 40 % (text längre ner går att läsa).
+- **Prestanda:** varje tryck mäter bara ±120 fokuserbara element runt det fokuserade i dokumentordning plus de fasta
+  delarna (`#top`, `#rail`, `#tabbar`, `#mbar`, `#rbar`, mini-spelaren) – aldrig tusentals kort. Hittas inget där provas
+  hela området en gång. `test/web-spatial.test.js` räknar mätningarna med 3000 kort.
+
+**Bakåt:** Escape, Backspace utanför textfält (med navigeringen på), `GoBack`/`BrowserBack`/`Back`/`XF86Back` och
+keyCode 10009 (Samsung) och 461 (LG) – `isBackKey()` i `core.js`. TV-plattformarnas Bakåt skickas vidare som en Escape dit
+fokus är, så att varje komponent bara behöver hantera Escape. Ordningen: dialog/meny/panel stängs → helskärmsspelaren
+blir litet fönster (eller live-TV stängs) → förra sidan i appen (`goBack()` i `router.js`; på startsidan händer inget,
+från en djuplänk går Bakåt till startsidan). En komponent som stänger något med Escape ska anropa `preventDefault()`
+(annars kan sidan bytas samtidigt); det som räknas som "öppet" när tangenten trycks (`dialog[open]`, `.pop`,
+helskärmsspelaren, användarmenyn, helskärm) hindrar alltid sidbytet.
+
+**Spelaren** (`player/controls.js`): när kontrollerna syns och en knapp i spelaren har synligt fokus flyttar pilarna
+fokus rumsligt (kontrollraden, tidslinjen, *Hoppa över*, panelerna). Var kontrollerna dolda när tangenten trycktes
+(`P.keyHidden`) spolar ← → (och fokus hamnar på tidslinjen, där ← → fortsätter spola) och ↑ ↓ ändrar volymen utan att
+visa kontrollerna. Utan fokus i spelaren (eller efter ett musklick) spolar pilarna som förut. **Mediaknapparna**
+(`mediaKey()` i `core.js`: `MediaPlayPause`, `MediaPlay`, `MediaPause`, `MediaStop`, `MediaFastForward`, `MediaRewind`,
+`MediaTrackNext`, `MediaTrackPrevious` och TV-plattformarnas keyCode) styr videospelaren – även i litet fönster – och
+annars ljudspelaren (`audio.js`).
+
+**Fokusmarkering i TV-läge** (`html.tv` i `style.css`): 4 px ram med glorian runt kortet och kortet 6 % större (utan
+förstoring med *minska rörelse*), tydligare ram på spelarens knappar och menyval. Hyllorna har plats för det och
+fäster inte vid korten (`scroll-snap` av när navigeringen är på).
 
 ## Stjärnbetyg – `ui/rating.js`
 
@@ -267,8 +326,9 @@ new Date(s * 1000).toLocaleDateString(locale, { … });  // datum, tid och tal m
 - **Fokus**: flytta fokus bara när användaren gjort något (öppnat en dialog/meny) och lämna tillbaka det när det
   stängs. Ta bort-åtgärder flyttar fokus till nästa kort. Använd aldrig `outline: none` utan ersättning –
   `:focus-visible` ger den tydliga orangea ramen.
-- **TV och fjärrkontroll**: allt ska gå att nå med Tab/piltangenter och Enter, och Escape/Bakåt ska stänga det
-  som är öppet. Lägg inte viktiga åtgärder bara på hovring – kortens ⋮ nås med Tab och Menu-tangenten.
+- **TV och fjärrkontroll**: allt ska gå att nå med bara piltangenter och Enter (TV-webbläsare har sällan Tab), och
+  Escape/Bakåt ska stänga det som är öppet – se *Rumslig navigering*. Lägg inte viktiga åtgärder bara på hovring –
+  kortens ⋮ nås med Tab och Menu-tangenten, och allt i kortmenyn finns även på titelsidan.
   Klickbara rader som inte är knappar kopplas med `keyClick()` i `core.js`.
 - **Telefon**: minst 44 px stora mål (`--touch`) på pekskärm, dialoger och menyer som ark nerifrån, inget som
   gör sidan bredare än skärmen (kontrollera vid 375 px), och `env(safe-area-inset-*)` för installerad app.
@@ -279,6 +339,8 @@ new Date(s * 1000).toLocaleDateString(locale, { … });  // datum, tid och tal m
 ## Testa
 
 - `test/web-a11y.test.js` granskar alla vyer och tangentbordsflödena (se *Tillgänglighet* ovan).
+- `test/web-spatial.test.js` styr appen i TV-läge med bara pilar, Enter och Escape/Bakåt (startsidan → titelsidan →
+  spelaren → litet fönster → tillbaka till samma kort, sökfältet, dialogens fokusfälla, 3000 kort).
 - `test/web-i18n.test.js` kontrollerar katalogen och letar svensk text i alla vyer på engelska (och kör granskningen där).
 - `test/ui-components.test.js` testar strängbyggarna (escapning, aria-attribut, kortmenyns val per sort och roll).
 - `test/card-actions.test.js` testar `/api/items/:id/state` och `/api/items/:id/continue` mot en riktig server,

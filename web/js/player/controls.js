@@ -1,9 +1,10 @@
 // Videospelarens kontroller och kortkommandon
-import { $, fmtTime, store, t } from '../core.js';
+import { $, fmtTime, mediaKey, store, t } from '../core.js';
 import { setMini } from './overlay.js';
 import { P, closePlayer } from './video.js';
 import { setIconButton } from '../ui/buttons.js';
 import { preKey } from './cinema.js';
+import { move } from '../ui/spatial.js';
 
 /** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
 export function bindControls(cur, v) {
@@ -85,25 +86,55 @@ export function say(el, text) {
   s.textContent = ''; setTimeout(() => { s.textContent = text; }, 30);
 }
 
+/** Mediaknapparna (tangentbord, fjärrkontroll) – även i litet fönster */
+function media(e) {
+  const k = mediaKey(e); if (!k || e.defaultPrevented) return false;
+  const v = $('#vid', P.el); if (!v) return false;
+  const click = (s) => { const b = $(s, P.el); if (b && !b.disabled) b.click(); };
+  if (k === 'MediaPlayPause') v.paused ? v.play().catch(() => {}) : v.pause();
+  else if (k === 'MediaPlay') v.play().catch(() => {});
+  else if (k === 'MediaPause') v.pause();
+  else if (k === 'MediaStop') closePlayer();
+  else if (k === 'MediaFastForward') click('#cfwd');
+  else if (k === 'MediaRewind') click('#cback');
+  else if (k === 'MediaTrackNext') click('#pnext, #cnextch');
+  else if (k === 'MediaTrackPrevious') click('#cprev');
+  else return false;
+  e.preventDefault();
+  return true;
+}
+
 export function keys(e) {
+  if (P && media(e)) return;
   // I litet fönster tar spelaren inte över tangentbordet (man bläddrar och söker)
-  if (!P || P.mini || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || document.querySelector('dialog[open]')) return;
+  if (!P || P.mini || document.querySelector('dialog[open]')) return;
   const v = $('#vid', P.el); if (!v) return;
+  // Fält: rullistor och reglage ger ↑/↓ till navigeringen (fjärrkontrollen), annars skriver/väljer man i dem
+  const tag = e.target.tagName;
+  if (tag === 'SELECT' || tag === 'INPUT') {
+    if (e.key.startsWith('Arrow') && (tag === 'SELECT' || e.target.type === 'range' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) && navigate(e)) return;
+    return;
+  }
   if (P.pre && preKey(e, P)) return; // trailers före filmen spelas
   if (P.learn?.key(e)) return; // språkinlärningen (learn.js): a/d, r, x, p, w och pilarna mellan orden
   // Mellanslag/Enter på en fokuserad knapp eller länk (t.ex. "Hoppa över intro") ska aktivera den, inte pausa
   if ((e.key === ' ' || e.key === 'Enter') && e.target !== v && e.target.closest?.('button,a,textarea,[contenteditable]')) return;
-  if (e.key.startsWith('Arrow') && moveFocus(e)) return;
+  if (e.key.startsWith('Arrow') && navigate(e)) return;
   if (e.key === 'Escape' && (!$('#setp', P.el).hidden || !$('#chlist', P.el).hidden)) {
     // Stäng inställningar/kapitel först och lämna fokus på knappen som öppnade dem
+    e.preventDefault();
     const ch = !$('#chlist', P.el).hidden;
     $('#setp', P.el).hidden = true; $('#chlist', P.el).hidden = true;
     $(ch ? '#pchap' : '#cset', P.el)?.focus();
   }
-  else if (e.key === 'Escape' && !document.fullscreenElement) setMini(true);
+  else if (e.key === 'Escape' && !document.fullscreenElement) { e.preventDefault(); setMini(true); }
   else if (e.key === ' ' || e.key === 'k') { e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); }
-  else if (e.key === 'ArrowRight' || e.key === 'l') v.currentTime += 10;
-  else if (e.key === 'ArrowLeft' || e.key === 'j') v.currentTime -= 10;
+  else if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'ArrowLeft' || e.key === 'j') {
+    e.preventDefault();
+    v.currentTime += e.key === 'ArrowRight' || e.key === 'l' ? 10 : -10;
+    // Fjärrkontroll med dolda kontroller: kontrollerna visas med fokus på tidslinjen, där ←/→ fortsätter spola
+    if (P.keyHidden && e.key.startsWith('Arrow')) $('#scrub', P.el)?.focus({ preventScroll: true });
+  }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
     v.volume = Math.max(0, Math.min(1, Math.round((v.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10)); v.muted = v.volume === 0;
@@ -133,25 +164,16 @@ function toggleSubs() {
   say(P.el, ps.value ? t('Undertexter: ') + ps.options[ps.selectedIndex].text : t('Undertexter av'));
 }
 
-// Fjärrkontroll och tangentbord: när en knapp i spelaren har synligt fokus flyttar pilarna fokus mellan knapparna
-// (vänster/höger i kontrollraden, upp/ner i kapitellistan och inställningarna) i stället för att spola.
-// Efter ett musklick är fokus inte synligt, och då spolar pilarna som vanligt.
-function moveFocus(e) {
-  const t = e.target;
-  if (!t?.matches || !t.matches(':focus-visible')) return false;
-  const box = t.closest('#chlist,#setp,.crow,.pbar,.learnbar'); if (!box) return false;
-  const list = box.matches('#chlist,#setp');
-  const fwd = list ? e.key === 'ArrowDown' : e.key === 'ArrowRight', back = list ? e.key === 'ArrowUp' : e.key === 'ArrowLeft';
-  if (!fwd && !back) {
-    // Upp från kontrollraden: till "Hoppa över" om den syns
-    const sk = $('#pskip', P.el);
-    if (box.matches('.crow') && e.key === 'ArrowUp' && sk && !sk.hidden) { e.preventDefault(); sk.focus(); return true; }
-    return false;
-  }
-  const items = [...box.querySelectorAll('button,select,input,summary')].filter(x => !x.disabled && x.offsetParent !== null);
-  const i = items.indexOf(t);
-  const n = items[i + (fwd ? 1 : -1)];
+// Fjärrkontroll och tangentbord: när kontrollerna syns och en knapp i spelaren har synligt fokus flyttar pilarna fokus
+// rumsligt (ui/spatial.js: kontrollraden, tidslinjen, Hoppa över, panelerna) i stället för att spola. Dolda kontroller
+// (P.keyHidden – läget innan tangenten väckte dem, video.js), ett musklick (inget synligt fokus) eller fokus utanför
+// spelaren: pilarna spolar (←/→) och ändrar volymen (↑/↓). På tidslinjen spolar ←/→ alltid.
+function navigate(e) {
+  const tg = e.target;
+  if (P.keyHidden || !tg?.matches || !P.el.contains(tg) || tg.id === 'vid' || !tg.matches(':focus-visible')) return false;
+  if (tg.id === 'scrub' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return false;
+  const dir = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key];
   e.preventDefault();
-  n?.focus();
+  move(dir, { scroll: false });
   return true;
 }
