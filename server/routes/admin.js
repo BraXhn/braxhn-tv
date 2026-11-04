@@ -253,7 +253,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   send(c.res, 200, { ok: true });
 });
 route('GET', '/api/updates', admin, (c) => send(c.res, 200, updates.info()));
-route('POST', '/api/updates/check', admin, async (c) => { await updates.check(); send(c.res, 200, updates.info()); });
+route('POST', '/api/updates/check', admin, async (c) => { await updates.check({ force: true }); send(c.res, 200, updates.info()); });
 route('PUT', '/api/updates', admin, async (c) => { const b = await readJson(c.req); if (b.enabled != null) setSetting('update_check', b.enabled ? '1' : '0'); send(c.res, 200, updates.info()); });
 
 // Spelas nu, statistik och säkerhetskopior

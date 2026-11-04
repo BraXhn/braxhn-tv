@@ -2,25 +2,38 @@
 <Container version="2">
   <Name>braxhn-tv-nvidia</Name>
   <Repository>ghcr.io/braxhn/braxhn-tv:latest</Repository>
-  <Registry/>
+  <Registry>https://github.com/BraXhn/braxhn-tv/pkgs/container/braxhn-tv</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Stable releases (recommended). Updated only when a version is released.</TagDescription>
+  </Branch>
+  <Branch>
+    <Tag>beta</Tag>
+    <TagDescription>Pre-releases before the next version.</TagDescription>
+  </Branch>
+  <Branch>
+    <Tag>edge</Tag>
+    <TagDescription>Every change on main – newest first, you are the tester.</TagDescription>
+  </Branch>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Support>https://github.com/BraXhn/braxhn-tv/issues</Support>
   <Project>https://github.com/BraXhn/braxhn-tv</Project>
-  <Overview>NVIDIA-variant (NVENC/NVDEC): installera först pluginen Nvidia-Driver från Community Applications och starta om. BraXhn TV – egen, fri mediaserver för filmer, serier, musik, ljudböcker, poddar och live-TV med inspelning (HDHomeRun/IPTV). Appar för iPhone, iPad, Apple TV, Google TV och Android Automotive (t.ex. Polestar 4). Remux utan omkodning (även HEVC/Dolby Vision), HDR→SDR, hoppa över intro, undertexter, profiler med åldersgräns, titta tillsammans, offline, Sonarr/Radarr och Trakt, var-kan-jag-se för streamingtjänster, Let's Encrypt, passkeys och krypterade säkerhetskopior. Inga konton, inga prenumerationer.</Overview>
-  <Category>MediaServer:Video</Category>
+  <ReadMe>https://github.com/BraXhn/braxhn-tv#readme</ReadMe>
+  <Overview>NVIDIA variant (NVENC/NVDEC): install the Nvidia-Driver plugin from Community Applications and reboot first. BraXhn TV is a free, self-hosted media server for movies, TV shows, music, audiobooks, podcasts, photos, e-books and live TV with recording (HDHomeRun and IPTV/M3U/Xtream). Apps for iPhone, iPad, Apple TV, Google TV/Android TV and Android Automotive. Direct play and remux without transcoding (also HEVC/Dolby Vision), hardware transcoding with Intel Quick Sync/VA-API, AMD and NVIDIA, HDR to SDR tone mapping, intro skipping, subtitles, profiles with age ratings and screen time, watch together, offline downloads, Sonarr/Radarr and Trakt, Let's Encrypt, passkeys and encrypted backups. No accounts, no subscriptions, no telemetry. The web interface is in Swedish and English.[br][br]Svenska: egen, fri mediaserver – filmer, serier, musik, ljudböcker, poddar och live-TV. Inga konton, inga prenumerationer.</Overview>
+  <Category>MediaServer:Video MediaServer:Music</Category>
   <WebUI>http://[IP]:[PORT:8420]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/braxhn-tv-nvidia.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/web/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/unraid/braxhn-tv.png</Icon>
   <ExtraParams>--restart unless-stopped --security-opt=no-new-privileges:true --runtime=nvidia</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Requires/>
+  <Requires>The Nvidia-Driver plugin from Community Applications (install it and reboot first). / Pluginen Nvidia-Driver.</Requires>
   <Config Name="WebUI-port" Target="8420" Default="8420" Mode="tcp" Description="Port för webbgränssnittet" Type="Port" Display="always" Required="true" Mask="false">8420</Config>
   <Config Name="Port i containern" Target="PORT" Default="8420" Mode="" Description="Porten servern lyssnar på i containern. Med bridge: låt vara 8420 och välj port ovan. Med Custom: br0 (egen IP-adress) gäller inte portmappningen – ange porten här i stället, t.ex. 80, och ändra WebUI-porten ovan till samma." Type="Variable" Display="always" Required="false" Mask="false">8420</Config>
   <Config Name="HTTPS-port" Target="8443" Default="8443" Mode="tcp" Description="Inbyggd HTTPS. Startar när ett certifikat finns – hämta gratis från Let's Encrypt under Administration (vidarebefordra då WAN 80 till WebUI-porten och 443 hit). Behövs inte om du kör Nginx Proxy Manager." Type="Port" Display="advanced" Required="false" Mask="false">8443</Config>
@@ -45,6 +58,8 @@
   <Config Name="Let's Encrypt-domän" Target="ACME_DOMAIN" Default="" Mode="" Description="Valfritt: domän för inbyggt HTTPS-certifikat, t.ex. tv.dindomän.se. Kan även anges i webbgränssnittet." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Användar-id (99 = nobody i Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Grupp-id (100 = users i Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="002" Mode="" Description="Rättigheter för nya filer (inspelningar, bilder, databas). 002 = gruppen users får skriva (Unraid-standard för delade mappar), 022 = bara ägaren." Type="Variable" Display="advanced" Required="false" Mask="false">002</Config>
+  <Config Name="Leta efter nya versioner" Target="UPDATE_CHECK" Default="1|0" Mode="" Description="1 = fråga GitHub högst en gång per dygn om en ny utgåva finns (bara ett anrop till api.github.com, inget om din server skickas) och visa det för administratören. 0 = av. Kan även ändras under Administration." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
   <Config Name="Automatisk skanning (min)" Target="SCAN_INTERVAL" Default="60" Mode="" Description="Hur ofta biblioteken skannas efter nya filer. 0 = av. Kan ändras i webbgränssnittet." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
   <Config Name="x264-preset" Target="X264_PRESET" Default="veryfast" Mode="" Description="Hastighet/kvalitet vid omkodning med processor: ultrafast, superfast, veryfast, faster, fast, medium" Type="Variable" Display="advanced" Required="false" Mask="false">veryfast</Config>
 </Container>

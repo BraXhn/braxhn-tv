@@ -212,8 +212,8 @@ views.admin = async (sec) => {
     <div class="row" style="margin-top:14px"><button class="primary">${t('Spara säkerhetsinställningar')}</button></div></form>
   </div>
   <div class="panel"><h2>Version ${esc(UP.current)} ${UP.available ? `<span class="warn-badge">${t('{latest} finns', { latest: esc(UP.latest) })}</span>` : UP.latest ? t('<span class="ok-badge">Senaste</span>') : ''}</h2>
-    ${UP.available ? `<p>${t('Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.')}</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}` : ''}
-    <p class="muted small">${t('{v}{v2}. Servern hämtar bara versionsnumret från GitHub ({repo}) och skickar ingenting om dig.', { v: UP.checked ? t('Senast kontrollerat ') + new Date(UP.checked).toLocaleString(locale) : t('Inte kontrollerat än'), v2: UP.error ? t(' – fel: ') + esc(UP.error) : '', repo: esc(UP.repo) })}</p>
+    ${UP.available ? `<p>${t('Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.')}</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}${UP.url ? `<p class="small"><a href="${esc(UP.url)}" target="_blank" rel="noopener">${t('Läs om utgåvan på GitHub')}</a></p>` : ''}` : ''}
+    <p class="muted small">${t('{v}{v2}. Servern frågar GitHub ({repo}) högst en gång per dygn om senaste utgåvan och skickar ingenting om dig.', { v: UP.checked ? t('Senast kontrollerat ') + new Date(UP.checked).toLocaleString(locale) : t('Inte kontrollerat än'), v2: UP.error ? t(' – fel: ') + esc(t(UP.error)) : '', repo: esc(UP.repo) })}</p>
     <div class="row"><label class="switch" style="margin:0"><input type="checkbox" id="upen" ${UP.enabled ? 'checked' : ''}> ${t('Leta efter nya versioner')}</label><button class="ghost small" id="upchk">${t('Kontrollera nu')}</button></div>
   </div>
   <div class="panel"><h2>${t('Live-TV och inspelning')}</h2>
@@ -387,7 +387,7 @@ views.admin = async (sec) => {
     try { await api('/settings', { method: 'PUT', body }); toast(t('Sparat')); route(); } catch (er) { toastErr(er); }
   };
   $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast(t('Sparat')); });
-  $('#upchk').onclick = act(async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? t('Kunde inte kontrollera: ') + u.error : u.available ? t('Version {latest} finns', { latest: u.latest }) : t('Du har senaste versionen')); route(); });
+  $('#upchk').onclick = act(async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? t('Kunde inte kontrollera: ') + t(u.error) : u.available ? t('Version {latest} finns', { latest: u.latest }) : t('Du har senaste versionen')); route(); });
   const noSave = () => { const body = { kind: $('#nok').value, url: $('#nou').value, user: $('#nous').value, events: $$('[data-nev]').filter(x => x.checked).map(x => x.dataset.nev) };
     if ($('#not').value) body.token = $('#not').value; return api('/notify', { method: 'PUT', body }); };
   $('#noform').onsubmit = async (e) => { e.preventDefault(); try { await noSave(); toast(t('Sparat')); } catch (er) { toastErr(er); } };

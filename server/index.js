@@ -20,8 +20,11 @@ import { purgeIdle } from './stream.js';
 import { scheduleRenewal } from './acme.js';
 import { shutdown as liveShutdown } from './livetv.js';
 import { shutdown as dvrShutdown } from './dvr.js';
+import { logStart } from './startinfo.js';
+import { VERSION } from './updates.js';
 
 const PORT = +process.env.PORT || 8420;
+logStart({ version: VERSION, config: CONFIG }).catch(e => console.warn('[start] startloggen:', e.message));
 const app = (req, res) => handle(req, res).catch(e => { console.error(e); try { res.writeHead(500); res.end(); } catch {} });
 
 // Skydd mot långsamma/hängande anslutningar (slowloris). requestTimeout gäller bara mottagandet av
@@ -63,13 +66,21 @@ globalThis.__braxhnReloadTls = loadTls;
 scheduleRenewal(loadTls);
 
 // Avsluta snyggt: stoppa live-TV och låt pågående inspelningar skriva klart sina filer
+// Unraid (docker stop) skickar SIGTERM och väntar 10 s innan containern dödas – allt ska vara klart före det.
 let stopping = false;
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => {
   if (stopping) return; stopping = true;
+  const t0 = Date.now();
+  console.log(`[stopp] ${sig} – stänger av (inspelningar skrivs klart, omkodningar stoppas, databasen stängs)`);
+  // Hänger något ändå: avsluta före Dockers SIGKILL så att databasen hinner stängas av SQLite själv
+  setTimeout(() => { console.warn('[stopp] avstängningen tog för lång tid – avslutar'); try { db.close(); } catch {} process.exit(0); }, 8000).unref();
   server.close(); tlsServer?.close();
+  server.closeIdleConnections?.(); tlsServer?.closeIdleConnections?.();
   try { liveShutdown(); await dvrShutdown(5000); } catch {}
   // Stoppa omkodningar och stäng databasen ordentligt (WAL skrivs in i huvudfilen)
   try { purgeIdle(-1); } catch {}
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   try { db.close(); } catch {}
+  console.log(`[stopp] klart på ${Date.now() - t0} ms`);
   process.exit(0);
 });

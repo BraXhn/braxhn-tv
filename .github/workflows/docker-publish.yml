@@ -40,6 +40,11 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && gh release view "v$V" >/dev/null 2>&1; then
             echo "::error::Version $V finns redan som utgåva. Höj \"version\" i package.json och försök igen."; exit 1
           fi
+          # Stabil utgåva: ändringsloggen ska ha ett avsnitt för versionen ("## Ej utgiven" döps om till "## $V – datum")
+          # – det blir releasens text och det servern visar som "Ny version finns"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$CH" = latest ] && ! grep -Eq "^## $V( |$)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md saknar avsnittet \"## $V\". Döp om \"## Ej utgiven\" till \"## $V – $(date +%Y-%m-%d)\" och försök igen."; exit 1
+          fi
           echo "channel=$CH" >> "$GITHUB_OUTPUT"; echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Kanal: $CH, version: $V"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -82,6 +87,12 @@ jobs:
           # ffmpeg 7.1 med HEVC/AV1-kodarna som omkodningen provar vid start
           docker exec rok ffmpeg -hide_banner -version | head -1 | grep -q '^ffmpeg version 7\.'
           docker logs rok 2>&1 | grep -q 'processorn libx265, libsvtav1' || { echo 'x265/SVT-AV1 hittades inte vid start'; exit 1; }
+          # Startloggen (version, användare) och PUID/PGID: servern körs som 99:100, inte root
+          docker logs rok 2>&1 | grep -q 'körs som 99:100' || { echo 'Servern kör inte som 99:100'; exit 1; }
+          # Unraid stoppar med SIGTERM och 10 s: servern ska stänga databasen och avsluta själv
+          docker stop -t 10 rok
+          docker logs rok 2>&1 | grep -q '\[stopp\] klart' || { echo 'Avstängningen blev inte klar'; docker logs rok; exit 1; }
+          [ "$(docker inspect -f '{{.State.ExitCode}}' rok)" = 0 ] || { echo 'Avslutades inte med 0'; exit 1; }
           docker rm -f rok
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -103,6 +114,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.ch.outputs.version }}
+            REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # Signera imagen (Sigstore, utan nyckel) så att den kan verifieras:

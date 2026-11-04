@@ -43,11 +43,41 @@ if (fs.existsSync(RESTORE)) {
   console.log('[db] Säkerhetskopian återställdes. Den tidigare databasen sparades som', `braxhn-tv.db.före-återställning-${stamp}`);
 }
 export const RESTORE_FILE = RESTORE;
+// Schemats version (PRAGMA user_version) som den här koden skapar – höj den med varje nytt steg i versionsmigreringarna
+// längre ned. En databas med högre värde kommer från en nyare version av BraXhn TV (se nedgraderingsskyddet).
+export const SCHEMA_VERSION = 8;
 export const db = new DatabaseSync(DBFILE);
+// Nedgraderingsskydd: en äldre image mot en databas som en nyare version redan migrerat kan skriva fel i tabeller och
+// kolumner den inte känner till. Vägra starta med ett tydligt besked i stället – inget i databasen har ändrats än.
+// ALLOW_DOWNGRADE=1 startar ändå (på egen risk).
+{
+  const uv = db.prepare('PRAGMA user_version').get().user_version;
+  if (uv > SCHEMA_VERSION && process.env.ALLOW_DOWNGRADE !== '1') {
+    let from = '';
+    try { from = db.prepare("SELECT v FROM settings WHERE k='app_version'").get()?.v || ''; } catch {}
+    const appV = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+    let copies = [];
+    try { copies = fs.readdirSync(path.join(CONFIG, 'backups')).filter(f => f.startsWith(`före-uppgradering-${appV}-`)).sort(); } catch {}
+    db.close();
+    const msg = [
+      `Databasen kommer från en nyare version av BraXhn TV${from ? ` (${from})` : ''} än den här (${appV}).`,
+      `Schemat är ${uv}, den här versionen känner bara till ${SCHEMA_VERSION}. Servern startar inte, så att inget går förlorat.`,
+      'Gör något av följande:',
+      '  1. Byt tillbaka till den nyare imagen (Unraid: Repository ghcr.io/braxhn/braxhn-tv:latest, Apply).',
+      copies.length
+        ? `  2. Gå tillbaka till databasen från före uppgraderingen: kopiera backups/${copies.at(-1)} till ${RESTORE} och starta om (det som hänt sedan dess försvinner).`
+        : `  2. Återställ en säkerhetskopia från en version ${appV} eller äldre: lägg den som ${RESTORE} och starta om.`,
+      '  3. Starta ändå på egen risk med miljövariabeln ALLOW_DOWNGRADE=1.',
+    ];
+    for (const l of msg) console.error('[db] ' + l);
+    process.exit(78);
+  }
+}
 // Säkerhetskopia före uppgradering: ny programversion mot en befintlig databas (schemat ändras strax nedan).
-// Sparas i backups/ som före-uppgradering-<gammal version>.db; de tre senaste behålls.
+// Sparas i backups/ som före-uppgradering-<gammal version>-<tid>.db; de DB_UPGRADE_BACKUPS (standard 3) senaste behålls.
 {
   const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const KEEP = Math.max(1, parseInt(process.env.DB_UPGRADE_BACKUPS) || 3);
   let prev = null;
   try { prev = db.prepare("SELECT v FROM settings WHERE k='app_version'").get()?.v ?? ''; } catch {} // ny databas: ingen tabell än
   if (prev !== null && prev !== APP_VERSION) {
@@ -57,7 +87,7 @@ export const db = new DatabaseSync(DBFILE);
       const out = path.join(dir, `före-uppgradering-${(prev || 'okänd').replace(/[^\p{L}\p{N}.-]/gu, '')}-${Date.now()}.db`);
       db.exec(`VACUUM INTO '${out.replace(/'/g, "''")}'`);
       const old = fs.readdirSync(dir).filter(f => f.startsWith('före-uppgradering-')).map(f => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
-      for (const x of old.slice(3)) fs.rmSync(path.join(dir, x.f), { force: true });
+      for (const x of old.slice(KEEP)) fs.rmSync(path.join(dir, x.f), { force: true });
       console.log(`[db] uppgradering ${prev || '?'} → ${APP_VERSION}: säkerhetskopia sparad som backups/${path.basename(out)}`);
     } catch (e) { console.warn('[db] kunde inte spara säkerhetskopia före uppgradering:', e.message); }
   }
@@ -741,7 +771,7 @@ CREATE INDEX IF NOT EXISTS items_kind_rating ON items(kind, rating);
 CREATE INDEX IF NOT EXISTS tracks_album_dur ON tracks(album_id, duration);`);
 
 // Versionsmigreringar körs i tur och ordning så att även uppgradering från mycket gamla versioner får alla steg
-const LATEST = 8;
+const LATEST = SCHEMA_VERSION;
 let ver = db.prepare('PRAGMA user_version').get().user_version;
 if (ver < 2) {
   // v0.2: analysera om alla filer (HDR-info, bildundertexter)
@@ -779,9 +809,8 @@ if (ver < 8) {
   ver = 8;
 }
 if (ver !== db.prepare('PRAGMA user_version').get().user_version) db.exec(`PRAGMA user_version=${Math.max(ver, LATEST)}`);
-// Äldre programversion mot en nyare databas (t.ex. efter återgång till en gammal image): fungerar oftast,
-// men nya kolumner och tabeller används inte – varna tydligt
-if (ver > LATEST) console.warn(`[db] Databasen kommer från en nyare version av BraXhn TV (schema ${ver} > ${LATEST}). Uppdatera imagen – eller återställ backups/före-uppgradering-*.db om du vill gå tillbaka.`);
+// Äldre programversion mot en nyare databas startar bara med ALLOW_DOWNGRADE=1 (nedgraderingsskyddet ovan) – varna
+if (ver > LATEST) console.warn(`[db] ALLOW_DOWNGRADE=1: databasen kommer från en nyare version av BraXhn TV (schema ${ver} > ${LATEST}). Nya kolumner och tabeller används inte. Uppdatera imagen – eller återställ backups/före-uppgradering-*.db om du vill gå tillbaka.`);
 try { db.prepare("INSERT INTO settings(k,v) VALUES('app_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(globalThis.__braxhnAppVersion); } catch {}
 
 // IPTV (server/iptv/*): tillägg till live-TV:s tabeller tuners/channels/programs (skapas i livetv.js – därför egna

@@ -11,7 +11,8 @@ server/   Node.js-server (inga npm-beroenden): API, skanner, strömning, intro-d
 web/      Webbgränssnitt (fungerar i alla webbläsare, installerbart som webbapp)
 apps/apple/       App för iPhone, iPad och Apple TV (SwiftUI)  → se apps/apple/README.md
 apps/automotive/  Android-app för bilen (Android Automotive, t.ex. Polestar 4) och Google TV/Android TV (Kotlin) → se apps/automotive/README.md
-braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install.sh
+braxhn-tv.xml     Unraid-mall (Community Applications), braxhn-tv-nvidia.xml för NVIDIA, ikon i unraid/
+                  Dockerfile / docker-compose.yml / install.sh
 ```
 
 ## Funktioner
@@ -82,7 +83,7 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 | **Musikappar (Subsonic)** | Lyssna på musiken i färdiga musikappar: **Symfonium** (Android, Android Auto), **Amperfy** och **play:Sub** (iPhone med **CarPlay**), **Feishin** och **Supersonic** (dator) eller **Sonos via Music Assistant**. Servern talar Subsonic/OpenSubsonic-API:t under `/rest`. Var och en skapar ett eget *lösenord för musikappar* under Mitt konto – det ger bara tillgång till musiken. Favoriter, spellistor (även de smarta), låttexter och scrobbling är desamma som i webben. Se *Musikappar (Subsonic)* nedan. |
 | **Musikmetadata och låttexter från nätet** | Artistsidan som i Plexamp/Apple Music: **stor artistbild**, **biografi** från Wikipedia (svenska först, annars engelska) som fälls ut, född/bildad, ursprung, genrer, **Populärt**, album uppdelade i **Album, EP, Singlar, Livealbum och Samlingar**, *Liknande artister* (ljudanalysen) och *Relaterade artister* (medlemmar och samarbeten från MusicBrainz, liknande från Last.fm om nyckeln finns), och **länkar** (webbplats, Spotify, Instagram, Discogs …). Albumen får beskrivning och typ. Hämtas i bakgrunden efter musikskanningen från **MusicBrainz** (artisten matchas på namn *och* albumtitlar, högst ett anrop per sekund), **Wikidata/Wikipedia**, **Wikimedia Commons** och – med en egen nyckel – **Fanart.tv** (bättre bilder och bakgrunder). `artist.jpg` i artistens mapp går före. **Fel artist?** för administratören (sök, välj, lås, ta bort). **Synkade låttexter från LRCLIB** när en låt saknar egen `.lrc` eller texttagg – i webbens låttextpanel och i musikappar (Subsonic `getLyrics`/`getLyricsBySongId`), cachade i databasen; valfritt i förväg i bakgrunden. Musikappar får biografi, bilder och liknande artister via `getArtistInfo2`/`getAlbumInfo2`. Inställningar under *Administration → Musikmetadata och låttexter*. |
 | **Notiser** | Larm till mobilen via ntfy, Pushover, Gotify, Discord, Telegram eller webhook: attacker, spärrade konton, certifikat, säkerhetskopior, inspelningar, önskningar och nya versioner. |
-| **Uppdateringar** | Servern talar om när en ny version finns och vad som är nytt. |
+| **Uppdateringar** | Administratören ser *Ny version finns* med vad som är nytt (GitHub-releasen, högst en fråga per dygn, inget telemetri – avstängbart). Säkerhetskopia av databasen före varje uppgradering och ett nedgraderingsskydd som hellre vägrar starta än förstör data. Installeras via Unraids **Community Applications** (mall för NVIDIA också), kör som `nobody:users` (PUID/PGID/UMASK) och stänger av rent när Unraid stoppar containern. |
 | **Extern säkerhetskopia** | Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring (Backblaze B2, Wasabi, R2, MinIO, AWS). Återställning med ett klick. |
 | **Anpassningsbar kvalitet** | När servern omkodar med automatisk kvalitet kan spelaren själv växla ner (1080p/720p/480p) när nätet blir sämre, t.ex. i bilen eller på mobilnät. |
 | **Aktivitet** | Administratörer ser i menyraden när servern arbetar (skanning, analys, omkodning, inspelning, nedladdning) och kan öppna en lista med förloppet. |
@@ -121,7 +122,18 @@ braxhn-tv.xml     Unraid-mall          Dockerfile / docker-compose.yml / install
 
 ## Installation på Unraid
 
-GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv:latest`) vid varje ändring, så Unraid behöver bara hämta den.
+GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv`, amd64 och arm64), så Unraid behöver bara hämta den.
+
+### Via Community Applications (rekommenderas)
+
+1. Öppna fliken **Apps** (Community Applications) och sök på **BraXhn TV**.
+2. Välj **braxhn-tv** – eller **braxhn-tv-nvidia** om du har ett NVIDIA-kort (installera då först pluginen *Nvidia-Driver* från Apps och starta om).
+3. Peka **Media** på din mediamapp (t.ex. `/mnt/user/media`). Resten kan stå kvar: konfigurationen hamnar i `/mnt/user/appdata/braxhn-tv` och filerna ägs av `nobody:users` (PUID 99 / PGID 100) som i Unraids andra appar.
+4. Klicka **Apply** och sedan **WebUI** (`http://SERVERNS-IP:8420`).
+
+> Syns inte appen i Apps än? Mallen väntar på att godkännas i Community Applications – använd det manuella sättet nedan så länge.
+
+### Manuellt (utan Community Applications)
 
 1. Öppna Unraids terminal (ikonen `>_` uppe till höger) och kör:
    ```bash
@@ -129,13 +141,33 @@ GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv:latest`) vid 
    ```
 2. Gå till **Docker → Add Container** och välj mallen **braxhn-tv**.
 3. Peka **Media** på din mediamapp och klicka **Apply**.
-4. Öppna `http://SERVERNS-IP:8420` och skapa administratörskontot. Sedan startar **installationsguiden**: språk och tidszon, TMDB-nyckel (med test), förslag på bibliotek ur dina mappar, hårdvaruomkodning (med testkodning), åtkomst utanför hemmet och konton för hushållet. Allt går att hoppa över och ändra senare; guiden kan köras igen under **Administration**.
+
+### Första starten
+
+Öppna `http://SERVERNS-IP:8420` och skapa administratörskontot. Sedan startar **installationsguiden**: språk och tidszon, TMDB-nyckel (med test), förslag på bibliotek ur dina mappar, hårdvaruomkodning (med testkodning), åtkomst utanför hemmet och konton för hushållet. Allt går att hoppa över och ändra senare; guiden kan köras igen under **Administration**.
+
+Startar den inte? Titta i loggen (Docker-fliken → ikonen → **Logs**). De första raderna visar version, arkitektur, vilken användare servern körs som, ffmpeg, grafikkort och sökvägar – och vad du ska göra om något saknas, t.ex.:
+
+```
+[start] FEL: servern (99:100) kan inte skriva i /config.
+[start]   Rätta ägaren i Unraids terminal (byt sökväg om din appdata ligger någon annanstans):
+[start]     chown -R 99:100 /mnt/user/appdata/braxhn-tv && chmod -R u+rwX,g+rwX /mnt/user/appdata/braxhn-tv
+```
+
+**Rättigheter (PUID, PGID, UMASK):** containern startar som root bara för att rätta ägaren på `/config` och `/transcode` (bara filer med fel ägare – går snabbt även med många bilder) och på översta mappen i `/recordings`, `/backup` och `/prestart`, och för att ge åtkomst till grafikkortet. Själva servern körs sedan som `PUID:PGID` (standard 99:100 = `nobody:users`) med `UMASK` 002, så att inspelningar och andra nya filer kan läsas och skrivas av gruppen `users` som i resten av Unraid. `PUID=0` kör som root (fungerar, men avråds). Startas containern med `--user` används inte PUID/PGID – då ändras ingen ägare och loggen säger vad som saknas.
 
 **Egen IP-adress (Custom: br0):** välj *Network Type* `Custom: br0` och ange gärna en fast IP-adress under *Fixed IP address*. Portmappningen gäller inte då, så servern nås på containerns egen adress och porten i **Port i containern** (standard 8420). För port 80: sätt **Port i containern** till `80` och **WebUI-port** till `80`. Adressen blir då `http://CONTAINERNS-IP/`. Unraid-servern själv kan inte nå en br0-container (det är en egenskap hos macvlan) – testa från en annan dator eller telefon.
 
-**Uppdatera:** klicka *Check for updates* i Docker-fliken, sedan *apply update*.
+### Uppgradera
 
-**Kanaler** (välj i mallens *Repository*):
+Klicka *Check for updates* i Docker-fliken och sedan *apply update* (eller låt pluginen *CA Auto Update Applications* göra det). Administratören ser **Ny version finns** i menyn och under *Administration* (med vad som är nytt och en länk till utgåvan). Servern frågar då GitHubs API om senaste utgåvan **högst en gång per dygn** – bara den frågan, inget om din server och inget telemetri. Stäng av under *Administration* eller med `UPDATE_CHECK=0`.
+
+Uppgraderingen är skyddad:
+- **Säkerhetskopia före uppgradering:** startar en ny version mot din databas sparas först en fullständig kopia i `/config/backups/före-uppgradering-<gammal version>-<tid>.db` (de tre senaste behålls, ändra med `DB_UPGRADE_BACKUPS`). Sedan uppgraderas databasen automatiskt.
+- **Ingen nedgradering som förstör data:** byter du tillbaka till en äldre image än den som senast uppgraderade databasen vägrar servern starta och skriver i loggen vad du kan göra – byt tillbaka till den nyare imagen, eller gå tillbaka till kopian från före uppgraderingen genom att kopiera den till `/config/restore.db` och starta om. `ALLOW_DOWNGRADE=1` startar ändå, på egen risk.
+- **Avstängning:** Unraid stoppar containern med SIGTERM och väntar 10 s. Servern skriver då klart pågående inspelningar, stoppar omkodningar och stänger databasen ordentligt.
+
+**Kanaler** (välj i mallens *Repository*, eller taggen i Community Applications):
 
 | Tagg | Innehåll |
 |---|---|
@@ -144,7 +176,22 @@ GitHub bygger Docker-imagen automatiskt (`ghcr.io/braxhn/braxhn-tv:latest`) vid 
 | `:edge` | Varje ändring direkt – nytt först, men det är du som testar. |
 | `:0.9.3` / `:sha-…` | En bestämd version, för att gå tillbaka. |
 
-En utgåva ges ut från GitHub: *Actions → Bygg och publicera Docker-image → Run workflow* och välj `latest` eller `beta` (versionen tas från `package.json`, och en release med ändringsloggen skapas).
+### Ge ut en ny version (för ägaren)
+
+1. Höj `"version"` i `package.json` (t.ex. `1.0.0`).
+2. Döp om `## Ej utgiven` överst i `CHANGELOG.md` till `## 1.0.0 – ÅÅÅÅ-MM-DD` och lägg en ny, tom `## Ej utgiven` ovanför. Pusha.
+3. *Actions → Bygg och publicera Docker-image → Run workflow* och välj `latest` (eller `beta`). Bygget kör hela testsviten, röktestar imagen (start, användare 99:100, avstängning med `docker stop`), publicerar `:latest` och `:1.0.0`, signerar imagen och skapar en GitHub-release med avsnittet ur ändringsloggen – den texten visar servrarna under *Ny version finns*. Bygget stoppas om versionen redan är utgiven eller om ändringsloggen saknar avsnittet för versionen.
+
+### Skicka in mallen till Community Applications (för ägaren, en gång)
+
+Mallarna `braxhn-tv.xml` och `braxhn-tv-nvidia.xml` i repots rot följer Community Applications format (engelsk beskrivning med en svensk rad, kategorierna *MediaServer:Video* och *MediaServer:Music*, ikonen `unraid/braxhn-tv.png`, taggarna latest/beta/edge) och kontrolleras av `test/distribution.test.js`.
+
+1. **Supporttråd:** skapa en tråd i forumet *Docker Containers* på [forums.unraid.net](https://forums.unraid.net) (t.ex. *[Support] BraXhn TV*) med en kort beskrivning, länk till repot och hur man rapporterar fel. Ändra sedan `<Support>` i båda mallarna till trådens adress (i dag: GitHub Issues).
+2. **Mallrepo:** Community Applications läser mallarna direkt ur ett publikt GitHub-repo – det här, eller (vanligast) ett eget litet mallrepo som bara innehåller de två XML-filerna. Byter du repo: ändra `<TemplateURL>` i mallarna till det nya repots adress.
+3. **Ansökan:** följ instruktionerna i Community Applications egen tråd på forumet om hur man skickar in mallar, och ange mallrepot och supporttråden. Imagen måste vara publik – kontrollera på GitHub under *Packages → braxhn-tv → Package settings* att paketet är *Public*.
+4. Efter godkännandet syns appen i fliken **Apps**. Ändringar i mallarna som pushas till `main` hämtas av Community Applications av sig själva.
+
+### Bygga själv och apparna
 
 **Bygga själv i stället:** klona repot på servern och kör `bash install.sh`. Det bygger `braxhn-tv:local` lokalt och installerar mallen.
 
@@ -356,6 +403,7 @@ BraXhn TV har ett **Subsonic-API** (version 1.16.1 med OpenSubsonic-tillägg, so
 
 ## Säkerhetskopior och återställning
 
+- Före varje uppgradering till en ny version sparas databasen i `/config/backups/före-uppgradering-…db` (se *Uppgradera*). Gå tillbaka genom att kopiera filen till `/config/restore.db` och starta om containern.
 - Lokala kopior görs varje natt i `/config/backups`. Extern, krypterad kopia ställs in under *Statistik → Extern säkerhetskopia*. **Spara lösenfrasen på ett säkert ställe** – utan den går kopian inte att läsa.
 - Återställ från webben (*Återställ* vid en kopia, starta sedan om containern) eller från terminalen: `docker exec -it braxhn-tv node server/restore.js /backup/braxhn-tv-….bxtv` och starta om.
 
@@ -476,9 +524,15 @@ Så fungerar det:
 |---|---|
 | Intel iGPU | `HWACCEL=vaapi` eller `qsv`, plus enheten `/dev/dri`. Tonmappning görs då på GPU:n (libplacebo via Vulkan eller VAAPI). HEVC/AV1 ut med `hevc_vaapi`/`av1_vaapi` (AV1 från Arc och Core Ultra). |
 | AMD | `HWACCEL=vaapi` och `/dev/dri`. HEVC ut på de flesta Radeon, AV1 från RX 7000. |
-| NVIDIA | Installera pluginen *Nvidia-Driver* och starta om. Använd sedan mallen **braxhn-tv-nvidia** (se nedan) – den har redan `HWACCEL=nvenc`, `--runtime=nvidia`, `NVIDIA_VISIBLE_DEVICES=all` och `NVIDIA_DRIVER_CAPABILITIES=all`. Tonmappningen görs på grafikkortet med libplacebo (Vulkan – kräver `NVIDIA_DRIVER_CAPABILITIES=all`, som i mallen) eller OpenCL, annars med processorn efter nedskalningen. HEVC ut på GTX 900 och senare, AV1 från RTX 40. |
+| NVIDIA | Installera pluginen *Nvidia-Driver* från Apps och starta om. Använd sedan mallen **braxhn-tv-nvidia** (se nedan) – den har redan `HWACCEL=nvenc`, `--runtime=nvidia`, `NVIDIA_VISIBLE_DEVICES=all` och `NVIDIA_DRIVER_CAPABILITIES=all`. Tonmappningen görs på grafikkortet med libplacebo (Vulkan – kräver `NVIDIA_DRIVER_CAPABILITIES=all`, som i mallen) eller OpenCL, annars med processorn efter nedskalningen. HEVC ut på GTX 900 och senare, AV1 från RTX 40. |
 
-Mall för NVIDIA:
+Steg för steg på Unraid:
+- **Intel (Quick Sync – iGPU eller Arc):** installera gärna pluginen *Intel GPU TOP* (laddar drivrutinen och visar belastningen). Fyll i **GPU-enhet** = `/dev/dri` och sätt **Hårdvaruomkodning** till `qsv` (eller `vaapi`). Loggen visar då `[start] hårdvaruacceleration: HWACCEL=qsv, enheter: /dev/dri/renderD128`.
+- **AMD (Radeon eller APU):** installera gärna pluginen *Radeon TOP*. Fyll i **GPU-enhet** = `/dev/dri` och sätt **Hårdvaruomkodning** till `vaapi`.
+- **NVIDIA:** installera pluginen *Nvidia-Driver* och starta om Unraid. Installera sedan **braxhn-tv-nvidia** från Apps (eller mallen nedan) – den har `--runtime=nvidia`, `NVIDIA_VISIBLE_DEVICES=all` och `HWACCEL=nvenc` från början.
+- Saknas enheten, eller finns ett grafikkort som inte används, står det i loggen vid start med vad du ska ändra. Containern behöver aldrig vara *Privileged*.
+
+Mall för NVIDIA (manuellt):
 ```bash
 wget -O /boot/config/plugins/dockerMan/templates-user/my-braxhn-tv-nvidia.xml https://raw.githubusercontent.com/BraXhn/braxhn-tv/main/braxhn-tv-nvidia.xml
 ```
@@ -536,7 +590,9 @@ Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[
 | `DVR_DIR` | /recordings | Var inspelningar sparas |
 | `PODCAST_DIR` | /config/podcasts | Var nedladdade poddavsnitt sparas |
 | `NOTIFY_KIND` / `NOTIFY_URL` / `NOTIFY_TOKEN` / `NOTIFY_USER` | – | Notiser (kan även sättas i webbgränssnittet) |
-| `UPDATE_CHECK` | 1 | 0 = leta inte efter nya versioner |
+| `UPDATE_CHECK` | 1 | 0 = leta inte efter nya versioner. På: ett anrop till GitHubs API (senaste utgåvan) högst en gång per dygn, inget om servern skickas |
+| `DB_UPGRADE_BACKUPS` | 3 | Antal säkerhetskopior av databasen från före uppgraderingar som behålls i `/config/backups` |
+| `ALLOW_DOWNGRADE` | 0 | 1 = starta även mot en databas från en nyare version (nedgradering, på egen risk) |
 | `HISTORY_DAYS` | 365 | Hur många dagar tittarhistoriken sparas (0 = för alltid; kan även sättas under Tittarstatistik) |
 | `WEBHOOK_INTERVAL` | 10 | Sekunder mellan genomgångar av webhook-kön (0 = av) |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |
@@ -545,7 +601,8 @@ Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[
 | `SUBSONIC` | 1 | 0 = stäng av API:t för musikappar (`/rest`); kan även ändras i Administration → Säkerhet |
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `BACKUP_PASSPHRASE` | – | Extern säkerhetskopia |
 | `WATCH_REGION` | SE | Land för *var kan jag se den?* |
-| `PUID` / `PGID` | 99 / 100 | Ägare till filerna i /config |
+| `PUID` / `PGID` | 99 / 100 | Användaren servern körs som och ägare till filerna i /config (Unraid: `nobody:users`). 0 = root (avråds) |
+| `UMASK` | 002 | Rättigheter för nya filer: 002 = gruppen får skriva (Unraid), 022 = bara ägaren |
 | `LIVE_TIMESHIFT_MINUTES` | 120 | Minuter live-TV sparas bakåt (0 = av, max 720) |
 | `LIVE_TIMESHIFT_MAX_GB` | 20 | Diskutrymme för timeshift, alla kanaler tillsammans |
 | `IPTV_ALLOW_PRIVATE` | 0 | `1` = adresser i IPTV-listor får gå till alla nät (även `localhost`) – bara för särskilda installationer |
@@ -591,6 +648,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 
 | Funktion | Resultat i testet |
 |---|---|
+| Distribution och utgåvor | `test/distribution.test.js`: båda Unraid-mallarna är välformad XML enligt Community Applications schema (alla `Config` med giltiga typer, lägen och val, kategorierna, ikonen som 512×512 PNG i repot, taggarna latest/beta/edge, varje miljövariabel läses av servern, samma standardvärden som Dockerfile). Startskriptets beslut om PUID/PGID/UMASK (root → 99:100, `PUID=0`, `--user`, ogiltiga värden) och en riktig start: rätt ägare och umask på nya filer, och ett tydligt fel med `chown`-råd när `/config` inte går att skriva i. Nedgraderingsskyddet (servern vägrar, databasfilen är orörd, `restore.db` från kopian fungerar, `ALLOW_DOWNGRADE=1`), säkerhetskopian före uppgradering och att bara de N senaste behålls. Uppdateringsnotisen mot en låtsad GitHub: en fråga per dygn även över omstarter, ingen version eller id i anropet, avstängd = inga anrop, 404/403 och förhandsversioner. Startloggen och avstängning med SIGTERM (avslutningskod 0, WAL inskriven). Röktestet i bygget kontrollerar att imagen kör som 99:100 och stänger av rent på `docker stop`. **Otestat:** själva inskickningen till Community Applications och hur Apps-fliken visar mallen, `/dev/dri` och NVIDIA-runtime i en riktig container (ingen GPU i testmiljön), och `tini -g` och OCI-etiketterna i en byggd image (Docker-bygget kördes inte lokalt). |
 | Matchning (filnamn och TMDB) | En korpus med 373 riktiga namngivningar (`test/fixtures/match/corpus.js`: Sonarr/Radarr, scenreleaser, svenska DVD-rippar, Plex/Jellyfin-namn med id, MakeMKV, barnfilm och tecknat med svenska titlar, nyinspelningar utan år, anime, julkalendrar, datumavsnitt, kategorimappar) körs genom tolkningen och hela vägen genom `refreshItem` mot en låtsas-TMDB som svarar som TMDB (sökning med `language=sv-SE`/`en-US`, alternativa titlar, längd, säsonger) (`test/match-corpus.test.js`). Före: titel 91,2 %, år 98,9 %, säsong 96,8 %, avsnitt 97,9 %, rätt TMDB-träff 88,5 %. Efter: 100 % på allt, i snitt 3,1 TMDB-anrop per titel; testet kräver minst 97/98/98/98/95 %. 40 nya namn som inte användes under utvecklingen: 40/40 (förut 38/40). `test/match-scan.test.js`: skanning med kategorimappar, datumavsnitt, omtolkad serie som behåller raden och Min lista, låsningar, engångsförsöket och *Omatchade titlar*; vyn i Chromium vid 375 och 1280 px. **Otestat:** riktiga TMDB (svaren är skrivna efter dokumentation och erfarenhet – hur lös TMDB:s sökning är kan skilja) och riktiga bibliotek; korpusen och tolkningen skrevs samtidigt, så siffrorna på den är bättre än i verkligheten. **Svensk korpus** (`test/fixtures/match/corpus-sv.js`, 479 filer, `test/match-corpus-sv.test.js`): ägarens verkliga felfall (Dexters labratorium med segment, Anita och Televinken, Bröderna Fluff 103, Noscene-anki o pytte, SpongeBob S14E04, Alla utom vi, Band of Brothers-mappen, Roast on the Coast Sverige, The Big Bang Theory, Clark, Clarksons gård) och svenska dubbade filmer, svenska barnfilmer och barnserier, SVT Play/svtplay-dl, julkalendrar, svenska namn på utländska serier, Pokémon, avsnitt utan SxxExx, release-grupper och felkodade å/ä/ö, Disneyklassiker med nyinspelningar, kortfilmer, fattiga filnamn i mappar och svenska vuxenserier med vanliga ord – hela vägen genom skanningen mot en låtsas-TMDB med sidor, svenska premiärår (release_dates), översättningar, episode groups och avsnittsnamn. Före: 91,0 % rätt (ägarens fall 41,9 %, utan SxxExx 75 %, release-grupper/stavning 74 %, fattiga filnamn i mappar 83 %). Efter: 100 %; testet kräver 97 %. En kontrollgrupp på 30 namn skrevs efter förbättringen utan att koden justerades: 30/30 (förut 28/30). Den gamla korpusen ligger kvar på 100 %. `test/match-merge.test.js`: serier i två mappar slås ihop (Min lista, betyg, sedd-status, versioner, inte uppdelade igen), olika år slås aldrig ihop, felmatchad serie rättas men inte när den är låst, osäkra matchningar och förslag med *Godkänn*. **Otestat:** riktiga TMDB – särskilt hur många träffar en sökning på vanliga ord ger och i vilken ordning, om felstavade ord hittas av TMDB självt, hur episode groups ser ut för olika serier och om SpongeBob-felet hos ägaren verkligen var säsongsnumreringen. |
 | Testsamlingen (mediakonformitet) | 20 syntetiska källor (H.264 8/10 bit, HEVC 8/10 bit, HDR10, HLG, "Dolby Vision" 8.1/5, VP9, MPEG-4 i AVI, flätad MPEG-2 i TS, anamorf PAL, 1920×800, VFR, 23,976–50 bilder/s; AAC, AC-3, E-AC-3, DTS, TrueHD, FLAC, Opus, flera ljudspår; SRT, ASS, PGS) × 8 klientprofiler × direkt/remux/omkodning/ABR, kontrollerade med ffprobe: segmenttider mot EXTINF, inga överlappande DTS, IDR först, H.264 8 bit utan B-bilder och utan HDR-märkning vid omkodning, rätt ljud per klient, undertexter. Körs i CI på Linux med samma ffmpeg som Docker-imagen och på macOS med AVFoundation (AVPlayer) och WebKit – se [docs/testsamling.md](docs/testsamling.md). **Otestat:** riktig Dolby Vision (ffmpeg kan inte skriva RPU:er), iPhone-hårdvara och HDR-skärm. |
 | Remux | Segmentgränserna stämde med filens nyckelbilder, även efter spolning, och inga bildrutor dubblades eller tappades. Tidsstämplarna kan ligga 1–5 bilder (B-bildernas fördröjning) från spellistan, se testsamlingen. |
