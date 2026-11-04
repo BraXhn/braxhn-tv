@@ -33,7 +33,7 @@ body:
     attributes:
       label: BraXhn TV version
       description: Shown under Administration (and in the diagnostics bundle). Image tag if you know it (latest, beta, edge, sha-…).
-      placeholder: "0.9.3 (latest)"
+      placeholder: "1.0.0 (latest)"
     validations:
       required: true
   - type: input

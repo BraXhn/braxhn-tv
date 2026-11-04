@@ -1,6 +1,21 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.0.0 – 2026-11-04
+
+Första stabila utgåvan – redo för Unraids Community Applications. Höjdpunkter sedan 0.9.3 (alla detaljer nedan):
+
+- **Familjen:** Föräldraöversikt (vad barnen tittar på, skärmtid, Stoppa), Kvällsvalet, "Det här har hänt", Ögonblick, familjefilter och språkinlärning.
+- **TV och fjärrkontroll:** hela webbappen styrs med pilar, OK och Bakåt; TV-läge för soffavstånd.
+- **Fjärråtkomst utan portöppning** via BraXhn Relay (reläet levereras separat).
+- **Import från Plex** med alla profiler och löpande synk.
+- **Jämnare strömning** (bakgrundsjobb väntar medan någon tittar, Statistik i spelaren, nyckelbilder för grafikkortet) och **snabbare med stora bibliotek**.
+- **Bättre matchning** av svenska barnprogram och serier, osäkra matchningar att godkänna och rätta även utanför hemmet.
+- **Robust i okända miljöer:** nödsida vid skadad databas, full disk och behörighetsfel; startsidan läker sig själv; säkerhetskopia före varje uppgradering och skydd mot nedgradering.
+- **Säkerhet:** tre granskningar, bl.a. barnprofilernas åldersgränser överallt och gissningsspärrar.
+- **För alla:** engelsk README och webb, diagnostikpaket för supporten, Unraid-mallar med PUID/PGID/UMASK, ingen telemetri.
+
 - **Redo för Unraids Community Applications och tryggare uppgraderingar.**
   - **Mallarna** (`braxhn-tv.xml`, `braxhn-tv-nvidia.xml`) följer Community Applications format: engelsk beskrivning med en svensk rad, kategorierna *MediaServer:Video* och *MediaServer:Music*, ikon som 512×512 PNG i repot (`unraid/braxhn-tv.png`), länk till paketet (`Registry`), taggarna `latest`/`beta`/`edge` att välja mellan, `UMASK` och `UPDATE_CHECK` bland de avancerade inställningarna och pluginen *Nvidia-Driver* som krav för NVIDIA-mallen. Hur ägaren skickar in mallen och skapar supporttråden står i README.
   - **PUID/PGID/UMASK enligt Unraid:** servern körs som `nobody:users` (99:100) med `UMASK` 002, så att inspelningar och andra nya filer får rätt ägare och kan skrivas av gruppen. Ogiltiga värden ersätts med standard och loggas; `PUID=0` (root) fungerar men varnar; startad med `--user` används inte PUID/PGID och loggen säger vad som saknas. Går `/config` inte att skriva i startar servern inte och loggen visar exakt vilket `chown`-kommando som rättar det (förut: ett obegripligt `EACCES` från databasen).
