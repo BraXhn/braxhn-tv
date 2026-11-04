@@ -7,7 +7,7 @@ import { db, get, all, run, tx, now, getSetting, IMAGES, searchKeys } from './db
 import { ranked } from './search.js';
 import { probe, AUDIO, makeCover } from './music.js';
 import { underFailed } from './util.js';
-import { rootsOf, listRoots, relOf, under } from './libpaths.js';
+import { rootsOf, listRoots, relOf, under, listWarnings } from './libpaths.js';
 import { libOk, libFilter } from './perms.js';
 
 const pexec = promisify(execFile);
@@ -69,6 +69,7 @@ export async function scanBooks(lib, status) {
   const roots = rootsOf(lib);
   const list = await listRoots(roots, (n) => AUDIO.has(path.extname(n).toLowerCase()), (n) => n === '@eaDir');
   const { files: found, failed } = list;
+  for (const w of listWarnings(lib.name || lib.path, list)) { console.warn('[böcker]', w); (status.warnings ||= []).push(w); }
   const groups = groupBooks(found);
   status.total = groups.length; status.phase = 'Läser ljudböcker';
   const known = new Map(all('SELECT id, key FROM books WHERE library_id=?', lib.id).map(r => [r.key, r.id]));

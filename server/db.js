@@ -73,6 +73,10 @@ export const db = new DatabaseSync(DBFILE);
     process.exit(78);
   }
 }
+// Låst databas (ett annat program – sqlite3, ett säkerhetskopieringsverktyg – skriver i filen): vänta en stund i stället
+// för att ge "database is locked" direkt. WAL-filen krymps tillbaka efter en kontrollpunkt (annars stannar den på sin
+// största storlek, se checkWal nedan).
+db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_size_limit=67108864');
 // Säkerhetskopia före uppgradering: ny programversion mot en befintlig databas (schemat ändras strax nedan).
 // Sparas i backups/ som före-uppgradering-<gammal version>-<tid>.db; de DB_UPGRADE_BACKUPS (standard 3) senaste behålls.
 {
@@ -906,6 +910,20 @@ export function refreshKeys(only = null, max = 20000) {
 const optimize = () => { try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[db] optimize:', e.message); } };
 optimize();
 setInterval(optimize, 12 * 3600e3).unref();
+// WAL som växer: en lång läsning (t.ex. en export) hindrar de automatiska kontrollpunkterna, och filen krymper aldrig av
+// sig själv. Över 256 MB görs en kontrollpunkt som också kortar filen (TRUNCATE; går bara när ingen läser just då).
+export function checkWal(limit = 256 << 20) {
+  let size = 0;
+  try { size = fs.statSync(DBFILE + '-wal').size; } catch { return 0; }
+  if (size <= limit) return size;
+  try {
+    const r = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
+    const after = (() => { try { return fs.statSync(DBFILE + '-wal').size; } catch { return 0; } })();
+    console.log(`[db] WAL-filen var ${Math.round(size / 2 ** 20)} MB – kontrollpunkt gjord${r?.busy ? ' (delvis, databasen lästes samtidigt)' : ''}, nu ${Math.round(after / 2 ** 20)} MB`);
+    return after;
+  } catch (e) { noteDbError(e); console.warn('[db] kontrollpunkt för WAL misslyckades:', e.message); return size; }
+}
+setInterval(checkWal, 3600e3).unref();
 export const CACHE = path.join(CONFIG, 'cache');
 export const SUBS_DIR = path.join(CONFIG, 'subtitles');
 for (const d of [CACHE, SUBS_DIR, path.join(CACHE, 'keyframes'), path.join(CACHE, 'fingerprints')]) fs.mkdirSync(d, { recursive: true });
@@ -921,9 +939,49 @@ export function stmt(sql) {
   if (stmts.size > STMT_MAX) stmts.delete(stmts.keys().next().value);
   return st;
 }
+// ---- fel som beror på miljön, inte på koden: full disk, skrivskyddad /config, I/O-fel, låst eller skadad databas ----
+// Läsning fortsätter att fungera när disken är full (WAL), så servern fortsätter: skrivningar misslyckas med ett
+// begripligt fel (router.js: 507/503), det loggas en gång per tio minuter och syns i Administration (security-check).
+// Första lyckade skrivningen efteråt nollställer läget.
+const ENV_ERR = { 13: 'full', 8: 'readonly', 10: 'ioerr', 5: 'busy', 6: 'busy', 11: 'corrupt', 26: 'corrupt', 14: 'cantopen' };
+/** 'full' | 'readonly' | 'ioerr' | 'busy' | 'corrupt' | 'cantopen' | null (vanligt fel, t.ex. en bugg eller UNIQUE) */
+export function dbProblem(e) {
+  if (!e || (e.code !== 'ERR_SQLITE_ERROR' && typeof e.errcode !== 'number')) return null;
+  return ENV_ERR[(e.errcode ?? -1) & 0xff] || null;
+}
+export const DB_TEXT = {
+  full: 'Disken där /config ligger är full – ändringar kan inte sparas förrän det finns ledigt utrymme igen',
+  readonly: 'Databasen i /config är skrivskyddad – kontrollera att mappen är skrivbar för containerns användare (PUID/PGID)',
+  ioerr: 'Läs- eller skrivfel på disken där /config ligger – kontrollera disken (SMART) och loggen i Unraid',
+  busy: 'Databasen är låst av ett annat program – försök igen om en stund',
+  corrupt: 'Databasen är skadad – återställ från en säkerhetskopia (se README, Felsökning)',
+  cantopen: 'Databasfilen går inte att öppna – kontrollera /config'
+};
+export const dbHealth = { problem: null, since: 0, last: 0, count: 0, error: '' };
+let dbWarned = 0;
+export function noteDbError(e) {
+  const p = dbProblem(e);
+  if (!p) return null;
+  const t = Date.now();
+  if (dbHealth.problem !== p) Object.assign(dbHealth, { problem: p, since: t, count: 0 });
+  dbHealth.last = t; dbHealth.count++; dbHealth.error = String(e.message || e).slice(0, 200);
+  if (t - dbWarned > 10 * 60e3) { dbWarned = t; console.error(`[db] ${DB_TEXT[p]} (${dbHealth.error})`); }
+  return p;
+}
+const dbOk = () => { if (dbHealth.problem && dbHealth.problem !== 'corrupt') { console.log('[db] skrivningar fungerar igen'); dbHealth.problem = null; dbWarned = 0; } };
 export const get = (sql, ...p) => stmt(sql).get(...p);
 export const all = (sql, ...p) => stmt(sql).all(...p);
-export const run = (sql, ...p) => stmt(sql).run(...p);
+export function run(sql, ...p) {
+  let r;
+  try { r = stmt(sql).run(...p); } catch (e) { noteDbError(e); throw e; }
+  if (dbHealth.problem) dbOk();
+  return r;
+}
+/** Skrivning som inte får stoppa det den hör till (senast sedd, statistik): misslyckas den när disken är full loggas det
+ *  (noteDbError) och null returneras. Vanliga fel (buggar) kastas som förut. */
+export function softRun(sql, ...p) {
+  try { return run(sql, ...p); } catch (e) { if (dbProblem(e)) return null; throw e; }
+}
 
 /**
  * Kör fn i en transaktion (BEGIN IMMEDIATE/COMMIT, ROLLBACK vid fel). Kapslade anrop – eller anrop
@@ -938,10 +996,10 @@ export function tx(fn) {
     catch (e) { try { db.exec(`ROLLBACK TO ${sp}; RELEASE ${sp}`); } catch {} throw e; }
     finally { txDepth--; }
   }
-  db.exec('BEGIN IMMEDIATE');
+  try { db.exec('BEGIN IMMEDIATE'); } catch (e) { noteDbError(e); throw e; }
   txDepth++;
   try { const r = fn(); db.exec('COMMIT'); return r; }
-  catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  catch (e) { noteDbError(e); try { db.exec('ROLLBACK'); } catch {} throw e; }
   finally { txDepth--; }
 }
 

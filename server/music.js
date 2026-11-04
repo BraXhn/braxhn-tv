@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream';
 import { get, all, run, tx, now, getSetting, IMAGES } from './db.js';
 import { ranked, parseQuery } from './search.js';
 import { send, fail, deletionBlocked, streamFile } from './util.js';
-import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
+import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.js';
 import { parseReplayGain, scheduleLoudness, refreshAlbumGains } from './listening.js';
 import * as gapless from './gapless.js';
 import * as sonic from './sonic.js';
@@ -94,8 +94,8 @@ export async function scanMusic(lib, status) {
   const { failed } = list, allFiles = list.files;
   const files = allFiles.filter(f => AUDIO.has(path.extname(f).toLowerCase())), videoFiles = allFiles.filter(f => !AUDIO.has(path.extname(f).toLowerCase()));
   // Ingen mapp går att läsa (t.ex. omonterad NAS): rör ingenting
+  for (const w of listWarnings(lib.name, list)) scanWarn(status, w);
   if (!list.rootOk) return scanWarn(status, deletionBlocked({ name: lib.name, rootOk: false }));
-  for (const d of failed) if (!roots.includes(d)) scanWarn(status, `${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length; status.phase = 'Läser taggar';
   const known = new Map(all('SELECT id, path, size, mtime FROM tracks WHERE library_id=?', lib.id).map(r => [r.path, r]));
   const seen = new Set(), changedAlbums = new Set();

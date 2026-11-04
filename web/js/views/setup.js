@@ -198,6 +198,15 @@ const STEP = {
       const box = $('#stsug');
       let r;
       try { r = await api('/setup/suggest'); } catch (e) { if (e.aborted) throw e; box.innerHTML = errorState(e, { retry: true, compact: true }); bindRetry(box, suggest); return; }
+      // Mediamappen saknas helt i containern eller får inte läsas: säg exakt vad som ska göras i Unraid
+      if (r.problem === 'missing' || r.problem === 'denied') {
+        box.innerHTML = emptyState({ icon: '⚠️', compact: true,
+          title: r.problem === 'missing' ? t('Mappen {root} finns inte i containern', { root: r.root }) : t('BraXhn TV får inte läsa {root}', { root: r.root }),
+          text: r.problem === 'missing'
+            ? t('Öppna containerns inställningar i Unraid (Docker → BraXhn TV → Edit), lägg till en sökväg med Container Path {root} och Host Path till dina filmer, t.ex. /mnt/user/media, och tryck Apply. Du kan också hoppa över steget och lägga till bibliotek senare.', { root: r.root })
+            : t('Mappen finns men tillhör en annan användare. Kontrollera PUID/PGID i containerns inställningar (i Unraid normalt 99 och 100) och att mappen går att läsa för den användaren.') });
+        return;
+      }
       if (!r.suggestions.length) {
         box.innerHTML = emptyState({ icon: '📂', compact: true, title: t('Inga mappar under {root}', { root: r.root }), text: t('Lägg till dina mediamappar som sökvägar i Unraid-mallen och starta om containern – eller välj en mapp nedan.') });
         return;

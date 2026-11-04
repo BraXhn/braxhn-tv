@@ -150,9 +150,14 @@ export function groupNewEpisodes(eps, limit = 24) {
 }
 export const oneItem = (uid, id) => listItems(uid, 'i.id=?', [id], 'i.id', 1, 0, { versions: true })[0];
 
+// MEDIA_ROOT kan själv vara en symbolisk länk (egen installation: /media → /mnt/storage/media) – då jämförs även med målet
+let mediaReal = null;
 export function insideMedia(p) {
-  try { const r = fs.realpathSync(p); return r === MEDIA_ROOT || r.startsWith(MEDIA_ROOT + path.sep) ? r : null; }
-  catch { return null; }
+  try {
+    const r = fs.realpathSync(p);
+    if (!mediaReal) try { mediaReal = fs.realpathSync(MEDIA_ROOT); } catch {}
+    return [MEDIA_ROOT, mediaReal].some(R => R && (r === R || r.startsWith(R + path.sep))) ? r : null;
+  } catch { return null; }
 }
 export const ctx = (c) => ({ user: c.user, ip: clientIp(c.req) });
 

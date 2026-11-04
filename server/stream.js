@@ -11,6 +11,7 @@ import { fastKeyframes } from './keyframes.js';
 import * as jobs from './jobs.js';
 import { SubReader, vttParser } from './subreader.js';
 import { ffcaps, ffReady, vulkanDevice } from './ffcaps.js';
+import { autoMaxTranscodes } from './envcheck.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
@@ -30,7 +31,20 @@ try {
 } catch (e) { console.warn('[hls] kunde inte läsa omkodningsmappen', TRANSCODE, e.message); }
 // Grafikkortet behöver mer än så här många sekunder till första kodade bilden = något är fel (se slowStart)
 const SLOW_START = 4;
-const HW_WANTED = (process.env.HWACCEL || 'none').toLowerCase(); // none | vaapi | nvenc | qsv
+// none | vaapi | nvenc | qsv | auto. Vanliga felskrivningar tolkas (nvidia/cuda → nvenc, intel/amd → vaapi, off/cpu → none);
+// auto väljer efter enheterna i containern (NVIDIA-enhet → nvenc, /dev/dri → vaapi, annars processorn) – startprovet
+// nedan avgör sedan om det verkligen fungerar.
+export function hwFromEnv(v = process.env.HWACCEL, has = (f) => fs.existsSync(f)) {
+  const s = String(v || 'none').trim().toLowerCase();
+  const alias = { '': 'none', off: 'none', no: 'none', false: 'none', '0': 'none', cpu: 'none', software: 'none', nvidia: 'nvenc', cuda: 'nvenc', nvdec: 'nvenc',
+    intel: 'vaapi', amd: 'vaapi', radeon: 'vaapi', va: 'vaapi', 'va-api': 'vaapi', quicksync: 'qsv', 'quick sync': 'qsv' }[s] ?? s;
+  if (alias !== 'auto') return alias;
+  if (has('/dev/nvidia0') || has('/dev/nvidiactl')) return 'nvenc';
+  if (has(process.env.VAAPI_DEVICE || '/dev/dri/renderD128')) return 'vaapi';
+  return 'none';
+}
+const HW_WANTED = hwFromEnv();
+if (String(process.env.HWACCEL || '').trim().toLowerCase() === 'auto') console.log(`[hårdvara] HWACCEL=auto → ${HW_WANTED === 'none' ? 'inget grafikkort hittades, processorn används' : HW_WANTED}`);
 // Hårdvaruomkodning som inte fungerar (t.ex. nvenc utan NVIDIA-drivrutin i containern: "Cannot load libcuda.so.1")
 // får aldrig stoppa uppspelningen – då används processorn i stället och adminsidan visar varför.
 let HW = HW_WANTED;
@@ -46,6 +60,10 @@ export function hwHint(err) {
     return 'grafikkortet tillåter inte fler samtidiga kodningar (vanligt på GeForce) eller används av något annat, t.ex. en annan mediaserver.';
   if (/vaapi|VA-API|renderD|\/dev\/dri|No VA display/i.test(err))
     return 'enheten /dev/dri saknas i containern – lägg till den under GPU-enhet (Intel/AMD).';
+  // QSV (Intel Quick Sync): kräver Intel-grafik och /dev/dri – AMD och äldre Intel använder VA-API
+  if (/qsv|mfx|libvpl|MFX session|unsupported \(-3\)|Error creating a MFX/i.test(err))
+    return 'Quick Sync (QSV) fungerar inte här – den kräver Intel-grafik och /dev/dri i containern. Prova HWACCEL=vaapi (fungerar också med AMD och äldre Intel).';
+  if (/spawn ffmpeg ENOENT|ENOENT/.test(err)) return 'ffmpeg saknas – den finns i Docker-imagen; vid egen installation: installera ffmpeg.';
   return null;
 }
 export function disableHw(reason) {
@@ -1292,7 +1310,8 @@ function complete(s, n) {
 
 // Gränser för samtidiga omkodningar (skydd mot överbelastning)
 export function limits() {
-  return { global: +getSetting('max_transcodes', process.env.MAX_TRANSCODES || 4), user: +getSetting('max_transcodes_user', process.env.MAX_TRANSCODES_USER || 2) };
+  // Utan inställning: efter grafikkort, kärnor och minne (envcheck.js – en Raspberry Pi klarar inte fyra samtidiga)
+  return { global: +getSetting('max_transcodes', process.env.MAX_TRANSCODES || autoMaxTranscodes({ hw: HW })), user: +getSetting('max_transcodes_user', process.env.MAX_TRANSCODES_USER || 2) };
 }
 function ensureCapacity(s, userId) {
   if (s.d.mode !== 'transcode') {

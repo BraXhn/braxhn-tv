@@ -159,6 +159,7 @@ export async function backfill(lib, tmdb, { max = 40, status = null, apply = nul
       n++;
     } catch (e) {
       if (/429/.test(e.message)) { console.warn('[people] TMDB begränsar anropen – fortsätter vid nästa skanning'); break; }
+      if (e.offline) break; // TMDB går inte att nå (loggas en gång av backoff.js) – fortsätter vid nästa skanning
       if (/404/.test(e.message)) run('UPDATE items SET credits_done=2 WHERE id=?', it.id);
       else console.warn('[people]', e.message);
     }

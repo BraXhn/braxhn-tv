@@ -251,7 +251,8 @@ export async function matchDetail(api, q) {
   };
   const ranked = () => [...pool.values()].map(c => ({ c, s: score(c) })).sort((a, b) => b.s - a.s);
   const top = () => ranked()[0]?.s ?? -1;
-  const safe = async (fn) => { try { return await fn(); } catch (e) { if (/429/.test(e.message)) throw e; return null; } };
+  // 429 och "går inte att nå" (offline, scanner.js tmdb) kastas vidare: titeln ska försökas igen, inte räknas som "hittades inte"
+  const safe = async (fn) => { try { return await fn(); } catch (e) { if (/429/.test(e.message) || e.offline) throw e; return null; } };
   // 1. Svenska: varje variant med år, sedan de bästa utan år (årtalet kan skilja eller saknas hos TMDB)
   const steps = year ? [...qs.slice(0, 6).map(x => [x.q, year]), ...qs.slice(0, 4).map(x => [x.q, null])] : qs.slice(0, 6).map(x => [x.q, null]);
   let pages = 1;

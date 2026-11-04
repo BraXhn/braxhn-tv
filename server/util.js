@@ -163,32 +163,72 @@ export function inCidr(ip, cidr) {
  * Går igenom en mapp utan att blockera händelseloopen. accept(namn) väljer filer, skip(namn) hoppar över mappar.
  * Returnerar { files, rootOk, failed } där failed är mappar som inte gick att läsa (t.ex. avmonterad NAS-delning).
  */
+// Okända miljöer: symboliska länkar följs (rclone/debrid-upplägg, länkar mellan diskar) men en länkad mapp gås bara
+// igenom om den inte redan ingår (en länk till en överliggande mapp ger annars en oändlig slinga), och djupet har ett tak.
+// En trasig länk (målet borta, t.ex. en rclone-montering som släppt) räknas som "gick inte att läsa": raden behålls.
+// Filnamn som inte är giltig UTF-8 (Node ersätter bytena med U+FFFD och kan sedan inte öppna filen) samlas i badNames.
+export const MAX_SCAN_DEPTH = 40;
 export async function listFiles(root, accept, skip = () => false, dirs = null) {
-  const files = [], failed = [];
-  let rootOk = true, n = 0;
-  async function visit(dir, isRoot) {
+  const files = [], failed = [], badNames = [], errors = [];
+  // Länkade mappar: följs bara om målet inte redan ingår (i biblioteket eller under ett mål som redan följts) – så
+  // blir en länk till en överliggande mapp ingen slinga, och vanliga mappar behöver ingen extra stat
+  const targets = [];
+  let realRoot = null, rootOk = true, rootError = null, n = 0;
+  const inside = (base, p) => p === base || p.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
+  const note = (p, e) => { failed.push(p); if (errors.length < 50) errors.push({ path: p, code: e?.code || 'fel', message: e?.message || String(e) }); };
+  async function followDir(p) {
+    const real = await fs.promises.realpath(p);
+    realRoot ??= await fs.promises.realpath(root).catch(() => root);
+    if (inside(realRoot, real) || targets.some(t => inside(t, real))) return false;
+    targets.push(real);
+    return true;
+  }
+  async function visit(dir, isRoot, depth) {
+    if (depth > MAX_SCAN_DEPTH) { note(dir, { code: 'EDEPTH', message: `mer än ${MAX_SCAN_DEPTH} nivåer` }); return; }
     let d;
     try { d = await fs.promises.opendir(dir); }
-    catch (e) { if (isRoot) rootOk = false; else failed.push(dir); return; }
+    catch (e) { if (isRoot) { rootOk = false; rootError = e.code || e.message; } else note(dir, e); return; }
     const subdirs = [];
     try {
       for await (const e of d) {
         if (++n % 200 === 0) await new Promise(setImmediate);
         if (e.name.startsWith('.') || skip(e.name)) continue;
         const p = path.join(dir, e.name);
-        if (e.isDirectory()) subdirs.push(p);
-        else if (e.isFile() && accept(e.name)) files.push(p);
+        if (e.name.includes('\uFFFD')) {
+          // Ogiltig UTF-8 i namnet: sökvägen går inte att öppna (ett riktigt U+FFFD i namnet går det)
+          try { await fs.promises.lstat(p); } catch { badNames.push(p); continue; }
+        }
+        let isDir = e.isDirectory(), isFile = e.isFile();
+        if (e.isSymbolicLink()) {
+          try {
+            const st = await fs.promises.stat(p); isDir = st.isDirectory(); isFile = st.isFile();
+            if (isDir && !await followDir(p)) continue; // redan med (eller en slinga)
+          } catch (er) {
+            // Trasig länk eller slinga av länkar (ELOOP): det som fanns där behålls (bara länkar som kan vara en mediafil eller mapp)
+            if (accept(e.name) || !path.extname(e.name)) note(p, er);
+            continue;
+          }
+        }
+        if (isDir) subdirs.push(p);
+        else if (isFile && accept(e.name)) files.push(p);
       }
-    } catch { if (isRoot) rootOk = false; else failed.push(dir); return; }
+    } catch (e) { if (isRoot) { rootOk = false; rootError = e.code || e.message; } else note(dir, e); return; }
     dirs?.add(dir); // mappar som lästes helt (lokal metadata rör bara titlar i sådana mappar)
-    for (const s of subdirs) await visit(s, false);
+    for (const s of subdirs) await visit(s, false, depth + 1);
   }
-  await visit(root, true);
+  await visit(root, true, 0);
   if (rootOk && !files.length) {
     // En tom rotmapp kan vara en avmonterad monteringspunkt – kontrollera att den går att läsa alls
-    try { await fs.promises.access(root, fs.constants.R_OK); } catch { rootOk = false; }
+    try { await fs.promises.access(root, fs.constants.R_OK); } catch (e) { rootOk = false; rootError = e.code || e.message; }
   }
-  return { files, rootOk, failed };
+  return { files, rootOk, rootError, failed, badNames, errors };
+}
+/** Begriplig orsak till att en mapp/fil inte gick att läsa (loggen och skanningens varningar) */
+export function fsReason(code) {
+  return ({ EACCES: 'behörighet saknas (kontrollera PUID/PGID och mappens ägare)', EPERM: 'behörighet saknas',
+    ENOENT: 'finns inte längre (trasig länk eller borttagen under skanningen)', ELOOP: 'slinga av symboliska länkar',
+    ENAMETOOLONG: 'sökvägen är för lång', EDEPTH: `fler än ${MAX_SCAN_DEPTH} mappnivåer`, EIO: 'läsfel på disken eller nätverksresursen', ESTALE: 'nätverksresursen (NFS) har tappats',
+    EHOSTDOWN: 'nätverksresursen svarar inte', ETIMEDOUT: 'nätverksresursen svarar inte', ENOTCONN: 'nätverksresursen är inte ansluten' })[code] || code;
 }
 
 /** Skriv en fil atomiskt (temporär fil + rename): ett avbrott mitt i lämnar aldrig en halv fil som läses som giltig */
@@ -211,7 +251,8 @@ export function deletionBlocked({ name, rootOk, files, known, missing, allowMass
   return null;
 }
 /** Ligger filen under någon av mapparna som inte gick att läsa? */
-export const underFailed = (file, failed) => failed.some(d => file.startsWith(d + path.sep));
+// (även filen själv: en trasig symbolisk länk till en fil)
+export const underFailed = (file, failed) => failed.some(d => file === d || file.startsWith(d + path.sep));
 
 // ---- filströmning med Range-stöd ----
 /**

@@ -14,7 +14,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { get, all, run, tx, now, getSetting, CACHE } from './db.js';
-import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
+import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.js';
 import { readImageInfo, heicFromVersion, iso6709 } from './exif.js';
 import { probe, scanWarning, removeImages } from './scanner.js';
 import { sized, dropVariants, PHOTO_SIZES } from './imgsize.js';
@@ -120,8 +120,8 @@ export async function scanPhotos(lib, status = {}) {
   const roots = rootsOf(lib);
   const list = await listRoots(roots, isPhotoFile, (n) => SKIP_DIR.test(n));
   const res = { found: 0, changed: 0, removed: 0, skippedHeic: 0 };
+  for (const w of listWarnings(lib.name, list)) scanWarning(w);
   if (!list.rootOk) { scanWarning(`${lib.name}: biblioteksmappen går inte att läsa – inga foton tas bort (är disken/NAS:en monterad?)`); return res; }
-  for (const d of list.failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – foton där behålls`);
   const known = new Map(all('SELECT id, path, size, mtime, kind, item_id FROM photos WHERE library_id=?', lib.id).map(r => [r.path, r]));
   const seen = new Set();
   let files = list.files;

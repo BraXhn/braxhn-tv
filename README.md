@@ -427,6 +427,27 @@ Bra att veta:
 - `Clear-Site-Data` gäller bara över HTTPS (eller `localhost`). Över vanlig http hemma finns ingen service worker och därmed ingen sådan cache; där rensar `/reset`-sidan det den kan med JavaScript.
 - En ny version tas i bruk av sig själv vid nästa start: startsidan hämtas alltid från servern först och ur cachen bara om servern inte svarar inom tre sekunder.
 
+## Felsökning: vanliga problem
+
+Varje fel som beror på miljön ger en begriplig rad i loggen (*Administration → Logg*, eller Unraid → Docker → BraXhn TV → *Logs*) och de viktigaste syns i *Administration → Säkerhetskontroll*. Ingenting av det här tar bort titlar eller tittarhistorik.
+
+| Problem | Vad du ser | Gör så här |
+|---|---|---|
+| **Mediamappen saknas** | Guiden: *Mappen /media finns inte i containern* | Docker → BraXhn TV → *Edit* → lägg till en sökväg: *Container Path* `/media`, *Host Path* t.ex. `/mnt/user/media` → *Apply*. Servern startar och visar guiden även utan mappen. |
+| **Behörighet saknas** (EACCES) | Skanningen: *kunde inte läsa … – behörighet saknas (kontrollera PUID/PGID …)* | Mappen måste vara läsbar för containerns användare (Unraid: PUID 99, PGID 100). `chown -R 99:100` på mappen, eller *New Permissions* i Unraids verktyg. Titlarna i mappen ligger kvar tills den går att läsa igen. |
+| **NAS/SMB/NFS försvinner** | *biblioteksmappen går inte att läsa – inget tas bort*, eller *N filer gick inte att läsa – nätverksresursen svarar inte* | Inget tas bort medan resursen är borta – varken när hela mappen saknas, när den ser tom ut eller när mer än hälften av filerna försvunnit. Montera resursen igen; nästa skanning (eller *Skanna*) tar vid. |
+| **Symboliska länkar** | – | Länkar följs (även till andra diskar, t.ex. rclone/debrid). En länk till en mapp som redan ingår, eller en slinga, gås inte igenom igen. En trasig länk (målet borta) tar inte bort titeln. |
+| **Konstiga filnamn** | *… har ett namn som inte är giltig UTF-8 och hoppas över* | Filnamnet är skrivet i en gammal teckenkodning (ofta från Windows/latin1). Byt namn, t.ex. `convmv -f latin1 -t utf8 -r --notest /mnt/user/media`. Emoji, å/ä/ö och NFD-namn från en Mac fungerar som vanligt. |
+| **Trasig eller halvkopierad fil** | *ffprobe misslyckades … (filen verkar trasig)* | Filen läses om först när den ändras – varje timskanning försöker inte igen. 0-byte-filer och filer utan `moov` hamnar här. |
+| **Disken för /config är full** | 507 *Disken där /config ligger är full* vid ändringar; *Databasen kan inte skriva* i säkerhetskontrollen | Uppspelning och bläddring fungerar; det som ändras (framsteg, nya titlar) sparas inte. Frigör utrymme – läget nollställs av sig själv vid första lyckade skrivning. |
+| **Databasen är skadad** | En sida *BraXhn TV kan inte starta* på serverns adress | Sidan visar säkerhetskopiorna i `/config/backups` och kan återställa en av dem eller lägga den skadade databasen åt sidan och starta med en tom (den skadade sparas). Det krävs en engångskod som står i containerns logg. För hand: stoppa containern, kopiera en kopia till `/config/restore.db` och starta. |
+| **Databasen är låst** | *Databasen är låst av ett annat program* | Ett annat program (sqlite3, ett backupverktyg) har filen öppen. Servern väntar 3 s per skrivning; stäng programmet. |
+| **TMDB går inte att nå** | *TMDB går inte att nå: namnet går inte att slå upp (DNS)* / *inget svar* | Start, skanning och uppspelning fortsätter; metadata hämtas när TMDB svarar igen (titlarna markeras inte som "hittades inte"). Kontrollera DNS och brandvägg för containern. I ett nät med bara IPv6 måste TMDB nås över IPv6 eller via en proxy. |
+| **Hårdvaruomkodning fungerar inte** | *[hårdvara] nvenc fungerar inte – använder processorn i stället* plus en *Åtgärd* | Se *Hårdvaruomkodning*. NVIDIA utan persistence mode ger en varning om lång starttid (`nvidia-smi -pm 1`). QSV kräver Intel-grafik – AMD och äldre Intel: `HWACCEL=vaapi`. |
+| **Lite minne / Raspberry Pi** | *[minne] servern använder … av containerns gräns* | Servern läser containerns minnesgräns (cgroup) och tömmer sina cacher nära gränsen. Standardtaket för omkodningar räknas efter kärnor och minne. Visar loggen att Nodes heapgräns är större än containerns: sätt `NODE_OPTIONS=--max-old-space-size=…` som föreslås. |
+| **Porten är upptagen** | *Port 8420 används redan av ett annat program* | Välj en annan värdport i mallen (eller `PORT`). |
+| **Omvänd proxy på en undersökväg** | Tom sida eller 404 på `https://example.com/braxhn/` | Stöds inte: webbappen, API:t, service workern och apparna förutsätter att BraXhn TV ligger i roten. Använd en egen (under)domän, t.ex. `https://tv.example.com/` (Nginx Proxy Manager: en *Proxy Host* per domän). |
+
 ## Casting
 
 - **Chromecast:** knappen *📺 Casta* visas i spelaren och i ljudspelaren i Chrome. Googles regler kräver att sidan öppnas via **HTTPS**, alltså alternativ 2 eller 3 ovan. Chromecasten hämtar strömmen själv med en tidsbegränsad länk som gäller 24 timmar och bara för just den titeln (varje köat avsnitt får en egen). Medan du castar visas en panel längst ner med spolning, paus, ±10 s, volym, ljud- och undertextspår och stopp; framsteget sparas var 10:e sekund och vid paus och stopp, så *Fortsätt titta* och *sedd* stämmer. Nästa avsnitt köas på Chromecasten och startar av sig självt. Musik castas med resten av kön, ljudböcker från den sparade positionen (nästa del köas). Trailers i bio-läget spelas inte på Chromecast.
@@ -552,7 +573,7 @@ Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[
 |---|---|---|
 | `PORT` / `HTTPS_PORT` | 8420 / 8443 | Webbportar |
 | `MEDIA_ROOT` | /media | Bibliotek måste ligga här |
-| `HWACCEL` | none | none, vaapi, qsv eller nvenc |
+| `HWACCEL` | none | none, vaapi, qsv, nvenc eller auto (NVIDIA-enhet → nvenc, `/dev/dri` → vaapi, annars processorn). Vanliga felskrivningar tolkas (`nvidia` → nvenc, `intel`/`amd` → vaapi, `off` → none). Fungerar inte valet används processorn, och varför syns i loggen, guiden och säkerhetskontrollen |
 | `HW_DECODE` | 1 | 0 = avkoda med processorn även när grafikkortet kodar |
 | `GPU_FILTERS` | 1 | 0 = skala och färgkonvertera med processorn även när grafikkortet kan (felsökning). Annars stannar bilderna på grafikkortet hela vägen (NVIDIA/Intel/AMD), som i Plex |
 | `TZ` | Europe/Stockholm | Tidszon för skärmtid, inspelningar och nattliga säkerhetskopior |
@@ -575,7 +596,7 @@ Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[
 | `RELAY_HEARTBEAT_MS` | 15000 | Millisekunder mellan hjärtslagen i tunneln till BraXhn Relay (reläets egna variabler `RELAY_*`: se *Fjärråtkomst via BraXhn Relay*) |
 | `OIDC_CLOCK_SKEW` | 120 | Tillåten klockavvikelse i sekunder mot leverantören för enkel inloggning (ID-tokens giltighetstid) |
 | `OIDC_ALLOW_PRIVATE` | 0 | 1 = leverantörens övriga adresser (token, nycklar) får ligga på loopback/länklokalt – utfärdarens egen värd är alltid tillåten (tester, särskilda installationer) |
-| `MAX_TRANSCODES` / `MAX_TRANSCODES_USER` | 4 / 2 | Tak för samtidiga omkodningar |
+| `MAX_TRANSCODES` / `MAX_TRANSCODES_USER` | auto / 2 | Tak för samtidiga omkodningar. Utan värde: 4 med grafikkort; med processorn efter kärnor och minne (4 kärnor → 4, 2–3 → 2, 1 → 1; under 3 GB minne högst 2, under 1,5 GB 1) |
 | `STREAM_NICE` / `LOOP_LOG_MS` | 3 / 250 | Strömmens ffmpeg körs så mycket lägre prioritet (nice) än servern själv, så att segmenten alltid hinner skickas (0 = samma). Stopp i serverns händelseslinga längre än `LOOP_LOG_MS` ms loggas med de bakgrundsjobb som pågick |
 | `ACME_DOMAIN` / `ACME_EMAIL` | – | Domän och e-post för Let's Encrypt (kan även sättas i webbgränssnittet) |
 | `WATCH_FILES` | 1 | 0 = stäng av filbevakning |
@@ -654,6 +675,7 @@ Allt i tabellen nedan kördes mot riktiga testfiler, och uppspelning och introkn
 | Remux | Segmentgränserna stämde med filens nyckelbilder, även efter spolning, och inga bildrutor dubblades eller tappades. Tidsstämplarna kan ligga 1–5 bilder (B-bildernas fördröjning) från spellistan, se testsamlingen. |
 | HDR10 → SDR | Utdata blev BT.709. |
 | Introdetektering | Träffade inom 0,5 s på syntetiska avsnitt. |
+| Okända miljöer | `test/robustness-env.test.js`: behörighetsfel på en mapp (chmod som vanlig användare, simulerat som root), nätverksresurs som försvinner under och efter listningen, symboliska länkar med slingor och trasiga mål, mappar djupare än taket, långa namn, ogiltig UTF-8/NFD/emoji, full disk för databasen (SQLite `max_page_count`), TMDB som nekar anslutningen, cgroup-gränser, hårdvaruval och nödsidan vid skadad databas (startar sedan normalt). **Otestat:** riktig SMB/NFS som hänger, Unraids shfs, en riktig full disk, OOM-killern, Raspberry Pi och riktiga grafikkort med `HWACCEL=auto`, IPv6-only-nät. |
 | Eftertexter | Hittades. |
 | Undertexter | Fungerade, liksom token-inloggning för appar, cast-token, CORS, HTTPS och kvalitetsgränsen utanför hemmet. SRT, ASS och extern .srt gav WebVTT med rätt tider, även i liveläget; PGS kunde brännas in vid omkodning. |
 | Repliksökning | En film med två inbäddade textspår (svenska med å ä ö, engelska) och en extern .srt indexerades efter skanningen; sökningen gav rätt tid, markering och repliken före/efter, en sparad synk flyttade tiden direkt, en ändrad .srt indexerades om (de inbäddade spåren lästes inte om), borttagen fil och titel försvann ur sökningen, och bibliotek/barnprofil begränsade träffarna. Reserven utan FTS5 (LIKE) testades separat. Fliken i Chromium vid 375 och 1280 px; klick startade spelaren på rätt tid (två sekunder före). 600 000 repliker: sökningen tog 1–150 ms. **Otestat:** riktiga filmer med stora filer och många språk (tiden för att läsa inbäddade spår), ASS med avancerad formatering och apparna (har ingen repliksökning). |

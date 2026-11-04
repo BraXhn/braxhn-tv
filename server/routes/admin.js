@@ -16,6 +16,7 @@ import * as offsite from '../offsite.js';
 import { checkManifest } from '../verify.js';
 import * as ver from '../versions.js';
 import * as diskmon from '../diskmon.js';
+import * as envcheck from '../envcheck.js';
 import * as prestart from '../prestart.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
@@ -383,6 +384,7 @@ route('GET', '/api/security-check', admin, (c) => {
       `Error: ${st.hwStatus.error}. ${st.hwStatus.hint ? 'Action: ' + st.hwStatus.hint : 'NVIDIA requires the Nvidia-Driver plugin and --runtime=nvidia in Extra Parameters; Intel/AMD requires the device /dev/dri.'} Otherwise: set HWACCEL=none.`));
   if (old.length) add('warn', L('Konton med äldre lösenordsformat', 'Accounts with an older password format'), old.join(', ') + L(' – uppgraderas automatiskt vid nästa lösenordsbyte.', ' – upgraded automatically at the next password change.'));
   items.push(...diskmon.checkItems(en ? 'en' : 'sv'));
+  items.push(...envcheck.checkItems(en ? 'en' : 'sv')); // databas som inte kan skriva, tjänster som inte nås, minne
   if (dlna.enabled()) add('info', L('DLNA är påslaget', 'DLNA is on'), L('Alla enheter på hemnätet kan se och spela upp det som DLNA visar, utan inloggning', 'All devices on the home network can see and play what DLNA shows, without signing in') + (dlna.maxAge() != null ? L(` (titlar upp till ${dlna.maxAge()} år).`, ` (titles up to ${dlna.maxAge()} years).`) : '.'));
   send(c.res, 200, items);
 });

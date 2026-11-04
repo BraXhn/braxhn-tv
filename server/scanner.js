@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES } from './db.js';
+import { db, get, all, run, tx, now, getSetting, setSetting, IMAGES, dbProblem, DB_TEXT } from './db.js';
 import * as jobs from './jobs.js';
-import { deletionBlocked, lowPriority } from './util.js';
-import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
+import { deletionBlocked, lowPriority, fsReason } from './util.js';
+import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.js';
 import * as localMeta from './localmeta.js';
 import { AGE } from './nfo.js';
 import * as os from './opensubtitles.js';
@@ -440,13 +440,14 @@ async function scanLibrary(lib) {
     }
     return dirEps.get(dk).get(f);
   };
+  // Orsaker (behörighet, trasiga länkar, tappad nätverksresurs, ogiltiga filnamn) – sammanslagna, en rad per sort
+  for (const w of listWarnings(lib.name, list)) scanWarning(w);
   if (!list.rootOk) {
     // Ingen mapp går att läsa: rör ingenting (annars töms biblioteket när en NAS inte är monterad)
     scanWarning(deletionBlocked({ name: lib.name, rootOk: false }));
     return;
   }
   // En mapp av flera som inte går att läsa varnas för i raderingsskyddet nedan (titlarna där behålls)
-  for (const d of failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – filer där behålls`);
   status.total = files.length;
   const known = new Map(all(`SELECT id,path,size,mtime,episode,ep_guess,version_of FROM items WHERE library_id=? AND path IS NOT NULL`, lib.id).map(r => [r.path, r]));
   if (lib.type === 'show') { backfillSrcNames(lib); await regroupShows(lib); reparseEpisodes(lib); }
@@ -456,10 +457,12 @@ async function scanLibrary(lib) {
   // Skrivningar samlas och skrivs i en transaktion (var 200:e fil eller varannan sekund). Transaktionen hålls
   // aldrig öppen över en await – annars skulle andra delar av servern hamna i den.
   const pending = []; let flushed = Date.now();
+  const statFail = {};
   const flush = () => {
     if (!pending.length) return;
     const ops = pending.splice(0);
-    tx(() => { for (const op of ops) { try { op(); } catch (e) { console.warn('[scan] kunde inte spara:', e.message); } } });
+    // Full disk / skrivskyddad /config: avbryt skanningen med en rad (inte en rad per fil); inget tas bort
+    tx(() => { for (const op of ops) { try { op(); } catch (e) { if (['full', 'readonly', 'ioerr'].includes(dbProblem(e))) throw e; console.warn('[scan] kunde inte spara:', e.message); } } });
     flushed = Date.now();
   };
   status.phase = 'Analyserar filer';
@@ -469,7 +472,8 @@ async function scanLibrary(lib) {
       seen.add(f);
       // Små omgångar: en skrivning med 200 titlar höll händelseslingan ~80 ms (strömmar fick vänta)
       if (pending.length >= 50 || Date.now() - flushed > 2000) flush();
-      let st; try { st = await fs.promises.stat(f); } catch { continue; }
+      // Filen försvann eller gick inte att läsa efter listningen (NAS som tappats mitt i skanningen): raden behålls (seen)
+      let st; try { st = await fs.promises.stat(f); } catch (e) { (statFail[e.code || 'fel'] ||= []).push(f); continue; }
       const k = known.get(f), mtime = Math.floor(st.mtimeMs / 1000);
       // Huvudfilm på en Blu-ray som tidigare fick filnamnet ("00800") som titel: byt till skivans namn
       if (k && lib.type === 'movie' && discRoot(f)) {
@@ -529,7 +533,11 @@ async function scanLibrary(lib) {
         });
       }
     }
-  } finally { flush(); }
+  } finally {
+    flush();
+    for (const [code, list] of Object.entries(statFail))
+      scanWarning(`${lib.name}: ${list.length} ${list.length === 1 ? 'fil' : 'filer'} gick inte att läsa (t.ex. ${list[0]}) – ${fsReason(code)}; de behålls`);
+  }
   // Misslyckade läsningar av filer som inte längre finns glöms (en saknad disk: filen finns kvar på disken → raden kvar)
   for (const r of all('SELECT path FROM probe_fail WHERE library_id=?', lib.id)) if (!seen.has(r.path) && !fs.existsSync(r.path)) run('DELETE FROM probe_fail WHERE path=?', r.path);
   // Ta bort försvunna filer och tomma serier – men aldrig om det ser ut som att disken saknas. Skyddet gäller
@@ -682,7 +690,13 @@ export async function tmdb(p, params = {}, attempt = 0) {
   const q = new URLSearchParams({ language: getSetting('language', 'sv-SE'), ...params });
   const headers = { accept: 'application/json' };
   if (key.startsWith('eyJ')) headers.authorization = 'Bearer ' + key; else q.set('api_key', key);
-  const r = await fetch(`${TMDB_API}${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) });
+  // TMDB går inte att nå (DNS, brandvägg, inget internet): fel direkt i stället för 15 s per anrop (backoff.js)
+  const down = backoff.netDown('tmdb', 'TMDB');
+  if (down) throw down;
+  let r;
+  try { r = await fetch(`${TMDB_API}${p}?${q}`, { headers, signal: AbortSignal.timeout(15000) }); }
+  catch (e) { backoff.netFail('tmdb', e, { label: 'TMDB', tag: 'meta' }); throw Object.assign(new Error(`TMDB går inte att nå (${e.cause?.code || e.message})`), { offline: true }); }
+  backoff.netOk('tmdb', { label: 'TMDB', tag: 'meta' });
   // Begränsat antal omförsök: en spärrad nyckel får inte låsa skanningskön för alltid
   if (r.status === 429 && attempt < 4) {
     const wait = Math.min(30, +r.headers.get('retry-after') || 2) * 1000;
@@ -695,6 +709,7 @@ async function image(tmdbPath, size, id, type) {
   if (!tmdbPath) return 0;
   // En lokal bild (poster.jpg, fanart.jpg … bredvid filen) går före TMDB:s
   if (/^\d+$/.test(String(id)) && localMeta.hasLocal(+id, type)) return 1;
+  if (backoff.netDown('tmdb')) return 0;
   try {
     const r = await fetch(`${TMDB_IMG}/${size}${tmdbPath}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return 0;
@@ -783,7 +798,7 @@ async function knownTmdb(item, fileIds) {
       const r = await tmdb(`/find/${encodeURIComponent(v)}`, { external_source: src });
       const hit = (tv ? r.tv_results : r.movie_results)?.[0]?.id;
       if (hit) return hit;
-    } catch (e) { if (/429/.test(e.message)) throw e; }
+    } catch (e) { if (/429/.test(e.message) || e.offline) throw e; }
   }
   return null;
 }
@@ -1188,8 +1203,11 @@ async function metadata(lib) {
   status.phase = 'Hämtar metadata'; status.done = 0; status.total = todo.length;
   for (const it of todo) {
     status.done++;
+    // TMDB nere: resten väntar till nästa skanning (meta_done=0) – skanningen av filer och andra bibliotek går vidare
+    const down = backoff.netDown('tmdb', 'TMDB');
+    if (down) { scanWarning(`${lib.name}: metadata för ${todo.length - status.done + 1} titlar hämtas senare – ${down.message}`); break; }
     try { if (!(await refreshItem(it, it.match_locked ? it.tmdb_id : null))) run('UPDATE items SET meta_done=2 WHERE id=?', it.id); }
-    catch (e) { console.warn('[meta]', it.title, e.message); }
+    catch (e) { if (!e.offline) console.warn('[meta]', it.title, e.message); }
   }
 }
 
@@ -1274,7 +1292,11 @@ export function scan(libId = null) {
           // E-böcker och serietidningar (ebooks.js)
           else if (l.type === 'ebook') { status.library = l.name; await hooks.ebooks?.(l, status); }
           else { await scanLibrary(l); analyses.push(requestAnalysis(l.id)); }
-        } catch (e) { console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`); }
+        } catch (e) {
+          const p = dbProblem(e);
+          if (p) { scanWarning(`${l.name}: skanningen avbröts – ${DB_TEXT[p]}`); if (['full', 'readonly', 'ioerr'].includes(p)) break; continue; }
+          console.error(`[scan] fel i ${l.name}:`, e); scanWarning(`${l.name}: skanningen avbröts (${e.message})`);
+        }
       }
     }
     finally { status.running = false; status.phase = ''; status.library = null; status.last = now(); try { hooks.afterScan?.(); } catch {} }

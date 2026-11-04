@@ -14,7 +14,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, IMAGES, CACHE } from './db.js';
-import { rootsOf, listRoots, removable, relOf } from './libpaths.js';
+import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.js';
 import { scanWarning } from './scanner.js';
 import { permsOf } from './perms.js';
 import { ranked } from './search.js';
@@ -110,8 +110,8 @@ export async function scanEbooks(lib, status = {}) {
   const roots = rootsOf(lib);
   const list = await listRoots(roots, isEbookFile, (n) => SKIP_DIR.test(n));
   const res = { found: list.files.length, changed: 0, removed: 0, failed: 0, rar: 0 };
+  for (const w of listWarnings(lib.name, list)) scanWarning(w);
   if (!list.rootOk) { scanWarning(`${lib.name}: biblioteksmappen går inte att läsa – inga e-böcker tas bort (är disken/NAS:en monterad?)`); return res; }
-  for (const d of list.failed) if (!roots.includes(d)) scanWarning(`${lib.name}: kunde inte läsa ${d} – e-böckerna där behålls`);
   const known = new Map(all('SELECT id, path, size, mtime FROM ebooks WHERE library_id=?', lib.id).map(r => [r.path, r]));
   const failGet = db.prepare('SELECT size, mtime FROM ebook_fail WHERE path=?');
   const seen = new Set();

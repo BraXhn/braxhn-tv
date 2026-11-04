@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, scrypt, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
-import { get, all, run, now, getSetting } from './db.js';
+import { get, all, run, softRun, now, getSetting } from './db.js';
 import { cookies, clean } from './util.js';
 
 // ---------------- lösenord ----------------
@@ -100,11 +100,12 @@ export function userFromReq(req, query, allowQuery = false) {
   // Glidande giltighetstid för web/app (uppdateras högst var 10:e minut)
   if (now() - (u.last_seen || 0) > 600) {
     if (u.kind === 'web' || u.kind === 'app') {
-      run('UPDATE sessions SET last_seen=?, expires=? WHERE token=?', now(), now() + ttlOf(u.kind, u.remember), h);
+      // softRun: full disk får inte logga ut någon eller stoppa läsningar (förnyelsen görs vid nästa anrop)
+      const renewed = softRun('UPDATE sessions SET last_seen=?, expires=? WHERE token=?', now(), now() + ttlOf(u.kind, u.remember), h);
       // "Håll mig inloggad": förnya även kakan, så att 30 dagar räknas från senaste besöket (inte från inloggningen)
-      if (t.via === 'cookie' && u.kind === 'web' && u.remember) u.renewCookie = true;
+      if (renewed && t.via === 'cookie' && u.kind === 'web' && u.remember) u.renewCookie = true;
     }
-    else run('UPDATE sessions SET last_seen=? WHERE token=?', now(), h);
+    else softRun('UPDATE sessions SET last_seen=? WHERE token=?', now(), h);
   }
   u.token = t.token; u.tokenHash = h; u.via = t.via;
   return u;

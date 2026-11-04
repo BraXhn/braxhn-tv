@@ -9,7 +9,7 @@
 // Routes matchas i den ordning de registreras (första träff vinner). server/app.js importerar
 // routefilerna i en fast ordning; mönster som kan överlappa (t.ex. /api/music/:lib/albums och
 // /api/music/albums/:aid) ligger i samma fil och i samma inbördes ordning.
-import { getSetting, get } from '../db.js';
+import { getSetting, get, dbProblem, DB_TEXT } from '../db.js';
 import { clientIp, isPrivate, inCidr, fail, isHttps, send, viaRelay } from '../util.js';
 import { userFromReq, calendarUser, require2faRemote, audit, cookieHeader } from '../auth.js';
 import * as acme from '../acme.js';
@@ -212,7 +212,13 @@ export async function handle(req, res) {
     if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login|invite\/[^/]+|sso\/link\/[^/]+)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
     // Fel med e.status är avsedda för användaren; övriga loggas och ger "Internt fel"
     try { return await r.fn(c); }
-    catch (e) { if (!e.status) console.error(e); return fail(res, e.status || 500, e.status ? e.message : 'Internt fel'); }
+    catch (e) {
+      // Miljöfel i databasen (full disk, skrivskyddad /config, låst, skadad): ett begripligt svar – db.js loggar dem en gång
+      const p = !e.status && dbProblem(e);
+      if (p) return res.headersSent ? res.destroy() : fail(res, p === 'full' ? 507 : p === 'corrupt' ? 500 : 503, DB_TEXT[p]);
+      if (!e.status) console.error(e);
+      return fail(res, e.status || 500, e.status ? e.message : 'Internt fel');
+    }
   }
   fail(res, 404, 'Okänd endpoint');
 }

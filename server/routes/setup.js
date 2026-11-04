@@ -144,6 +144,13 @@ function reasonText(g, n, en = false) {
 }
 
 route('GET', '/api/setup/suggest', admin, async (c) => {
+  // Själva mediamappen saknas eller går inte att läsa (vanligt vid första start: ingen sökväg i Unraid-mallen, fel
+  // ägare): inget fel utan en förklaring i guiden (problem: 'missing' | 'denied' | 'empty')
+  if (!c.q.get('path')) {
+    let problem = null;
+    try { await fs.promises.access(MEDIA_ROOT, fs.constants.R_OK | fs.constants.X_OK); } catch (e) { problem = e.code === 'ENOENT' ? 'missing' : 'denied'; }
+    if (problem) return send(c.res, 200, { root: MEDIA_ROOT, path: MEDIA_ROOT, parent: null, suggestions: [], problem });
+  }
   const base = insideMedia(c.q.get('path') || MEDIA_ROOT);
   if (!base) return fail(c.res, 400, `Mappen måste finnas och ligga under ${MEDIA_ROOT}`);
   // Alla bibliotekens mappar (ett bibliotek kan ha flera, libpaths.js)
@@ -173,7 +180,7 @@ route('GET', '/api/setup/suggest', admin, async (c) => {
   for (const d of top.slice(0, 50)) await consider(path.join(base, d), d, 0);
   // Mediafiler direkt i mappen (utan undermappar) – då föreslås mappen själv
   if (!top.length) await consider(base, path.basename(base), 1);
-  send(c.res, 200, { root: MEDIA_ROOT, path: base, parent: base === MEDIA_ROOT ? null : path.dirname(base), suggestions: out });
+  send(c.res, 200, { root: MEDIA_ROOT, path: base, parent: base === MEDIA_ROOT ? null : path.dirname(base), suggestions: out, problem: !top.length && !out.length ? 'empty' : null });
 });
 async function subdirs(d) {
   try { return (await fs.promises.readdir(d, { withFileTypes: true })).filter(e => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.')).map(e => e.name).sort((a, b) => a.localeCompare(b, 'sv')); }

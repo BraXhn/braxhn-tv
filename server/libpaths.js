@@ -6,7 +6,7 @@
 // av titlarna försvunnit tar aldrig bort något – och det påverkar inte de andra mapparna i biblioteket.
 import path from 'node:path';
 import { all, run, tx } from './db.js';
-import { listFiles, deletionBlocked, underFailed } from './util.js';
+import { listFiles, deletionBlocked, underFailed, fsReason } from './util.js';
 
 export const MAX_ROOTS = 20;
 
@@ -48,18 +48,43 @@ export function relOf(roots, file) {
 
 /**
  * listFiles över alla mappar. Mappar som inte går att läsa hamnar i failed (ingenting under dem tas bort).
- * @returns {Promise<{ files: string[], failed: string[], dirs: Set<string>, roots: { root: string, ok: boolean }[], rootOk: boolean }>}
+ * badNames = filer/mappar med ogiltig UTF-8 i namnet, errors = orsaken per mapp som inte gick att läsa (högst 50 per mapp).
+ * @returns {Promise<{ files: string[], failed: string[], dirs: Set<string>, roots: { root: string, ok: boolean }[], rootOk: boolean, badNames: string[], errors: { path: string, code: string, message: string }[] }>}
  */
 export async function listRoots(roots, accept, skip) {
-  const files = [], failed = [], dirs = new Set(), state = [];
+  const files = [], failed = [], dirs = new Set(), state = [], badNames = [], errors = [];
   for (const root of roots) {
     const r = await listFiles(root, accept, skip, dirs);
     for (const f of r.files) files.push(f);
     for (const d of r.failed) failed.push(d);
+    for (const b of r.badNames || []) badNames.push(b);
+    for (const e of r.errors || []) errors.push(e);
     if (!r.rootOk) failed.push(root);
-    state.push({ root, ok: r.rootOk });
+    state.push({ root, ok: r.rootOk, error: r.rootError || null });
   }
-  return { files, failed, dirs, roots: state, rootOk: state.some(s => s.ok) };
+  return { files, failed, dirs, roots: state, rootOk: state.some(s => s.ok), badNames, errors };
+}
+
+/**
+ * Varningar från genomgången som en hemanvändare kan förstå och åtgärda: mappar som inte gick att läsa (med orsak –
+ * behörighet, trasig länk, nätverksresurs som tappats …) och filnamn med ogiltig UTF-8. Många likadana slås ihop till en
+ * rad (ett bibliotek med 3 000 trasiga länkar ska inte ge 3 000 rader i loggen).
+ * @returns {string[]}
+ */
+export function listWarnings(name, list) {
+  const out = [];
+  for (const st of list.roots) if (!st.ok && st.error && st.error !== 'ENOENT') out.push(`${name}: ${st.root} går inte att läsa – ${fsReason(st.error)}`);
+  const sub = (list.errors || []).filter(e => !list.roots.some(r => r.root === e.path));
+  const byCode = new Map();
+  for (const e of sub) { if (!byCode.has(e.code)) byCode.set(e.code, []); byCode.get(e.code).push(e.path); }
+  const extra = list.failed.length - sub.length - list.roots.filter(r => !r.ok).length;
+  for (const [code, paths] of byCode) {
+    const more = paths.length - 3 + (byCode.size === 1 && extra > 0 ? extra : 0);
+    out.push(`${name}: kunde inte läsa ${paths.slice(0, 3).join(', ')}${more > 0 ? ` och ${more} till` : ''} – ${fsReason(code)}; det som fanns där behålls`);
+  }
+  const bad = list.badNames || [];
+  if (bad.length) out.push(`${name}: ${bad.length} ${bad.length === 1 ? 'fil eller mapp har' : 'filer eller mappar har'} ett namn som inte är giltig UTF-8 och hoppas över (t.ex. ${bad[0]}) – byt namn (t.ex. med convmv -f latin1 -t utf8)`);
+  return out;
 }
 
 /**

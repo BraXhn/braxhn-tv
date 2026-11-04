@@ -34,6 +34,7 @@ import * as health from './health.js';
 import * as family from './familyfilter.js';
 import * as jobs from './jobs.js';
 import './loopmon.js'; // händelseslingans fördröjning (Statistik, diagnos vid hack)
+import * as envcheck from './envcheck.js'; // minnesgräns (cgroup), kärnor, miljöfel till säkerhetskontrollen
 // Routefilerna registrerar sina routes när de laddas. Ordningen är matchningsordningen (första träff vinner).
 import './routes/auth.js';
 import './routes/sso.js'; // enkel inloggning: OIDC, bekräftad koppling, Mitt konto och administration
@@ -130,6 +131,10 @@ hooks.newItems = (ids) => {
     webhooks.emit('library.new', { metadata: meta }, { visibleTo: (uid) => list.some(e => allowedFor(uid, e)) });
   }
 };
+
+// Containerns minnesgräns: nära gränsen töms cacherna i minnet (de byggs upp igen vid behov)
+envcheck.onMemoryPressure(() => { clearRecommendations(); clearHome(); });
+envcheck.startMemoryWatch();
 
 // Kalendern: avsnitt och sändningsdatum från TMDB, utspritt (pågående och följda serier en gång per dygn)
 calendar.start();
