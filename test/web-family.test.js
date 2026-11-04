@@ -179,7 +179,8 @@ bt('TV-läge: pilar, Enter och Bakåt', async () => {
   for (let i = 0; i < 12; i++) { await press('ArrowDown'); f = await focus(); if (f.ex) break; }
   for (let i = 0; i < 4 && f.ex !== '15'; i++) { await press('ArrowLeft'); f = await focus(); }
   assert.equal(f.ex, '15', 'fokus på +15 min: ' + JSON.stringify(f));
-  assert.ok(f.onScreen);
+  f = await (async () => { for (let j = 0; j < 20; j++) { const g = await focus(); if (g.onScreen) return g; await sleep(100); } return focus(); })();
+  assert.ok(f.onScreen, 'fokus på +15 min syns: ' + JSON.stringify(f));
   const extra = (await srv.req(`/api/screentime/${S.lisa}`)).data.status.extra; // +15 i datortestet före
   await press('Enter');
   await page.waitForFunction((n) => document.querySelector('#famst')?.textContent.includes(`${n} min extra`), extra + 15);
@@ -189,7 +190,9 @@ bt('TV-läge: pilar, Enter och Bakåt', async () => {
   await press('ArrowRight'); await press('Enter');
   await page.waitForFunction(() => document.querySelectorAll('#famper svg.chart .ch-g').length === 30);
   // Ner till en titel i Mest sett och in på titelsidan
-  for (let i = 0; i < 10 && !f.row; i++) { await press('ArrowDown'); f = await focus(); assert.ok(f.onScreen, 'fokus på skärmen'); }
+  // Rullningen till fokus är mjuk – vänta tills den är klar (TV-lägets större text ger längre rullningar)
+  const settled = async () => { for (let j = 0; j < 20; j++) { const g = await focus(); if (g.onScreen) return g; await sleep(100); } return focus(); };
+  for (let i = 0; i < 10 && !f.row; i++) { await press('ArrowDown'); f = await settled(); assert.ok(f.onScreen, 'fokus på skärmen: ' + JSON.stringify(f)); }
   assert.ok(f.row, 'en rad i Mest sett: ' + JSON.stringify(f));
   const href = f.href;
   await press('Enter');
