@@ -1,5 +1,5 @@
 // BraXhn TV webbklient – ren JavaScript, inga ramverk. Startmodul: laddar startsidans moduler och startar appen.
-// Modulerna ligger i /js/ (se CLAUDE.md). Bara det startsidan behöver importeras här (servern förladdar hela
+// Modulerna ligger i /js/ (se docs/utvecklarguide.md). Bara det startsidan behöver importeras här (servern förladdar hela
 // kedjan, server/http/static.js). Övriga vyer laddas av router.js första gången de öppnas (LAZY) och spelaren
 // genom fasaderna i js/lazy.js – i förväg när sidan är ritad och när pekaren eller fokus når ett kort.
 // Alla moduler ska även finnas i MODULES i sw.js så att appen kan starta utan kontakt med servern.

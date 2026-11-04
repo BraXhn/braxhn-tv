@@ -1,6 +1,6 @@
 # BraXhn TV jämfört med Plex, Jellyfin och Emby
 
-Det här är en ärlig jämförelse för en svensk familj med barn som kör Unraid, har ett stort bibliotek (mycket svenska
+Så här ser jag på jämförelsen, utifrån vår situation: en svensk familj med barn som kör Unraid, har ett stort bibliotek (mycket svenska
 barnprogram) och tittar på TV:n, iPhone och i webbläsaren – ibland utanför hemmet. Den bygger på README och koden
 (november 2026), inte på marknadsföring. Plex = Plex Media Server med Plex Pass, Jellyfin 10.10, Emby med Premiere,
 plus Infuse och Channels DVR där de är bäst i sin nisch.
@@ -46,5 +46,5 @@ barnen tittar på TV:n och iPaden medan föräldern är på jobbet eller i köke
 ställa in under *Mitt konto*, och det enda sättet att se vad barnen tittat på var administratörens tittarstatistik – som
 dessutom bara nås hemifrån. Nu ser huvudkontot på telefonen var som helst: vad barnen tittar på just nu (och kan stoppa
 det), hur länge de tittat i dag och per dag, mest sett, kvällstittande efter kl. 21 och tittande utanför hemmet, och kan
-ge eller dra av skärmtid med ett tryck. Ingen av Plex, Jellyfin eller Emby har något motsvarande. Se README,
-*Föräldraöversikt*.
+ge eller dra av skärmtid med ett tryck. Ingen av Plex, Jellyfin eller Emby har något motsvarande. Se
+*Föräldraöversikt* i [funktioner.md](funktioner.md).

@@ -1,7 +1,7 @@
 // hls.js-inställningarna för filmer och avsnitt (webbspelaren). Importerar inget – testas i Node
 // (test/stream-smooth.test.js) och i Chromium mot den riktiga hls.js.
 //
-// Varför de här värdena (orsaker till hack som mätts, se BRAIN.md):
+// Varför de här värdena (orsaker till hack som mätts, se docs/arkitektur.md):
 // - backBufferLength 30: utan gräns behåller hls.js allt som spelats i webbläsarens SourceBuffer. En 4K-remux fyller
 //   kvoten (≈ 150 MB i Chrome) efter några minuter → QuotaExceededError → bufferten töms och filmen hackar.
 // - maxBufferLength 60: en minut framåt (servern håller omkodningen 72–90 s före, se AHEAD_TRANSCODE i stream.js).

@@ -3,7 +3,7 @@
 # paket mot SHA-256 i Release) och får säkerhetsuppdateringar med imagen – inget eget paketförråd, ingen egen
 # nyckel och ingen nedladdning utanför apt. Bygget innehåller HEVC/AV1-kodarna (NVENC, VA-API, QSV, x265, SVT-AV1),
 # HEIF-avkodning, libplacebo (Vulkan) och tonemap_opencl. Det jellyfin-ffmpeg har utöver det (tonemap_cuda) sonderas
-# vid start och används om någon kör en egen ffmpeg med det. Se BRAIN.md (ffmpeg-version) och README.
+# vid start och används om någon kör en egen ffmpeg med det. Se docs/arkitektur.md (ffmpeg-version) och README.
 FROM node:24-trixie-slim
 
 # ffmpeg för analys/omkodning, VA-API-drivrutiner för Intel/AMD, Vulkan (Mesa) för tonmappning med libplacebo,

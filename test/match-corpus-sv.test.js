@@ -25,7 +25,7 @@ const sc = await import('../server/scanner.js');
 const { searchKey } = await import('../server/searchkey.js');
 after(() => { fake.srv.close(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
-// Utgångsläget före förbättringen (samma korpus, samma låtsas-TMDB): 91,0 % rätt (ägarens fall 41,9 %).
+// Utgångsläget före förbättringen (samma korpus, samma låtsas-TMDB): 91,0 % rätt (egna fall 41,9 %).
 const MIN = 0.97;
 const key = (s) => searchKey(s || '');
 

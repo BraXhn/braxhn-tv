@@ -4,13 +4,13 @@
 // Mäts hela vägen genom skanningen (tomma filer i riktiga mappar → scan → TMDB-matchning) mot låtsas-TMDB:n.
 // Film:  [sökväg, titel, år, tmdb-id]              titeln jämförs bara när tmdb-id är null (då ska titeln vara snygg)
 // Serie: [sökväg, serie, säsong, avsnitt, tmdb-id, { et }]  säsong/avsnitt efter matchningen; et = avsnittets namn efteråt
-// cat = kategori i rapporten. Ägarens verkliga felfall har cat 'ägaren'.
+// cat = kategori i rapporten. Mina egna felfall (ur hemmabiblioteket) har cat 'egna'.
 
 const mv = (lib, cat) => (p, t, y, id, o = {}) => ({ kind: 'movie', lib, cat, p, t, y, id, ...o });
 const tv = (lib, cat) => (p, s, se, ep, id, o = {}) => ({ kind: 'show', lib, cat, p, s, se, ep, id, ...o });
 
-// ---------- ägarens verkliga felfall ----------
-const OS = tv('Barnserier', 'ägaren'), OM = mv('Barnfilm', 'ägaren'), OV = tv('Serier', 'ägaren');
+// ---------- egna felfall ur hemmabiblioteket ----------
+const OS = tv('Barnserier', 'egna'), OM = mv('Barnfilm', 'egna'), OV = tv('Serier', 'egna');
 const OWNER = [
   OS('Barn/Dexters labratorium/Säsong 1/03a - DextersRival.avi', 'Dexters laboratorium', 1, 3, 4229, { et: "Dexter's Rival" }),
   OS('Barn/Dexters labratorium/Säsong 1/03b - Simion.avi', 'Dexters laboratorium', 1, 3, 4229, { et: 'Simion' }),

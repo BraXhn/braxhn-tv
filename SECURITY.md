@@ -2,13 +2,13 @@
 
 *Svenska: rapportera säkerhetsbrister privat enligt nedan – inte som ett öppet ärende. Svenska eller engelska går bra.*
 
-BraXhn TV is built to be reachable from the internet, so security reports are taken seriously and handled before anything else.
+BraXhn TV is built to be reachable from the internet, so I take security reports seriously and handle them before anything else.
 
 ## Reporting a vulnerability
 
 **Please do not open a public issue, discussion or pull request for a security problem.**
 
-Report it privately through GitHub: **[Report a vulnerability](https://github.com/BraXhn/braxhn-tv/security/advisories/new)** (the *Security* tab → *Advisories* → *Report a vulnerability*). Only the maintainers can see the report.
+Report it privately through GitHub: **[Report a vulnerability](https://github.com/BraXhn/braxhn-tv/security/advisories/new)** (the *Security* tab → *Advisories* → *Report a vulnerability*). Only I (the maintainer) can see the report.
 
 Please include:
 
@@ -21,9 +21,9 @@ Don't include real passwords, tokens or personal data – test against your own 
 
 ## What happens next
 
-- You get an answer within **7 days**, usually much sooner.
-- We confirm the problem, agree on a fix and a date, and keep you updated.
-- The fix is released as a new image (`latest`), described in [CHANGELOG.md](CHANGELOG.md) and published as a GitHub security advisory. We ask you to wait with publishing details until the fix is out, normally at most **90 days**.
+- You get an answer within 7 days, usually much sooner.
+- I confirm the problem, we agree on a fix and a date, and I keep you updated.
+- The fix is released as a new image (`latest`), described in [CHANGELOG.md](CHANGELOG.md) and published as a GitHub security advisory. Please wait with publishing details until the fix is out, normally at most 90 days.
 
 ## Supported versions
 
@@ -37,4 +37,4 @@ Out of scope: problems that require an administrator account on the home network
 
 ## Hardening tips
 
-See *Security* in [README.en.md](README.en.md#security) (or *Säkerhet* in [README.md](README.md#säkerhet)): HTTPS, 2FA or passkeys on every administrator, *Require 2FA away from home*, administration only from home, and *Administration → Security check*.
+See *Security* in [README.en.md](README.en.md#security) (or *Säkerhet* in [README.md](README.md#säkerhet)): HTTPS, 2FA or passkeys on every administrator, *Require 2FA away from home*, administration only from home, and *Administration → Security check*. How each protection works is described in [docs/sakerhet.md](docs/sakerhet.md) (Swedish).

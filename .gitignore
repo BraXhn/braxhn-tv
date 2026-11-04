@@ -9,7 +9,6 @@ apps/automotive/build/
 apps/automotive/app/build/
 apps/automotive/local.properties
 .DS_Store
-.claude/settings.local.json
 
 # BraXhn Relay levereras lokalt, inte via GitHub
 /relay/

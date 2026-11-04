@@ -1,4 +1,4 @@
-// Det som timskanningen gjorde om varje gång hos ägaren: en trasig fil ("moov atom not found") lästes och loggades
+// Det som timskanningen gjorde om varje gång på min server: en trasig fil ("moov atom not found") lästes och loggades
 // varje timme, OpenSubtitles/Google Books svarade 429 för samma titel varje timme, och "N serier delades upp eller
 // slogs ihop efter årtal" loggades vid varje skanning. Här: andra skanningen av ett oförändrat bibliotek gör ingenting,
 // och händelseslingan står aldrig still länge under skanningen av ett barnbibliotek med konstiga filnamn.
@@ -57,7 +57,7 @@ const capture = async (fn) => {
 };
 const put = (rel, data = '') => { const f = path.join(MEDIA, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data); return f; };
 
-// Barnbibliotek med ägarens konstiga namn, serier med och utan årtal i mappnamnet och en trasig MP4
+// Barnbibliotek med konstiga namn ur mitt bibliotek, serier med och utan årtal i mappnamnet och en trasig MP4
 const BARN = path.join(MEDIA, 'Barn TV');
 const broken = put('Barn TV/Nostalgikanalen/julkalender/Trolltider.2.mp4', Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(12), Buffer.alloc(4000, 7)]));
 for (const f of ['Trolltider.1.mp4', 'Trolltider.3.mp4']) put('Barn TV/Nostalgikanalen/julkalender/' + f);

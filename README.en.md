@@ -1,22 +1,23 @@
 # BraXhn TV – your own media server for Unraid
 
-**English** · [Svenska](README.md)
+English · [Svenska](README.md)
 
 <p align="center"><img src="web/brand/logo.svg" alt="BraXhn TV" width="520"></p>
 
-BraXhn TV is a self-hosted media server for **movies, TV shows, music, audiobooks, podcasts, photos, e-books and live TV**, written from scratch. It needs no accounts, no cloud service and no subscription – everything runs on your own server. The web app is available in English and Swedish.
+I built BraXhn TV so that my family would have everything we watch and listen to in one place – movies, TV shows, music, audiobooks, podcasts, photos and live TV – on our own Unraid server. No account with anyone else, no cloud service and no subscription.
 
-- **Server:** Node.js with no npm dependencies, plus ffmpeg. One Docker image (`ghcr.io/braxhn/braxhn-tv`, amd64 and arm64), signed with Sigstore.
-- **Clients:** the web app (works in every modern browser, installable as an app, works with a TV remote), apps for iPhone/iPad/Apple TV and for Android (Google TV and cars with Android Automotive), Subsonic music apps, DLNA, Chromecast and AirPlay.
-- **Highlights:** automatic matching against TMDB (optional free key), Continue watching, Up next, Watchlist, profiles with PIN and age limits, intro/credits skipping, hardware transcoding (Intel, AMD, NVIDIA) with HDR tone mapping, live TV and recording (HDHomeRun and IPTV), Sonarr/Radarr requests, Trakt, ListenBrainz and Last.fm, two-step verification, passkeys and single sign-on (OIDC/LDAP).
+The server is written from scratch in Node.js with no npm dependencies, and uses ffmpeg for streaming. It ships as one Docker image (`ghcr.io/braxhn/braxhn-tv`, amd64 and arm64), signed with Sigstore. You watch in the browser (also on the TV, with the remote), in the app for iPhone, iPad and Apple TV, or in the Android app on Google TV and in the car. Subsonic music apps, DLNA, Chromecast and AirPlay work too.
 
-The Swedish [README.md](README.md) is the full reference (every feature in detail and the test results). This page covers what you need to install, run and troubleshoot the server.
+We're a Swedish family, so the project is Swedish first: the code, the native apps and some of the documentation are in Swedish. The web app is in English and Swedish, and this page covers what you need to install, run and troubleshoot the server. Feature details, guides and test results are in `docs/` (in Swedish): [features](docs/funktioner.md), [guides](docs/guide.md), [security details](docs/sakerhet.md) and [what has been tested](docs/testat.md).
+
+It's a hobby project that I maintain in my spare time. Most of it is well tested, but not everything has been tried on real hardware – bug reports are welcome.
 
 ## Contents
 
 - [Install on Unraid](#install-on-unraid)
 - [First start](#first-start)
 - [Updating](#updating)
+- [Features](#features)
 - [Libraries and file naming](#libraries-and-file-naming)
 - [Hardware transcoding](#hardware-transcoding)
 - [Watching away from home](#watching-away-from-home)
@@ -28,7 +29,8 @@ The Swedish [README.md](README.md) is the full reference (every feature in detai
 - [FAQ](#faq)
 - [Environment variables](#environment-variables)
 - [Verify the image](#verify-the-image)
-- [Getting help and contributing](#getting-help-and-contributing)
+- [Tested and untested](#tested-and-untested)
+- [Getting help, contributing and license](#getting-help-contributing-and-license)
 
 ## Install on Unraid
 
@@ -59,7 +61,7 @@ The template's paths and variables:
 | `/media` (read-only) | `/mnt/user/media` | Your media. Libraries must be folders under it |
 | `/transcode` | `/tmp/braxhn-tv-transcode` | Temporary transcoding files (`/tmp` is RAM on Unraid) |
 | `/recordings` | `/mnt/user/media/Inspelningar` | Live TV recordings (only needed if you record) |
-| `/prestart` | – | Optional fast-start cache on the cache pool, see the Swedish README (*Snabbstart*) |
+| `/prestart` | – | Optional fast-start cache on the cache pool, see [docs/guide.md](docs/guide.md#snabbstart-när-diskarna-sover) (Swedish) |
 | `/backup` | – | Optional external disk/NAS for encrypted backups |
 | Port 8420 / 8443 | 8420 / 8443 | Web UI and built-in HTTPS |
 | `HWACCEL` | `none` | `none`, `auto` (pick from the devices in the container), `vaapi`, `qsv` or `nvenc` |
@@ -108,6 +110,18 @@ A free TMDB API key (themoviedb.org → Settings → API) gives posters, descrip
 - **Admin notification:** *Administration* shows when a new version is available (turn off with `UPDATE_CHECK=0`).
 - A backup is made every night in `/config/backups`. Make one by hand (*Statistics → Backups → Back up now*) before a big upgrade if you want to be able to go back.
 - What changed: [CHANGELOG.md](CHANGELOG.md) (Swedish).
+
+## Features
+
+A short overview. Everything in detail (Swedish): [docs/funktioner.md](docs/funktioner.md).
+
+- **Libraries:** movies, TV shows, music, audiobooks, podcasts, photos, home videos, e-books and comics. Several folders per library, file watching. TMDB matching (optional free key) that copes with Swedish titles and dubbed kids' movies, NFO files and images from Kodi/Jellyfin, metadata editing with per-field locks, multiple versions of a movie, a library health check, and a disk advisor that can re-encode to HEVC/AV1. Nothing is removed when a disk or network share is missing.
+- **Playback:** direct play when the device can, otherwise remux or transcoding with Intel, AMD or NVIDIA and HDR tone mapping. Subtitles (including PGS and automatic sync to the audio), night mode and clearer dialogue, intro and credits skipping, trickplay thumbnails, adaptive quality away from home, fast start while the array disks spin up, and offline downloads.
+- **Home, search and discovery:** home screen shelves you can reorder, search that tolerates typos and accents, search inside subtitle lines, collections and smart collections, filters, following shows, a calendar of upcoming episodes.
+- **Family:** profiles with PIN, kids profiles with age limits enforced on the server, screen time and a parents' overview, a household vote for tonight's movie, watch together, a family filter that mutes swearing, a "previously on" recap cut from your own files, short clips to share in the household, and language learning with dual subtitles.
+- **Music, audiobooks and podcasts:** gapless music player with lyrics, music videos, audio analysis and song radio, scrobbling to ListenBrainz and Last.fm, a Subsonic API, audiobooks with chapters and bookmarks, podcasts.
+- **Live TV:** HDHomeRun and IPTV (M3U and Xtream Codes) with a TV guide, catch-up, timeshift, recordings and series recordings.
+- **Accounts and operations:** two-step verification, passkeys, single sign-on (OIDC/LDAP), sign-in on the TV with a code, sharing and permissions per user, remote access through your own relay, a setup guide, nightly and encrypted external backups, a diagnostics bundle, Sonarr/Radarr, Trakt, webhooks, notifications, Prometheus, and importing and syncing watch history from Plex and Jellyfin.
 
 ## Libraries and file naming
 
@@ -377,7 +391,11 @@ cosign verify ghcr.io/braxhn/braxhn-tv:latest \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-## Getting help and contributing
+## Tested and untested
+
+The whole test suite (`npm test`, about 30 minutes) runs before every Docker image is published, against real media files generated with ffmpeg, and the web UI is tested in Chromium at phone, desktop and TV sizes. It also runs as a regular user without write access to `/config`. Not tested here, among other things: GPU transcoding and tone mapping on real graphics cards, the arm64 image, Chromecast and AirPlay for real, Let's Encrypt with a public domain, real IPTV providers, HDHomeRun, Sonarr/Radarr and other services (simulated in the tests), real screen readers, the apps on real devices and the relay on a real VPS. The full list, with what each feature was tested with, is in [docs/testat.md](docs/testat.md) (Swedish).
+
+## Getting help, contributing and license
 
 - **Bugs and feature requests:** [GitHub issues](https://github.com/BraXhn/braxhn-tv/issues) – please attach the diagnostics bundle to bug reports.
 - **Security vulnerabilities:** report privately, see [SECURITY.md](SECURITY.md).

@@ -13,7 +13,7 @@ import { getSetting } from '../db.js';
 import { fail, send, streamFile } from '../util.js';
 import { ffHeaders, assertStream, redact, iptvFetch, ffGuard } from './net.js';
 
-export const PLAY_SCOPE = 9e9; // mediatoken för en session: 9e9 + sessionens nummer (BRAIN.md: scope-intervall)
+export const PLAY_SCOPE = 9e9; // mediatoken för en session: 9e9 + sessionens nummer (docs/arkitektur.md: scope-intervall)
 const DIR = path.join(TRANSCODE, 'iptv');
 const SEG_RE = /^seg-\d{5,9}\.ts$/;
 const IDLE_MS = 60000, PER_USER = 2;

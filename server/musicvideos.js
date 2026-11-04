@@ -19,7 +19,7 @@ import { relOf, rootsOf, removable } from './libpaths.js';
 import { libOk } from './perms.js';
 
 const pexec = promisify(execFile);
-export const MV_SCOPE = 6e9; // mediatoken för en musikvideo: 6e9 + videons id (BRAIN.md: scope-intervall)
+export const MV_SCOPE = 6e9; // mediatoken för en musikvideo: 6e9 + videons id (docs/arkitektur.md: scope-intervall)
 export const VIDEO = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.mpg', '.mpeg', '.ts', '.wmv']);
 export const KINDS = ['video', 'live', 'lyrics', 'concert', 'interview', 'behindthescenes', 'other'];
 const VIDEO_DIRS = new Set(['music videos', 'musicvideos', 'musikvideor', 'videos', 'video', 'videor']);

@@ -1,7 +1,7 @@
 // Jämn strömning trots bakgrundsjobb: händelseslingan hålls låg medan segment levereras (skanning av ett stort
 // bibliotek, nyckelbilder, miniatyrer, repliksökning, hälsokontroll pågår), omkodningen är snabbare än realtid och
 // ligger före spelaren, hls.js-inställningarna (buffertar, glapp, bandbredd från första byte) och orsaken vid hack.
-// Mätningarna med riktiga filmer (1080p/4K/HEVC HDR/DTS/TrueHD/DVD) gjordes med ett separat mätskript – se BRAIN.md.
+// Mätningarna med riktiga filmer (1080p/4K/HEVC HDR/DTS/TrueHD/DVD) gjordes med ett separat mätskript – se docs/arkitektur.md.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
