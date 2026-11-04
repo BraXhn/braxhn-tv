@@ -30,11 +30,16 @@ export function emptyState({ icon = '', title = '', text = '', html = '', action
  */
 export function errorState(err, { retry = false, retryId = 'retry', compact = false } = {}) {
   const off = !!err?.offline || (typeof navigator !== 'undefined' && navigator.onLine === false);
-  const title = off ? t('Ingen kontakt med servern') : t('Något gick fel');
+  // 404 (titeln/sidan finns inte, t.ex. en gammal länk): inget "Försök igen" – det hjälper inte – utan vägen vidare
+  const gone = !off && err?.status === 404;
+  const title = off ? t('Ingen kontakt med servern') : gone ? t('Hittades inte') : t('Något gick fel');
   const text = off ? t('Kontrollera att BraXhn TV körs och att du är ansluten till nätet. Det du har sparat finns kvar.')
+    : gone && (!err.message || err.message === t('Finns inte')) ? t('Det du letar efter finns inte längre – det kan ha tagits bort eller flyttats.')
     : (err?.message || t('Okänt fel'));
-  return `<div class="state error${compact ? ' compact' : ''}" role="alert"><div class="state-icon" aria-hidden="true">${off ? '📡' : '⚠'}</div>
-    <h2>${title}</h2><p>${esc(text)}</p>${retry ? `<div class="state-act"><button type="button" class="primary" id="${esc(retryId)}">${t('Försök igen')}</button></div>` : ''}</div>`;
+  const act = gone && !compact ? `<a class="btn primary" href="#/">${t('Till startsidan')}</a>`
+    : retry ? `<button type="button" class="primary" id="${esc(retryId)}">${t('Försök igen')}</button>` : '';
+  return `<div class="state error${compact ? ' compact' : ''}" role="alert"><div class="state-icon" aria-hidden="true">${off ? '📡' : gone ? '🔍' : '⚠'}</div>
+    <h2>${title}</h2><p>${esc(text)}</p>${act ? `<div class="state-act">${act}</div>` : ''}</div>`;
 }
 /** Kopplar "Försök igen"-knappen från errorState() */
 export function bindRetry(root, fn, retryId = 'retry') {

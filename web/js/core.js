@@ -110,7 +110,9 @@ export async function api(path, opts = {}) {
   if (r.status === 401 && !path.startsWith('/login')) { me = null; rememberPage(); location.hash = '#/login'; throw new Error(t('Inte inloggad')); }
   if (!bg && gen !== routeGen) throw abortErr(); // användaren har gått vidare – resultatet ska inte användas
   // Serverns felmeddelanden är svenska; de vanligaste översätts med katalogen (samma text som nyckel)
-  if (!r.ok) throw Object.assign(new Error(data?.error ? t(String(data.error)) : t('Fel {status}', { status: r.status })), { code: data?.code, data });
+  // Utan meddelande från servern: ord i stället för en felkod (proxy/serverfel ger "Fel 502" annars)
+  if (!r.ok) throw Object.assign(new Error(data?.error ? t(String(data.error)) : r.status >= 500 ? t('Servern kunde inte svara just nu – försök igen om en stund.')
+    : t('Fel {status}', { status: r.status })), { code: data?.code, data, status: r.status });
   return data;
 }
 // Rader och mappar som bara har onclick: gör dem nåbara med tangentbord och fjärrkontroll (Tab/D-pad + Enter)
@@ -193,7 +195,9 @@ export const fmtTime = (s) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`;
 };
 export const fmtDur = (s) => { if (!s) return ''; const m = Math.max(1, Math.round(s / 60)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
-export const fmtSize = (b) => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+export const fmtSize = (b) => b > 1e9 ? fmtNum(b / 1e9, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' GB' : fmtNum(b / 1e6, { maximumFractionDigits: 0 }) + ' MB';
+/** Betyg med en decimal på valt språk (7,4 på svenska, 7.4 på engelska) */
+export const fmtRating = (r) => fmtNum(+r || 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 export const resLabel = (h) => !h ? '' : h >= 2000 ? '4K' : h >= 1000 ? '1080p' : h >= 700 ? '720p' : h >= 560 ? '576p' : h + 'p';
 export const sxe = (e) => `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')}`;
 export function hue(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }

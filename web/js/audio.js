@@ -48,7 +48,7 @@ export function stopAudio() {
   document.body.classList.remove('hasbar');
   setSession({});
 }
-const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.textContent = playing ? '⏸' : '▶'; b.title = playing ? t('Pausa') : t('Spela'); b.setAttribute('aria-label', b.title); };
+const setMplay = (playing) => { const b = $('#mplay'); if (!b) return; b.innerHTML = playing ? ICON.pause : ICON.play; b.title = playing ? t('Pausa') : t('Spela'); b.setAttribute('aria-label', b.title); };
 function setPlaying(playing) {
   setMplay(playing);
   if (navigator.mediaSession) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
@@ -81,7 +81,7 @@ function ensureBar() {
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
-    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="${t('Föregående')}" title="${t('Föregående')}">⏮</button><button class="primary" id="mplay" aria-label="${t('Pausa')}" title="${t('Pausa')}">⏸</button><button class="ghost small" id="mnext" aria-label="${t('Nästa')}" title="${t('Nästa')}">⏭</button>
+    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="${t('Föregående')}" title="${t('Föregående')}">${ICON.prev}</button><button class="primary" id="mplay" aria-label="${t('Pausa')}" title="${t('Pausa')}">${ICON.pause}</button><button class="ghost small" id="mnext" aria-label="${t('Nästa')}" title="${t('Nästa')}">${ICON.next}</button>
       <button class="ghost small" id="mrep" title="${t('Upprepa')}" aria-label="${t('Upprepa')}" aria-pressed="false">🔁</button><button class="ghost small" id="mset" title="${t('Ljudinställningar')}" aria-label="${t('Ljudinställningar')}" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small" id="msleep" title="${t('Sovtimer')}" aria-label="${t('Sovtimer')}" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="${t('Låttext')}" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="${t('Casta till Chromecast')}" aria-label="${t('Casta till Chromecast')}" ${castReady ? '' : 'hidden'}>📺</button><button class="ghost small" id="mradio" title="${t('Starta låtradio från låten')}" aria-label="${t('Starta låtradio från låten')}" aria-pressed="false">📻</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
     <div class="mright"><select id="mspeed" title="${t('Hastighet')}" aria-label="${t('Uppspelningshastighet')}" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="${t('Volym')}" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">${t('Kö')}</button><button class="ghost small" id="mx" title="${t('Stäng spelaren')}" aria-label="${t('Stäng spelaren')}">✕</button></div>`;

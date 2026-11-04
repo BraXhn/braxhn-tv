@@ -2,7 +2,7 @@
 // framåt, tappade bildrutor, nätverkshastighet och serverns omkodningshastighet (GET /api/stream/:id/stats).
 // Dessutom rapporteras varje hack (bufferten tog slut) till servern, som loggar orsaken (POST /api/stream/:id/stall).
 // Laddas med videospelaren (video.js); använder bara core.js.
-import { esc, t } from '../core.js';
+import { esc, locale, t } from '../core.js';
 
 const CAUSE = () => ({
   'server-busy': t('servern var upptagen med bakgrundsjobb'),
@@ -11,8 +11,8 @@ const CAUSE = () => ({
   network: t('nätet hann inte med'),
   client: t('enheten (avkodning eller webbläsare)')
 });
-const mbit = (bps) => bps > 0 ? (bps / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' Mbit/s' : '–';
-const num = (n, d = 1) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
+const mbit = (bps) => bps > 0 ? (bps / 1e6).toLocaleString(locale, { maximumFractionDigits: 1 }) + ' Mbit/s' : '–';
+const num = (n, d = 1) => Number(n).toLocaleString(locale, { maximumFractionDigits: d });
 
 /** Strömmens id och pid ur uppspelningslänken (/api/stream/<id>/…?pid=) */
 export function streamRef(url) {

@@ -1,6 +1,6 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, extramaterial, eget betyg, temamusik, metadataverktyg, undertextsökning och följ-knapp
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDur, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, resumeAt, store, sxe, toast, toastErr, views, t } from '../core.js';
+import { $, $$, act, api, esc, fmtDur, fmtRating, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, resumeAt, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { curPlayer, liveOpen, loadPlayer, need, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
@@ -37,7 +37,7 @@ export async function fillWatch() {
 function heroHtml(it, extra = '') {
   // Hemvideor (taken): inspelningsdagen i stället för året
   const meta = [it.taken ? esc(fmtTaken(it.taken)) : it.year, it.kind === 'movie' ? fmtDur(it.duration) : (it.episodes ? t('{episodes} avsnitt', { episodes: it.episodes }) : ''),
-    it.rating ? `<span class="star">★ ${it.rating.toFixed(1)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
+    it.rating ? `<span class="star">★ ${fmtRating(it.rating)}</span>` : '', it.kind === 'movie' ? resLabel(it.height) : '',
     it.age != null ? `<span class="agebadge" title="${esc(it.cert || '')}">${it.age === 0 ? t('Barntillåten') : it.age + '+'}</span>` : '',
     (it.genres || []).slice(0, 3).map(esc).join(', '), it.studio ? esc(it.studio) : '']
     .filter(Boolean).map(x => `<span>${x}</span>`).join('');
@@ -64,7 +64,7 @@ views.item = async (id, season) => {
     <button class="ghost" id="seen">${it.watched ? t('Markera som osedd') : t('Markera som sedd')}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button>${it.kind === 'movie' ? t('<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>') : ''}${trailerBtns(it)}
     ${me.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="dloff" title="${t('Spara i webbläsaren och titta utan nät')}">${stateOf(it.kind, it.id) === 'done' ? t('✓ Sparad offline') : stateOf(it.kind, it.id) ? t('⤓ Sparas offline…') : t('⤓ Spara offline')}</button>`}
-    ${me.canDownload === false ? '' : `${t('<a class="btn" href="/api/stream/{v}/download" download>Ladda ner</a>', { v: it.version || it.id })}`}
+    ${me.canDownload === false ? '' : `${t('<a class="btn ghost" href="/api/stream/{v}/download" download>Ladda ner</a>', { v: it.version || it.id })}`}
     ${me.curateHere || me.adminHere ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.taken ? '' : t('<button class="ghost" id="match">Fel titel?</button>')}<button class="ghost" id="edit">${t('Redigera')}</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
@@ -79,7 +79,7 @@ views.item = async (id, season) => {
     ${it.intro ? `<span>Intro</span><b>${fmtTime(it.intro.start)}–${fmtTime(it.intro.end)}</b>` : ''}
     ${it.credits ? `<span>${t('Eftertexter')}</span>${t('<b>från {credits}</b>', { credits: fmtTime(it.credits) })}` : ''}
     <span>${t('Uppspelning')}</span><b id="pbinfo">…</b></div>
-    <div class="row" style="margin-top:16px"><button class="ghost small" id="subsearch">${t('Sök undertexter online')}</button>
+    <div class="row" style="margin:16px 0 32px"><button class="ghost small" id="subsearch">${t('Sök undertexter online')}</button>
     ${me.is_admin && it.kind === 'episode' ? t('<button class="ghost small" id="markers">Justera intro/eftertexter</button>') : ''}</div>`;
   if ($('#ver')) {
     $('#ver').value = verSel;
@@ -138,7 +138,7 @@ function showView(it, season) {
       <div class="info"><h3>${e.episode}. ${esc(e.title)}</h3><div class="muted">${fmtDur(e.duration)}${e.watched ? t(' · Sedd') : e.position ? ` ${t('· {position} kvar: {v}', { position: fmtTime(e.position), v: fmtTime(e.duration - e.position) })}` : ''}</div>
       ${e.overview ? `<p>${esc(e.overview)}</p>` : ''}
       <div class="acts" style="margin-top:8px"><button class="primary small" data-play="${e.id}" data-pos="${e.position}">${t('▶ Spela')}</button>
-      <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? t('Osedd') : t('Sedd')}</button></div></div></div>`).join('')}</div>`;
+      <button class="ghost small" data-seen="${e.id}" data-w="${e.watched ? 1 : 0}">${e.watched ? t('Markera som osedd') : t('Markera som sedd')}</button></div></div></div>`).join('')}</div>`;
     $$('[data-play]', $('#eps')).forEach(b => b.onclick = () => startPlay(b, +b.dataset.play, +b.dataset.pos));
     if ($('#seasonOff')) $('#seasonOff').onclick = () => downloadEpisodes({ id: it.id, title: it.title }, eps);
     $$('[data-seen]').forEach(b => b.onclick = act(async () => { await api(`/items/${b.dataset.seen}/watched`, { method: 'POST', body: { watched: b.dataset.w !== '1' } }); route(); }));

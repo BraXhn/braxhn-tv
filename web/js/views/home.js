@@ -216,7 +216,10 @@ views.lib = async (id, folder) => {
     ${chipsHtml(ch)}
     ${own.length ? shelfHtml(t('Egna samlingar'), own.map(colCard).join(''), { more: t('<a href="#/collections">Alla samlingar</a>') }) : ''}
     ${d.items.length ? `<div class="grid" id="libgrid">${d.items.slice(0, FIRST).map(libCard).join('')}</div><div id="libmore" aria-hidden="true"></div>`
-      : emptyState({ title: filtered ? t('Inget som matchar filtret') : t('Inget här ännu'), text: filtered ? t('Ta bort ett filter eller välj Rensa alla.') : t('Titlarna dyker upp här när biblioteket har skannats.') })}`;
+      : filtered ? emptyState({ title: t('Inget som matchar filtret'), text: t('Ta bort ett filter eller välj Rensa alla.') })
+      // Administratören kan göra något åt ett tomt bibliotek: vägen dit och vad som brukar vara fel
+      : me?.adminHere ? emptyState({ icon: '📁', title: t('Inget här ännu'), text: t('Inga titlar hittades i bibliotekets mapp. Kontrollera sökvägen under Administration och att filerna heter t.ex. ”Film (2020).mkv” – skanningen tar några minuter för ett stort bibliotek.'), action: { label: t('Till Administration'), href: '#/admin', kind: 'ghost' } })
+      : emptyState({ title: t('Inget här ännu'), text: t('Titlarna dyker upp här när biblioteket har skannats.') })}`;
   // Stora bibliotek: de första korten direkt, resten av sidan i omgångar och nästa sida när man närmar sig slutet
   // (tusentals kort på en gång låser webbläsaren en stund, särskilt på TV och telefon)
   const items = d.items;

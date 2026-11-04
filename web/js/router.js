@@ -224,7 +224,7 @@ export async function route() {
   catch (e) {
     if (gen !== routeGen || e?.aborted) return;
     main.removeAttribute('aria-busy');
-    if (me) { main.innerHTML = errorState(e, { retry: true }); bindRetry(main, () => route()); }
+    if (me) { main.innerHTML = errorState(e, { retry: true }); bindRetry(main, () => route()); announcePage(name); }
   }
 }
 window.addEventListener('hashchange', () => { navigated = true; saveFocus(); entry(); route(); });
@@ -465,7 +465,13 @@ function setRail(open) {
   $('#railbtn').setAttribute('aria-label', open ? t('Dölj namnen i sidomenyn') : t('Visa namnen i sidomenyn'));
 }
 setRail(!!store.get('rail', false));
-$('#railbtn').onclick = () => { const open = !document.documentElement.classList.contains('rail-open'); store.set('rail', open); setRail(open); };
+let railAnim = 0;
+$('#railbtn').onclick = () => {
+  const r = document.documentElement, open = !r.classList.contains('rail-open');
+  // Animeringen bara vid klicket (se html.rail-anim i style.css)
+  r.classList.add('rail-anim'); clearTimeout(railAnim); railAnim = setTimeout(() => r.classList.remove('rail-anim'), 400);
+  store.set('rail', open); setRail(open);
+};
 // Mer: det som inte får plats i sidomenyn
 $('#railmore').onclick = (e) => {
   e.stopPropagation();

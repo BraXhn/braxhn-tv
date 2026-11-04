@@ -69,7 +69,7 @@ function cardLabel(it, parts) {
     : it.watched ? t('sedd') : it.position > 0 && it.duration ? t('{v} % sett', { v: Math.round(it.position / it.duration * 100) }) : '';
   return [...parts, st].filter(Boolean).join(', ');
 }
-const se = (season, episode) => `S${season} · A${episode}`;
+const se = (season, episode) => t('S{season} · A{episode}', { season, episode }); // A = avsnitt (E på engelska)
 /** Rad 1–3 under bilden. Stående: titel, sedan år/avsnittstitel/säsonger och "S3 · A23" för avsnitt. */
 function lines(it, land) {
   if (it.kind === 'episode') {

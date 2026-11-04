@@ -99,8 +99,11 @@ När används vad:
 - **emptyState** när svaret kom men inte innehöll något. Säg *varför* och *vad man kan göra* (en länk till
   Administration, en hint om filnamn). `text` escapas; `html` är för egen, betrodd text med t.ex. `<code>`.
 - **errorState** när anropet misslyckades. `err.offline` (satt av `api()` när servern inte svarar) ger
-  "Ingen kontakt med servern", annars "Något gick fel" med felmeddelandet. `role="alert"`. Ge `retry` när ett
-  nytt försök kan hjälpa och koppla med `bindRetry` (den flyttar även fokus till knappen).
+  "Ingen kontakt med servern", `err.status === 404` (`api()` sätter `status`) ger "Hittades inte" med en
+  begriplig förklaring och *Till startsidan* i stället för *Försök igen* (utom `compact`), annars "Något gick fel"
+  med felmeddelandet (serverfel utan meddelande blir en mening, aldrig "Fel 502"). `role="alert"`. Ge `retry`
+  när ett nytt försök kan hjälpa och koppla med `bindRetry` (den flyttar även fokus till knappen). Routern lägger
+  en dold `h1` på felsidan.
 - **toast** för kvittenser på något användaren just gjorde ("Sparat"), och för fel i en åtgärd där sidan i
   övrigt fungerar: `toastErr(e)` (ignorerar avbrutna anrop). Ångringsbara åtgärder får en knapp:
   `toast('Borttagen från Min lista', { action: { label: 'Ångra', onClick: undo } })`. Toasten är
@@ -330,6 +333,15 @@ new Date(s * 1000).toLocaleDateString(locale, { … });  // datum, tid och tal m
   Escape/Bakåt ska stänga det som är öppet – se *Rumslig navigering*. Lägg inte viktiga åtgärder bara på hovring –
   kortens ⋮ nås med Tab och Menu-tangenten, och allt i kortmenyn finns även på titelsidan.
   Klickbara rader som inte är knappar kopplas med `keyClick()` i `core.js`.
+- **Typografi och avstånd**: `.small` är bara en textstorlek – inre luft får bara knappar (`button.small`,
+  `.btn.small`), så liten text ligger i linje med rubriken ovanför. Länkar som knappar har samma klasser som
+  knapparna bredvid (`btn ghost` bredvid `button.ghost`). Kortens titel får två rader (`line-clamp`), raderna under
+  en. Tal med decimaler genom `fmtNum`/`fmtRating`/`fmtSize` (svenska: 7,4 och 1,5 GB), aldrig `toFixed()` i text.
+  Ikoner i spelarnas knappar från `ICON` (SVG), inte tecken som ⏸ ⏮ – de ritas olika i olika typsnitt.
+- **TV-läge på stor skärm** (`html.tv`, minst 1600 px): texten är 125 % (Mitt konto → Textstorlek går före) och
+  korten 175 px breda (`--cw`, fast värde eftersom `cardW()` läser det som ett tal). Kontrollera TV-vyer vid 1920 × 1080.
+- **Ingen layoutförskjutning**: animera aldrig något som flyttar sidan när den visas första gången (sidomenyns
+  övergång gäller bara under `html.rail-anim`, som ☰ sätter en kort stund). Bilder har `width`/`height`.
 - **Telefon**: minst 44 px stora mål (`--touch`) på pekskärm, dialoger och menyer som ark nerifrån, inget som
   gör sidan bredare än skärmen (kontrollera vid 375 px), och `env(safe-area-inset-*)` för installerad app.
 - **Rörelse**: animationer bara under `prefers-reduced-motion: no-preference` (eller stängs av under `reduce`).
@@ -342,6 +354,9 @@ new Date(s * 1000).toLocaleDateString(locale, { … });  // datum, tid och tal m
 - `test/web-spatial.test.js` styr appen i TV-läge med bara pilar, Enter och Escape/Bakåt (startsidan → titelsidan →
   spelaren → litet fönster → tillbaka till samma kort, sökfältet, dialogens fokusfälla, 3000 kort).
 - `test/web-i18n.test.js` kontrollerar katalogen och letar svensk text i alla vyer på engelska (och kör granskningen där).
+- `test/web-quality.test.js` kontrollerar färgernas kontrast i `style.css`, att `.small` inte ger text inre luft,
+  och i webbläsaren (375/1280 px och TV-läge) ingen vågrät rullning, bilder med mått, layoutförskjutning under 0,02 på
+  startsidan och i biblioteket, tvåradiga korttitlar, 404-läget och TV-lägets storlek.
 - `test/ui-components.test.js` testar strängbyggarna (escapning, aria-attribut, kortmenyns val per sort och roll).
 - `test/card-actions.test.js` testar `/api/items/:id/state` och `/api/items/:id/continue` mot en riktig server,
   även att barnprofiler inte kan nå titlar över åldersgränsen.

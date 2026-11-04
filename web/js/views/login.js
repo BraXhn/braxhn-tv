@@ -169,7 +169,7 @@ views.profiles = async () => {
   main.innerHTML = `<div class="profiles"><h1>${t('Vem tittar?')}</h1><div class="plist">${d.profiles.map(p => {
     const h = hue(p.name);
     return `<button class="pcard" data-pid="${p.id}" data-pin="${p.hasPin ? 1 : 0}" data-kid="${p.kid ? 1 : 0}">
-      <span class="pav" aria-hidden="true" style="background:${esc(safeColor(p.color)) || `hsl(${h} 55% 45%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+      <span class="pav" aria-hidden="true" style="background:${esc(safeColor(p.color)) || `hsl(${h} 55% 36%)`}">${esc(p.name.slice(0, 1).toUpperCase())}</span>
       <span>${esc(p.name)}</span>${p.kid ? `${t('<small class="muted">Barn · max {maxAge} år</small>', { maxAge: p.maxAge })}` : p.hasPin ? '<small class="muted"><span aria-hidden="true">🔒 </span>PIN</small>' : ''}</button>`;
   }).join('')}</div>
   <div class="row" style="justify-content:center;margin-top:30px"><button class="ghost" id="pdone">${t('Fortsätt som {name}', { name: esc(me.name) })}</button></div></div>`;

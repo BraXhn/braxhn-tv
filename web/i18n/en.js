@@ -2307,7 +2307,7 @@ self.BX_I18N = {
   "<button class=\"ghost\" id=\"addcol\" aria-haspopup=\"dialog\">+ Samling</button>": "<button class=\"ghost\" id=\"addcol\" aria-haspopup=\"dialog\">+ Collection</button>",
   "Spara i webbläsaren och titta utan nät": "Save in the browser and watch without a network",
   "⤓ Sparas offline…": "⤓ Saving offline…",
-  "<a class=\"btn\" href=\"/api/stream/{v}/download\" download>Ladda ner</a>": "<a class=\"btn\" href=\"/api/stream/{v}/download\" download>Download</a>",
+  "<a class=\"btn ghost\" href=\"/api/stream/{v}/download\" download>Ladda ner</a>": "<a class=\"btn ghost\" href=\"/api/stream/{v}/download\" download>Download</a>",
   "<button class=\"ghost\" id=\"match\">Fel titel?</button>": "<button class=\"ghost\" id=\"match\">Wrong title?</button>",
   "Automatiskt": "Automatic",
   "Fil": "File",
@@ -4007,4 +4007,8 @@ self.BX_I18N = {
   "{n} gånger": "{n} times",
   "Vad barnen tittat på, hur länge och när.": "What the kids watched, for how long and when.",
   "En vuxen stoppade uppspelningen": "A grown-up stopped playback",
+  "S{season} · A{episode}": "S{season} · E{episode}",
+  "Det du letar efter finns inte längre – det kan ha tagits bort eller flyttats.": "What you are looking for no longer exists – it may have been removed or moved.",
+  "Servern kunde inte svara just nu – försök igen om en stund.": "The server could not answer right now – try again in a moment.",
+  "Inga titlar hittades i bibliotekets mapp. Kontrollera sökvägen under Administration och att filerna heter t.ex. ”Film (2020).mkv” – skanningen tar några minuter för ett stort bibliotek.": "No titles were found in the library folder. Check the path under Administration and that the files are named e.g. “Movie (2020).mkv” – scanning takes a few minutes for a large library.",
 };

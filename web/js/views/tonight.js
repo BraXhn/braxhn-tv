@@ -3,7 +3,7 @@
 // Var och en sveper på samma förslag i samma ordning; när alla (eller en majoritet) gillat samma titel visas matchen för
 // alla direkt. Servern: server/tonight.js och server/routes/tonight.js, realtid med SSE som Titta tillsammans.
 // Mobilen är huvudfallet: kortet sveps med fingret, och knapparna (och ← →, Backsteg för Ångra) gör samma sak.
-import { $, $$, api, esc, fmtDur, imgSrc, main, onLeave, status, store, toast, toastErr, views, t, tn } from '../core.js';
+import { $, $$, api, esc, fmtDur, fmtRating, imgSrc, main, onLeave, status, store, toast, toastErr, views, t, tn } from '../core.js';
 import { errorState, emptyState } from '../ui/states.js';
 import { confirmDialog } from '../ui/dialog.js';
 import { need, openRemotePicker, startPlay } from '../lazy.js';
@@ -250,7 +250,7 @@ function meta(it) {
   const p = [it.year, it.kind === 'show' ? t('Serie') : t('Film')];
   if (it.kind === 'show' && it.seasons) p.push(tn(it.seasons, '{n} säsong', '{n} säsonger'));
   else if (it.duration) p.push(fmtDur(it.duration));
-  if (it.rating) p.push('★ ' + Number(it.rating).toFixed(1));
+  if (it.rating) p.push('★ ' + fmtRating(it.rating));
   if (it.cert) p.push(it.cert);
   return p.filter(Boolean).map(x => esc(String(x))).join(' · ');
 }

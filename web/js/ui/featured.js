@@ -2,7 +2,7 @@
 // osedda titlar (fältet featured i /api/home). Bläddrar långsamt av sig själv, men aldrig med prefers-reduced-motion,
 // och står still medan muspekaren är över eller fokus är inuti, eller när användaren pausat (WCAG 2.2.2).
 // Tangentbord/TV-fjärr: ← → mellan knapparna, ↓ till första hyllan (↑ från första hyllan hit – rumslig navigering, ui/spatial.js).
-import { api, esc, fmtDur, heroUrl, later, resumeAt, toast, t } from '../core.js';
+import { api, esc, fmtDur, fmtRating, heroUrl, later, resumeAt, toast, t } from '../core.js';
 import { startPlay } from '../lazy.js';
 
 const INTERVAL = 9000;
@@ -15,7 +15,7 @@ function meta(it) {
   if (it.kind === 'show') { if (it.seasons) p.push(it.seasons === 1 ? t('1 säsong') : t('{seasons} säsonger', { seasons: +it.seasons })); }
   else if (it.duration) p.push(esc(fmtDur(it.duration)));
   if (it.cert) p.push(esc(it.cert));
-  if (it.rating) p.push(`<span class="star" aria-hidden="true">★</span> ${(+it.rating).toFixed(1)}<span class="sr-only"> ${t('i betyg')}</span>`);
+  if (it.rating) p.push(`<span class="star" aria-hidden="true">★</span> ${fmtRating(it.rating)}<span class="sr-only"> ${t('i betyg')}</span>`);
   return p.map(x => `<span>${x}</span>`).join('');
 }
 
@@ -26,7 +26,7 @@ export function featuredHtml(items) {
     const ph = HEX.test(it.phBackdrop || '') ? ` style="background:${it.phBackdrop}"` : '';
     const genres = (it.genres || []).slice(0, 3).join(' · ');
     return `<div class="feat-slide${i ? '' : ' on'}" role="group" aria-roledescription="${t('bild')}" aria-label="${t('{v} av {n}: {title}', { v: i + 1, n, title: esc(it.title) })}"${i ? ' inert aria-hidden="true"' : ''} data-i="${i}">
-      <div class="feat-bd"${ph}><img ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async" src="${heroUrl(`/api/image/${+it.id}/backdrop`)}" alt="" data-fb="1"></div>
+      <div class="feat-bd"${ph}><img ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async" src="${heroUrl(`/api/image/${+it.id}/backdrop`)}" alt="" width="1280" height="720" data-fb="1"></div>
       <div class="feat-in"><div class="feat-kicker">${t('Utvalt för dig{v}', { v: genres ? ` · ${esc(genres)}` : '' })}</div>
         <h2 class="feat-title">${esc(it.title)}</h2><div class="meta">${meta(it)}</div>
         ${it.overview ? `<p class="feat-ov">${esc(it.overview)}</p>` : ''}

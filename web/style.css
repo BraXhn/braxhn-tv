@@ -71,7 +71,8 @@ html.rail-open{--rail-w:220px}
   #top:not([hidden]) ~ main{margin-left:var(--rail-w)}
   #top:not([hidden]) ~ #mbar,#top:not([hidden]) ~ #player.mini{left:var(--rail-w)}
 }
-@media (min-width:761px) and (prefers-reduced-motion:no-preference){#rail,main{transition:width var(--dur),margin-left var(--dur)}}
+/* Glid bara när användaren fäller ut/in menyn (html.rail-anim, router.js) – vid start gled annars hela sidan in från vänster */
+@media (min-width:761px) and (prefers-reduced-motion:no-preference){html.rail-anim #rail,html.rail-anim main{transition:width var(--dur),margin-left var(--dur)}}
 .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--line);
   border-radius:var(--r);padding:6px;min-width:180px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .menu a,.menu button{display:block;width:100%;text-align:left;padding:8px 12px;border-radius:6px;background:none;border:0}
@@ -84,11 +85,13 @@ main{padding:20px 32px 60px;--cw:var(--card-w)}
   border-radius:8px;border:1px solid var(--line);background:var(--bg3);font-weight:600}
 .btn.primary,button.primary{background:var(--accent);border-color:var(--accent);color:#1a0d08}
 .btn.primary:hover,button.primary:hover{background:var(--accent2)}
-button.ghost{background:transparent}
+button.ghost,.btn.ghost{background:transparent} /* länkar som knappar ser ut som knapparna bredvid */
 button.ghost:hover,.btn:hover{border-color:var(--dim)}
 button.danger{color:var(--err)}
 button:disabled{opacity:.5;cursor:default}
-.small{padding:5px 10px!important;font-size:.8125rem}
+/* Små knappar: bara knappar (och kanalmärken) får knappens inre luft – .small på text ska ligga i linje med texten runt */
+button.small,.btn.small,select.small,.liveind.small,.chlogo.small{padding:5px 10px!important}
+.small{font-size:.8125rem}
 input[type=text],input[type=password],input[type=number],input[type=email],input[type=url],input[type=search]:not(#q),input:not([type]),select,textarea{
   padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);width:100%}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -110,7 +113,7 @@ label{display:block;font-size:.8125rem;color:var(--dim);margin:12px 0 5px}
 #main>.section{content-visibility:auto;contain-intrinsic-block-size:auto 320px}
 .section h2{font-size:1.125rem;font-weight:700;margin-bottom:8px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .section.has-nav h2{padding-right:76px}
-.section h2 a{font-size:.8125rem;color:var(--dim);font-weight:600}
+.section h2 a{font-size:.8125rem;color:var(--dim);font-weight:600;display:inline-block;padding:4px 0} /* klickytan minst 24 px (2.5.8) */
 .section h2 a:hover{color:var(--text)}
 .shelf-nav{position:absolute;right:0;top:-3px;display:flex;gap:6px}
 .snav{width:30px;height:30px;border-radius:50%;border:0;background:var(--bg3);color:var(--text);font-size:1.375rem;line-height:1;display:flex;align-items:center;justify-content:center;padding:0 0 3px}
@@ -140,7 +143,9 @@ label{display:block;font-size:.8125rem;color:var(--dim);margin:12px 0 5px}
 .art .badge,.art .seen{position:absolute;top:0;right:0;min-width:22px;height:22px;padding:0 6px;border-radius:0 0 0 4px;background:rgba(0,0,0,.78);color:#fff;
   font-size:.6875rem;font-weight:700;display:flex;align-items:center;justify-content:center}
 .art .seen{color:var(--accent);font-size:.8125rem}
-.card .t{margin-top:6px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Titeln på högst två rader (långa svenska titlar och sammansatta ord avstavas/bryts i stället för att klippas efter ett ord) */
+.card .t{margin-top:6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;
+  overflow-wrap:break-word;hyphens:auto}
 .card .s{font-size:.78125rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
 .toolbar h1{font-size:1.375rem;margin-right:auto}
@@ -327,6 +332,7 @@ body.hasbar main{padding-bottom:110px}
 #mbar .mleft{display:flex;gap:12px;align-items:center;min-width:0}
 #mbar .mtxt{display:flex;flex-direction:column;min-width:0}
 #mbar .mtxt b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mbar #martist{align-self:flex-start;max-width:100%;line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} /* klickytan (2.5.8) */
 #mbar .mmid{display:flex;flex-direction:column;align-items:center;gap:6px}
 #mbar .mctl{justify-content:center}
 #mbar #mplay{width:44px;height:44px;border-radius:50%;justify-content:center;padding:0}
@@ -334,7 +340,8 @@ body.hasbar main{padding-bottom:110px}
 #mbar .track{flex:1;height:5px;background:rgba(255,255,255,.2);border-radius:3px;position:relative;cursor:pointer}
 #mbar .track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
 #mbar .mright{display:flex;gap:8px;align-items:center;justify-content:flex-end}
-#mbar #mvol{width:100px;padding:0}
+#mbar #mvol{width:100px;padding:0;accent-color:var(--accent)}
+#mbar .mctl svg{width:20px;height:20px;display:block} /* ⏮ ⏯ ⏭ som SVG (ICON) – samma ikoner som videospelaren */
 #mbar #mrep.on{border-color:var(--accent)}
 /* "Spela på…": fjärrkontrollpanelen (styr en annan enhet) – ligger ovanför ljudspelaren och det lilla fönstret */
 .playon svg{width:18px;height:18px;flex:none}
@@ -552,6 +559,8 @@ dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8p
 #player.idle .ctl,#player.idle .pbar{opacity:0;pointer-events:none}
 #player .ctl{position:absolute;left:0;right:0;bottom:0;background:rgba(28,30,36,.92);transition:opacity .3s;z-index:5}
 #player .ctl .scrub{position:relative;height:14px;margin-top:-7px;display:flex;align-items:center;cursor:pointer}
+/* Pekskärm: tidslinjen tar emot fingret i 32 px höjd (linjen ritas lika tunn och på samma ställe) */
+@media (pointer:coarse){#player .ctl .scrub{height:32px;margin-top:-16px}}
 #player .ctl .track{position:relative;flex:1;height:3px;background:rgba(255,255,255,.18);transition:height .12s}
 #player .ctl .scrub:hover .track{height:6px}
 #player .ctl .track i,#player .ctl .track b{position:absolute;left:0;top:0;bottom:0}
@@ -695,9 +704,10 @@ pre.codes{font-size:1.0625rem;line-height:1.7;background:var(--bg3);padding:14px
 .sk{background:linear-gradient(90deg,var(--bg2) 0,var(--bg3) 40%,var(--bg2) 80%);background-size:300% 100%;border-radius:var(--r-sm);animation:sk 1.4s ease-in-out infinite}
 @keyframes sk{from{background-position:100% 0}to{background-position:-100% 0}}
 .sk-h1{height:30px;width:min(320px,60%);margin-bottom:var(--sp-5)}
+.sk-h1 + .grid{margin-top:6px} /* rubrikraden i biblioteket är 40 px hög (knapparna) */
 .sk-h2{height:20px;width:min(220px,50%);margin-bottom:var(--sp-3)}
 .sk-line{height:12px;margin-top:9px;width:85%}.sk-line.short{width:55%}
-.sk-card .sk-art{aspect-ratio:2/3;border-radius:var(--r)}
+.sk-card .sk-art{aspect-ratio:2/3;border-radius:4px} /* samma hörn som .card .art */
 .sk-card.land .sk-art{aspect-ratio:16/9}
 .sk-hero{display:flex;gap:30px;align-items:flex-end;min-height:360px;padding-top:40px}
 .sk-poster{flex:0 0 210px;aspect-ratio:2/3}
@@ -1719,3 +1729,6 @@ a.fam-row:hover{background:var(--bg3)}
 .fam-clock{flex:none;font-variant-numeric:tabular-nums;color:var(--dim);min-width:3.2em}
 html.tv .fam-row:focus-visible{outline:4px solid var(--focus);outline-offset:2px}
 @media (forced-colors:active){.fam-meter>span,.fam-bar>span{background:Highlight}.fam-live{background:Highlight}}
+/* TV på stor skärm (1080p i CSS-pixlar): text och kort för tre meters avstånd. 14 px brödtext och 125 px breda
+   affischer var lika små som på en dator men sågs från soffan. Textstorleken i Mitt konto (inline på html) går före. */
+@media (min-width:1600px){html.tv{font-size:125%}html.tv main{--cw:175px}} /* fast värde: cardW() läser --cw som tal (bildstorleken) */
