@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.1.0 – 2026-11-05
 - **Integritet och personuppgifter (GDPR):**
   - **Sidan *Integritet*** (under *Mitt konto*): vad servern sparar och hur länge, vilka externa tjänster som är på,
     vem som ansvarar och användarens rättigheter.
