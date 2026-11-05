@@ -40,7 +40,20 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - **på Google TV: bitström till förstärkaren** (Dolby Digital, Dolby Digital Plus/Atmos, DTS/DTS-HD, Dolby TrueHD spelas orört när förstärkaren tar emot formatet), **HDR10/HDR10+/HLG/Dolby Vision** direkt när TV:n klarar det och **automatisk bildfrekvensväxling** (*Inställningar → Bild och ljud på TV:n*: Av / Bara bildfrekvens / Bildfrekvens och upplösning)
 - i bilens mediaspelare och Android Auto: flikarna Musik, Ljudböcker och Poddar, **Stationer** (låtradio och stationer från serverns ljudanalys), *Radio: artist* överst på varje artistsida, sökning i musik, ljudböcker och poddar och **röststyrning** ("Hey Google, spela … på BraXhn TV" spelar bästa träffen: låten med sitt album, ett album, en ljudbok eller poddens senaste avsnitt)
 
-Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning.
+Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning. Spelaren väntar upp till 60 s på servern, så en omkodning med grafikkort som tar några sekunder att komma igång startas inte om.
+
+**Barnprofiler:** poddar visas inte (servern stänger dem för barn), och när en vuxen trycker *Stoppa* i Föräldraöversikten stannar filmen inom ungefär tio sekunder med beskedet *En vuxen stoppade uppspelningen*. Samma sak när skärmtiden tar slut, med serverns förklaring.
+
+## Serveradress, https och BraXhn Relay
+
+- **Hemma:** IP-adressen eller datornamnet, t.ex. `192.168.1.10` – appen lägger till `http://` och port 8420.
+- **Utanför hemmet (bilen, mobilnätet):** en https-adress – från BraXhn Relay, Let's Encrypt eller din egen omvända proxy. Skriver du bara ett domännamn, t.ex. `tv.example.com`, använder appen `https://`. Inloggning, strömning, bilder och nedladdning går genom samma adress.
+- **Eget (självsignerat) certifikat:** appen godkänner bara certifikat som enheten litar på. Installera ditt certifikat (eller din egen CA) under *Inställningar → Säkerhet → Kryptering och användaruppgifter* på telefonen, så fungerar det. Certifikatkontrollen går inte att stänga av. Nedladdning för offline går via Androids nedladdningshanterare, som kanske inte litar på ett eget certifikat – använd då http hemma.
+- Felmeddelanden säger vad som är fel: servern hittades inte, kunde inte ansluta, certifikatet godkänns inte eller att reläet inte når hemservern.
+
+**Stöd projektet:** längst ner i Inställningar finns raden *Stöd projektet* när servern anger en donationslänk (PayPal). Den öppnar länken i webbläsaren – inget annat, inga påminnelser, och den visas aldrig för barnprofiler. Saknar enheten webbläsare (bilen, vissa TV-apparater) visas adressen.
+
+Appen är på svenska. Serverns felmeddelanden är också bara på svenska, så appen följer inte enhetens språk än (den skickar enhetens språk i `Accept-Language` för framtida bruk).
 
 **Körning:** appen saknar avsiktligt markeringen *distraction optimized*. Bilen lägger därför en spärr över appen när den börjar rulla, och appen pausar uppspelningen direkt (krav från Google).
 
@@ -79,4 +92,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera.
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+
+**Inte provat på riktig enhet (appversion 0.7.0):** att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

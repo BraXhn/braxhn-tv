@@ -34,8 +34,8 @@ class App : Application() {
 
 // ---------- modeller (matchar serverns JSON) ----------
 
-@Serializable data class UserInfo(val id: Int, val name: String, @SerialName("is_admin") val isAdmin: Int = 0)
-@Serializable data class ServerStatus(val needsSetup: Boolean = false, val version: String = "", val user: UserInfo? = null)
+@Serializable data class UserInfo(val id: Int, val name: String, @SerialName("is_admin") val isAdmin: Int = 0, val kid: Boolean = false, val canDownload: Boolean = true)
+@Serializable data class ServerStatus(val needsSetup: Boolean = false, val version: String = "", val user: UserInfo? = null, val donateUrl: String? = null)
 @Serializable data class LoginResponse(val token: String, val user: UserInfo)
 @Serializable data class Library(val id: Int, val name: String, val type: String, val count: Int? = null)
 @Serializable data class Marker(val start: Double, val end: Double)
@@ -103,7 +103,7 @@ fun castLine(cast: List<CastMember>?): String? {
 )
 @Serializable data class Chapter(val start: Double, val end: Double, val title: String)
 
-class ApiException(msg: String, val need2fa: Boolean = false, val needPassword: Boolean = false) : IOException(msg)
+class ApiException(msg: String, val need2fa: Boolean = false, val needPassword: Boolean = false, val code: Int = 0) : IOException(msg)
 
 @Serializable data class TokenResponse(val token: String)
 
@@ -160,11 +160,11 @@ object Api {
     }
 
     fun normalize(input: String): String {
-        var s = input.trim().trimEnd('/')
-        if (!s.startsWith("http://", true) && !s.startsWith("https://", true)) s = "http://$s"
-        val u = Uri.parse(s)
-        if (u.scheme == "http" && u.port == -1) s = "$s:8420"
-        return s
+        // Utan schema: ett domännamn (t.ex. BraXhn Relay eller Let's Encrypt) får https, en IP-adress,
+        // ett datornamn eller *.local i hemnätet får http och port 8420. Med schema används adressen
+        // som den är (http utan port får 8420 som förut). Tolkningen finns i serverAddress() i Net.kt,
+        // så att raderna här (och hänvisningarna i test/contracts/apps.json) står kvar.
+        return serverAddress(input)
     }
 
     fun url(path: String, query: Map<String, String?> = emptyMap()): String {
@@ -188,7 +188,7 @@ object Api {
             try {
                 c.requestMethod = method
                 c.connectTimeout = 15000; c.readTimeout = 30000
-                token.value?.let { c.setRequestProperty("Authorization", "Bearer $it") }
+                token.value?.let { c.setRequestProperty("Authorization", "Bearer $it") }; c.setRequestProperty("Accept-Language", acceptLanguage())
                 if (body != null) {
                     c.doOutput = true
                     c.setRequestProperty("Content-Type", "application/json")
@@ -201,10 +201,10 @@ object Api {
                     val obj = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
                     val msg = obj?.get("error")?.jsonPrimitive?.content
                     val need2fa = obj?.get("need2fa")?.jsonPrimitive?.content == "true"
-                    throw ApiException(msg ?: "Servern svarade $code", need2fa, obj?.get("needPassword")?.jsonPrimitive?.content == "true")
+                    throw ApiException(msg ?: httpErrorText(code), need2fa, obj?.get("needPassword")?.jsonPrimitive?.content == "true", code)
                 }
                 text
-            } finally { c.disconnect() }
+            } catch (e: IOException) { throw if (e is ApiException) e else netError(e) } finally { c.disconnect() }
         }
 
     suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T =
@@ -225,7 +225,7 @@ object Api {
         }))
         prefs.edit().putString("server", server.value).putString("token", r.token).apply()
         token.value = r.token
-        refreshImageToken(force = true)
+        refreshImageToken(force = true); Session.refresh()
     }
 
     /** Hämtar ny bildtoken (gäller 7 dygn) om den saknas eller är äldre än ett dygn. */
@@ -238,7 +238,7 @@ object Api {
     }
 
     fun clearLogin() {
-        prefs.edit().remove("token").apply()
+        prefs.edit().remove("token").apply(); Session.reset()
         token.value = null
         imageToken.value = null
     }
@@ -272,8 +272,8 @@ object Api {
         ) + TvOutput.hdrQuery(ctx, types)
     }
 
-    suspend fun reportProgress(id: Int, position: Double, duration: Double) {
-        runCatching { post("/api/items/$id/progress", buildJsonObject { put("position", position); put("duration", duration) }) }
+    suspend fun reportProgress(id: Int, position: Double, duration: Double): ProgressResult? {
+        return runCatching { json.decodeFromString<ProgressResult>(post("/api/items/$id/progress", buildJsonObject { put("position", position); put("duration", duration) })) }.getOrNull()
     }
     suspend fun setWatched(id: Int, watched: Boolean) {
         post("/api/items/$id/watched", buildJsonObject { put("watched", JsonPrimitive(watched)) })
@@ -304,7 +304,7 @@ object Api {
         if (r.status == "approved" && t != null) {
             prefs.edit().putString("server", server.value).putString("token", t).apply()
             token.value = t
-            refreshImageToken(force = true)
+            refreshImageToken(force = true); Session.refresh()
         }
         return r.status
     }
@@ -320,7 +320,7 @@ object Api {
         }))
         prefs.edit().putString("token", r.token).apply()
         token.value = r.token
-        refreshImageToken(force = true)
+        refreshImageToken(force = true); Session.refresh()
     }
 
     /** Lägger till i eller tar bort från Min lista (ett avsnitt räknas som hela serien på servern). */

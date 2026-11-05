@@ -102,7 +102,7 @@ class MusicService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-        val http = DefaultHttpDataSource.Factory().setUserAgent("BraXhnTV-Android").setAllowCrossProtocolRedirects(true)
+        val http = Media.http()
         // Kontots token skickas som header (inte i URL:en) och läses vid varje anrop – den kan bytas medan tjänsten lever
         val authed = ResolvingDataSource.Factory(http) { spec ->
             val t = Api.token.value
@@ -273,7 +273,7 @@ class MusicService : MediaLibraryService() {
         // Bildtokenen förnyas av Api när den är äldre än ett dygn (gäller 7 dygn)
         Api.refreshImageToken()
         if (libsLoaded && System.currentTimeMillis() - libsAt < LIBS_TTL) return
-        Api.refreshListenPrefs()
+        Api.refreshListenPrefs(); Session.refresh() // barnprofil: inga poddar (servern ger tom lista/404)
         val l: List<Library> = Api.get("/api/libraries")
         libId = l.firstOrNull { it.type == "music" }?.id
         bookLibId = l.firstOrNull { it.type == "audiobook" }?.id
@@ -335,15 +335,15 @@ class MusicService : MediaLibraryService() {
         when {
             parent == "books" -> { val bl = bookLibId ?: return emptyList(); val r = Api.get<BList>("/api/audiobooks/$bl", mapOf("sort" to "recent"))
                 return (r.cont + r.books.filter { b -> r.cont.none { it.id == b.id } }).map(::bookItem) }
-            parent == "pods" -> { val r = Api.get<PList>("/api/podcasts")
+            parent == "pods" -> { if (Session.kid.value) return emptyList(); val r = Api.get<PList>("/api/podcasts")
                 return listOf(folder("podlatest", "Senaste avsnitten", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)) +
                     r.podcasts.map { folder("pod:${it.id}", it.title ?: "Podd", if (it.unplayed > 0) "${it.unplayed} nya" else it.author, if (it.image) img("/api/podcasts/${it.id}/image") else null, MediaMetadata.MEDIA_TYPE_PODCAST) } }
-            parent == "podlatest" -> return Api.get<PList>("/api/podcasts").latest.map(::epItem)
-            parent.startsWith("pod:") -> { val d = Api.get<PDetail>("/api/podcasts/${parent.removePrefix("pod:")}"); return d.episodes.take(100).map { epItem(it.copy(podcastTitle = d.title)) } }
+            parent == "podlatest" -> return if (Session.kid.value) emptyList() else Api.get<PList>("/api/podcasts").latest.map(::epItem)
+            parent.startsWith("pod:") -> { if (Session.kid.value) return emptyList(); val d = Api.get<PDetail>("/api/podcasts/${parent.removePrefix("pod:")}"); return d.episodes.take(100).map { epItem(it.copy(podcastTitle = d.title)) } }
         }
         val l = lib()
         val books = bookLibId?.let { folder("books", "Ljudböcker", type = MediaMetadata.MEDIA_TYPE_FOLDER_AUDIO_BOOKS) }
-        val pods = folder("pods", "Poddar", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
+        val pods = if (Session.kid.value) null else folder("pods", "Poddar", type = MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS) // poddar är stängda för barnprofiler
         if (parent == ROOT) return (if (l != null) musicFolders(l) else emptyList()) + listOfNotNull(books, pods)
         // Android Auto och bilar som anger en gräns: högst fyra flikar i roten
         if (parent == AUTO_ROOT) return listOfNotNull(l?.let { folder(MUSIC, "Musik", type = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED) }, books, pods)
@@ -508,7 +508,7 @@ class MusicService : MediaLibraryService() {
 
     private fun resolve(items: List<MediaItem>): List<MediaItem> = items.map { mi ->
         val parts = mi.mediaId.split(":")
-        if (parts.size >= 2 && parts[0] == "t" && mi.localConfiguration == null) mi.buildUpon().setUri(trackUri(parts[1].toInt())).build() else mi
+        if (parts.size >= 2 && parts[0] == "t" && mi.localConfiguration == null) (parts[1].toIntOrNull()?.let { tid -> mi.buildUpon().setUri(trackUri(tid)).build() } ?: mi) else mi
     }
 
     /** Sökning i bilen: musik, ljudböcker (titel/författare) och poddar (namn) */
@@ -524,7 +524,7 @@ class MusicService : MediaLibraryService() {
             Api.get<BList>("/api/audiobooks/$bl", mapOf("sort" to "recent")).books
                 .filter { b -> b.title.lowercase().contains(needle) || (b.author?.lowercase()?.contains(needle) == true) }.take(20).map(::bookItem)
         }.getOrDefault(emptyList()) } ?: emptyList()
-        val pods = runCatching {
+        val pods: List<MediaItem> = if (Session.kid.value) emptyList() else runCatching {
             Api.get<PList>("/api/podcasts").podcasts.filter { p -> p.title?.lowercase()?.contains(needle) == true }.take(10)
                 .map { folder("pod:${it.id}", it.title ?: "Podd", it.author, if (it.image) img("/api/podcasts/${it.id}/image") else null, MediaMetadata.MEDIA_TYPE_PODCAST) }
         }.getOrDefault(emptyList())
@@ -558,7 +558,7 @@ class MusicService : MediaLibraryService() {
                 .firstOrNull { it.title.lowercase().contains(needle) || (it.author?.lowercase()?.contains(needle) == true) }
             if (b != null) bookQueue(b.id.toString())?.let { return it }
         }
-        val pod = runCatching { Api.get<PList>("/api/podcasts").podcasts }.getOrDefault(emptyList()).firstOrNull { it.title?.lowercase()?.contains(needle) == true }
+        val pod = if (Session.kid.value) null else runCatching { Api.get<PList>("/api/podcasts").podcasts }.getOrDefault(emptyList()).firstOrNull { it.title?.lowercase()?.contains(needle) == true }
         if (pod != null) {
             val e = runCatching { Api.get<PDetail>("/api/podcasts/${pod.id}").episodes.firstOrNull() }.getOrNull()
             if (e != null) return MediaSession.MediaItemsWithStartPosition(listOf(epMedia(e.copy(podcastTitle = pod.title))), 0, if (e.played) 0 else (e.position * 1000).toLong())

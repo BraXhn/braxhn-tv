@@ -124,7 +124,7 @@ private fun halfHour(t: Long): Long = t - t % 1800
 
 @Composable
 fun TvGuide(data: IptvChannels, onPlay: (Screen) -> Unit) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope(); val ctx = androidx.compose.ui.platform.LocalContext.current
     var from by remember { mutableStateOf(halfHour(nowSec())) }
     val to: Long = from + WINDOW_MIN * 60L
     var filter by remember { mutableStateOf("all") }
@@ -213,7 +213,7 @@ fun TvGuide(data: IptvChannels, onPlay: (Screen) -> Unit) {
                     if (p != null && past && p.catchup != true) Text("Finns inte i kanalens arkiv.", color = Color.Gray, fontSize = 13.sp)
                     if (p != null && !past) OutlinedButton(onClick = {
                         selected = null
-                        scope.launch { runCatching { Api.post("/api/dvr/program", buildJsonObject { put("programId", p.id) }) } }
+                        scope.launch { val r = runCatching { Api.post("/api/dvr/program", buildJsonObject { put("programId", p.id) }) }; android.widget.Toast.makeText(ctx, if (r.isSuccess) "Inspelningen är bokad" else "Kunde inte boka: ${r.exceptionOrNull()?.message ?: ""}", android.widget.Toast.LENGTH_LONG).show() }
                     }) { Text("Spela in") }
                     OutlinedButton(onClick = {
                         val on = !fav

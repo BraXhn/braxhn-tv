@@ -241,7 +241,7 @@ fun LinesResults(q: String, push: (Screen) -> Unit) {
         if (q.length < 3) { res = null; return@LaunchedEffect }
         delay(350)
         try { res = Api.get<LinesResult>("/api/search/lines", mapOf("q" to q, "limit" to "40")) }
-        catch (e: Exception) { res = null; error = if (e.message?.contains("404") == true) "Servern stöder inte repliksökning." else e.message }
+        catch (e: Exception) { res = null; error = if ((e as? ApiException)?.code == 404 || e.message?.contains("404") == true) "Servern stöder inte repliksökning." else e.message }
     }
     val r = res
     when {
@@ -300,7 +300,7 @@ fun StreamPlayerScreen(req: Screen.Stream, onClose: () -> Unit) {
     var duration by remember(req) { mutableStateOf<Double?>(null) }
     val progressKind: String? = when (req.kind) { "vod" -> "movie"; "vodep" -> "episode"; else -> null }
     val player: ExoPlayer = remember {
-        val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
+        val http = Media.http() // 60 s: IPTV-sessioner omkodas också
         ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         }
@@ -353,7 +353,7 @@ fun StreamPlayerScreen(req: Screen.Stream, onClose: () -> Unit) {
     DisposableEffect(req) {
         val l = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) { report(); onClose() } }
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = e.errorCodeName }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = playerErrorText(e) }
         }
         player.addListener(l)
         onDispose { player.removeListener(l) }

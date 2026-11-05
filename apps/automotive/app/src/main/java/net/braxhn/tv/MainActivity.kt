@@ -28,6 +28,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -181,7 +182,7 @@ fun LoginScreen() {
         Column(Modifier.widthIn(max = 520.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(72.dp))
             Text("BraXhn TV", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-            Text("Serveradress, t.ex. 192.168.1.10:8420 eller https://tv.dindomän.se", color = Color.Gray, fontSize = 14.sp)
+            Text("Serveradress, t.ex. 192.168.1.10:8420 hemma, eller tv.dindomän.se (https, även via BraXhn Relay) utanför hemmet", color = Color.Gray, fontSize = 14.sp)
             OutlinedTextField(server, { server = it }, label = { Text("Server") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
             OutlinedTextField(name, { name = it }, label = { Text("Användarnamn") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -255,6 +256,20 @@ fun Loading() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)
 @Composable
 fun ErrorText(msg: String) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(msg, color = Color.Gray) }
 
+/** Fel med knappen Försök igen (får fokus på TV, så att fjärrkontrollen inte fastnar på en tom sida) */
+@Composable
+fun ErrorRetry(msg: String, onRetry: () -> Unit) {
+    val fr = remember { androidx.compose.ui.focus.FocusRequester() }
+    val tv = isTv(LocalContext.current)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 560.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(msg, color = Color.Gray)
+            Button(onClick = onRetry, modifier = Modifier.height(52.dp).focusRequester(fr).focusRing(RoundedCornerShape(26.dp))) { Text("Försök igen", fontSize = 17.sp) }
+        }
+    }
+    LaunchedEffect(msg) { if (tv) runCatching { fr.requestFocus() } }
+}
+
 // ---------------- hem / bibliotek / sök ----------------
 
 @Composable
@@ -265,8 +280,12 @@ fun HomeScreen(push: (Screen) -> Unit) {
     val scope = rememberCoroutineScope()
     var libs by remember { mutableStateOf<List<Library>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        error = null
         Api.refreshImageToken()
+        // Barnprofil och nedladdningsrätt (/api/status) – används av spelaren, nedladdningen och bilens mediaspelare
+        Session.refresh()
         // Musik och ljudböcker har egna vyer – i rutnätet för film/serier blir de tomma
         try {
             libs = Api.get<List<Library>>("/api/libraries").filter { it.type == "movie" || it.type == "show" }
@@ -277,11 +296,11 @@ fun HomeScreen(push: (Screen) -> Unit) {
             home = h
             // Google TV: samma titlar i systemets rad Fortsätt titta
             withContext(Dispatchers.IO) { WatchNext.sync(context, h.continueWatching) }
-        } catch (e: Exception) { error = e.message }
+        } catch (e: Exception) { error = e.message ?: e.toString() }
     }
     val h = home
     when {
-        error != null -> ErrorText(error!!)
+        error != null && h == null -> ErrorRetry(error ?: "") { attempt++ }
         h == null -> Loading()
         else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 12.dp)) {
             item {
@@ -311,7 +330,13 @@ fun ItemGrid(items: List<MediaItem>, landscape: Boolean = false, push: (Screen) 
 fun LibraryScreen(lib: Library, push: (Screen) -> Unit) {
     var items by remember { mutableStateOf<List<MediaItem>?>(null) }
     var sort by remember { mutableStateOf("title") }
-    LaunchedEffect(sort) { items = runCatching { Api.get<LibraryItems>("/api/libraries/${lib.id}/items", mapOf("sort" to sort)).items }.getOrDefault(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(sort, attempt) {
+        error = null
+        try { items = Api.get<LibraryItems>("/api/libraries/${lib.id}/items", mapOf("sort" to sort)).items }
+        catch (e: Exception) { error = e.message ?: e.toString() }
+    }
     Column {
         Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(lib.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -319,7 +344,9 @@ fun LibraryScreen(lib: Library, push: (Screen) -> Unit) {
                 FilterChip(selected = sort == k, onClick = { sort = k }, label = { Text(n) })
             }
         }
-        items?.let { ItemGrid(it, push = push) } ?: Loading()
+        val err = error
+        if (err != null && items == null) ErrorRetry(err) { attempt++ }
+        else items?.let { ItemGrid(it, push = push) } ?: Loading()
     }
 }
 
@@ -362,7 +389,10 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     val tv = remember { isTv(ctx) }
     var frameRate by remember { mutableStateOf(TvOutput.frameRateMode(ctx)) }
     val output = remember { if (tv) TvOutput.describe(ctx) else null }
+    val donate by Session.donateUrl.collectAsState()
+    val kid by Session.kid.collectAsState()
     LaunchedEffect(Unit) {
+        Session.refresh()
         Api.refreshListenPrefs()
         skipBack = Api.skipBack; skipForward = Api.skipForward; skipSilence = Api.skipSilence; normalize = Api.normalize
     }
@@ -447,6 +477,17 @@ fun SettingsScreen(push: (Screen) -> Unit) {
         item { Text("Nedladdat för offline", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
         item { DownloadsList(push) }
         item { Text("Video kan bara spelas när bilen står parkerad.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
+        // Stöd projektet: helt frivilligt, bara en rad här (aldrig för barnprofiler), och bara när servern skickar en PayPal-länk
+        val link: String? = donate
+        if (link != null && !kid) {
+            item {
+                TextButton(onClick = {
+                    val ok = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                    // Bilar och vissa TV-apparater saknar webbläsare: visa adressen i stället
+                    if (!ok) android.widget.Toast.makeText(ctx, "Ingen webbläsare – öppna $link på telefonen eller datorn", android.widget.Toast.LENGTH_LONG).show()
+                }, modifier = Modifier.padding(top = 8.dp).focusRing(RoundedCornerShape(20.dp))) { Text("Stöd projektet", color = Color.Gray, fontSize = 14.sp) }
+            }
+        }
     }
 }
 
@@ -465,8 +506,12 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(id, reload) { try { item = Api.get("/api/items/$id") } catch (e: Exception) { error = e.message } }
-    val it = item ?: run { if (error != null) ErrorText(error!!) else Loading(); return }
+    LaunchedEffect(id, reload) { error = null; try { item = Api.get("/api/items/$id") } catch (e: Exception) { error = e.message ?: e.toString() } }
+    val it = item ?: run { if (error != null) ErrorRetry(error ?: "") { reload++ } else Loading(); return }
+    // Google TV: fokus på Spela/Fortsätt när sidan öppnas, så att OK startar direkt
+    val playFocus = remember(it.id) { androidx.compose.ui.focus.FocusRequester() }
+    val tv = isTv(LocalContext.current)
+    LaunchedEffect(it.id) { if (tv) { delay(150); runCatching { playFocus.requestFocus() } } }
 
     var season by remember(it.id) { mutableIntStateOf(it.next?.season ?: it.children?.firstOrNull()?.season ?: 1) }
     var audio by remember(it.id) { mutableStateOf((it.audio?.firstOrNull { a -> a.default == true } ?: it.audio?.firstOrNull())?.index) }
@@ -502,10 +547,10 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
                             if (pos > 30) {
-                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp)) { Icon(Icons.Filled.PlayArrow, null); Text(" Fortsätt ${formatTime(pos)}", fontSize = 17.sp) }
+                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" Fortsätt ${formatTime(pos)}", fontSize = 17.sp) }
                                 OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp)) { Text("Börja om") }
                             } else {
-                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp)) { Icon(Icons.Filled.PlayArrow, null); Text(" Spela", fontSize = 17.sp) }
+                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" Spela", fontSize = 17.sp) }
                             }
                             OutlinedButton(onClick = { scope.launch { runCatching { Api.setWatched(it.id, it.watched != true) }; reload++ } }, Modifier.height(56.dp)) {
                                 Text(if (it.watched == true) "Markera osedd" else "Markera sedd")
@@ -529,7 +574,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     } else {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             it.next?.let { n ->
-                                Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp)) {
+                                Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) {
                                     Icon(Icons.Filled.PlayArrow, null); Text(" ${if ((n.position ?: 0.0) > 0) "Fortsätt" else "Spela"} S${n.season}E${n.episode}", fontSize = 17.sp)
                                 }
                             }
@@ -575,6 +620,7 @@ fun DownloadRow(item: MediaItem) {
     val records by Downloads.records.collectAsState()
     val active by Downloads.active.collectAsState()
     val errors by Downloads.errors.collectAsState()
+    val canDownload by Session.canDownload.collectAsState()
     val error = errors[item.id]
     val done = records.any { it.id == item.id }
     val p = active[item.id]
@@ -582,6 +628,7 @@ fun DownloadRow(item: MediaItem) {
         when {
             done -> OutlinedButton(onClick = { Downloads.remove(item.id) }) { Text("Ta bort nedladdning") }
             p != null -> { LinearProgressIndicator(progress = { p }, modifier = Modifier.width(200.dp)); Text(if (p < 0.5f) "Förbereder…" else "Laddar ner…", color = Color.Gray) }
+            !canDownload -> {} // kontot får inte ladda ner – servern skulle svara 403
             else -> listOf("1080" to "Ladda ner HD", "480" to "Ladda ner (liten)").forEach { (q, label) ->
                 // Körs i appens scope – avbryts inte när man lämnar sidan
                 OutlinedButton(onClick = { Downloads.start(item, q) }) { Text(label) }
@@ -628,8 +675,10 @@ fun QuickConnectScreen(serverInput: String, onCancel: () -> Unit) {
                         "approved" -> break // token sparad – appen byter till startsidan
                         "expired" -> { message = "Koden har gått ut."; break }
                     }
-                } catch (e: ApiException) { message = e.message; break } // servern nekade – sluta fråga
-                catch (e: IOException) { } // tillfälligt nätverksfel: försök igen
+                } catch (e: ApiException) {
+                    // Servern nekade (4xx) – sluta fråga. Nätverksfel och 5xx (t.ex. reläet tappade servern): försök igen
+                    if (e.code in 400..499) { message = e.message; break }
+                } catch (e: IOException) { } // tillfälligt nätverksfel: försök igen
             }
         }
     }

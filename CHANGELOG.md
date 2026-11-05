@@ -14,6 +14,16 @@
   - **Apple TV:** felrutorna i spelaren och live-TV tar bort spelarvyn så att *Stäng*/*Försök igen* får fokus med Siri Remote, och poddavsnitten i listan får kortstil (syns när de har fokus).
   - **Stöd projektet** (bara egna byggen med Swift-flaggan `DONATION_LINK`, av som standard – Apples regel 3.2.1(vi)): en diskret rad under Inställningar med serverns `donateUrl`, bara https till PayPal och aldrig för barnprofiler.
   - Kontraktet (`test/contracts/apps.json`) har de nya valfria fälten (`user.kid`, `user.canDownload`, `remote`, `donateUrl`) och svaret på framstegsanropen (`ProgressReply.ios`).
+- **Android-appen (bil och Google TV) i fas med 1.0.0, appversion 0.7.0:**
+  - **Omkodning med grafikkort startade om i en slinga:** spelaren gav upp efter Media3:s standardtidsgräns (8 s) medan servern fortfarande gjorde första segmentet (~10 s med NVENC) och startade då om omkodningen. Nu 60 s för anslutning och läsning som i webbspelaren – även för live-TV, inspelningar, IPTV och musik. En ny start av samma titel (byte av ljudspår, nattläge, undertext som bränns in) väntar tills stoppet av den förra nått servern, så att stoppet inte kan döda den nya strömmen.
+  - **Föräldraöversiktens Stoppa:** spelaren läser `stop` i svaret på framstegsanropet, stoppar och visar *En vuxen stoppade uppspelningen* (barnprofil), *Uppspelningen stoppades av administratören* eller skärmtidens förklaring från servern, med fokus på *Stäng* för fjärrkontrollen.
+  - **Barnprofiler:** fliken *Poddar* visas inte i bilens mediaspelare och Android Auto, och poddar söks eller spelas inte med rösten (servern stänger poddar för barn). Nedladdningsknapparna döljs för konton utan nedladdningsrätt (`user.canDownload`).
+  - **2-minutersgränsen:** kontrollerat – appen sparar ingen egen position, så det som setts under 2 minuter börjar om från början även för nedladdade titlar och i *Fortsätt titta*.
+  - **Begripliga fel:** serverns förklaring visas även när den kommer från spelaren (t.ex. kvalitetstak, för många samtidiga strömmar, 507 full disk, 503), och nätverksfel får svenska texter (servern hittades inte, kunde inte ansluta, certifikatet godkänns inte, reläet når inte hemservern) i stället för Javas engelska.
+  - **Fjärråtkomst via BraXhn Relay och https:** en adress utan `http://` som ser ut som ett domännamn (t.ex. `tv.example.com`) blir `https://` – IP-adresser, datornamn och `*.local` blir som förut `http://…:8420`. Certifikat som användaren själv installerat på enheten godkänns (för ett eget/självsignerat certifikat); kontrollen stängs aldrig av. Inloggning med kod fortsätter fråga när reläet eller nätet tillfälligt inte svarar.
+  - **Fjärrkontrollen:** titelsidan öppnas med fokus på *Spela*/*Fortsätt*, fel på startsidan, i biblioteket och på titelsidan har *Försök igen* med fokus (förut en tom sida), och *Spela in* i TV-guiden bekräftar eller visar felet.
+  - **Stöd projektet:** en diskret rad längst ner i Inställningar som öppnar donationslänken i webbläsaren – bara när servern skickar `donateUrl` (https till paypal.com/paypal.me), aldrig för barnprofiler, inga popups eller påminnelser.
+  - **Ingen långsam avkodarlista på huvudtråden** före uppspelning, och en låt med trasigt id i bilens kö kraschar inte tjänsten.
 
 ## 1.0.0 – 2026-11-04
 

@@ -38,13 +38,14 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -77,9 +78,15 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var modeNote by remember { mutableStateOf<String?>(null) }
     // Familjefiltret (överhoppad scen) och automatisk undertextsynk visas en stund i statusraden
     var note by remember { mutableStateOf<String?>(null) }
+    // Stoppad av servern (en vuxen i Föräldraöversikten, administratören eller skärmtiden): serverns/appens förklaring
+    var stopped by remember(req) { mutableStateOf<String?>(null) }
+    // Slutrapport och stopp av strömmen skickas en gång per uppspelning (Stäng + att vyn stängs gav dubbla anrop)
+    val finalSent = remember(req) { booleanArrayOf(false) }
+    val closeFocus = remember { FocusRequester() }
 
     val player = remember {
-        val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
+        // 60 s tidsgräns (Media.http): en omkodning med grafikkort kan ta ~10 s till första segmentet
+        val http = Media.http()
         // Avkodarreserv (t.ex. Dolby Vision → HEVC-avkodaren). På TV: ljudutgångens hastighetsstyrning, så att
         // bitström (Dolby/DTS till förstärkaren) och hastighetsändring fungerar ihop
         val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
@@ -92,13 +99,33 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
     }
 
+    /** Servern bad spelaren sluta (stop i framstegssvaret): stoppa och visa varför */
+    fun stoppedByServer(r: ProgressResult) {
+        if (stopped != null) return
+        player.pause()
+        player.stop()
+        val st = r.screenTime
+        stopped = if (st != null && !st.allowed) st.message ?: "Skärmtiden är slut för idag."
+                  else if (Session.kid.value) "En vuxen stoppade uppspelningen"
+                  else "Uppspelningen stoppades av administratören"
+    }
+
     fun report(final: Boolean = false) {
         val it = item ?: return
+        if (final) { if (finalSent[0]) return; finalSent[0] = true }
+        val id = it.id
         val pos = player.currentPosition / 1000.0
         val dur = pb?.duration ?: it.duration ?: 0.0
-        // Under trailers/förfilm finns inget framsteg att spara
-        if (pos > 1 && player.currentMediaItemIndex >= mainIndex) Api.appScope.launch { Api.reportProgress(it.id, pos, dur) }
-        if (final) Api.appScope.launch { runCatching { Api.post("/api/stream/${it.id}/stop") } }
+        // Under trailers/förfilm finns inget framsteg att spara. Positionen sparas bara på servern (ingen egen lokal
+        // position) – servern ger 0 för det som setts under 2 minuter, så appen erbjuder då ingen Fortsätt.
+        if (pos > 1 && player.currentMediaItemIndex >= mainIndex) {
+            if (final) Api.appScope.launch { Api.reportProgress(id, pos, dur) }
+            else if (stopped == null) scope.launch {
+                val r: ProgressResult? = Api.reportProgress(id, pos, dur)
+                if (r != null && r.stop && item?.id == id) stoppedByServer(r)
+            }
+        }
+        if (final && !offline) StreamGate.stop(id)
     }
 
     // Läs in objekt + uppspelningsbeslut och starta
@@ -111,10 +138,15 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             player.prepare(); player.playWhenReady = true
             item = runCatching { Api.get<MediaItem>("/api/items/${req.id}") }.getOrNull()
             // info=1: bara intro/eftertexter – räknas inte som en strömning på servern
-            pb = runCatching { Api.get<Playback>("/api/items/${req.id}/playback", Api.capabilities(req.audio, null) + ("info" to "1")) }.getOrNull()
+            pb = runCatching {
+                val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(req.audio, null) }
+                Api.get<Playback>("/api/items/${req.id}/playback", caps + ("info" to "1"))
+            }.getOrNull()
             return@LaunchedEffect
         }
         try {
+            // Ett stopp av samma titel (omstart med annat ljud, nattläge …) måste nå servern före den nya starten
+            StreamGate.awaitStop(req.id)
             val it: MediaItem = Api.get("/api/items/${req.id}")
             item = it
             val sub = req.sub ?: it.subtitles?.firstOrNull { s -> s.forced == true && s.bitmap != true }
@@ -122,7 +154,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             // Bio-läge bara för filmer från början, och bara om det är påslaget (/api/me/cinema; saknas hos äldre servrar)
             val cinema = !req.skipPreroll && req.start < 1 && it.kind == "movie" &&
                 runCatching { Api.get<CinemaPrefs>("/api/me/cinema").on }.getOrDefault(false)
-            val p: Playback = Api.get("/api/items/${req.id}/playback", Api.capabilities(req.audio, sub) + Api.comfortQuery() +
+            // Avkodarlistan (MediaCodecList) är långsam första gången – inte på huvudtråden
+            val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(req.audio, sub) }
+            val p: Playback = Api.get("/api/items/${req.id}/playback", caps + Api.comfortQuery() +
                 ("cinema" to (if (cinema) "1" else null)))
             pb = p
             currentSub = sub
@@ -250,7 +284,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
                 // En trailer som inte går att spela: gå direkt till filmen
                 if (player.currentMediaItemIndex < mainIndex) { player.seekTo(mainIndex, 0L); player.prepare(); return }
-                error = e.errorCodeName + ": " + (e.message ?: "")
+                error = playerErrorText(e)
             }
         }
         player.addListener(l)
@@ -425,13 +459,17 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
         // Google TV: flytta fokus till knappen när den dyker upp så att den kan väljas direkt med fjärrkontrollen
         LaunchedEffect(skip) { if (tv && skip != null) runCatching { skipFocus.requestFocus() } }
-        error?.let { e ->
-            Column(Modifier.align(Alignment.Center).background(Surface2, RoundedCornerShape(14.dp)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Kunde inte spela", fontWeight = FontWeight.Bold, color = Color.White)
-                Text(e, color = Color.Gray, fontSize = 13.sp)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onClose) { Text("Stäng") }
+        val failure: Pair<String, String>? = stopped?.let { s -> "Uppspelningen stoppades" to s } ?: error?.let { e -> "Kunde inte spela" to e }
+        failure?.let { (head, text) ->
+            Column(Modifier.align(Alignment.Center).widthIn(max = 560.dp).background(Surface2, RoundedCornerShape(14.dp)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(head, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(text, color = Color.LightGray, fontSize = 15.sp)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { report(final = true); onClose() }, modifier = Modifier.height(52.dp).focusRequester(closeFocus).focusRing(RoundedCornerShape(26.dp))) { Text("Stäng", fontSize = 17.sp) }
             }
+            // Fjärrkontrollen: fokus på Stäng, så att OK stänger (annars ligger fokus kvar i spelaren bakom)
+            LaunchedEffect(head, text) { runCatching { closeFocus.requestFocus() } }
         }
         } // !inPip
     }

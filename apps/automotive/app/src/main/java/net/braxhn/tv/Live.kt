@@ -213,7 +213,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
     val viewRef = remember { arrayOfNulls<PlayerView>(1) }
     val live = chan > 0
     val player = remember {
-        val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setUserAgent("BraXhnTV-Android")
+        val http = Media.http() // 60 s: live-TV omkodas också (grafikkortet kan ta ~10 s)
         ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
             setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         }
@@ -306,7 +306,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
 
     DisposableEffect(req) {
         val l = object : androidx.media3.common.Player.Listener {
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = if (e.message?.contains("409") == true) "Alla tuners används" else e.errorCodeName }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = if (e.message?.contains("409") == true) "Alla tuners används" else playerErrorText(e) }
         }
         player.addListener(l)
         onDispose { player.removeListener(l) }

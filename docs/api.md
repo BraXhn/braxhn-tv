@@ -625,6 +625,8 @@ Bara webben. Huvudkontot (ingen `parent_id`, ingen åldersgräns) ser sina barnp
 - `GET /api/parents/:pid?days=7|30` → `{ id, name, maxAge, days, lateHour, perDay: [{ day, video, audio, screen }], totals: { video, audio, plays, titles, late, remote, avgPerDay }, top: [{ id, title, kind, seconds, plays, episodes, last, item }], books: [{ id, title, seconds }], recent: [{ id, ts, ended, itemId|null, showId, title, kind, played, percent, device, remote, late }], screen: { rules, status }, now }`. En serie räknas som en titel i `top`; `item` är kortet (`null` om titeln är borttagen).
 - `POST /api/parents/:pid/stop` → `{ stopped }`: stoppar barnets pågående uppspelningar (som administratörens stopp – spelaren får `stop: true` i framstegssvaret).
 - `/api/status` → `user.kidProfiles` (nytt fält): antal barnprofiler under huvudkontot, 0 för profiler.
+- **Android-appen** (0.7.0) läser också `donateUrl` i `/api/status` (valfritt, toppnivå): visas som *Stöd projektet* i Inställningar bara om det är en https-adress till `paypal.com`/`paypal.me`, aldrig för barnprofiler.
+- **Android-appen** (0.7.0) läser `stop` och `screenTime` (`allowed`, `message`) i svaret på `POST /api/items/:id/progress` och `user.kid`/`user.canDownload` i `/api/status` (alla valfria i kontraktet). Texten vid Stoppa väljer appen själv som webben (*En vuxen stoppade uppspelningen* för barnprofiler); skärmtidens `message` visas som den är.
 ## Fjärråtkomst via BraXhn Relay: `/api/relay*` (admin, betrott nät) och apparna genom reläet
 
 **Apparna behöver ingen ändring.** Genom reläet (`https://<reläets domän>`) är API:t exakt detsamma som direkt mot
@@ -632,6 +634,8 @@ servern – samma sökvägar, token, kakor, Range/206, HLS, SSE och CORS för `/
 räknas som utanför hemmet: `remote: true` i `/api/status`, `adminHere: false`, kvalitetsgränsen utanför hemmet, och
 admin-routes ger 403. Sökvägar som börjar med `/_relay/` hör till reläet själv och når aldrig servern. WebSocket används
 inte av servern och släpps inte igenom.
+
+Android-appen gör en adress utan schema som ser ut som ett domännamn till `https://` (IP-adresser, datornamn och `*.local` blir `http://…:8420`), och ett 502/504 utan JSON-förklaring (reläet når inte hemservern) visas som det. Den skickar `Accept-Language` med enhetens språk; servern svarar fortfarande på svenska.
 
 Bara webbens administration använder routes nedan. Hemligheten lämnas aldrig ut i något svar.
 

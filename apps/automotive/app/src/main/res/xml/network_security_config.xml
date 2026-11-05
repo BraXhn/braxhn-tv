@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tillåt http mot servern på hemnätet (använd https utanför hemmet) -->
+<!-- Tillåt http mot servern på hemnätet (använd https utanför hemmet, t.ex. Let's Encrypt eller BraXhn Relay).
+     https kräver ett certifikat som enheten litar på: systemets certifikat, eller ett eget (självsignerat) certifikat/CA
+     som användaren själv installerat under Inställningar → Säkerhet → Kryptering och användaruppgifter. Certifikat-
+     kontrollen stängs aldrig av. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
