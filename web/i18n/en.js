@@ -797,6 +797,8 @@ self.BX_I18N = {
   "Visa information": "Show information",
   "Gå till serien": "Go to the show",
   "Uppdatera metadata": "Refresh metadata",
+  "Att rätta matchning och metadata utanför hemmet är avstängt. Slå på det under Administration → Inställningar (från hemnätet).": "Fixing matches and metadata away from home is turned off. Turn it on under Administration → Settings (from the home network).",
+  "Utanför hemmet krävs tvåstegsverifiering eller en passkey för att rätta matchning och metadata. Slå på det under Mitt konto → Tvåstegsverifiering (på huvudkontot).": "Away from home, two-step verification or a passkey is required to fix matches and metadata. Turn it on under My account → Two-step verification (on the main account).",
   "Fel titel?": "Wrong title?",
   "Redigera…": "Edit…",
   "Byt bild…": "Change image…",

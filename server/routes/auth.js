@@ -16,7 +16,7 @@ import { kidsHaveChannels } from '../iptv/channels.js';
 import { vodAllowed } from '../iptv/vod.js';
 import * as family from '../familyfilter.js';
 import * as sso from '../sso.js';
-import { route, pub, isTrusted, adminAnywhere, user, has2fa, curateHere } from '../http/router.js';
+import { route, pub, isTrusted, adminAnywhere, user, has2fa, curateHere, curateAnywhere } from '../http/router.js';
 import { ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
 // Hälsokontroll (Docker HEALTHCHECK): databasen måste svara, annars startas containern om
@@ -51,6 +51,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
     // Får rätta matchning och metadata härifrån (även utanför hemmet med tvåstegsverifiering – nytt fält)
     curateHere: curateHere(c.user, c.req),
+    // Administratör som inte får rätta härifrån: varför (webben visar en förklaring i stället för att dölja knapparna)
+    curateBlocked: c.user.is_admin && !curateHere(c.user, c.req) ? (curateAnywhere() ? 'no2fa' : 'off') : undefined,
     // Installationsguiden är inte klar: startsidan visar "Slutför installationen" (bara för administratörer som får administrera här)
     setupPending: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) && setupPending(),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,

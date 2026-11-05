@@ -65,7 +65,7 @@ views.item = async (id, season) => {
     <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button>${it.kind === 'movie' ? t('<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>') : ''}${trailerBtns(it)}
     ${me.canDownload === false || !offlineOk() ? '' : `<button class="ghost" id="dloff" title="${t('Spara i webbläsaren och titta utan nät')}">${stateOf(it.kind, it.id) === 'done' ? t('✓ Sparad offline') : stateOf(it.kind, it.id) ? t('⤓ Sparas offline…') : t('⤓ Spara offline')}</button>`}
     ${me.canDownload === false ? '' : `${t('<a class="btn ghost" href="/api/stream/{v}/download" download>Ladda ner</a>', { v: it.version || it.id })}`}
-    ${me.curateHere || me.adminHere ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.taken ? '' : t('<button class="ghost" id="match">Fel titel?</button>')}<button class="ghost" id="edit">${t('Redigera')}</button>` : ''}</div>`;
+    ${me.curateHere || me.adminHere ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.taken ? '' : t('<button class="ghost" id="match">Fel titel?</button>')}<button class="ghost" id="edit">${t('Redigera')}</button>` : me.curateBlocked ? `<button class="ghost" id="curatehelp">${t('Uppdatera metadata')}</button>` : ''}</div>`;
   const back = it.kind === 'episode' ? `<p><a class="muted" href="#/item/${it.show}">← ${esc(it.showTitle)}</a> · ${sxe(it)}</p>` : '';
   const versions = it.versions ? `<div class="row" style="margin-top:10px"><label class="muted small" for="ver">Version</label>
     <select id="ver"><option value="">${t('Automatiskt')}</option>${it.versions.map(v => `<option value="${v.id}">${esc(v.label)}${v.size ? ' · ' + fmtSize(v.size) : ''}</option>`).join('')}</select></div>` : '';
@@ -106,6 +106,7 @@ views.item = async (id, season) => {
   $$('[data-play]').forEach(b => b.onclick = () => startPlay(b, it.id, +b.dataset.play, verSel ? { version: verSel } : {}));
   $('#playon').onclick = (e) => openRemotePicker(e.currentTarget, { item: it.id, position: resume ? it.position : 0 });
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
+  curateHelp();
   if ($('#refresh')) {
     $('#refresh').onclick = () => refreshMeta(it);
     if ($('#match')) $('#match').onclick = () => matchItem(it);
@@ -125,7 +126,7 @@ function showView(it, season) {
     <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button><button class="ghost" id="addcol" aria-haspopup="dialog">${t('+ Samling')}</button>${trailerBtns(it)}
     <button class="ghost" id="follow" title="${t('Få besked när nya avsnitt kommer')}">${it.following ? t('🔔 Följer') : t('🔕 Följ')}</button>
     <select id="fsync" title="${t('Håll nästa osedda avsnitt nedladdade i appen')}" ${it.following ? '' : 'hidden'}>${[['', t('Appen: standard')], ['0', t('Appen: ladda inte ner')], ...[1, 2, 3, 5].map(n => [String(n), t('Appen: håll {n} nedladdade', { n })])].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
-    ${me.curateHere || me.adminHere ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.kind !== 'episode' ? t('<button class="ghost" id="match">Fel titel?</button>') : ''}<button class="ghost" id="edit">${t('Redigera')}</button>` : ''}</div>`;
+    ${me.curateHere || me.adminHere ? `<button class="ghost" id="refresh">${t('Uppdatera metadata')}</button>${it.kind !== 'episode' ? t('<button class="ghost" id="match">Fel titel?</button>') : ''}<button class="ghost" id="edit">${t('Redigera')}</button>` : me.curateBlocked ? `<button class="ghost" id="curatehelp">${t('Uppdatera metadata')}</button>` : ''}</div>`;
   main.innerHTML = heroHtml(it, actions + ratingHtml(it) + '<div id="missing" hidden></div>') + tabsHtml({ id: 'tabs', label: t('Säsonger'), panel: 'eps', current: cur,
     items: seasons.map(s => ({ key: s, label: s === 0 ? t('Specialavsnitt') : t('Säsong ') + s })) }) + '<div id="eps" role="tabpanel"></div>';
   const renderEps = () => {
@@ -158,6 +159,7 @@ function showView(it, season) {
   if (nx) $('#playnext').onclick = (e) => startPlay(e.currentTarget, nx.id, nx.position);
   if (nx) need('player/recap.js').then(m => m.recapButton(it)).catch(() => {}); // "Det här har hänt" när något är sett
   $('#seen').onclick = act(async () => { await api(`/items/${it.id}/watched`, { method: 'POST', body: { watched: !it.watched } }); route(); });
+  curateHelp();
   if ($('#refresh')) { $('#refresh').onclick = () => refreshMeta(it); $('#edit').onclick = () => editItem(it); if ($('#match')) $('#match').onclick = () => matchItem(it); }
   playTheme(it);
 }
@@ -324,4 +326,12 @@ function bindFollow(it) {
     toast(it.following ? t('Du följer {title} – nya avsnitt visas under Nytt för dig', { title: it.title }) : t('Du följer inte längre {title}', { title: it.title }));
   });
   if (sel) sel.onchange = act(async () => { const r = await api(`/items/${it.id}/follow`, { method: 'POST', body: { follow: true, sync: sel.value } }); it.sync = r.sync; toast(t('Sparat')); });
+}
+
+// Administratör utanför hemmet utan rätt att rätta härifrån: förklara varför i stället för att bara dölja knapparna
+function curateHelp() {
+  const b = $('#curatehelp'); if (!b) return;
+  b.onclick = () => toast(me.curateBlocked === 'off'
+    ? t('Att rätta matchning och metadata utanför hemmet är avstängt. Slå på det under Administration → Inställningar (från hemnätet).')
+    : t('Utanför hemmet krävs tvåstegsverifiering eller en passkey för att rätta matchning och metadata. Slå på det under Mitt konto → Tvåstegsverifiering (på huvudkontot).'));
 }

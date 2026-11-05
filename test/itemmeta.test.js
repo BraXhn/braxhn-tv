@@ -326,9 +326,11 @@ test('utanför hemmet: administratör med tvåstegsverifiering får rätta match
     // Utan tvåstegsverifiering: nekas, som förut
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 403);
     assert.equal((await st()).curateHere, false);
+    assert.equal((await st()).curateBlocked, 'no2fa', 'webben förklarar att tvåstegsverifiering saknas');
     // Med tvåstegsverifiering: matchning, redigering, bilder och Uppdatera metadata går
     D.run('UPDATE users SET totp_enabled=1 WHERE id=?', adminId);
     assert.equal((await st()).curateHere, true);
+    assert.equal((await st()).curateBlocked, undefined);
     assert.equal((await st()).adminHere, false, 'övrig administration räknas fortfarande inte som tillåten');
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 200);
     assert.equal((await req(`/api/items/${ids.movie}/match?q=Matrix`, { headers: far })).status, 200);
@@ -340,6 +342,7 @@ test('utanför hemmet: administratör med tvåstegsverifiering får rätta match
     assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: false }, headers: far })).status, 403);
     assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: false } })).status, 200);
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 403);
+    assert.equal((await st()).curateBlocked, 'off', 'webben förklarar att det är avstängt');
     assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: true } })).status, 200);
     // Vanliga användare får aldrig
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far, t: userTok })).status, 403);
