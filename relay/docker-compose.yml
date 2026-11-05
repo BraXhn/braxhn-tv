@@ -1,0 +1,42 @@
+# BraXhn Relay med Caddy (automatiskt HTTPS-certifikat från Let's Encrypt).
+# Körs på servern som nås från internet – INTE på Unraid hemma. Steg för steg: README → Fjärråtkomst via BraXhn Relay.
+#
+#   1. Peka ett domännamn (t.ex. tv.example.com) på serverns publika IP och öppna port 80 och 443 i dess brandvägg.
+#   2. Lägg den här filen och Caddyfile i en mapp och skapa en fil .env bredvid:
+#        RELAY_DOMAIN=tv.example.com
+#        RELAY_ADMIN_TOKEN=<lång slumpad text, t.ex. från: openssl rand -hex 24>
+#   3. docker compose up -d   och   docker compose logs relay   → parningskoden står i loggen.
+services:
+  relay:
+    build: .
+    image: braxhn-relay:local
+    container_name: braxhn-relay
+    restart: unless-stopped
+    environment:
+      - RELAY_PUBLIC_URL=https://${RELAY_DOMAIN:?Ange RELAY_DOMAIN i .env}
+      - RELAY_ADMIN_TOKEN=${RELAY_ADMIN_TOKEN:-}
+    volumes:
+      - relay_data:/data
+    # Ingen port mot internet: Caddy når reläet i Docker-nätet (relay:8080)
+
+  caddy:
+    image: caddy:2
+    container_name: braxhn-relay-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - RELAY_DOMAIN=${RELAY_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - relay
+
+volumes:
+  relay_data:
+  caddy_data:
+  caddy_config:

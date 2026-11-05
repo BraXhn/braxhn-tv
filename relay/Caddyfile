@@ -1,0 +1,8 @@
+# Caddy framför BraXhn Relay: certifikat från Let's Encrypt för domänen i RELAY_DOMAIN (hämtas och förnyas automatiskt).
+# Caddy skickar X-Forwarded-For/-Proto/-Host och släpper igenom HTTP-uppgraderingen som hemserverns tunnel använder.
+{$RELAY_DOMAIN} {
+	reverse_proxy relay:8080 {
+		# Strömmar (video, SSE) skickas vidare direkt utan buffring
+		flush_interval -1
+	}
+}

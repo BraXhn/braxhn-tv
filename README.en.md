@@ -343,7 +343,7 @@ Many of these can also be changed in the web UI. Set them in the Unraid template
 | `WATCH_REGION` | SE | Country for *where to watch* (e.g. US, GB, DE) |
 | `PUID` / `PGID` | 99 / 100 | Owner of the files in /config |
 | `UMASK` | 002 | Permissions for new files: 002 = the group may write (Unraid), 022 = owner only |
-| `RELAY_HEARTBEAT_MS` | 15000 | Milliseconds between heartbeats in the tunnel to BraXhn Relay (the relay is delivered separately) |
+| `RELAY_HEARTBEAT_MS` | 15000 | Milliseconds between heartbeats in the tunnel to BraXhn Relay (the relay itself is in `relay/`) |
 | `LIVE_TIMESHIFT_MINUTES` | 120 | Minutes of live TV kept for rewinding (0 = off, max 720) |
 | `LIVE_TIMESHIFT_MAX_GB` | 20 | Disk space for timeshift, all channels together |
 | `IPTV_ALLOW_PRIVATE` | 0 | `1` = addresses in IPTV lists may point to any network (even `localhost`) – only for special setups |

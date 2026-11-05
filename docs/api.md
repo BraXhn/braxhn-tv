@@ -644,7 +644,7 @@ Bara webbens administration använder routes nedan. Hemligheten lämnas aldrig u
 - `DELETE /api/relay` → `{ ...status, relayForgot }` – tunneln stängs, inställningarna raderas och reläet ombeds glömma servern
   (`relayForgot: false` om reläet inte kunde nås – ta då bort servern på reläets adminsida).
 
-Reläets egna adresser (det separata reläpaketet, `server.js`): `GET /_relay/health`, `GET /_relay/admin` (adminsida), `GET /_relay/challenge?server=`,
+Reläets egna adresser (`relay/server.js`): `GET /_relay/health`, `GET /_relay/admin` (adminsida), `GET /_relay/challenge?server=`,
 `GET /_relay/tunnel` (uppgradering, se arkitektur.md, bro 35), `POST /_relay/pair`, `POST /_relay/unpair` och adminens API med
 `Authorization: Bearer <RELAY_ADMIN_TOKEN>`: `GET /_relay/api/status`, `POST /_relay/api/codes` `{ host? }` → `{ code, expires }`,
 `PUT /_relay/api/servers/:id` `{ hosts: [] }`, `DELETE /_relay/api/servers/:id`.

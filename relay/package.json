@@ -1,0 +1,10 @@
+{
+  "name": "braxhn-tv-relay",
+  "version": "1.0.0",
+  "description": "BraXhn Relay – fjärråtkomst till BraXhn TV utan portöppning (inga npm-beroenden)",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=22.13" },
+  "scripts": { "start": "node server.js" }
+}
