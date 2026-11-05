@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.0.1 – 2026-11-05
 - **Rätta matchning utanför hemmet utan tvåstegsverifiering:** en administratör kan nu använda *Uppdatera metadata*, *Fel titel?* och *Redigera* utanför hemmet utan tvåstegsverifiering. Den nya inställningen *Kräv tvåstegsverifiering för att rätta matchning utanför hemmet* (Administration, standard av, `CURATE_REQUIRE_2FA`) slår på kravet igen. Övrig administration kräver fortfarande hemnätet. Är rättning spärrad visar knappen en förklaring i stället för att försvinna (`user.curateBlocked` i `/api/status`).
 
 - **iPhone-, iPad- och Apple TV-appen i fas med servern 1.0** (appen hade stått still sedan oktober):
