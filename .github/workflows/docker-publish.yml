@@ -137,5 +137,10 @@ jobs:
           BASE="${V%%-*}"
           awk -v v="$BASE" '$0 ~ "^## "v"( |$)" {f=1; next} f && /^## / {exit} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Se CHANGELOG.md" > notes.md
+          # GitHub tillåter högst 125 000 tecken i en release – korta av vid en hel rad och länka till hela ändringsloggen
+          if [ "$(wc -c < notes.md)" -gt 120000 ]; then
+            head -c 120000 notes.md | sed '$d' > notes.kort && mv notes.kort notes.md
+            printf '\n\n… Hela listan finns i [CHANGELOG.md](https://github.com/%s/blob/v%s/CHANGELOG.md).\n' "$GITHUB_REPOSITORY" "$V" >> notes.md
+          fi
           printf '\n\nDocker: `ghcr.io/braxhn/braxhn-tv:%s` (%s)\n' "$V" "$CH" >> notes.md
           gh release create "v$V" --target "$GITHUB_SHA" --title "BraXhn TV $V" --notes-file notes.md $([ "$CH" = beta ] && echo --prerelease)
