@@ -251,9 +251,9 @@ struct MusicView: View {
                 if let e = error { Text(e).foregroundStyle(.secondary) }
                 if libs.isEmpty && error == nil { Text("Inget musikbibliotek ännu – lägg till ett under Administration i webben.").foregroundStyle(.secondary).padding() }
                 if let h = home {
-                    if !h.recentlyPlayed.isEmpty { albumRow("Spelat nyligen", h.recentlyPlayed) }
+                    if !h.recentlyPlayed.isEmpty { albumRow(L("Spelat nyligen"), h.recentlyPlayed) }
                     if let s = h.smart, !s.isEmpty, let lib = libs.first { smartRow(s, lib: lib.id) }
-                    if !h.recentAlbums.isEmpty { albumRow("Nytt", h.recentAlbums) }
+                    if !h.recentAlbums.isEmpty { albumRow(L("Nytt"), h.recentAlbums) }
                     if !h.favorites.isEmpty {
                         HStack { Text("Favoriter").font(.title3.bold()); Spacer()
                             Button { MusicPlayer.shared.play(h.favorites.shuffled(), at: 0, model: model) } label: { Label("Blanda", systemImage: "shuffle") }.buttonStyle(.bordered)
@@ -340,7 +340,7 @@ struct MusicView: View {
             let (hh, aa) = try await (h, a)
             home = hh
             albums = aa
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 }
 

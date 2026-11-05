@@ -56,6 +56,14 @@ final class PlayerController: ObservableObject {
     @Published private(set) var canComfort = false
     @Published private(set) var night = false
     @Published private(set) var dialog = false
+    /// Strömmen förbereds (servern startar omkodningen) – sätts tills bilden faktiskt rör sig
+    @Published private(set) var preparing = false
+    /// Förberedelsen har tagit mer än några sekunder (t.ex. grafikkortets ~10 s till första segmentet) – visa varför
+    @Published private(set) var slowStart = false
+    /// Servern stoppade uppspelningen (Föräldraöversikten, administratören eller skärmtiden) – texten som visas
+    @Published private(set) var stopNotice: String?
+    /// Felet kan försökas igen (strömmen avbröts under uppspelningen)
+    @Published private(set) var canRetry = false
 
     private let model: AppModel
     private var item: MediaItem?
@@ -91,12 +99,27 @@ final class PlayerController: ObservableObject {
     private var mainStart: Double = 0
     private var prerollObservers: [NSObjectProtocol] = []
     private var prerollStatus: NSKeyValueObservation?
+    // Själva filmens AVPlayerItem: fel bevakas så att en långsam start inte blir en svart skärm
+    private var mainURL: URL?
+    private var mainMeta: [AVMetadataItem] = []
+    private var mainStatus: NSKeyValueObservation?
+    private var mainFail: NSObjectProtocol?
+    private var timeControl: NSKeyValueObservation?
+    /// Bilden har rört sig för den här starten (efter det försöker appen inte längre själv igen)
+    private var playbackBegan = false
+    /// Nya försök med samma ström-URL (samma session på servern) under starten
+    private var retries = 0
 
     init(model: AppModel) {
         self.model = model
         night = model.nightMode
         dialog = model.clearDialog
         player.allowsExternalPlayback = true // AirPlay till Apple TV
+        // När bilden börjar röra sig är förberedelsen klar
+        timeControl = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            let playing = p.timeControlStatus == .playing
+            Task { @MainActor [weak self] in self?.playStateChanged(playing) }
+        }
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
@@ -158,6 +181,8 @@ final class PlayerController: ObservableObject {
             return
         }
         #endif
+        beginPreparing(gen: gen)
+        retries = 0
         do {
             let it: MediaItem = try await model.get("/api/items/\(itemId)")
             guard isLive(gen) else { return }
@@ -172,15 +197,18 @@ final class PlayerController: ObservableObject {
             guard isLive(gen) else { return }
             let cinemaQ = await cinemaQuery(it, start: start, cinema: cinema)
             guard isLive(gen) else { return }
-            let extra = model.comfortQuery() + cinemaQ
+            // start: servern förstartar omkodningen där uppspelningen börjar (annars från början och en gång till här)
+            let startQ: [URLQueryItem] = start > 1 ? [URLQueryItem(name: "start", value: String(Int(start)))] : []
+            let extra = model.comfortQuery() + cinemaQ + startQ
             let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub) + extra)
             guard isLive(gen) else {
                 // Ersatt eller stängd medan servern förberedde strömmen – stäng sessionen igen
                 Task { [model] in try? await model.post("/api/stream/\(itemId)/stop") }
                 return
             }
-            guard let url = model.absolute(p.url) else { throw APIError(message: "Ogiltig ström-URL") }
+            guard let url = model.absolute(p.url) else { throw APIError(message: L("Ogiltig ström-URL")) }
             resetState()
+            beginPreparing(gen: gen)
             item = it
             pb = p
             currentId = itemId
@@ -195,13 +223,11 @@ final class PlayerController: ObservableObject {
             audioTracks = p.audio ?? []
             chapters = p.chapters ?? []
             selectedAudio = p.audioSelected.flatMap { Int($0) } ?? audio
-            status = [p.mode == "direct" ? "Direkt" : p.mode == "remux" ? "Remux" : "Omkodning",
-                      p.tonemap == true ? "HDR→SDR" : nil, p.remote == true ? "utanför hemmet" : nil].compactMap { $0 }.joined(separator: " · ")
-            let playerItem = AVPlayerItem(asset: AVURLAsset(url: url))
-            playerItem.externalMetadata = metadata(it)
-            #if os(tvOS)
-            playerItem.navigationMarkerGroups = chapterMarkers(p.chapters ?? [])
-            #endif
+            status = [p.mode == "direct" ? L("Direkt") : p.mode == "remux" ? L("Remux") : L("Omkodning"),
+                      p.tonemap == true ? "HDR→SDR" : nil, p.remote == true ? L("utanför hemmet") : nil].compactMap { $0 }.joined(separator: " · ")
+            mainURL = url
+            mainMeta = metadata(it)
+            let playerItem = makeMainItem(url)
             serverSession = true
             canComfort = true
             // Bio-läge: trailers och förfilm först (filer som AVPlayer inte klarar hoppas över)
@@ -211,19 +237,27 @@ final class PlayerController: ObservableObject {
                 mainItem = playerItem
                 mainStart = start
                 prerollQueue = urls
-                prerollTitles = queue.map { $0.title ?? ($0.kind == "preroll" ? "Förfilm" : "Trailer") }
+                prerollTitles = queue.map { $0.title ?? ($0.kind == "preroll" ? L("Förfilm") : L("Trailer")) }
                 playNextPreroll()
                 return
             }
             await startMain(playerItem, at: start, gen: gen)
         } catch {
-            if isLive(gen) { self.error = error.localizedDescription }
+            if isLive(gen), !isCancellation(error) {
+                preparing = false
+                slowStart = false
+                self.error = error.localizedDescription
+            }
         }
     }
 
     /// Startar själva filmen/avsnittet (direkt, eller när bio-lägets kö är slut)
     private func startMain(_ playerItem: AVPlayerItem, at start: Double, gen: Int) async {
         guard isLive(gen) else { return }
+        mainStart = start
+        playbackBegan = false
+        beginPreparing(gen: gen)
+        watchMain(playerItem, gen: gen)
         player.replaceCurrentItem(with: playerItem)
         reporting = true
         if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
@@ -247,12 +281,12 @@ final class PlayerController: ObservableObject {
         guard !closed else { return }
         guard !prerollQueue.isEmpty else { finishPreroll(); return }
         let url = prerollQueue.removeFirst()
-        let name = prerollTitles.isEmpty ? "Trailer" : prerollTitles.removeFirst()
+        let name = prerollTitles.isEmpty ? L("Trailer") : prerollTitles.removeFirst()
         let gen = generation
         let pi = AVPlayerItem(url: url)
         let oid = ObjectIdentifier(pi)
         prerollTitle = name
-        skipTitle = "Hoppa över"
+        skipTitle = SkipKind.preroll
         player.replaceCurrentItem(with: pi)
         // Nästa post när den här är slut eller inte gick att spela
         let next: @Sendable () -> Void = { [weak self] in
@@ -336,6 +370,14 @@ final class PlayerController: ObservableObject {
         selectedSubtitle = "none"
         subtitle = nil
         lastReport = Date()
+        clearMainObservers()
+        mainURL = nil
+        mainMeta = []
+        stopNotice = nil
+        canRetry = false
+        preparing = false
+        slowStart = false
+        playbackBegan = false
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -399,7 +441,8 @@ final class PlayerController: ObservableObject {
 
     private func restart(audio: Int?, subtitle: SubtitleTrack?) {
         guard let id = currentId, !isLocal else { return }
-        let t = prerollTitle != nil ? mainStart : player.currentTime().seconds
+        // Före första bilden (eller efter ett fel) är spelarens tid inte att lita på – starta där filmen skulle börja
+        let t = prerollTitle != nil || !playbackBegan ? mainStart : player.currentTime().seconds
         load(itemId: id, at: t.isFinite ? t : 0, audio: audio, subtitle: subtitle, cinema: false)
     }
 
@@ -437,23 +480,26 @@ final class PlayerController: ObservableObject {
         else if !subtitleText.isEmpty { subtitleText = "" }
         // Hoppa över intro / nästa avsnitt
         var skip: String?
-        if let r = recap, t >= r.start, t < r.end - 1 { skip = "Hoppa över sammanfattning" }
-        else if let i = intro, t >= i.start, t < i.end - 1 { skip = "Hoppa över intro" }
-        else if let c = credits, item?.nextId != nil, t >= c, t < c + 60 { skip = "Nästa avsnitt" }
+        if let r = recap, t >= r.start, t < r.end - 1 { skip = SkipKind.recap }
+        else if let i = intro, t >= i.start, t < i.end - 1 { skip = SkipKind.intro }
+        else if let c = credits, item?.nextId != nil, t >= c, t < c + 60 { skip = SkipKind.next }
         if skip != skipTitle { skipTitle = skip }
         // Tittarstatus var 10:e sekund
         if reporting, Date().timeIntervalSince(lastReport) > 10, t > 1, let id = currentId {
             lastReport = Date()
-            model.reportProgress(id: id, position: t, duration: duration)
+            let gen = generation
+            model.reportProgress(id: id, position: t, duration: duration) { [weak self] r in
+                Task { @MainActor [weak self] in self?.stoppedByServer(r, id: id, gen: gen) }
+            }
         }
     }
 
     func skip() {
         guard let t = skipTitle else { return }
         if prerollTitle != nil { playNextPreroll(); return }
-        if t == "Hoppa över sammanfattning", let r = recap {
+        if t == SkipKind.recap, let r = recap {
             player.seek(to: CMTime(seconds: r.end, preferredTimescale: 600))
-        } else if t == "Hoppa över intro", let i = intro {
+        } else if t == SkipKind.intro, let i = intro {
             player.seek(to: CMTime(seconds: i.end, preferredTimescale: 600))
         } else if let next = item?.nextId {
             load(itemId: next, at: 0, audio: nil, subtitle: nil)
@@ -491,6 +537,9 @@ final class PlayerController: ObservableObject {
         onFinished = nil
         stopReporting()
         clearPrerollObservers()
+        clearMainObservers()
+        timeControl?.invalidate()
+        timeControl = nil
         mainItem = nil
         player.pause()
         if let o = observer { player.removeTimeObserver(o); observer = nil }
@@ -519,9 +568,9 @@ struct PlayerVC: UIViewControllerRepresentable {
         #if os(tvOS)
         // På Apple TV visas knappen i spelarens egna kontroller (fokuserbar med fjärrkontrollen)
         if let t = skipTitle {
-            var actions = [UIAction(title: t, image: UIImage(systemName: "forward.end.fill")) { _ in onSkip() }]
+            var actions = [UIAction(title: L(t), image: UIImage(systemName: "forward.end.fill")) { _ in onSkip() }]
             if ctrl.prerollTitle != nil {
-                actions.append(UIAction(title: "Hoppa över alla", image: UIImage(systemName: "forward.fill")) { _ in ctrl.skipAllPreroll() })
+                actions.append(UIAction(title: L("Hoppa över alla"), image: UIImage(systemName: "forward.fill")) { _ in ctrl.skipAllPreroll() })
             }
             vc.contextualActions = actions
         } else {
@@ -530,20 +579,20 @@ struct PlayerVC: UIViewControllerRepresentable {
         // Ljud och undertexter i spelarens menyrad (svep nedåt på fjärrkontrollen)
         var menus: [UIMenuElement] = []
         if ctrl.audioTracks.count > 1 {
-            menus.append(UIMenu(title: "Ljud", image: UIImage(systemName: "speaker.wave.2"), options: .singleSelection, children: ctrl.audioTracks.map { a in
+            menus.append(UIMenu(title: L("Ljud"), image: UIImage(systemName: "speaker.wave.2"), options: .singleSelection, children: ctrl.audioTracks.map { a in
                 UIAction(title: a.label, state: a.index == ctrl.selectedAudio ? .on : .off) { _ in ctrl.selectAudio(a.index) }
             }))
         }
         if !ctrl.subtitleTracks.isEmpty {
-            let none = UIAction(title: "Inga", state: ctrl.selectedSubtitle == "none" ? .on : .off) { _ in ctrl.selectSubtitle("none") }
-            menus.append(UIMenu(title: "Undertexter", image: UIImage(systemName: "captions.bubble"), options: .singleSelection, children: [none] + ctrl.subtitleTracks.map { s in
+            let none = UIAction(title: L("Inga"), state: ctrl.selectedSubtitle == "none" ? .on : .off) { _ in ctrl.selectSubtitle("none") }
+            menus.append(UIMenu(title: L("Undertexter"), image: UIImage(systemName: "captions.bubble"), options: .singleSelection, children: [none] + ctrl.subtitleTracks.map { s in
                 UIAction(title: s.label, state: s.id == ctrl.selectedSubtitle ? .on : .off) { _ in ctrl.selectSubtitle(s.id) }
             }))
         }
         if ctrl.canComfort {
-            menus.append(UIMenu(title: "Ljudläge", image: UIImage(systemName: "moon"), children: [
-                UIAction(title: "Nattläge", state: ctrl.night ? .on : .off) { _ in ctrl.toggleNight() },
-                UIAction(title: "Tydligare dialog", state: ctrl.dialog ? .on : .off) { _ in ctrl.toggleDialog() }
+            menus.append(UIMenu(title: L("Ljudläge"), image: UIImage(systemName: "moon"), children: [
+                UIAction(title: L("Nattläge"), state: ctrl.night ? .on : .off) { _ in ctrl.toggleNight() },
+                UIAction(title: L("Tydligare dialog"), state: ctrl.dialog ? .on : .off) { _ in ctrl.toggleDialog() }
             ]))
         }
         vc.transportBarCustomMenuItems = menus
@@ -596,8 +645,12 @@ struct PlayerContent: View {
 
     var body: some View {
         ZStack {
-            PlayerVC(player: ctrl.player, skipTitle: ctrl.skipTitle, onSkip: { ctrl.skip() }, ctrl: ctrl)
-                .ignoresSafeArea()
+            // Vid fel eller stopp tas spelarvyn bort: på Apple TV får rutans knappar då fokus (annars behåller
+            // AVPlayerViewController fokus och Stäng/Försök igen går inte att nå med fjärrkontrollen)
+            if ctrl.error == nil && ctrl.stopNotice == nil {
+                PlayerVC(player: ctrl.player, skipTitle: ctrl.skipTitle, onSkip: { ctrl.skip() }, ctrl: ctrl)
+                    .ignoresSafeArea()
+            }
             // Undertexter ritas av appen (fungerar för alla lägen, även direktuppspelning)
             VStack {
                 Spacer()
@@ -666,7 +719,7 @@ struct PlayerContent: View {
                             .padding(.bottom, 110)
                         }
                         Button { ctrl.skip() } label: {
-                            Label(s, systemImage: "forward.end.fill").font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
+                            Label(L(s), systemImage: "forward.end.fill").font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
                         }
                         .padding(.trailing, 20).padding(.bottom, 110)
@@ -674,21 +727,41 @@ struct PlayerContent: View {
                 }
             }
             #endif
-            if let e = ctrl.error {
+            if ctrl.slowStart && ctrl.error == nil && ctrl.stopNotice == nil {
+                // Omkodning med grafikkort kan ta ~10 s till första bilden – säg det, så att ingen startar om
+                VStack {
+                    Spacer()
+                    Text("Servern förbereder strömmen – det kan ta några sekunder…")
+                        .font(.callout).multilineTextAlignment(.center)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.bottom, 40).padding(.horizontal)
+                }
+                .allowsHitTesting(false)
+            }
+            if let n = ctrl.stopNotice {
                 VStack(spacing: 14) {
-                    Text("Kunde inte spela").font(.headline)
-                    Text(e).font(.footnote).foregroundStyle(.secondary)
+                    Image(systemName: "hand.raised.fill").font(.largeTitle)
+                    Text("Uppspelningen stoppades").font(.headline)
+                    Text(n).font(.body).multilineTextAlignment(.center).foregroundStyle(.secondary)
                     Button("Stäng") { close() }.buttonStyle(.borderedProminent)
                 }
-                .padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(24).frame(maxWidth: 640).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            } else if let e = ctrl.error {
+                VStack(spacing: 14) {
+                    Text("Kunde inte spela").font(.headline)
+                    Text(e).font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                    HStack(spacing: 16) {
+                        if ctrl.canRetry { Button("Försök igen") { ctrl.retry() }.buttonStyle(.borderedProminent) }
+                        Button("Stäng") { close() }.buttonStyle(.bordered)
+                    }
+                }
+                .padding(24).frame(maxWidth: 640).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
 
-    static func fmt(_ s: Double) -> String {
-        let t = Int(s), h = t / 3600, m = (t % 3600) / 60, sec = t % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
-    }
+    static func fmt(_ s: Double) -> String { formatTime(s) }
 
     private var subtitleFont: Font {
         #if os(tvOS)
@@ -703,5 +776,123 @@ struct PlayerContent: View {
         #else
         return 60
         #endif
+    }
+}
+
+/// Knappens text i spelaren (svenskan är också nyckeln i Localizable.strings – visas med L())
+enum SkipKind {
+    static let recap = "Hoppa över sammanfattning"
+    static let intro = "Hoppa över intro"
+    static let next = "Nästa avsnitt"
+    static let preroll = "Hoppa över"
+}
+
+// MARK: - Långsam start, fel under uppspelningen och stopp från servern
+
+// (sist i filen så att radhänvisningarna i test/contracts/apps.json står kvar; private-medlemmar nås från samma fil)
+extension PlayerController {
+    /// Strömmen förbereds. Efter 4 s utan bild visas en förklaring – omkodning med grafikkort kan ta ~10 s till
+    /// första segmentet, och då ska ingen tro att appen hängt sig och starta om (en ny start = en ny session).
+    fileprivate func beginPreparing(gen: Int) {
+        preparing = true
+        slowStart = false
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self, self.generation == gen, self.preparing, !self.closed else { return }
+            self.slowStart = true
+        }
+    }
+
+    fileprivate func playStateChanged(_ playing: Bool) {
+        guard playing, !closed else { return }
+        preparing = false
+        slowStart = false
+        // Bara själva filmen räknas – en trailer i bio-läget som spelar betyder inte att filmen har startat
+        if prerollTitle == nil { playbackBegan = true }
+    }
+
+    fileprivate func makeMainItem(_ url: URL) -> AVPlayerItem {
+        let item = AVPlayerItem(asset: AVURLAsset(url: url))
+        item.externalMetadata = mainMeta
+        #if os(tvOS)
+        item.navigationMarkerGroups = chapterMarkers(chapters)
+        #endif
+        return item
+    }
+
+    /// Bevakar filmens AVPlayerItem: misslyckas den hanteras det i mainFailed (annars blir det bara svart)
+    fileprivate func watchMain(_ item: AVPlayerItem, gen: Int) {
+        clearMainObservers()
+        let oid = ObjectIdentifier(item)
+        mainStatus = item.observe(\.status, options: [.new]) { [weak self] it, _ in
+            guard it.status == .failed else { return }
+            let msg = it.error?.localizedDescription
+            Task { @MainActor [weak self] in self?.mainFailed(oid, gen: gen, message: msg) }
+        }
+        mainFail = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] n in
+            let msg = (n.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription
+            Task { @MainActor [weak self] in self?.mainFailed(oid, gen: gen, message: msg) }
+        }
+    }
+
+    fileprivate func clearMainObservers() {
+        mainStatus?.invalidate()
+        mainStatus = nil
+        if let f = mainFail { NotificationCenter.default.removeObserver(f); mainFail = nil }
+    }
+
+    /// Filmen gick inte att spela. Under starten (innan bilden rört sig) provas samma ström-URL igen – samma pid,
+    /// alltså samma session och samma ffmpeg på servern, ingen ny /playback. AVPlayer kan ge upp på ett segment som
+    /// grafikkortet inte hunnit koda klart. Annars: stoppad av servern, eller ett fel med Försök igen.
+    fileprivate func mainFailed(_ oid: ObjectIdentifier, gen: Int, message: String?) {
+        guard !closed, gen == generation, let cur = player.currentItem, ObjectIdentifier(cur) == oid,
+              stopNotice == nil, error == nil else { return }
+        if !playbackBegan, retries < 3, let url = mainURL {
+            retries += 1
+            let at = mainStart
+            let item = makeMainItem(url)
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, self.generation == gen, !self.closed else { return }
+                await self.startMain(item, at: at, gen: gen)
+            }
+            return
+        }
+        clearMainObservers()
+        preparing = false
+        slowStart = false
+        let text = message ?? L("Strömmen kunde inte spelas.")
+        // Har servern stoppat uppspelningen (Föräldraöversikten/skärmtiden) är det den förklaringen som gäller:
+        // fråga med en framstegsrapport – svarar den stop ersätts felet av stoppmeddelandet
+        if let id = currentId, serverSession {
+            let t = player.currentTime().seconds
+            let pos = t.isFinite && t > 1 ? t : mainStart
+            model.reportProgress(id: id, position: pos, duration: duration) { [weak self] r in
+                Task { @MainActor [weak self] in self?.stoppedByServer(r, id: id, gen: gen) }
+            }
+        }
+        error = text
+        canRetry = !isLocal
+    }
+
+    /// Servern svarade stop på framstegsanropet: sluta spela och visa varför
+    fileprivate func stoppedByServer(_ r: ProgressReply, id: Int, gen: Int) {
+        guard !closed, gen == generation, currentId == id, stopNotice == nil else { return }
+        player.pause()
+        stopReporting()
+        clearMainObservers()
+        preparing = false
+        slowStart = false
+        error = nil
+        canRetry = false
+        stopNotice = model.stopText(r)
+    }
+
+    /// Försök igen efter ett fel: en ny start där filmen var (ny /playback – användaren har själv valt det)
+    func retry() {
+        guard canRetry else { return }
+        error = nil
+        canRetry = false
+        restart(audio: audio, subtitle: subtitle)
     }
 }

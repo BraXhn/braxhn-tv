@@ -76,7 +76,7 @@ struct ItemDetailView: View {
                 subtitle = (subs.first { $0.forced == true && $0.bitmap != true }
                             ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true })?.id ?? "none"
             }
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 
     @MainActor @ViewBuilder func header(_ it: MediaItem) -> some View {
@@ -140,15 +140,16 @@ struct ItemDetailView: View {
             HStack(spacing: 14) {
                 watchlistButton(it)
                 #if os(iOS)
-                DownloadButton(item: it)
+                // Konton utan rätt att ladda ner (rättigheter per användare) får 403 – visa inte knappen alls
+                if model.user?.canDownload != false { DownloadButton(item: it) }
                 #endif
             }
             HStack(spacing: 14) {
                 if let a = it.audio, a.count > 1 {
-                    OptionButton<Int>(title: "Ljud", options: a.map { ($0.index, $0.label) }, selection: $audio)
+                    OptionButton<Int>(title: L("Ljud"), options: a.map { ($0.index, $0.label) }, selection: $audio)
                 }
                 if let s = it.subtitles, !s.isEmpty {
-                    OptionButton<String>(title: "Undertext", options: [("none", "Inga")] + s.map { ($0.id, $0.label) }, selection: $subtitle)
+                    OptionButton<String>(title: L("Undertext"), options: [("none", L("Inga"))] + s.map { ($0.id, $0.label) }, selection: $subtitle)
                 }
             }
             if let o = it.overview { Text(o).font(.body).foregroundStyle(.secondary) }
@@ -165,7 +166,7 @@ struct ItemDetailView: View {
                 Button {
                     play = PlayRequest(itemId: n.id, start: n.position ?? 0, audio: nil, subtitle: nil)
                 } label: {
-                    Label((n.position ?? 0) > 0 ? "Fortsätt S\(n.season ?? 0)E\(n.episode ?? 0)" : "Spela S\(n.season ?? 0)E\(n.episode ?? 0)", systemImage: "play.fill")
+                    Label(String(format: L((n.position ?? 0) > 0 ? "Fortsätt S%dE%d" : "Spela S%dE%d"), n.season ?? 0, n.episode ?? 0), systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -175,7 +176,7 @@ struct ItemDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     ForEach(seasons, id: \.self) { s in
-                        Button(s == 0 ? "Special" : "Säsong \(s)") { season = s }
+                        Button(s == 0 ? L("Special") : String(format: L("Säsong %d"), s)) { season = s }
                             .buttonStyle(.bordered)
                             .tint(s == season ? accent : Color.secondary)
                     }
@@ -189,7 +190,7 @@ struct ItemDetailView: View {
                         PosterCard(item: e, landscape: true).frame(maxWidth: 250)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(e.episode ?? 0). \(e.title)").font(.headline)
-                            Text(formatDuration(e.duration) + (e.watched == true ? " · Sedd" : "")).font(.caption).foregroundStyle(.secondary)
+                            Text(formatDuration(e.duration) + (e.watched == true ? " · " + L("Sedd") : "")).font(.caption).foregroundStyle(.secondary)
                             if let o = e.overview { Text(o).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
                         }
                         Spacer()

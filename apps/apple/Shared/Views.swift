@@ -42,6 +42,7 @@ struct RootView: View {
 }
 
 struct MainTabs: View {
+    @EnvironmentObject var model: AppModel
     /// Profilbyte bygger om alla flikar (ingen vy från förra profilen ligger kvar)
     @ObservedObject private var profiles = ProfileEvents.shared
     private var miniPlayerPadding: CGFloat {
@@ -55,6 +56,10 @@ struct MainTabs: View {
         ZStack(alignment: .bottom) {
             tabs.id(profiles.generation)
             VStack(spacing: 6) { MiniPlayer(); SpokenMiniPlayer() }.padding(.bottom, miniPlayerPadding)
+        }
+        // T.ex. skärmtiden pausade en ljudbok (ProgressReply.stop)
+        .alert(Text(model.notice ?? ""), isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
+            Button("OK", role: .cancel) {}
         }
     }
     private var tabs: some View {
@@ -129,7 +134,7 @@ struct LoginView: View {
                         if needCode { self.error = e.message }
                         needCode = true
                     }
-                    catch { self.error = error.localizedDescription }
+                    catch { if !isCancellation(error) { self.error = error.localizedDescription } }
                     busy = false
                 }
             } label: {
@@ -294,7 +299,7 @@ struct HomeView: View {
             // Musik och ljudböcker har egna vyer – i rutnätet för film/serier blir de tomma
             libs = ll.filter { $0.type == "movie" || $0.type == "show" }
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 }
 
@@ -326,13 +331,14 @@ struct LibraryView: View {
     @State private var items: [MediaItem] = []
     @State private var sort = "title"
     @State private var loading = true
+    @State private var error: String?
     private let sorts: [(key: String, name: String)] = [("title", "Titel"), ("added", "Senast tillagda"), ("year", "År")]
 
     var body: some View {
         ScrollView {
             HStack {
                 ForEach(sorts, id: \.key) { o in
-                    Button(o.name) { sort = o.key; Task { await load() } }
+                    Button(L(o.name)) { sort = o.key; Task { await load() } }
                         .buttonStyle(.bordered)
                         .tint(sort == o.key ? accent : Color.secondary)
                 }
@@ -340,6 +346,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal)
             if loading { ProgressView().padding(40) }
+            if let e = error { Text(e).foregroundStyle(.secondary).padding() }
             ItemGrid(items: items)
         }
         .navigationTitle(library.name)
@@ -348,7 +355,11 @@ struct LibraryView: View {
 
     @MainActor func load() async {
         loading = true
-        if let r: LibraryItems = try? await model.get("/api/libraries/\(library.id)/items", [URLQueryItem(name: "sort", value: sort)]) { items = r.items }
+        do {
+            let r: LibraryItems = try await model.get("/api/libraries/\(library.id)/items", [URLQueryItem(name: "sort", value: sort)])
+            items = r.items
+            error = nil
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
         loading = false
     }
 }
@@ -389,19 +400,26 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            Section("Server") {
+            Section {
                 LabeledContent("Adress", value: model.server)
                 LabeledContent("Inloggad som", value: model.user?.name ?? "–")
+                if model.remote {
+                    LabeledContent("Anslutning", value: L("Utanför hemmet"))
+                }
                 NavigationLink(destination: ProfilesView()) { Text("Byt profil") }
+            } header: {
+                Text("Server")
+            } footer: {
+                if model.remote { Text("Servern ser den här anslutningen som utanför hemmet (t.ex. via BraXhn Relay). Kvaliteten kan vara begränsad av administratören.") }
             }
             Section("Kvalitet") {
                 ForEach(qualities, id: \.key) { o in
-                    Button { model.quality = o.key } label: { HStack { Text(o.name); Spacer(); if model.quality == o.key { Image(systemName: "checkmark") } } }
+                    Button { model.quality = o.key } label: { HStack { Text(L(o.name)); Spacer(); if model.quality == o.key { Image(systemName: "checkmark") } } }
                 }
             }
             Section("Undertexter som standard") {
                 ForEach(langs, id: \.key) { o in
-                    Button { model.subtitleLang = o.key } label: { HStack { Text(o.name); Spacer(); if model.subtitleLang == o.key { Image(systemName: "checkmark") } } }
+                    Button { model.subtitleLang = o.key } label: { HStack { Text(L(o.name)); Spacer(); if model.subtitleLang == o.key { Image(systemName: "checkmark") } } }
                 }
             }
             Section {
@@ -417,6 +435,13 @@ struct SettingsView: View {
                 Button("Logga ut", role: .destructive) { model.logout() }
             }
             Section { Text("BraXhn TV – fri mediaserver utan prenumeration").font(.footnote).foregroundStyle(.secondary) }
+            #if DONATION_LINK && os(iOS)
+            // Bara i egna byggen (Apples regel 3.2.1(vi) tillåter inte donationer i App Store-appar): flaggan
+            // DONATION_LINK sätts inte som standard. Aldrig för barnprofiler, bara en diskret rad – ingen ruta.
+            if let u = model.donateURL, model.user?.kid != true {
+                Section { Link(destination: u) { Label("Stöd projektet", systemImage: "heart") }.font(.footnote) }
+            }
+            #endif
         }
         .navigationTitle("Inställningar")
     }
@@ -478,7 +503,7 @@ struct QuickConnectView: View {
             code = r.code
             secret = r.secret
         } catch {
-            message = error.localizedDescription
+            if !isCancellation(error) { message = error.localizedDescription }
             return
         }
         guard let s = secret else { return }
@@ -488,7 +513,7 @@ struct QuickConnectView: View {
             do {
                 let status = try await model.pollQuickConnect(secret: s)
                 if status == "approved" { dismiss(); return }
-                if status == "expired" { message = "Koden har gått ut."; return }
+                if status == "expired" { message = L("Koden har gått ut."); return }
             } catch let e as APIError {
                 // Servern nekade (t.ex. kontot får bara användas hemma) – sluta fråga
                 message = e.message

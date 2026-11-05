@@ -2,6 +2,19 @@
 
 ## Ej utgiven
 
+- **iPhone-, iPad- och Apple TV-appen i fas med servern 1.0** (appen hade stått still sedan oktober):
+  - **Långsam start med grafikkort:** omkodning med NVENC/VAAPI kan ta ~10 s till första segmentet. Spelaren säger efter 4 s att servern förbereder strömmen, och ger AVPlayer upp under starten provas *samma* ström-URL igen (samma session och ffmpeg på servern) i stället för en svart skärm – ingen ny `/playback`. `/playback` får `start=` vid fortsättning, så att servern förstartar omkodningen där filmen börjar och inte från början. Ett fel under uppspelningen ger *Försök igen*.
+  - **Föräldraöversiktens Stoppa och skärmtiden:** appen läser `stop` i svaret på framstegsanropet (filmer, avsnitt, ljudböcker och poddar), stoppar och visar *En vuxen stoppade uppspelningen* (barnprofil), *Uppspelningen stoppades av administratören* eller skärmtidens förklaring från servern – förut spelade appen vidare.
+  - **Barnprofiler:** poddarna döljs (fliken och *Fortsätt lyssna*) i stället för en tom vy; barnprofilen läses ur `user.kid` i `/api/status`.
+  - **2-minutersgränsen:** appen sparar ingen egen position – *Fortsätt från* och nästa avsnitt kommer från serverns `position` (0 under två minuter).
+  - **Felmeddelanden:** serverns `error` visas för alla felkoder (429 vid gissningsspärren, 503/507 när databasen inte kan skrivas, 403 för rättigheter och skärmtid), och utan förklaring finns egna texter för 429, 502–504 (t.ex. hemservern nere bakom BraXhn Relay) och 507. Nätverksfel (ingen anslutning, fel adress, tidsgräns, certifikat) förklaras, ett svar med oväntad form ger ett begripligt fel i stället för avkodningens, och avbrutna anrop visas inte som fel. Live-TV och inspelningar som inte går att starta ger en felruta i stället för en svart skärm. Inga tvingade avrundningar av `Double` som kan krascha (`formatTime`).
+  - **BraXhn Relay och https:** en adress utan `http://`/`https://` provas med https först när den ser ut som en domän (reläet, egen domän) och med http och port 8420 först för IP-adresser och namn i hemnätet. Inställningar visar *Utanför hemmet* när servern ser anslutningen så. Strömmar, bilder och AirPlay byggs av serveradressen och fungerar likadant via reläet.
+  - **Engelska:** appen följer enhetens språk – svenska eller engelska (`Shared/Resources/en.lproj`), andra språk får engelska. Datum i guiden och *Kommer snart* följer språket.
+  - **Rättigheter:** *Ladda ner för offline* visas inte för konton utan nedladdningsrätt (`user.canDownload`).
+  - **Apple TV:** felrutorna i spelaren och live-TV tar bort spelarvyn så att *Stäng*/*Försök igen* får fokus med Siri Remote, och poddavsnitten i listan får kortstil (syns när de har fokus).
+  - **Stöd projektet** (bara egna byggen med Swift-flaggan `DONATION_LINK`, av som standard – Apples regel 3.2.1(vi)): en diskret rad under Inställningar med serverns `donateUrl`, bara https till PayPal och aldrig för barnprofiler.
+  - Kontraktet (`test/contracts/apps.json`) har de nya valfria fälten (`user.kid`, `user.canDownload`, `remote`, `donateUrl`) och svaret på framstegsanropen (`ProgressReply.ios`).
+
 ## 1.0.0 – 2026-11-04
 
 Första stabila utgåvan – redo för Unraids Community Applications. Höjdpunkter sedan 0.9.3 (alla detaljer nedan):

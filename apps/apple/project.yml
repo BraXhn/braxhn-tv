@@ -5,6 +5,8 @@ options:
     iOS: "16.0"
     tvOS: "16.0"
   createIntermediateGroups: true
+  # Engelska är reservspråket (enheter på andra språk än svenska och engelska); svenskan finns i Shared/Resources/sv.lproj
+  developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -14,6 +16,9 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     ENABLE_PREVIEWS: YES
+    # Raden "Stöd projektet" (serverns donateUrl) finns bara i egna byggen – Apples regel 3.2.1(vi) tillåter inte
+    # donationer i App Store-appar. Slå på genom att lägga till raden nedan (aldrig i App Store/TestFlight-bygget):
+    # SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DONATION_LINK"
 targets:
   BraXhnTV-iOS:
     type: application

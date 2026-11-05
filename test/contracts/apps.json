@@ -3,11 +3,14 @@
   "api": 1,
   "typer": {
     "UserInfo.ios": { "källa": "apps/apple/Shared/Models.swift:3",
-      "required": { "id": "integer", "name": "string", "is_admin": "integer" } },
-    "ServerStatus.ios": { "källa": "apps/apple/Shared/Models.swift:9",
+      "required": { "id": "integer", "name": "string", "is_admin": "integer" },
+      "optional": { "kid": "boolean", "canDownload": "boolean" } },
+    "ServerStatus.ios": { "källa": "apps/apple/Shared/Models.swift:12",
       "required": { "needsSetup": "boolean", "version": "string" },
-      "optional": { "user": "@UserInfo.ios", "publicUrl": "string" } },
-    "LoginResponse.ios": { "källa": "apps/apple/Shared/Models.swift:16",
+      "optional": { "user": "@UserInfo.ios", "publicUrl": "string", "remote": "boolean", "donateUrl": "string" } },
+    "ProgressReply.ios": { "källa": "apps/apple/Shared/Models.swift:264 (stopp och skärmtid: AppModel.swift:198-213, Listen.swift:355-370)",
+      "optional": { "stop": "boolean", "screenTime": { "optional": { "allowed": "boolean", "message": "string" } } } },
+    "LoginResponse.ios": { "källa": "apps/apple/Shared/Models.swift:21",
       "required": { "token": "string", "user": "@UserInfo.ios" } },
     "QuickConnectStart.ios": { "källa": "apps/apple/Shared/Models.swift:242",
       "required": { "secret": "string", "code": "string" } },
@@ -434,7 +437,7 @@
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:50-61 (bildtoken i ?t=)", "svar": { "media": "^image/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:178-183 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
     "POST /api/items/:id/progress": {
-      "ios": { "källa": "apps/apple/Shared/AppModel.swift:175", "body": { "position": 4.5, "duration": 12 }, "svar": null },
+      "ios": { "källa": "apps/apple/Shared/AppModel.swift:198", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressReply.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:276", "body": { "position": 4.5, "duration": 12 }, "svar": null } },
     "POST /api/items/:id/watched": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:137", "body": { "watched": false }, "svar": null },
@@ -503,7 +506,7 @@
     "GET /api/audiobooks/book/:bid/play": {
       "ios": { "källa": "apps/apple/Shared/Listen.swift:154, :257", "query": { "a": "mp3,aac,flac,alac" }, "svar": "@Book.ios" } },
     "POST /api/audiobooks/book/:bid/progress": {
-      "ios": { "källa": "apps/apple/Shared/Listen.swift:360-362", "body": { "position": 40, "speed": 1 }, "svar": null },
+      "ios": { "källa": "apps/apple/Shared/Listen.swift:360-370", "body": { "position": 40, "speed": 1 }, "svar": "@ProgressReply.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:233", "body": { "position": 40 }, "svar": null } },
     "GET /api/audiobooks/files/:fid/stream": {
       "ios": { "källa": "apps/apple/Shared/Listen.swift:209 (BookFile.url)", "svar": { "media": "^audio/" } },
@@ -513,7 +516,7 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:289 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
 
     "GET /api/podcasts": {
-      "ios": { "källa": "apps/apple/Shared/Listen.swift:506", "svar": "@PodcastList.ios" },
+      "ios": { "källa": "apps/apple/Shared/Listen.swift:524 (inte för barnprofiler)", "svar": "@PodcastList.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:338, :341", "svar": "@PList.android" } },
     "GET /api/podcasts/:pid": {
       "ios": { "källa": "apps/apple/Shared/Listen.swift:589", "svar": "@PodcastDetail.ios" },
@@ -529,7 +532,7 @@
       "ios": { "källa": "apps/apple/Shared/Listen.swift:167, :209 (play-adressen)", "svar": { "media": "^audio/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:292 (Bearer i header)", "svar": { "media": "^audio/" } } },
     "POST /api/podcasts/episodes/:eid/progress": {
-      "ios": { "källa": "apps/apple/Shared/Listen.swift:360-362", "body": { "position": 6, "speed": 1 }, "svar": null },
+      "ios": { "källa": "apps/apple/Shared/Listen.swift:360-370", "body": { "position": 6, "speed": 1 }, "svar": "@ProgressReply.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MusicService.kt:236", "body": { "position": 6 }, "svar": null } },
 
     "GET /api/live/channels": {

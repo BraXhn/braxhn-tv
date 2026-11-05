@@ -99,7 +99,7 @@ final class SleepTimer: ObservableObject {
             label = "\(n) min"
         case .endOfItem:
             deadline = nil
-            label = "slut"
+            label = L("slut")
         }
         task = Task { @MainActor [weak self] in
             while !Task.isCancelled {

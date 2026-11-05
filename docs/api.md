@@ -697,6 +697,14 @@ Xtream-källa eller ett catch-up-arkiv som testservern saknar och finns därför
 - `GET /api/home?web=1` (bara webben) har dessutom `collectionsList` (samma som `/api/collections`) och
   `ownCollections` (samma som `/api/custom-collections`) – två förfrågningar färre vid start. Utan `web=1` är svaret
   oförändrat.
+- `/api/status`: `user.kid` (döljer poddar), `user.canDownload` (döljer nedladdning), `remote` (visas under
+  Inställningar) och `donateUrl` (bara i egna byggen med `DONATION_LINK`, bara https till PayPal) – alla valfria.
+  Inloggningens och profilbytets `user` saknar `kid`, så appen läser `/api/status` efteråt.
+- Framstegsanropen (`/api/items/:id/progress`, `/api/audiobooks/book/:bid/progress`,
+  `/api/podcasts/episodes/:eid/progress`): appen läser `stop` och `screenTime.allowed`/`screenTime.message`
+  (`ProgressReply.ios`) och stoppar spelaren. Stoppa-texten skriver appen själv (servern skickar ingen).
+- `/api/items/:id/playback` med `start=<sekunder>` vid fortsättning (förstarten börjar där).
+- Felsvar: appen visar `error` för alla statuskoder och har egna texter när det saknas (429, 502–504, 507).
 - `POST /api/profiles/switch` svarar `401` med `needPin`/`needPassword` vid fel PIN – appen loggar inte ut på det
   svaret (alla andra `401` med apptoken loggar ut).
 - Bio-läge: appen läser `GET /api/me/cinema` innan en film startas från början och skickar `cinema=1` bara när

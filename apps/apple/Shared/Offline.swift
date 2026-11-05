@@ -142,10 +142,10 @@ final class Downloads: ObservableObject {
                 repeat {
                     try await Task.sleep(nanoseconds: 3_000_000_000)
                     st = try await model.get("/api/items/\(item.id)/offline", [URLQueryItem(name: "q", value: quality)])
-                    if st.status == "error" { throw APIError(message: st.error ?? "Servern kunde inte skapa filen") }
+                    if st.status == "error" { throw APIError(message: st.error ?? L("Servern kunde inte skapa filen")) }
                     active[item.id] = Double(st.progress ?? 0) / 200 // förberedelse = första halvan
                 } while st.status != "ready"
-                guard let rel = st.url, let url = model.absolute(rel) else { throw APIError(message: "Ingen nedladdningslänk") }
+                guard let rel = st.url, let url = model.absolute(rel) else { throw APIError(message: L("Ingen nedladdningslänk")) }
                 // 2. Ladda ner i bakgrundssessionen (resultatet kommer via DownloadDelegate)
                 let task = session.downloadTask(with: url)
                 task.taskDescription = String(item.id)
@@ -283,7 +283,8 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
         guard let id = Int(downloadTask.taskDescription ?? "") else { return }
         let code = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
-            Task { @MainActor in Downloads.shared.failed(id, message: "Nedladdningen misslyckades (\(code))", resumeData: nil) }
+            let msg = String(format: L("Nedladdningen misslyckades (%d)"), code)
+            Task { @MainActor in Downloads.shared.failed(id, message: msg, resumeData: nil) }
             return
         }
         // Filen måste flyttas innan metoden returnerar – annars tas den bort av systemet

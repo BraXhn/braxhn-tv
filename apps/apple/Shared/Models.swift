@@ -4,6 +4,9 @@ struct UserInfo: Codable, Equatable {
     let id: Int
     let name: String
     let is_admin: Int
+    /// Barnprofil och nedladdningsrätt – bara i /api/status (inte i inloggningens svar), saknas hos äldre servrar
+    var kid: Bool? = nil
+    var canDownload: Bool? = nil
 }
 
 struct ServerStatus: Decodable {
@@ -11,6 +14,10 @@ struct ServerStatus: Decodable {
     let version: String
     let user: UserInfo?
     let publicUrl: String?
+    /// Anslutningen räknas som utanför hemmet (t.ex. via BraXhn Relay); bara när man är inloggad
+    let remote: Bool?
+    /// Ägarens donationslänk (valfri, nyare servrar) – visas bara i byggen med DONATION_LINK (Views.swift)
+    let donateUrl: String?
 }
 
 struct LoginResponse: Decodable {
@@ -34,7 +41,7 @@ struct AudioStream: Decodable, Hashable, Identifiable {
     let `default`: Bool?
     var id: Int { index }
     var label: String {
-        [lang?.uppercased() ?? "Ljud", title, codec?.uppercased(), channels.map { "\($0)ch" }]
+        [lang?.uppercased() ?? L("Ljud"), title, codec?.uppercased(), channels.map { "\($0)ch" }]
             .compactMap { $0 }.joined(separator: " · ")
     }
 }
@@ -105,7 +112,7 @@ struct MediaItem: Decodable, Identifiable, Hashable {
     }
     var subtitleLine: String {
         if isEpisode { return showTitle.map { "\($0) · \(sxe)" } ?? sxe }
-        if isShow { return [year.map(String.init), episodes.map { "\($0) avsnitt" }].compactMap { $0 }.joined(separator: " · ") }
+        if isShow { return [year.map(String.init), episodes.map { String(format: L("%d avsnitt"), $0) }].compactMap { $0 }.joined(separator: " · ") }
         return year.map(String.init) ?? ""
     }
 }
@@ -125,8 +132,8 @@ func castLine(_ cast: [CastMember]?) -> String? {
     for c in cast where (c.role ?? "cast") != "cast" && !lead.contains(c.name) { lead.append(c.name) }
     let actors = cast.filter { ($0.role ?? "cast") == "cast" }.prefix(8).map { $0.name }
     var parts: [String] = []
-    if !lead.isEmpty { parts.append((cast.contains { $0.role == "creator" } ? "Skapad av: " : "Regi: ") + lead.joined(separator: ", ")) }
-    if !actors.isEmpty { parts.append("Medverkande: " + actors.joined(separator: ", ")) }
+    if !lead.isEmpty { parts.append((cast.contains { $0.role == "creator" } ? L("Skapad av: ") : L("Regi: ")) + lead.joined(separator: ", ")) }
+    if !actors.isEmpty { parts.append(L("Medverkande: ") + actors.joined(separator: ", ")) }
     return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
 }
 
@@ -231,6 +238,9 @@ struct APIError: LocalizedError {
     /// Profilbyte (POST /api/profiles/switch): profilen kräver PIN, eller huvudkontots lösenord från en barnprofil
     var needPin: Bool = false
     var needPassword: Bool = false
+    /// HTTP-status (0 = inget svar) och serverns felkod (t.ex. "screen_time")
+    var status: Int = 0
+    var code: String? = nil
     var errorDescription: String? { message }
 }
 
@@ -249,4 +259,16 @@ struct QuickConnectPoll: Decodable {
     let status: String
     let token: String?
     let user: UserInfo?
+}
+
+/// Svar på framstegsanropen (filmer/avsnitt, ljudböcker, poddavsnitt). stop = sluta spela: Föräldraöversiktens eller
+/// administratörens Stoppa, eller skärmtiden (screenTime.allowed = false med en förklaring i message).
+struct ProgressReply: Decodable {
+    let stop: Bool?
+    let screenTime: ScreenTimeInfo?
+}
+
+struct ScreenTimeInfo: Decodable {
+    let allowed: Bool?
+    let message: String?
 }

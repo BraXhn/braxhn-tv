@@ -359,7 +359,14 @@ final class SpokenPlayer: ObservableObject {
         guard final || pos > 5 else { return }
         let path = tr.kind == .book ? "/api/audiobooks/book/\(tr.id)/progress" : "/api/podcasts/episodes/\(tr.id)/progress"
         let body: [String: Any] = ["position": pos, "speed": Double(speed)]
-        Task { _ = try? await model.post(path, body) }
+        let id = tr.id, gen = trackGen
+        Task { [weak self] in
+            // Skärmtiden kan vara slut (även för ljud, om föräldern valt det): servern svarar stop – pausa och säg varför
+            guard let data = try? await model.post(path, body), let r = try? JSONDecoder().decode(ProgressReply.self, from: data),
+                  r.stop == true, let self, self.trackGen == gen, self.track?.id == id, self.playing else { return }
+            self.pause()
+            model.notice = model.stopText(r)
+        }
     }
 
     private func updateNowPlaying(artwork: Bool = false) {
@@ -393,7 +400,7 @@ func speedLabel(_ s: Float) -> String {
     var t = String(format: "%.2f", Double(s))
     while t.hasSuffix("0") { t.removeLast() }
     if t.hasSuffix(".") { t.removeLast() }
-    return t.replacingOccurrences(of: ".", with: ",") + "×"
+    return t.replacingOccurrences(of: ".", with: appLocale.decimalSeparator ?? ",") + "×"
 }
 
 @MainActor
@@ -429,13 +436,16 @@ struct ListenView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Picker("", selection: $tab) {
-                    Text("Ljudböcker").tag(0)
-                    Text("Poddar").tag(1)
+                // Poddar finns inte för barnprofiler (servern ger en tom lista) – då visas bara ljudböckerna
+                if !isKid {
+                    Picker("", selection: $tab) {
+                        Text("Ljudböcker").tag(0)
+                        Text("Poddar").tag(1)
+                    }
+                    .pickerStyle(.segmented).padding(.horizontal)
                 }
-                .pickerStyle(.segmented).padding(.horizontal)
                 if let e = error { Text(e).foregroundStyle(.secondary).padding(.horizontal) }
-                if tab == 0 { booksSection } else { podsSection }
+                if tab == 0 || isKid { booksSection } else { podsSection }
             }
             .padding(.vertical)
         }
@@ -471,7 +481,7 @@ struct ListenView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 artView(model, path: pod.image ? "/api/podcasts/\(pod.id)/image" : nil, size: size, symbol: "mic")
                                 Text(pod.title ?? "").font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text((pod.unplayed ?? 0) > 0 ? "\(pod.unplayed ?? 0) nya" : (pod.author ?? "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text((pod.unplayed ?? 0) > 0 ? String(format: L("%d nya"), pod.unplayed ?? 0) : (pod.author ?? "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }.frame(width: size)
                         }
                         .cardButton()
@@ -497,14 +507,21 @@ struct ListenView: View {
         .cardButton()
     }
 
+    private var isKid: Bool { model.user?.kid == true }
+
     private func load() async {
         do {
             await model.refreshImageToken()
             let l: [Library] = try await model.get("/api/libraries")
             bookLib = l.first { $0.type == "audiobook" }
             if let bl = bookLib { books = try await model.get("/api/audiobooks/\(bl.id)", [URLQueryItem(name: "sort", value: "recent")]) }
-            pods = try await model.get("/api/podcasts")
-        } catch { self.error = error.localizedDescription }
+            error = nil
+        } catch {
+            if !isCancellation(error) { self.error = error.localizedDescription }
+        }
+        // Poddarna för sig: ett fel där (t.ex. 404 för en barnprofil på en äldre server) ska inte dölja ljudböckerna
+        guard !isKid else { pods = nil; return }
+        pods = try? await model.get("/api/podcasts")
     }
 }
 
@@ -516,15 +533,23 @@ struct EpisodeRow: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(episode.title).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(episode.played ? .secondary : .primary)
-                    Text([episode.podcastTitle, episode.duration.map { formatTime($0) }, episode.played ? "Lyssnad" : nil].compactMap { $0 }.joined(separator: " · "))
+                    Text([episode.podcastTitle, episode.duration.map { formatTime($0) }, episode.played ? L("Lyssnad") : nil].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(accent)
             }
             .padding(.vertical, 8)
+            #if os(tvOS)
+            .padding(.horizontal, 16)
+            #endif
         }
+        #if os(tvOS)
+        // Siri Remote: raden måste synas när den har fokus
+        .buttonStyle(.card)
+        #else
         .buttonStyle(.plain)
+        #endif
     }
 }
 
@@ -543,7 +568,7 @@ struct BookView: View {
                         Text(b.title).font(.title2.bold())
                         Text(b.author ?? "").foregroundStyle(.secondary)
                         if let n = b.narrator { Text("Uppläsare: \(n)").font(.caption).foregroundStyle(.secondary) }
-                        if let d = b.duration { Text(b.position > 30 ? "\(formatTime(d - b.position)) kvar" : formatTime(d)).font(.caption).foregroundStyle(.secondary) }
+                        if let d = b.duration { Text(b.position > 30 ? String(format: L("%@ kvar"), formatTime(d - b.position)) : formatTime(d)).font(.caption).foregroundStyle(.secondary) }
                         Button { Task { await sp.play(book: b.id, model: model) } } label: {
                             Label(b.position > 30 ? "Fortsätt" : "Lyssna", systemImage: "play.fill")
                         }.buttonStyle(.borderedProminent)

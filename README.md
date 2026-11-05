@@ -306,14 +306,14 @@ Ungefär som Plex fjärråtkomst, men med ett relä som du kör själv: BraXhn T
 ## Appar och andra klienter
 
 - **Webben:** fungerar i alla moderna webbläsare och kan installeras som app (se nedan). På TV-webbläsare (Google TV, Fire TV, LG, Samsung) styrs hela appen med pilar, OK och Bakåt.
-- **iPhone, iPad och Apple TV:** en SwiftUI-app som du bygger själv med Xcode, se [apps/apple/README.md](apps/apple/README.md). Apparna finns inte i App Store.
+- **iPhone, iPad och Apple TV:** en SwiftUI-app som du bygger själv med Xcode, se [apps/apple/README.md](apps/apple/README.md). Apparna finns inte i App Store. Appen följer enhetens språk (svenska eller engelska) och fungerar även via BraXhn Relay (ange reläets `https://`-adress).
 - **Android (Google TV, Android TV, telefon och bilar med Android Automotive):** APK:n byggs av GitHub Actions – ladda ner den från senaste körningen av *Android Automotive-app* under *Actions → Artifacts*, se [apps/automotive/README.md](apps/automotive/README.md). *Apple-app*-körningen kontrollerar bara att koden kompilerar.
 - **Logga in på TV:n med kod:** TV:n visar en sexsiffrig kod och en QR-kod som du godkänner från telefonen.
 - **Musikappar (Subsonic):** Symfonium, Amperfy, play:Sub, Feishin, Supersonic, substreamer och Music Assistant. Skapa ett eget lösenord under **Mitt konto → Musikappar** och lägg till servern som en *Subsonic*-server. Hela guiden och vad som stöds: [docs/guide.md](docs/guide.md#musikappar-subsonic).
 - **Läsappar (OPDS):** under **Mitt konto → Läsappar**.
 - **Chromecast** (kräver HTTPS, sätt 2–4 ovan) och **AirPlay** (Safari och Apple-apparna, fungerar hemma utan HTTPS). **Spela på…** styr en annan öppen BraXhn TV-webbläsare i hemmet från telefonen. **DLNA** för smart-TV utan app är avstängt som standard. Detaljer om alla tre och om live-TV: [docs/guide.md](docs/guide.md).
 
-Apparna, notiserna, serverns logg och offlinesidan är fortfarande bara på svenska.
+iOS/tvOS-appen finns på svenska och engelska (efter enhetens språk); Android-appen, notiserna, serverns logg, serverns felmeddelanden och offlinesidan är fortfarande bara på svenska.
 
 ### Installera som app på telefonen
 
@@ -575,7 +575,8 @@ Det jag inte har kunnat prova här:
 - CarPlay (kräver ett särskilt tillstånd från Apple och är därför inte byggt)
 - Docker-bygget
 - BraXhn Relay bakom Caddy/Nginx och Let's Encrypt på en riktig VPS, reläets Docker-image, och apparna och Chromecast via reläet
-- apparna, som byggs via GitHub Actions (se respektive README) – bl.a. sovtimer, rollista, smarta listor, Nytt för dig och automatisk offline-synk, och i iOS/tvOS-appen live-TV, guide och inspelningar, profilbyte med PIN, Min lista, startsidans nya hyllor, bio-läge och nattläge/tydligare dialog (Swift-koden har inte kompilerats här; serverns svar är kontrollerade med kontraktstestet)
+- apparna, som byggs via GitHub Actions (se respektive README) – bl.a. sovtimer, rollista, smarta listor, Nytt för dig och automatisk offline-synk, och i iOS/tvOS-appen live-TV, guide och inspelningar, profilbyte med PIN, Min lista, startsidans nya hyllor, bio-läge och nattläge/tydligare dialog
+- iOS/tvOS-appen på riktiga enheter efter omarbetningen för 1.0: väntan på grafikkortets första segment (förklaringen efter 4 s, nya försök med samma ström), Föräldraöversiktens *Stoppa* och skärmtiden i spelaren och ljudspelaren, att poddarna döljs för barnprofiler, inloggning och strömning/AirPlay via BraXhn Relay, de engelska texterna och Siri Remote-fokus i felrutorna – svaren är kontrollerade med kontraktstestet, Swift-koden kompileras bara i GitHub Actions (Swift-koden har inte kompilerats här; serverns svar är kontrollerade med kontraktstestet)
 - anpassningsbar kvalitet i Safari, AVPlayer, ExoPlayer och Chromecast
 - timeshift i Safari/AVPlayer och reklamdetektering på riktiga sändningar
 - DLNA mot en riktig TV, och import mot riktiga Plex- och Jellyfin-servrar (plex.tv:s växling av hemanvändare och `resources`, och en riktig `com.plexapp.plugins.library.db` från en aktuell Plex-version, är simulerade efter Plex dokumenterade/kända format)

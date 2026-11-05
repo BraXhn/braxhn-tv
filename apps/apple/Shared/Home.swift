@@ -104,7 +104,14 @@ let defaultHomeOrder = ["foryou", "continue", "listening", "watchlist", "upcomin
                         "recent", "short", "toprated", "onthisday", "genre", "gems", "collections"]
 
 struct HomeShelves: View {
+    @EnvironmentObject var model: AppModel
     let home: HomeResponse
+
+    /// Fortsätt lyssna utan poddavsnitt för barnprofiler (poddar finns inte för barn)
+    private var listening: [ListeningEntry] {
+        let l = home.listening ?? []
+        return model.user?.kid == true ? l.filter { $0.type == "book" } : l
+    }
 
     private var order: [String] {
         var o: [String] = []
@@ -120,23 +127,23 @@ struct HomeShelves: View {
     @ViewBuilder private func shelf(_ key: String) -> some View {
         switch key {
         case "foryou":
-            if let f = home.forYou, !f.isEmpty { Shelf(title: "Nytt för dig", items: f, landscape: true) }
+            if let f = home.forYou, !f.isEmpty { Shelf(title: L("Nytt för dig"), items: f, landscape: true) }
         case "continue":
-            if !home.continueWatching.isEmpty { Shelf(title: "Fortsätt titta", items: home.continueWatching, landscape: true) }
+            if !home.continueWatching.isEmpty { Shelf(title: L("Fortsätt titta"), items: home.continueWatching, landscape: true) }
         case "listening":
-            if let l = home.listening, !l.isEmpty { ListeningShelf(entries: l) }
+            if !listening.isEmpty { ListeningShelf(entries: listening) }
         case "watchlist":
-            if let w = home.watchlist, !w.isEmpty { Shelf(title: "Min lista", items: w) }
+            if let w = home.watchlist, !w.isEmpty { Shelf(title: L("Min lista"), items: w) }
         case "upcoming":
             if let u = home.upcoming, !u.isEmpty { UpcomingShelf(entries: u) }
         case "because":
             if let b = home.because {
                 ForEach(b) { s in
-                    if !s.items.isEmpty { Shelf(title: "Eftersom du såg \(s.seed.title)", items: s.items) }
+                    if !s.items.isEmpty { Shelf(title: String(format: L("Eftersom du såg %@"), s.seed.title), items: s.items) }
                 }
             }
         case "recommended":
-            if let r = home.recommended, !r.isEmpty { Shelf(title: "Rekommenderat för dig", items: r) }
+            if let r = home.recommended, !r.isEmpty { Shelf(title: L("Rekommenderat för dig"), items: r) }
         case "custom":
             if let c = home.customCollections {
                 ForEach(c) { s in
@@ -148,15 +155,15 @@ struct HomeShelves: View {
                 if !r.items.isEmpty { Shelf(title: r.title, items: r.items) }
             }
         case "short":
-            if let s = home.shortTonight, !s.isEmpty { Shelf(title: "Kort film ikväll", items: s) }
+            if let s = home.shortTonight, !s.isEmpty { Shelf(title: L("Kort film ikväll"), items: s) }
         case "toprated":
-            if let t = home.topRated, !t.isEmpty { Shelf(title: "Topprankat i biblioteket", items: t) }
+            if let t = home.topRated, !t.isEmpty { Shelf(title: L("Topprankat i biblioteket"), items: t) }
         case "onthisday":
-            if let d = home.onThisDay, !d.isEmpty { Shelf(title: "Den här dagen", items: d) }
+            if let d = home.onThisDay, !d.isEmpty { Shelf(title: L("Den här dagen"), items: d) }
         case "genre":
-            if let g = home.genreOfDay, !g.items.isEmpty { Shelf(title: "Dagens genre: \(g.genre)", items: g.items) }
+            if let g = home.genreOfDay, !g.items.isEmpty { Shelf(title: String(format: L("Dagens genre: %@"), g.genre), items: g.items) }
         case "gems":
-            if let g = home.hiddenGems, !g.isEmpty { Shelf(title: "Glömda guldkorn", items: g) }
+            if let g = home.hiddenGems, !g.isEmpty { Shelf(title: L("Glömda guldkorn"), items: g) }
         default:
             EmptyView()
         }
@@ -231,14 +238,14 @@ struct UpcomingShelf: View {
     /// "Idag", "Imorgon" eller t.ex. "ons 28 okt" ur "YYYY-MM-DD"
     private func dateLabel(_ ymd: String) -> String? {
         let p = DateFormatter()
-        p.locale = Locale(identifier: "sv_SE")
+        p.locale = Locale(identifier: "en_US_POSIX")
         p.dateFormat = "yyyy-MM-dd"
         guard let d = p.date(from: ymd) else { return ymd }
         let cal = Calendar.current
-        if cal.isDateInToday(d) { return "Idag" }
-        if cal.isDateInTomorrow(d) { return "Imorgon" }
+        if cal.isDateInToday(d) { return L("Idag") }
+        if cal.isDateInTomorrow(d) { return L("Imorgon") }
         let f = DateFormatter()
-        f.locale = Locale(identifier: "sv_SE")
+        f.locale = appLocale
         f.dateFormat = "EEE d MMM"
         return f.string(from: d)
     }
@@ -328,7 +335,7 @@ struct WatchlistView: View {
         do {
             items = try await model.get("/api/watchlist")
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 }
 
@@ -387,8 +394,8 @@ struct ProfilesView: View {
 
     private func profileTags(_ p: Profile) -> [String] {
         var t: [String] = []
-        if p.owner == true { t.append("Huvudkonto") }
-        if p.kid == true { t.append("Barnprofil") }
+        if p.owner == true { t.append(L("Huvudkonto")) }
+        if p.kid == true { t.append(L("Barnprofil")) }
         if p.hasPin == true { t.append("PIN") }
         return t
     }
@@ -397,7 +404,7 @@ struct ProfilesView: View {
         do {
             list = try await model.get("/api/profiles")
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 
     private func choose(_ p: Profile, current: Int) {

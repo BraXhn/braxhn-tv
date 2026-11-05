@@ -194,7 +194,7 @@ Three ways, which can be combined:
 ## Apps and other clients
 
 - **Web app:** every modern browser; install it as an app from the browser menu (Android/desktop) or *Share → Add to Home Screen* (iPhone/iPad). Full installation and offline start need HTTPS. On TV browsers (Google TV, Fire TV, LG, Samsung) the whole app works with arrows, OK and Back.
-- **iPhone, iPad and Apple TV:** SwiftUI app – build it yourself with Xcode ([apps/apple/README.md](apps/apple/README.md), Swedish). The apps are not in the App Store.
+- **iPhone, iPad and Apple TV:** SwiftUI app – build it yourself with Xcode ([apps/apple/README.md](apps/apple/README.md), Swedish). The apps are not in the App Store. The app follows the device language (English or Swedish) and also works through BraXhn Relay (enter the relay's `https://` address).
 - **Android (Google TV, Android TV, phones, cars with Android Automotive):** the APK is built by GitHub Actions – download it from the latest *Android Automotive* workflow run under *Actions → Artifacts* and sideload it ([apps/automotive/README.md](apps/automotive/README.md), Swedish).
 - **Sign in on a TV with a code:** the TV shows a six-digit code and a QR code; approve it from your phone under *Approve sign-in on a TV*.
 - **Music apps (Subsonic API):** Symfonium, Amperfy, play:Sub, Feishin, Supersonic, substreamer, Music Assistant. Create a separate password under **My account → Music apps** and add the server as a *Subsonic* server (`https://your-server`, or `…/rest`).
@@ -203,7 +203,7 @@ Three ways, which can be combined:
 - **Play on another device:** any open BraXhn TV browser in the household can be remote-controlled from your phone (*Play on…*).
 - **DLNA** for smart TVs without an app: off by default, **Administration → DLNA** (or `DLNA=1`). Needs host networking (or br0) for multicast, answers only on the home network and shows its own selection of libraries **without sign-in** – set an age limit if the kids have their own devices.
 
-The native apps, notifications, the server log and the offline page are still in Swedish.
+The iOS/tvOS app is in English and Swedish (following the device language); the Android app, notifications, the server log, the server's error messages and the offline page are still in Swedish.
 
 ## Security
 

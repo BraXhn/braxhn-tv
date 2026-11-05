@@ -57,13 +57,13 @@ struct DvrList: Decodable {
 
 private let hmFormat: DateFormatter = {
     let f = DateFormatter()
-    f.locale = Locale(identifier: "sv_SE")
+    f.locale = appLocale
     f.dateFormat = "HH:mm"
     return f
 }()
 private let dayFormat: DateFormatter = {
     let f = DateFormatter()
-    f.locale = Locale(identifier: "sv_SE")
+    f.locale = appLocale
     f.dateFormat = "EEE d MMM HH:mm"
     return f
 }()
@@ -170,7 +170,7 @@ struct LiveView: View {
         do {
             data = try await model.get("/api/live/channels")
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 }
 
@@ -270,7 +270,7 @@ struct GuideView: View {
         .navigationTitle("TV-guide")
         .task { await load() }
         .refreshable { await load() }
-        .confirmationDialog(selected?.program.title ?? "Program", isPresented: $showPick, titleVisibility: .visible, presenting: selected) { pick in
+        .confirmationDialog(selected?.program.title ?? L("Program"), isPresented: $showPick, titleVisibility: .visible, presenting: selected) { pick in
             let now = Date().timeIntervalSince1970
             if pick.program.start <= now && pick.program.stop > now {
                 Button("Titta nu") { play = LivePlayRequest(path: "/api/live/\(pick.channel.id)/play", title: pick.channel.name, live: true) }
@@ -289,14 +289,14 @@ struct GuideView: View {
         do {
             guide = try await model.get("/api/live/guide", [URLQueryItem(name: "hours", value: "12")])
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 
     /// Bokar en inspelning av programmet (POST /api/dvr/program)
     @MainActor func record(_ p: LiveProg) async {
         do {
             try await model.post("/api/dvr/program", ["programId": p.id])
-            message = "Inspelningen av \(p.title) är bokad."
+            message = String(format: L("Inspelningen av %@ är bokad."), p.title)
         } catch { message = error.localizedDescription }
         showMessage = true
     }
@@ -370,21 +370,21 @@ struct RecordingsView: View {
 
     private func statusText(_ r: Recording) -> String? {
         switch r.status {
-        case "processing": return "Bearbetas"
-        case "failed": return "Misslyckades" + (r.error.map { ": \($0)" } ?? "")
+        case "processing": return L("Bearbetas")
+        case "failed": return L("Misslyckades") + (r.error.map { ": \($0)" } ?? "")
         default: return nil
         }
     }
 
     private func removeQuestion(_ r: Recording) -> String {
-        r.status == "scheduled" ? "Avboka \(r.title)?" : r.status == "recording" ? "Stoppa och ta bort \(r.title)?" : "Ta bort inspelningen \(r.title)?"
+        String(format: L(r.status == "scheduled" ? "Avboka %@?" : r.status == "recording" ? "Stoppa och ta bort %@?" : "Ta bort inspelningen %@?"), r.title)
     }
 
     @MainActor func load() async {
         do {
             data = try await model.get("/api/dvr")
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
     }
 
     @MainActor func remove(_ r: Recording) async {
@@ -400,6 +400,7 @@ final class LivePlayback: ObservableObject {
     let player = AVPlayer()
     @Published var error: String?
     private var failObserver: NSObjectProtocol?
+    private var statusObservation: NSKeyValueObservation?
     private var started = false
     private var stopped = false
 
@@ -419,20 +420,26 @@ final class LivePlayback: ObservableObject {
             let data = try await model.post(r.path)
             let u = try JSONDecoder().decode(PlayURL.self, from: data)
             guard !stopped else { return }
-            guard let url = model.absolute(u.url) else { throw APIError(message: "Ogiltig ström-URL") }
+            guard let url = model.absolute(u.url) else { throw APIError(message: L("Ogiltig ström-URL")) }
             let item = AVPlayerItem(url: url)
             let t = AVMutableMetadataItem()
             t.identifier = .commonIdentifierTitle
             t.value = r.title as NSString
             t.extendedLanguageTag = "und"
             item.externalMetadata = [t]
+            let failText = r.live ? L("Kanalen kunde inte spelas – alla tuners kan vara upptagna.") : L("Inspelningen kunde inte spelas.")
             failObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.error = r.live ? "Kanalen kunde inte spelas – alla tuners kan vara upptagna." : "Inspelningen kunde inte spelas." }
+                Task { @MainActor [weak self] in if self?.stopped == false { self?.error = failText } }
+            }
+            // Ett fel redan vid starten kommer som status .failed (inte som notis) – annars blev det bara svart
+            statusObservation = item.observe(\.status, options: [.new]) { [weak self] it, _ in
+                guard it.status == .failed else { return }
+                Task { @MainActor [weak self] in if self?.stopped == false { self?.error = failText } }
             }
             player.replaceCurrentItem(with: item)
             player.play()
         } catch {
-            if !stopped { self.error = error.localizedDescription }
+            if !stopped, !isCancellation(error) { self.error = error.localizedDescription }
         }
     }
 
@@ -442,6 +449,8 @@ final class LivePlayback: ObservableObject {
         player.pause()
         player.replaceCurrentItem(with: nil)
         if let o = failObserver { NotificationCenter.default.removeObserver(o); failObserver = nil }
+        statusObservation?.invalidate()
+        statusObservation = nil
     }
 }
 
@@ -468,12 +477,13 @@ struct LivePlayerScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            BasicPlayerVC(player: playback.player).ignoresSafeArea()
+            // Vid fel tas spelarvyn bort så att Stäng får fokus på Apple TV
+            if playback.error == nil { BasicPlayerVC(player: playback.player).ignoresSafeArea() }
             #if os(iOS)
             VStack {
                 HStack {
                     Button { close() } label: { Image(systemName: "xmark").font(.title3.bold()).padding(10).background(.ultraThinMaterial, in: Circle()) }
-                    Text(request.title + (request.live ? "  · LIVE" : "")).font(.subheadline.weight(.semibold)).lineLimit(1).shadow(radius: 2)
+                    Text(request.title + (request.live ? "  · " + L("LIVE") : "")).font(.subheadline.weight(.semibold)).lineLimit(1).shadow(radius: 2)
                     Spacer()
                 }
                 .padding()

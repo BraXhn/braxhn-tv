@@ -1,0 +1,2 @@
+/* Svenska är appens källspråk: texterna i koden är redan svenska, så filen är tom.
+   Den behövs för att svenska ska räknas som ett språk appen har (annars visas engelska för svenska enheter). */
