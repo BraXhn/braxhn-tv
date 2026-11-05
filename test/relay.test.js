@@ -263,7 +263,7 @@ test('stor fil genom reläet: mottrycket håller minnet nere (reläet och hemser
 });
 
 // ---------------- säkerhet ----------------
-test('via reläet är man alltid utanför hemmet: admin nekas, curate kräver 2FA, hemmakonton nekas, X-Forwarded-For ignoreras', async () => {
+test('via reläet är man alltid utanför hemmet: admin nekas, curate kräver 2FA bara om ägaren valt det, hemmakonton nekas, X-Forwarded-For ignoreras', async () => {
   const A = { authorization: 'Bearer ' + annaTok };
   const spoof = { 'x-forwarded-for': '192.168.1.10', 'x-real-ip': '127.0.0.1', forwarded: 'for=127.0.0.1' };
   // Direkt från loopback (betrott nät): tillåtet
@@ -273,8 +273,13 @@ test('via reläet är man alltid utanför hemmet: admin nekas, curate kräver 2F
   for (const h of [A, { ...A, ...spoof }]) {
     const s = await req(R, '/api/settings', { headers: h, ck: false });
     assert.equal(s.status, 403); assert.match(s.data.error, /hemnätverket/);
-    const cu = await req(R, `/api/items/${FILM_ID}/metadata`, { headers: h, ck: false });
-    assert.equal(cu.status, 403, 'curate kräver tvåstegsverifiering utanför hemmet');
+    // Rätta matchning: tillåtet för admin utanför hemmet som standard, nekas när ägaren kräver 2FA
+    assert.equal((await req(R, `/api/items/${FILM_ID}/metadata`, { headers: h, ck: false })).status, 200);
+    D.setSetting('curate_require_2fa', '1');
+    try {
+      const cu = await req(R, `/api/items/${FILM_ID}/metadata`, { headers: h, ck: false });
+      assert.equal(cu.status, 403, 'curate kräver tvåstegsverifiering när kravet är på');
+    } finally { D.setSetting('curate_require_2fa', '0'); }
     const st = await req(R, '/api/status', { headers: h, ck: false });
     assert.equal(st.data.user.adminHere, false); assert.equal(st.data.remote, true);
   }
