@@ -17,6 +17,10 @@ services:
       - RELAY_ADMIN_TOKEN=${RELAY_ADMIN_TOKEN:-}
     volumes:
       - relay_data:/data
+    # Loggen (anslutningar och misslyckade parningsförsök med IP-adress) roteras: högst 3 × 5 MB
+    logging: &rotate
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
     # Ingen port mot internet: Caddy når reläet i Docker-nätet (relay:8080)
 
   caddy:
@@ -35,6 +39,7 @@ services:
       - caddy_config:/config
     depends_on:
       - relay
+    logging: *rotate
 
 volumes:
   relay_data:

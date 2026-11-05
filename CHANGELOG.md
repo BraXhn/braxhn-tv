@@ -1,6 +1,25 @@
 # Ändringar
 
 ## Ej utgiven
+- **Integritet och personuppgifter (GDPR):**
+  - **Sidan *Integritet*** (under *Mitt konto*): vad servern sparar och hur länge, vilka externa tjänster som är på,
+    vem som ansvarar och användarens rättigheter.
+  - **Ladda ner mina uppgifter:** en JSON-fil med allt om kontot och dess profiler, utan lösenord, PIN-koder och
+    nycklar.
+  - **Radera mitt konto:** för vanliga konton, med lösenordet som bekräftelse.
+  - **Radering lämnar inga spår:** när ett konto tas bort, på något av sätten, försvinner också dess tittarhistorik.
+    Namnet, IP-adressen och kopplingen tas bort ur säkerhetsloggen, önskemål och inbjudningar.
+  - **Gallring:** säkerhetsloggen sparas 180 dagar (inställbart 30–3650, `AUDIT_DAYS`), och IP-adresser i
+    historiken tas bort efter 90 dagar.
+  - **Administration → Integritet (GDPR):** kontaktuppgift för frågor (`PRIVACY_CONTACT`) och loggens lagringstid.
+  - **TMDB-bilder via servern:** affischer i sökningar (Önskningar, Streaming, *Fel titel?*), tjänsternas
+    logotyper på titelsidan och bildvalet i *Redigera* hämtas via `/api/tmdbimg`. Webbläsaren kontaktar aldrig TMDB,
+    och CSP tillåter bara bilder från servern.
+  - **Integritetsmanifest för Apple-apparna** (`PrivacyInfo.xcprivacy`): ingen spårning och ingen insamling.
+    Det krävs av App Store.
+  - **[PRIVACY.md](PRIVACY.md):** integritetspolicy för projektet och apparna, på svenska och engelska. Den kan
+    användas som adress till integritetspolicyn i App Store och Google Play.
+  - **Övrigt:** reläets Docker-logg roteras, och TMDB-attributionen finns i README och på sidan Integritet.
 
 ## 1.0.1 – 2026-11-05
 - **Rätta matchning utanför hemmet utan tvåstegsverifiering:** en administratör kan nu använda *Uppdatera metadata*, *Fel titel?* och *Redigera* utanför hemmet utan tvåstegsverifiering. Den nya inställningen *Kräv tvåstegsverifiering för att rätta matchning utanför hemmet* (Administration, standard av, `CURATE_REQUIRE_2FA`) slår på kravet igen. Övrig administration kräver fortfarande hemnätet. Är rättning spärrad visar knappen en förklaring i stället för att försvinna (`user.curateBlocked` i `/api/status`).

@@ -219,6 +219,13 @@ views.admin = async (sec) => {
     ${S.donateUrl ? `<label class="switch"><input type="checkbox" id="sdon" ${S.showDonate ? 'checked' : ''}> ${t('Visa länken Stöd projektet')} <span class="muted">${t('(i Mitt konto och här, inte för barnprofiler)')}</span></label>
     <p class="muted small" id="donate" ${S.showDonate ? '' : 'hidden'}>${t('BraXhn TV är gratis och utan reklam. Vill du hjälpa till med kostnader och en riktig iOS-app kan du donera via PayPal – helt frivilligt.')} <a href="${esc(S.donateUrl)}" target="_blank" rel="noopener noreferrer">${t('Stöd projektet')}</a></p>` : ''}
   </div>
+  <div class="panel" id="adm-privacy"><h2>${t('Integritet (GDPR)')}</h2>
+    <p class="muted small">${t('Du som kör servern ansvarar för uppgifterna om dem du bjuder in. Användarna ser vad som sparas, hur länge och vilka tjänster som är på under <a href="#/privacy">Integritet</a>, där de också kan ladda ner sina uppgifter.')}</p>
+    <form id="privform"><label for="pcontact">${t('Kontakt för frågor om personuppgifter (visas för användarna)')}</label><input id="pcontact" maxlength="200" value="${esc(S.privacyContact || '')}" placeholder="${t('t.ex. namn och e-post')}">
+    <label for="paudit">${t('Spara säkerhetsloggen (dagar, 30–3650)')}</label><input id="paudit" type="number" min="30" max="3650" value="${S.auditDays}">
+    <p class="muted small">${t('Tittarhistoriken gallras enligt inställningen under Tittarstatistik. IP-adresser i historiken tas alltid bort efter 90 dagar. När en användare tas bort försvinner också historiken och namnet i loggen.')}</p>
+    <div class="row" style="margin-top:12px"><button class="primary">${t('Spara')}</button></div></form>
+  </div>
   <div class="panel"><h2>${t('Live-TV och inspelning')}</h2>
     <p class="muted small">${t('<b>HDHomeRun</b> (antenn/kabel) eller <b>IPTV</b> med en M3U-lista. TV-guide från en XMLTV-adress (t.ex. från din IPTV-leverantör eller <i>xmltv.se</i>) – HDHomeRun har egen guide om ingen anges. Inspelningar sparas i <code>{dvrDir}</code> – lägg till sökvägen <code>/recordings</code> i Unraid-mallen.', { dvrDir: esc(LT.settings.dvrDir) })}</p>
     ${LT.tuners.length ? `<table>${LT.tuners.map(tm => `<tr><td><b>${esc(tm.name)}</b><div class="muted small">${tm.kind === 'hdhr' ? 'HDHomeRun' : 'IPTV'} · ${esc(tm.url)}${tm.epg_url ? ' · guide: ' + esc(tm.epg_url) : ''}</div>${tm.error ? `<div class="err small">${esc(tm.error)}</div>` : ''}</td>
@@ -389,6 +396,10 @@ views.admin = async (sec) => {
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
     if (body.require2faRemote && !me.totp) { if (!await confirmDialog(t('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?'), { okLabel: t('Fortsätt') })) return; }
     try { await api('/settings', { method: 'PUT', body }); toast(t('Sparat')); route(); } catch (er) { toastErr(er); }
+  };
+  $('#privform').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/settings', { method: 'PUT', body: { privacyContact: $('#pcontact').value, auditDays: $('#paudit').value } }); toast(t('Sparat')); } catch (er) { toastErr(er); }
   };
   if ($('#sdon')) $('#sdon').onchange = act(async () => { await api('/settings', { method: 'PUT', body: { showDonate: $('#sdon').checked } }); $('#donate').hidden = !$('#sdon').checked; toast(t('Sparat')); });
   $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast(t('Sparat')); });

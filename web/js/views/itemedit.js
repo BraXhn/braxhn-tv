@@ -2,7 +2,7 @@
 // Dialogen "Redigera" för administratören: flikarna Allmänt (fälten med lås per fält, som i Plex), Bilder (TMDB:s
 // affischer/bakgrunder/logotyper/stillbilder, egen bild, återställ) och Avancerat (låsen och matchningen).
 // Ett fält som ändras låses automatiskt; låsta fält skrivs aldrig över av Uppdatera metadata, NFO eller omskanning.
-import { $, $$, api, esc, toast, toastErr, t } from '../core.js';
+import { $, $$, api, esc, tmdbImg, toast, toastErr, t } from '../core.js';
 import { route } from '../router.js';
 import { iconButton, setIconButton } from '../ui/buttons.js';
 import { openDialog } from '../ui/dialog.js';
@@ -185,7 +185,7 @@ export async function openEditor(it, tab = 'general') {
       : !opts.length ? emptyState({ compact: true, title: t('Inga bilder från TMDB'), text: m.tmdb ? t('TMDB har inga bilder av den här typen. Ladda upp en egen.') : t('Titeln är inte matchad mot TMDB (eller TMDB-nyckel saknas). Ladda upp en egen bild.') })
       : `<p class="muted small">${t('{optsN} {v} från TMDB – välj en.', { optsN: opts.length, v: opts.length === 1 ? t('bild') : t('bilder') })}</p><div class="megallery ${shape}">${opts.map((o, i) => `<button type="button" class="meopt" data-opt="${i}" data-path="${esc(o.path)}" aria-pressed="false"
           aria-label="${t('{v} {v2} av {optsN}, {v3}{v4}', { v: esc(imgLabel(imgType)), v2: i + 1, optsN: opts.length, v3: esc(langName(o.lang)), v4: o.width ? `, ${+o.width}×${+o.height}` : '' })}">
-          <img src="https://image.tmdb.org/t/p/${shape === 'land' ? 'w300' : 'w185'}${esc(o.path)}" alt="" loading="lazy" decoding="async">
+          <img src="${esc(tmdbImg(`https://image.tmdb.org/t/p/${shape === 'land' ? 'w300' : 'w185'}${o.path}`))}" alt="" loading="lazy" decoding="async">
           <span class="melang">${esc(o.lang ? o.lang.toUpperCase() : '–')}</span></button>`).join('')}</div>`;
     markOn();
   }

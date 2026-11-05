@@ -66,6 +66,7 @@ import './routes/tonight.js'; // Kvällsvalet: hushållet röstar fram filmen
 import './routes/history.js';
 import './routes/photos.js';
 import './routes/ebooks.js'; // e-böcker och serietidningar, lösenord för läsappar och OPDS (/api/opds/*)
+import './routes/privacy.js'; // personuppgifter: sidan Integritet, export av egna uppgifter och radering av eget konto
 import './routes/relay.js'; // fjärråtkomst via BraXhn Relay: parning och status (/api/relay, admin)
 import { handle } from './http/router.js';
 import * as relay from './relay.js';

@@ -35,6 +35,7 @@ import { normLibs, normQuality, normStreams } from '../perms.js';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { configuredDonateUrl, donateShown } from '../project.js';
+import * as privacy from '../privacy.js';
 
 // Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
 let integCache = null, integAt = 0;
@@ -161,8 +162,9 @@ route('DELETE', '/api/users/:id', admin, (c) => {
   if (+c.p.id === c.user.id) return fail(c.res, 400, 'Du kan inte ta bort dig själv');
   const t = get('SELECT name FROM users WHERE id=?', +c.p.id);
   // Profilerna försvinner med kontot (deras sessioner tas bort via ON DELETE CASCADE)
-  tx(() => { run('DELETE FROM users WHERE parent_id=?', +c.p.id); run('DELETE FROM users WHERE id=?', +c.p.id); });
-  audit('user_deleted', { ...ctx(c), detail: t?.name });
+  // Historik, loggrader och liknande som inte följer med automatiskt rensas först (privacy.js)
+  tx(() => { privacy.eraseTraces(privacy.householdIds(+c.p.id)); run('DELETE FROM users WHERE parent_id=?', +c.p.id); run('DELETE FROM users WHERE id=?', +c.p.id); });
+  audit('user_deleted', { ...ctx(c), detail: t ? `#${+c.p.id}` : null });
   send(c.res, 200, { ok: true });
 });
 route('GET', '/api/settings', admin, (c) => {
@@ -186,7 +188,9 @@ route('GET', '/api/settings', admin, (c) => {
     bookMeta: bookmeta.enabled(), bookMetaStatus: bookmeta.status, bookMetaRegion: bookmeta.audibleRegion(), bookMetaRegions: Object.keys(bookmeta.AUDIBLE_REGIONS),
     cinemaPreroll: cinema.prerollSetting(), cinemaPrerollFiles: cinema.prerollFiles(insideMedia).length,
     // Länken "Stöd projektet" (null = ingen giltig länk) och om den visas (standard på)
-    donateUrl: configuredDonateUrl(), showDonate: donateShown()
+    donateUrl: configuredDonateUrl(), showDonate: donateShown(),
+    // Integritet: kontaktuppgift som visas för användarna och hur länge säkerhetsloggen sparas
+    privacyContact: privacy.contact(), auditDays: privacy.auditDays()
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -246,6 +250,8 @@ route('PUT', '/api/settings', admin, async (c) => {
   if (b.trickplay != null) setSetting('trickplay', b.trickplay ? '1' : '0');
   if (b.detectRecap != null) setSetting('detect_recap', b.detectRecap ? '1' : '0');
   if (b.showDonate != null) setSetting('show_donate', b.showDonate ? '1' : '0');
+  if (typeof b.privacyContact === 'string') setSetting('privacy_contact', b.privacyContact.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200));
+  if (b.auditDays != null && Number.isFinite(parseInt(b.auditDays))) setSetting('audit_days', String(Math.max(30, Math.min(3650, parseInt(b.auditDays)))));
   if (b.bookMeta != null) setSetting('book_meta', b.bookMeta ? '1' : '0');
   if (typeof b.bookMetaRegion === 'string' && bookmeta.AUDIBLE_REGIONS[b.bookMetaRegion]) setSetting('book_meta_region', b.bookMetaRegion);
   if (b.subAuto != null) setSetting('sub_auto', b.subAuto ? '1' : '0');

@@ -1,6 +1,7 @@
 // Status, första kontot, inloggning, lösenord, tvåstegsverifiering, sessioner, passkeys och profiler (hushåll).
 import crypto from 'node:crypto';
-import { get, getSetting, setSetting, run, now, all } from '../db.js';
+import { get, getSetting, setSetting, run, now, all, tx } from '../db.js';
+import * as privacy from '../privacy.js';
 import { send, fail, readJson, clientIp, rateIp, isHttps, isPrivate, isLocalReq } from '../util.js';
 import { weakPassword, hashPw, audit, cookieHeader, createSession, ipBlocked, userLocked, noteFail, checkPw, dummyCheck, require2faRemote, verifyTotp, useRecoveryCode, clearFails, clearCookies, newTotpSecret, totpUri, newRecoveryCodes, listSessions, ipKey,
   quickConnectOn, qcCreate, qcFind, qcFindCode, qcApprove, qcRemove, QC_TTL } from '../auth.js';
@@ -455,8 +456,8 @@ route('DELETE', '/api/profiles/:pid', user, (c) => {
   const p = get('SELECT * FROM users WHERE id=? AND parent_id=?', +c.p.pid, root);
   if (!p) return fail(c.res, 404, 'Finns inte');
   if (!canManage(c, root)) return fail(c.res, 403, 'Bara huvudkontot kan ta bort profiler');
-  run('DELETE FROM users WHERE id=?', p.id);
-  audit('profile_deleted', { ...ctx(c), detail: p.name });
+  tx(() => { privacy.eraseTraces([p.id]); run('DELETE FROM users WHERE id=?', p.id); });
+  audit('profile_deleted', { ...ctx(c), detail: `#${p.id}` });
   send(c.res, 200, { ok: true });
 });
 // Felaktig PIN (eller huvudkontots lösenord från en barnprofil) vid profilbyte, per målprofil: 5 fel → 5 min spärr,

@@ -58,6 +58,33 @@ Nytt, valfritt fält: en https-adress till PayPal (`server/project.js`). Saknas 
 administratören slagit av *Visa länken Stöd projektet* (`showDonate` i `/api/settings`) och när ingen giltig länk
 finns. Bara webben läser det; apparna ignorerar det.
 
+## Personuppgifter: `/api/privacy`, `/api/me/export`, `DELETE /api/me`
+
+Nya vägar, alla kräver inloggning. Apparna behöver inte använda dem, eftersom webben har sidan *Integritet*.
+
+- **`GET /api/privacy`** svarar med:
+  - `contact`: sträng eller `null`;
+  - `retention: { historyDays, auditDays, ipDays }`;
+  - `services`: flaggor för de externa tjänster som är på;
+  - `canDeleteSelf` och `hasPassword`.
+- **`GET /api/me/export`** ger en JSON-bilaga `braxhn-tv-mina-uppgifter-ÅÅÅÅ-MM-DD.json` (`format:
+  "braxhn-tv-personuppgifter/1"`):
+  - `users`: kontot och dess profiler;
+  - `tables`: raderna per tabell;
+  - `items`: titlarna raderna pekar på.
+
+  Lösenord, PIN-koder, nycklar och token tas aldrig med.
+- **`DELETE /api/me`** tar `{ "password": "…" }`, eller `{ "confirm": "<kontots namn>" }` för konton utan lösenord.
+  - Svarar 200 och tar bort kakan.
+  - Profiler och administratörer får 400.
+  - Fel lösenord ger 400 och räknas som ett misslyckat försök (429 vid spärr).
+- **`GET /api/tmdbimg/:size/:file`** ger en TMDB-bild via servern (bara TMDB:s storlekar och filnamn, annars 404).
+  - Webben använder den för TMDB-adresser i svaren.
+  - Svaren har kvar TMDB:s adresser, så apparna kan använda dem som förut.
+- **`/api/settings`** (admin) har två nya fält:
+  - `privacyContact`: sträng, högst 200 tecken;
+  - `auditDays`: 30–3650.
+
 ## Enkel inloggning: `/api/sso/*` och `/api/me/sso`
 
 Bara webben använder dem; apparna loggar in som förut (LDAP-användare med `POST /api/login`, se nedan).

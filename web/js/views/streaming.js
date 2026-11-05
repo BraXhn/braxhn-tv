@@ -1,6 +1,6 @@
 // Vyer: strömmande tjänster och var en titel finns att se
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, main, me, store, toast, views, t } from '../core.js';
+import { $, $$, act, api, esc, tmdbImg, main, me, store, toast, views, t } from '../core.js';
 import { route } from '../router.js';
 import { REQ_STATUS } from './requests.js';
 import { provBlock } from './item.js';
@@ -17,7 +17,7 @@ views.streaming = async () => {
   const shown = P_.all.filter(p => P_.mine.includes(p.id) || sel.includes(p.id));
   main.innerHTML = `<div class="toolbar"><h1>${t('Strömmande')}</h1><span class="muted">${t('Det som finns på era tjänster just nu')}</span>
       <select id="stk" style="margin-left:auto"><option value="movie">${t('Filmer')}</option><option value="show">${t('Serier')}</option></select>${me.adminHere ? t('<button class="ghost" id="stmine">Välj era tjänster</button>') : ''}</div>
-    ${P_.mine.length ? `<div class="provrow" id="stchips">${shown.map(p => `<button class="prov chip${sel.includes(p.id) ? ' mine' : ''}" data-pv="${p.id}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></button>`).join('')}</div>
+    ${P_.mine.length ? `<div class="provrow" id="stchips">${shown.map(p => `<button class="prov chip${sel.includes(p.id) ? ' mine' : ''}" data-pv="${p.id}">${p.logo ? `<img src="${esc(tmdbImg(p.logo))}" alt="">` : ''}<span>${esc(p.name)}</span></button>`).join('')}</div>
       <div class="grid" id="stgrid" style="margin-top:16px" aria-busy="true">${loadingState({ kind: 'inline' })}</div><div class="row" style="justify-content:center;margin:16px 0"><button class="ghost" id="stmore" hidden>${t('Visa fler')}</button></div>`
     : emptyState({ icon: '📡', title: t('Inga tjänster valda'), text: me.adminHere ? t('Välj vilka tjänster ni har (t.ex. Prime Video och TV4 Play) så visas deras utbud här.') : t('En administratör behöver välja vilka tjänster ni har.') })}
     <p class="muted small">${t('BraXhn TV kan inte spela upp innehåll från tjänsterna (de är kopieringsskyddade) – ett klick öppnar titeln i tjänstens egen app eller webbplats.')}</p>`;
@@ -25,7 +25,7 @@ views.streaming = async () => {
   $('#stk').onchange = (e) => { store.set('stkind', e.target.value); route(); };
   if ($('#stmine')) $('#stmine').onclick = () => {
     openDialog({ title: t('Era streamingtjänster'), size: 'wide',
-      body: `<div class="provpick">${P_.all.map(p => `<label class="prov"><input type="checkbox" value="${p.id}" ${P_.mine.includes(p.id) ? 'checked' : ''}>${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('')}</div>`,
+      body: `<div class="provpick">${P_.all.map(p => `<label class="prov"><input type="checkbox" value="${p.id}" ${P_.mine.includes(p.id) ? 'checked' : ''}>${p.logo ? `<img src="${esc(tmdbImg(p.logo))}" alt="">` : ''}<span>${esc(p.name)}</span></label>`).join('')}</div>`,
       actions: [{ label: t('Avbryt') }, { label: t('Spara'), kind: 'primary', onClick: async ({ el }) => {
         const ids = $$('input:checked', el).map(i => +i.value); await api('/streaming/mine', { method: 'PUT', body: { ids }, bg: true }); store.set('stprov', ''); route();
       } }] });
@@ -33,7 +33,7 @@ views.streaming = async () => {
   if (!P_.mine.length) return;
   $$('[data-pv]').forEach(b => b.onclick = () => { const id = +b.dataset.pv; const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); store.set('stprov', [...s].join(',') || P_.mine.join(',')); route(); });
   let page = 1, results = [];
-  const stCard = (x, i) => `<a class="card" href="#" data-st="${i}"><div class="art">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : `<div class="ph">${esc(x.title)}</div>`}${x.inLibrary ? t('<span class="badge">Hemma</span>') : ''}</div><div class="t">${esc(x.title)}</div><div class="s">${x.year || ''}</div></a>`;
+  const stCard = (x, i) => `<a class="card" href="#" data-st="${i}"><div class="art">${x.poster ? `<img loading="lazy" src="${esc(tmdbImg(x.poster))}" alt="">` : `<div class="ph">${esc(x.title)}</div>`}${x.inLibrary ? t('<span class="badge">Hemma</span>') : ''}</div><div class="t">${esc(x.title)}</div><div class="s">${x.year || ''}</div></a>`;
   const load = async () => {
     const r = await api(`/streaming/discover?kind=${kind}&providers=${sel.join(',')}&page=${page}`);
     const grid = $('#stgrid'), more = $('#stmore');
@@ -55,7 +55,7 @@ views.streaming = async () => {
 };
 async function streamDialog(x) {
   const h = openDialog({ title: `${x.title}${x.year ? ` (${x.year})` : ''}`,
-    body: `<div class="row" style="align-items:flex-start;gap:16px;flex-wrap:nowrap">${x.poster ? `<img src="${esc(x.poster)}" alt="" width="110" style="width:110px;height:auto;border-radius:8px">` : ''}
+    body: `<div class="row" style="align-items:flex-start;gap:16px;flex-wrap:nowrap">${x.poster ? `<img src="${esc(tmdbImg(x.poster))}" alt="" width="110" style="width:110px;height:auto;border-radius:8px">` : ''}
     <p class="small" style="margin:0">${esc(x.overview || '')}</p></div>
     <div id="sdp" aria-live="polite">${loadingState({ kind: 'inline' })}</div>
     ${x.inLibrary ? `<p>${t('<a class="btn primary" href="#/item/{inLibrary}">▶ Finns hemma – spela</a>', { inLibrary: +x.inLibrary })}</p>` : ''}`,

@@ -21,7 +21,8 @@ export const EVENTS = { login_ok: t('Inloggning'), login_fail: t('Misslyckad inl
   '2fa_recovery_used': t('Reservkod använd'), '2fa_recovery_regenerated': t('Nya reservkoder'), session_revoked: t('Enhet utloggad'), sessions_revoked_all: t('Alla enheter utloggade'),
   user_created: t('Användare skapad'), user_updated: t('Användare ändrad'), user_deleted: t('Användare borttagen'), settings_changed: t('Inställningar ändrade'),
   admin_denied: t('Admin nekad (utifrån)'), passkey_added: t('Passkey tillagd'), passkey_removed: t('Passkey borttagen'), passkey_add_fail: t('Passkey misslyckades'), acme_obtain: t('Certifikat begärt'), quickconnect_approved: t('Inloggning med kod godkänd'), quickconnect_fail: t('Fel kod för TV-inloggning'), quickconnect_denied: t('TV-inloggning nekad'), library_added: t('Bibliotek tillagt'), library_removed: t('Bibliotek borttaget'),
-  sso_linked: t('Enkel inloggning kopplad'), sso_unlinked: t('Enkel inloggning bortkopplad'), sso_link_pending: t('Koppling väntar på bekräftelse'), sso_user_created: t('Konto skapat via enkel inloggning'), sso_error: t('Fel hos inloggningsleverantören') };
+  sso_linked: t('Enkel inloggning kopplad'), sso_unlinked: t('Enkel inloggning bortkopplad'), sso_link_pending: t('Koppling väntar på bekräftelse'), sso_user_created: t('Konto skapat via enkel inloggning'), sso_error: t('Fel hos inloggningsleverantören'),
+  data_exported: t('Uppgifter nedladdade'), account_self_deleted: t('Konto raderat av användaren'), profile_deleted: t('Profil borttagen') };
 const device = (ua) => {
   ua = ua || '';
   if (/BraXhnTV-Android|Android.*Automotive/i.test(ua)) return 'Android-app';
@@ -136,6 +137,10 @@ views.account = async () => {
   <div class="panel" id="opds" hidden></div>
   <div class="panel" id="listenprefs"></div>
   <div class="panel" id="calfeed"></div>
+  <div class="panel"><h2>${t('Mina uppgifter')}</h2>
+    <p class="muted small">${t('Vad servern sparar om dig, hur länge och vilka externa tjänster den använder. Här kan du också ladda ner dina uppgifter.')}</p>
+    <div class="row"><a class="btn ghost" href="#/privacy">${t('Integritet och mina uppgifter →')}</a></div>
+  </div>
   <div class="panel"><h2>${t('Inloggade enheter')}</h2>
     <table><tr><th>${t('Enhet')}</th><th>IP</th><th>${t('Senast aktiv')}</th><th></th></tr>
     ${sess.map(s => `<tr><td>${esc(device(s.ua))}${s.current ? t(' <span class="ok-badge">Den här</span>') : ''}</td><td class="muted">${esc(s.ip || '–')}</td><td class="muted">${fmtDate(s.last_seen)}</td>

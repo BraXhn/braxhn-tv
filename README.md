@@ -394,7 +394,23 @@ Servern kontaktar externa tjänster bara för funktioner du använder:
 | Sonarr, Radarr, Plex, Jellyfin/Emby, HDHomeRun (`api.hdhomerun.com` för guiden), IPTV-leverantörer, S3, notistjänster (ntfy, Pushover, Telegram, Gotify, Discord), webhooks, OIDC/LDAP | Bara adresserna du själv anger |
 | Googles Cast-SDK (`www.gstatic.com`) | Laddas **av webbläsaren** när spelaren öppnas i Chrome, för Casta-knappen |
 
-YouTube öppnas bara om du klickar på en trailerlänk. Bilder från TMDB hämtas och cachas av servern, så hushållets webbläsare kontaktar inte TMDB – utom bildvalet under *Redigera → Bilder*, där administratörens webbläsare visar TMDB:s miniatyrer direkt.
+YouTube öppnas bara om du klickar på en trailerlänk. Bilder från TMDB hämtas och cachas av servern, även
+affischerna i sökningar, tjänsternas logotyper och bildvalet under *Redigera → Bilder* (via `/api/tmdbimg`). Hushållets
+webbläsare kontaktar alltså aldrig TMDB, och Content-Security-Policy spärrar det dessutom.
+
+**Personuppgifter (GDPR).** Den som kör servern ansvarar för uppgifterna om dem som bjuds in. BraXhn TV har verktygen:
+
+- **Integritet** (under *Mitt konto*): användaren ser vad som sparas, hur länge och vilka externa tjänster som är på,
+  laddar ner sina uppgifter som JSON och raderar sitt konto.
+- **Radering:** när ett konto tas bort försvinner också dess historik, och namnet och IP-adressen tas bort ur
+  säkerhetsloggen.
+- **Gallring:** IP-adresser i historiken tas bort efter 90 dagar, och säkerhetsloggen sparas 180 dagar
+  (inställbart).
+- **Kontakt:** under *Administration → Integritet (GDPR)* anger du en kontaktuppgift för frågor.
+
+Mer i [PRIVACY.md](PRIVACY.md), som också är integritetspolicyn för apparna.
+
+*Den här produkten använder TMDB:s API men är inte godkänd eller certifierad av TMDB.*
 
 ## Säkerhetskopior och återställning
 
@@ -491,6 +507,8 @@ Bra att veta:
 | `DB_UPGRADE_BACKUPS` | 3 | Antal säkerhetskopior av databasen från före uppgraderingar som behålls i `/config/backups` |
 | `ALLOW_DOWNGRADE` | 0 | 1 = starta även mot en databas från en nyare version (nedgradering, på egen risk) |
 | `HISTORY_DAYS` | 365 | Hur många dagar tittarhistoriken sparas (0 = för alltid; kan även sättas under Tittarstatistik) |
+| `AUDIT_DAYS` | 180 | Hur många dagar säkerhetsloggen sparas (30–3650; kan även sättas under Administration → Integritet) |
+| `PRIVACY_CONTACT` | – | Kontakt för frågor om personuppgifter som visas för användarna under Integritet (kan även sättas i Administration) |
 | `WEBHOOK_INTERVAL` | 10 | Sekunder mellan genomgångar av webhook-kön (0 = av) |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |
 | `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | – | Din Trakt-app |

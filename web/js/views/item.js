@@ -1,6 +1,6 @@
 // Vyer: film-, avsnitts- och seriesidor med trailers, extramaterial, eget betyg, temamusik, metadataverktyg, undertextsökning och följ-knapp
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDur, fmtRating, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, resumeAt, store, sxe, toast, toastErr, views, t } from '../core.js';
+import { $, $$, act, api, esc, tmdbImg, fmtDur, fmtRating, fmtSize, fmtTime, heroUrl, imgSrc, main, me, onLeave, resLabel, resumeAt, store, sxe, toast, toastErr, views, t } from '../core.js';
 import { capsQuery } from '../player/caps.js';
 import { curPlayer, liveOpen, loadPlayer, need, openRemotePicker, startPlay } from '../lazy.js';
 import { route } from '../router.js';
@@ -17,7 +17,7 @@ import { downloadEpisodes, downloadItem, stateOf, supported as offlineOk } from 
 
 // ---------- "Finns även på" (streamingtjänster för titeln) ----------
 // Här och inte i views/streaming.js: den vyn laddas först när den öppnas, men rutan syns på varje titelsida
-const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="${t('Öppna i {name}', { name: esc(p.name) })}">${p.logo ? `<img src="${esc(p.logo)}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
+const provLinks = (list) => list.map(p => `<a class="prov${p.mine ? ' mine' : ''}" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="${t('Öppna i {name}', { name: esc(p.name) })}">${p.logo ? `<img src="${esc(tmdbImg(p.logo))}" alt="">` : ''}<span>${esc(p.name)}</span></a>`).join('');
 /** Tjänsterna där en titel finns (från /api/items/:id/watch) som HTML, '' om inga */
 export const provBlock = (w) => {
   if (!w) return '';
@@ -262,7 +262,7 @@ export function matchItem(it) {
       $('#mlock', d).textContent = r.locked ? t('Matchningen är låst och ändras inte vid omskanning.') : '';
       $('#munlock', d).hidden = !r.locked;
       $('#mres', d).innerHTML = r.results.map(x => `<button class="mcard${x.id === r.current ? ' on' : ''}" data-tid="${x.id}">
-        ${x.poster ? `<img src="${esc(x.poster)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+        ${x.poster ? `<img src="${esc(tmdbImg(x.poster))}" alt="" loading="lazy">` : '<div class="ph"></div>'}
         <div><b>${esc(x.title)}</b> ${x.year ? `<span class="muted">(${x.year})</span>` : ''}${x.original && x.original !== x.title ? `<div class="muted small">${esc(x.original)}</div>` : ''}
         <div class="small muted">${esc(x.overview)}</div></div></button>`).join('') || emptyState({ compact: true, title: t('Inga träffar'), text: t('Prova en annan stavning eller originaltiteln.') });
       $$('[data-tid]', d).forEach(b => b.onclick = async () => {

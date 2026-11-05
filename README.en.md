@@ -242,7 +242,24 @@ The server only contacts external services for features you use, and only from t
 | Sonarr, Radarr, Plex, Jellyfin/Emby, HDHomeRun (`api.hdhomerun.com` for the guide), IPTV providers, S3 storage, notification services (ntfy, Pushover, Telegram, Gotify …), webhooks, OIDC/LDAP | Only the addresses you configure |
 | Google Cast SDK (`www.gstatic.com`) | Loaded **by the browser** only when you open the player in Chrome, for the Cast button |
 
-YouTube is only opened if you click a trailer link. Images from TMDB are fetched and cached by the server, so the household's browsers don't contact TMDB – except the image picker under *Edit → Images*, where the administrator's browser shows TMDB's thumbnails directly.
+YouTube is only opened if you click a trailer link. Images from TMDB are fetched and cached by the server, including
+posters in searches, service logos and the image picker under *Edit → Images* (via `/api/tmdbimg`). The household's
+browsers therefore never contact TMDB, and the Content-Security-Policy blocks it as well.
+
+**Personal data (GDPR).** Whoever runs the server is responsible for the data about the people they invite. BraXhn TV
+has the tools:
+
+- **Privacy** (under *My account*): users see what is stored, for how long and which external services are on,
+  download their data as JSON and delete their account.
+- **Deletion:** removing an account also removes its history, and its name and IP address are removed from the
+  security log.
+- **Pruning:** IP addresses in the history are removed after 90 days, and the security log is kept for 180 days
+  (configurable).
+- **Contact:** under *Administration → Privacy (GDPR)* you set a contact for questions.
+
+More in [PRIVACY.md](PRIVACY.md), which is also the privacy policy for the apps.
+
+*This product uses the TMDB API but is not endorsed or certified by TMDB.*
 
 ## Backups
 
@@ -337,6 +354,8 @@ Many of these can also be changed in the web UI. Set them in the Unraid template
 | `DB_UPGRADE_BACKUPS` | 3 | Number of database backups from before upgrades kept in `/config/backups` |
 | `ALLOW_DOWNGRADE` | 0 | 1 = start even against a database from a newer version (downgrade, at your own risk) |
 | `HISTORY_DAYS` | 365 | How many days viewing history is kept (0 = forever; can also be set under Viewing statistics) |
+| `AUDIT_DAYS` | 180 | How many days the security log is kept (30–3650; can also be set under Administration → Privacy) |
+| `PRIVACY_CONTACT` | – | Contact for questions about personal data, shown to users under Privacy (can also be set in Administration) |
 | `WEBHOOK_INTERVAL` | 10 | Seconds between runs of the webhook queue (0 = off) |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (can also be set in the web UI) |
 | `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | – | Your Trakt app |

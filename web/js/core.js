@@ -4,6 +4,8 @@ export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 // Utan DOM (Node-testerna importerar rena moduler som player/autoskip.js, som använder t()): main blir null
 export const main = globalThis.document ? $('#main') : null;
+/** TMDB-bildadress → samma bild via servern (/api/tmdbimg), så att webbläsaren inte kontaktar TMDB (CSP spärrar det) */
+export const tmdbImg = (u) => typeof u === 'string' ? u.replace(/^https:\/\/image\.tmdb\.org\/t\/p\/([a-z0-9]+)\/([A-Za-z0-9_-]+\.(?:jpg|jpeg|png|svg|webp))$/, '/api/tmdbimg/$1/$2') : u;
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const store = {
   get(k, d) { try { const v = localStorage.getItem('braxhn-tv.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },

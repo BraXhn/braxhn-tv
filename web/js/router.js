@@ -38,7 +38,7 @@ export async function loadLibs(list) {
 // Rubriken till vänster i menyraden ("Hem", bibliotekets namn …)
 const CRUMB = { '': t('Hem'), home: t('Hem'), watchlist: t('Min lista'), search: t('Sök'), podcasts: t('Poddar'), podcast: t('Poddar'), live: t('Live-TV'), streaming: t('Strömmande'),
   account: t('Mitt konto'), admin: t('Administration'), setup: t('Installation'), stats: t('Statistik'), requests: t('Önskningar'), calendar: t('Kommande'), wrapped: t('Årssammanfattning'), collection: t('Samling'), collections: t('Samlingar'), ucollection: t('Samling'), person: 'Person',
-  history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'), sso: t('Enkel inloggning'),
+  history: t('Min historik'), playstats: t('Tittarstatistik'), webhooks: 'Webhooks', downloads: t('Nedladdat'), epg: t('TV-guide'), vod: t('Filmer och serier'), iptvadmin: 'IPTV', health: t('Hälsokontroll'), shrink: t('Diskrådgivaren'), tonight: t('Kvällsvalet'), sso: t('Enkel inloggning'), privacy: t('Integritet'),
   quickconnect: t('Godkänn inloggning'), guide: t('TV-guide'), dvr: t('Inspelningar'), photos: t('Foton'), lib: t('Bibliotek'), music: t('Musik'), books: t('Ljudböcker'),
   ebooks: t('E-böcker'), ebook: t('E-bok'), read: t('Läsaren'), vocab: t('Ordlista'), moments: t('Ögonblick'), family: t('Föräldraöversikt') };
 // Sidor som inte syns i menyraden (rubriken för skärmläsare och flikens titel)
@@ -157,7 +157,7 @@ const LAZY = new Map(Object.entries({ item: 'views/item', person: 'views/person'
   login: 'views/login', invite: 'views/login', profiles: 'views/login', party: 'player/party',
   admin: 'views/admin', stats: 'views/stats', wrapped: 'views/wrapped', requests: 'views/requests', streaming: 'views/streaming', live: 'views/live', guide: 'views/live', dvr: 'views/dvr', epg: 'views/epg', vod: 'views/vod', iptvadmin: 'views/iptvadmin',
   history: 'views/history', playstats: 'views/history', webhooks: 'views/webhooks', photos: 'views/photos', downloads: 'views/downloads', health: 'views/health', shrink: 'views/shrink', tonight: 'views/tonight', sso: 'views/sso',
-  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader', vocab: 'views/vocab', moments: 'views/moments', family: 'views/family' }));
+  ebooks: 'views/ebooks', ebook: 'views/ebooks', read: 'views/reader', vocab: 'views/vocab', moments: 'views/moments', family: 'views/family', privacy: 'views/privacy' }));
 /** Hämtar vyns modul i förväg (pekaren över eller fokus på en länk dit) */
 export function prefetchView(name) { const m = !views[name] && LAZY.get(name); if (m) need(m + '.js').catch(() => {}); }
 // Pekaren över (även ett tryck börjar så) eller fokus på en länk eller ett kort: hämta vyn – och spelaren för

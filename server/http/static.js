@@ -68,9 +68,10 @@ const START_CSP = cspHash(START_JS);
 // Service workerns skal: filerna med hash (sw.js läser listan)
 const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|style\.css|vendor\/hls\.min\.js|i18n\/en\.js)$/.test(r))));
 
-// Content Security Policy: bara egna skript (plus Googles Cast-SDK)
+// Content Security Policy: bara egna skript (plus Googles Cast-SDK). Bilder bara från servern – TMDB:s bilder går via
+// /api/tmdbimg (routes/privacy.js), så att webbläsaren aldrig kontaktar TMDB.
 const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} ${START_CSP} https://www.gstatic.com`,
-  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https://image.tmdb.org", "media-src 'self' blob:", "connect-src 'self'",
+  "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "media-src 'self' blob:", "connect-src 'self'",
   "font-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "frame-src https://www.gstatic.com"].join('; ');
 
 // Färdiga svar per fil: { raw, br, gz, etag, type, mtime }. Byts när filen ändras (utveckling); i imagen aldrig.
