@@ -21,7 +21,7 @@ import * as prestart from '../prestart.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import * as mediaImport from '../mediaimport.js';
-import { route, admin, user, adminAnywhere, curateAnywhere, trustVpn, isTrusted } from '../http/router.js';
+import { route, admin, user, adminAnywhere, curateAnywhere, curate2fa, trustVpn, isTrusted } from '../http/router.js';
 import { ctx, MEDIA_ROOT, allowUnrated, invalidateProfile, insideMedia } from '../http/context.js';
 import * as cinema from '../cinema.js';
 import * as jobs from '../jobs.js';
@@ -177,7 +177,7 @@ route('GET', '/api/settings', admin, (c) => {
     subAutoMax: +getSetting('sub_auto_max', '10'), subAutoStats: autoSubs,
     remoteQuality: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''),
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
-    adminAnywhere: adminAnywhere(), curateAnywhere: curateAnywhere(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), subsonic: subsonic.enabled(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
+    adminAnywhere: adminAnywhere(), curateAnywhere: curateAnywhere(), curateRequire2fa: curate2fa(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), subsonic: subsonic.enabled(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
     maxTranscodes: st.limits().global, maxTranscodesUser: st.limits().user,
     transcodeVcodec: st.vcodecSetting(), transcode: st.transcodeInfo(),
@@ -216,6 +216,10 @@ route('PUT', '/api/settings', admin, async (c) => {
   if (b.curateAnywhere != null) {
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
     setSetting('curate_anywhere', b.curateAnywhere ? '1' : '0');
+  }
+  if (b.curateRequire2fa != null) {
+    if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');
+    setSetting('curate_require_2fa', b.curateRequire2fa ? '1' : '0');
   }
   if (b.trustVpnRange != null) {
     if (!isTrusted(c.req)) return fail(c.res, 403, 'Kan bara ändras från hemnätverket');

@@ -3898,6 +3898,8 @@ self.BX_I18N = {
   "Tryck på ▶ för att starta uppspelningen": "Press ▶ to start playback",
   "Rätta matchning och metadata utanför hemmet": "Fix matches and metadata away from home",
   "(bara administratörer med tvåstegsverifiering eller passkey – övrig administration kräver hemnätet)": "(only administrators with two-step verification or a passkey – other administration requires the home network)",
+  "(bara administratörer – övrig administration kräver hemnätet)": "(administrators only – other administration requires the home network)",
+  "Kräv tvåstegsverifiering för att rätta matchning utanför hemmet": "Require two-step verification to fix matches away from home",
   // "Det här har hänt" (player/recap.js)
   "Det här har hänt": "Previously",
   "⟲ Det här har hänt": "⟲ Previously",

@@ -102,8 +102,12 @@ export const isTrusted = (req) => { if (viaRelay(req)) return false; const ip = 
 export const adminAnywhere = () => getSetting('admin_anywhere', process.env.ADMIN_ANYWHERE || '0') === '1';
 /** Får administratörer med tvåstegsverifiering rätta matchning/metadata utifrån? (på som standard) */
 export const curateAnywhere = () => getSetting('curate_anywhere', process.env.CURATE_ANYWHERE || '1') === '1';
+/** Kräv tvåstegsverifiering (eller passkey) för att rätta matchning utanför hemmet – standard av, ägaren väljer */
+export const curate2fa = () => getSetting('curate_require_2fa', process.env.CURATE_REQUIRE_2FA || '0') === '1';
+/** Uppfyller administratören kravet för att rätta utifrån? */
+const curateOk = (u) => curateAnywhere() && (!curate2fa() || has2fa(u));
 /** Får den här administratören rätta matchning och metadata från förfrågans nät? */
-export const curateHere = (u, req) => !!u?.is_admin && (adminAnywhere() || isTrusted(req) || (curateAnywhere() && has2fa(u)));
+export const curateHere = (u, req) => !!u?.is_admin && (adminAnywhere() || isTrusted(req) || curateOk(u));
 
 /** Profiler ärver huvudkontots tvåstegsverifiering (de nås bara via ett inloggat hushåll); en passkey räknas också, liksom
  *  en koppling till en leverantör för enkel inloggning som administratören markerat "sköter tvåstegsverifieringen" (sso.js) */
@@ -206,7 +210,7 @@ export async function handle(req, res) {
     // Administration: administratör, och betrott nät om inte "administration överallt" är påslaget
     if (r.admin) {
       if (!c.user.is_admin) return fail(res, 403, 'Kräver administratör');
-      if (!adminAnywhere() && !isTrusted(req) && !(r.curate && curateAnywhere() && has2fa(c.user))) { audit('admin_denied', { user: c.user, ip: clientIp(req), detail: url.pathname }); return fail(res, 403, 'Administration är bara tillåten från hemnätverket eller VPN'); }
+      if (!adminAnywhere() && !isTrusted(req) && !(r.curate && curateOk(c.user))) { audit('admin_denied', { user: c.user, ip: clientIp(req), detail: url.pathname }); return fail(res, 403, 'Administration är bara tillåten från hemnätverket eller VPN'); }
     }
     // CSRF: ändrande anrop med kaka måste komma från samma origin. Inloggning och första kontot
     // utan kaka nekas också från annan origin (skyddar mot inloggnings-CSRF).

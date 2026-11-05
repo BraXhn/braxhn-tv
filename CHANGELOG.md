@@ -1,7 +1,7 @@
 # Ändringar
 
 ## Ej utgiven
-- **Rätta matchning utanför hemmet förklarar sig:** en administratör som inte får rätta härifrån (tvåstegsverifiering eller passkey saknas, eller inställningen är avstängd) ser nu knappen *Uppdatera metadata* med en förklaring om vad som behövs, i stället för att knapparna bara försvinner. `/api/status` har det nya fältet `user.curateBlocked` (`no2fa`/`off`).
+- **Rätta matchning utanför hemmet utan tvåstegsverifiering:** en administratör kan nu använda *Uppdatera metadata*, *Fel titel?* och *Redigera* utanför hemmet utan tvåstegsverifiering. Den nya inställningen *Kräv tvåstegsverifiering för att rätta matchning utanför hemmet* (Administration, standard av, `CURATE_REQUIRE_2FA`) slår på kravet igen. Övrig administration kräver fortfarande hemnätet. Är rättning spärrad visar knappen en förklaring i stället för att försvinna (`user.curateBlocked` i `/api/status`).
 
 - **iPhone-, iPad- och Apple TV-appen i fas med servern 1.0** (appen hade stått still sedan oktober):
   - **Långsam start med grafikkort:** omkodning med NVENC/VAAPI kan ta ~10 s till första segmentet. Spelaren säger efter 4 s att servern förbereder strömmen, och ger AVPlayer upp under starten provas *samma* ström-URL igen (samma session och ffmpeg på servern) i stället för en svart skärm – ingen ny `/playback`. `/playback` får `start=` vid fortsättning, så att servern förstartar omkodningen där filmen börjar och inte från början. Ett fel under uppspelningen ger *Försök igen*.

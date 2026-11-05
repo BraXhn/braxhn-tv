@@ -300,6 +300,9 @@ test('återställ till automatiskt: låset tas bort och TMDB:s bild hämtas igen
 });
 
 test('behörighet: bara administratör, bara betrott nät, CSRF med kaka', { skip: !hasFfmpeg }, async () => {
+  // Utifrån utan tvåstegsverifiering nekas bara när kravet är påslaget (standard av – se nästa test)
+  assert.equal((await req('/api/settings', { method: 'PUT', body: { curateRequire2fa: true } })).status, 200);
+  try {
   const id = ids.movie, png = fs.readFileSync(path.join(ROOT, 'egen.png'));
   const calls = [['GET', `/api/items/${id}/metadata`], ['PUT', `/api/items/${id}/metadata`, { values: { title: 'x' } }], ['GET', `/api/items/${id}/images/poster`],
     ['POST', `/api/items/${id}/images/poster`, { tmdbPath: '/p-sv.jpg' }], ['DELETE', `/api/items/${id}/images/poster`]];
@@ -316,6 +319,7 @@ test('behörighet: bara administratör, bara betrott nät, CSRF med kaka', { ski
   assert.equal((await put(B)).status, 200);
   assert.equal((await req('/api/items/999999/metadata')).status, 404);
   assert.equal(item('id=?', id).title, 'Matrix igen', 'inget nekat anrop ändrade titeln');
+  } finally { await req('/api/settings', { method: 'PUT', body: { curateRequire2fa: false } }); }
 });
 
 test('utanför hemmet: administratör med tvåstegsverifiering får rätta matchning och metadata – inget annat', { skip: !hasFfmpeg }, async () => {
@@ -323,7 +327,13 @@ test('utanför hemmet: administratör med tvåstegsverifiering får rätta match
   const adminId = D.get("SELECT id FROM users WHERE name='admin'").id;
   const st = async () => (await req('/api/status', { headers: far })).data.user;
   try {
-    // Utan tvåstegsverifiering: nekas, som förut
+    // Standard: tvåstegsverifiering krävs inte – administratören får rätta utifrån direkt
+    assert.equal((await st()).curateHere, true);
+    assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 200);
+    // Med kravet påslaget (bara hemifrån): utan tvåstegsverifiering nekas
+    assert.equal((await req('/api/settings', { method: 'PUT', body: { curateRequire2fa: true }, headers: far })).status, 403);
+    assert.equal((await req('/api/settings', { method: 'PUT', body: { curateRequire2fa: true } })).status, 200);
+    assert.equal((await req('/api/settings')).data.curateRequire2fa, true);
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far })).status, 403);
     assert.equal((await st()).curateHere, false);
     assert.equal((await st()).curateBlocked, 'no2fa', 'webben förklarar att tvåstegsverifiering saknas');
@@ -346,5 +356,5 @@ test('utanför hemmet: administratör med tvåstegsverifiering får rätta match
     assert.equal((await req('/api/settings', { method: 'PUT', body: { curateAnywhere: true } })).status, 200);
     // Vanliga användare får aldrig
     assert.equal((await req(`/api/items/${ids.movie}/metadata`, { headers: far, t: userTok })).status, 403);
-  } finally { D.run('UPDATE users SET totp_enabled=0 WHERE id=?', adminId); }
+  } finally { D.run('UPDATE users SET totp_enabled=0 WHERE id=?', adminId); await req('/api/settings', { method: 'PUT', body: { curateRequire2fa: false } }); }
 });

@@ -200,7 +200,8 @@ views.admin = async (sec) => {
     <label class="switch"><input type="checkbox" id="sqc" ${S.quickConnect !== false ? 'checked' : ''}> ${t('Tillåt inloggning med kod på TV (en inloggad användare godkänner koden från mobilen)')}</label>
     <label class="switch"><input type="checkbox" id="ssub" ${S.subsonic !== false ? 'checked' : ''}> ${t('Tillåt musikappar (Subsonic: Symfonium, Amperfy, play:Sub …) – var och en skapar ett eget lösenord för musikappar under Mitt konto')}</label>
     <label class="switch"><input type="checkbox" id="sadm" ${S.adminAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> ${t('Tillåt administration från internet')} <span class="muted">${t('(rekommenderas inte)')}</span></label>
-    <label class="switch"><input type="checkbox" id="scur" ${S.curateAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> ${t('Rätta matchning och metadata utanför hemmet')} <span class="muted">${t('(bara administratörer med tvåstegsverifiering eller passkey – övrig administration kräver hemnätet)')}</span></label>
+    <label class="switch"><input type="checkbox" id="scur" ${S.curateAnywhere ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> ${t('Rätta matchning och metadata utanför hemmet')} <span class="muted">${t('(bara administratörer – övrig administration kräver hemnätet)')}</span></label>
+    <label class="switch"><input type="checkbox" id="scur2fa" ${S.curateRequire2fa ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> ${t('Kräv tvåstegsverifiering för att rätta matchning utanför hemmet')}</label>
     <label class="switch"><input type="checkbox" id="svpn" ${S.trustVpnRange ? 'checked' : ''} ${S.youAreLocal ? '' : 'disabled'}> ${t('Räkna VPN-nätet 100.64.0.0/10 (NetBird/Tailscale) som hemma')} <span class="muted">${t('(behövs normalt inte om VPN:et routas via routern)')}</span></label>
     <label for="stn">${t('Extra betrodda nät utöver hemnätet, t.ex. 10.8.0.0/24 (minst /16)')}</label><input id="stn" value="${esc(S.trustedNetworks)}" placeholder="${t('kommaseparerade CIDR')}">
     <label class="switch"><input type="checkbox" id="sunr" ${S.allowUnrated ? 'checked' : ''}> ${t('Barnprofiler får se titlar utan känd åldersgräns')}</label>
@@ -384,6 +385,7 @@ views.admin = async (sec) => {
       allowUnrated: $('#sunr').checked, watchEnabled: $('#swatch').checked, trickplay: $('#strick').checked, detectRecap: $('#srecap').checked };
     if (!$('#sadm').disabled) body.adminAnywhere = $('#sadm').checked;
     if (!$('#scur').disabled) body.curateAnywhere = $('#scur').checked;
+    if ($('#scur2fa') && !$('#scur2fa').disabled) body.curateRequire2fa = $('#scur2fa').checked;
     if (!$('#svpn').disabled) body.trustVpnRange = $('#svpn').checked;
     if (body.require2faRemote && !me.totp) { if (!await confirmDialog(t('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?'), { okLabel: t('Fortsätt') })) return; }
     try { await api('/settings', { method: 'PUT', body }); toast(t('Sparat')); route(); } catch (er) { toastErr(er); }
