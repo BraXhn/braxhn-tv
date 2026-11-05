@@ -4247,8 +4247,8 @@ self.BX_I18N = {
   "<b>Säkerhetsloggen:</b> inloggningar, misslyckade försök och ändringar, med IP-adress. Sparas {d} för att upptäcka intrång.": "<b>The security log:</b> sign-ins, failed attempts and changes, with IP address. Kept for {d} to detect intrusions.",
   "Inget säljs, ingen reklam och ingen spårning. Webbläsaren sparar bara det som behövs för inloggningen och dina val (t.ex. språk och volym) – inga kakor från tredje part.": "Nothing is sold, no ads and no tracking. The browser only stores what is needed to sign in and your choices (e.g. language and volume) – no third-party cookies.",
   "Externa tjänster på den här servern": "External services on this server",
-  "Servern hämtar information från de här tjänsterna. De ser i regel serverns IP-adress, inte din.": "The server fetches information from these services. As a rule they see the server's IP address, not yours.",
-  "Undantag där din webbläsare kontaktar en tjänst direkt (och den ser din IP-adress): affischer från TMDB när du söker titlar att önska eller under Streaming, och när en administratör rättar matchning. I Chrome laddas Googles Cast-bibliotek när du öppnar spelaren, så att du kan casta.": "Exceptions where your browser contacts a service directly (and it sees your IP address): posters from TMDB when you search for titles to request or under Streaming, and when an administrator fixes a match. In Chrome, Google's Cast library is loaded when you open the player so that you can cast.",
+  "Servern hämtar information från de här tjänsterna. De ser serverns IP-adress, inte din.": "The server fetches information from these services. They see the server's IP address, not yours.",
+  "Bilder från TMDB, även affischer i sökningar och tjänsternas logotyper, hämtas via servern. Enda undantaget: i Chrome laddar webbläsaren Googles Cast-bibliotek när du öppnar spelaren, så att du kan casta – då ser Google din IP-adress.": "Images from TMDB, including posters in searches and service logos, are fetched through the server. The only exception: in Chrome, the browser loads Google's Cast library when you open the player so that you can cast – Google then sees your IP address.",
   "Bilder, beskrivningar och skådespelare till filmer och serier. Servern skickar titel och år – aldrig vem som tittar.": "Images, descriptions and cast for movies and shows. The server sends the title and year – never who is watching.",
   "Extra bilder (logotyper och bakgrunder) till titlar i biblioteket.": "Extra images (logos and backgrounds) for titles in the library.",
   "Information om artister och album samt låttexter. Servern skickar artist, album och låt.": "Information about artists and albums, and lyrics. The server sends the artist, album and track.",
@@ -4285,4 +4285,5 @@ self.BX_I18N = {
   "Den här produkten använder TMDB:s API men är inte godkänd eller certifierad av TMDB.": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
   "TMDB svarar inte": "TMDB is not responding",
   "Bilden är för stor": "The image is too large",
+  "Notiser": "Notifications",
 };

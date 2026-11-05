@@ -22,7 +22,7 @@ views.privacy = async () => {
     [S.musicMeta, 'MusicBrainz, Wikidata, LRCLIB', t('Information om artister och album samt låttexter. Servern skickar artist, album och låt.')],
     [S.bookMeta, 'Open Library, Google Books, Audible (Audnexus)', t('Omslag och beskrivningar till böcker och ljudböcker. Servern skickar titel, författare eller ISBN.')],
     [S.updateCheck, 'GitHub', t('Högst en gång per dygn: finns det en ny version? Servern skickar bara sin version.')],
-    [!!S.notify, t('Notiser ({kind})', { kind: esc(S.notify || '–') }), t('Händelser som administratören valt (t.ex. nya titlar) skickas till notistjänsten.')],
+    [!!S.notify, S.notify ? t('Notiser ({kind})', { kind: esc(S.notify) }) : t('Notiser'), t('Händelser som administratören valt (t.ex. nya titlar) skickas till notistjänsten.')],
     [S.relay, 'BraXhn Relay', t('Fjärråtkomst: trafiken utifrån går krypterad genom reläet till servern. Reläet sparar inte vad du tittar på.')],
     [S.acme, "Let's Encrypt", t('Certifikat för https. Bara serverns domännamn skickas.')],
     [S.scrobble, t('Scrobbling (ditt konto)'), t('Det du lyssnar på skickas till Last.fm eller ListenBrainz – bara om du själv kopplat ett konto under Mitt konto.')]
@@ -41,9 +41,9 @@ views.privacy = async () => {
     </ul>
     <p class="muted small">${t('Inget säljs, ingen reklam och ingen spårning. Webbläsaren sparar bara det som behövs för inloggningen och dina val (t.ex. språk och volym) – inga kakor från tredje part.')}</p></div>
   <div class="panel"><h2>${t('Externa tjänster på den här servern')}</h2>
-    <p class="muted small">${t('Servern hämtar information från de här tjänsterna. De ser i regel serverns IP-adress, inte din.')}</p>
+    <p class="muted small">${t('Servern hämtar information från de här tjänsterna. De ser serverns IP-adress, inte din.')}</p>
     <table>${svc.map(([on, name, why]) => `<tr><td><b>${esc(name)}</b><div class="muted small">${why}</div></td><td class="r">${badge(on)}</td></tr>`).join('')}</table>
-    <p class="muted small">${t('Undantag där din webbläsare kontaktar en tjänst direkt (och den ser din IP-adress): affischer från TMDB när du söker titlar att önska eller under Streaming, och när en administratör rättar matchning. I Chrome laddas Googles Cast-bibliotek när du öppnar spelaren, så att du kan casta.')}</p></div>
+    <p class="muted small">${t('Bilder från TMDB, även affischer i sökningar och tjänsternas logotyper, hämtas via servern. Enda undantaget: i Chrome laddar webbläsaren Googles Cast-bibliotek när du öppnar spelaren, så att du kan casta – då ser Google din IP-adress.')}</p></div>
   <div class="panel"><h2>${t('Dina rättigheter')}</h2>
     <p>${t('Du har rätt att få veta vad som sparats om dig, få en kopia, få fel rättade och få dina uppgifter raderade. Mycket kan du göra själv här:')}</p>
     <div class="row" style="flex-wrap:wrap;gap:8px">
