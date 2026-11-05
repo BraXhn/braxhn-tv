@@ -35,6 +35,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
   remote: c.user ? !isLocalReq(c.req) : undefined,
   publicUrl: getSetting('public_url', process.env.PUBLIC_URL || '') || null,
   quickConnect: quickConnectOn(), // "Logga in med kod" på inloggningssidan
+  // Samma länk "Stöd projektet" på toppnivå – apparna läser den här (samma regler som user.donateUrl)
+  donateUrl: c.user ? donateUrlFor(c.user) || undefined : undefined,
   user: c.user ? { id: c.user.id, name: c.user.name, is_admin: c.user.is_admin, totp: !!c.user.totp_enabled,
     profiles: get('SELECT COUNT(*) AS n FROM users WHERE id=? OR parent_id=?', c.user.parent_id || c.user.id, c.user.parent_id || c.user.id).n,
     kid: c.user.max_age != null, maxAge: c.user.max_age ?? null,

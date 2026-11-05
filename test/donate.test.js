@@ -65,15 +65,19 @@ test('validDonateUrl: bara https till paypal.com eller paypal.me', () => {
 
 test('donateUrl skickas för vuxna när länken är satt och visas, aldrig utan inloggning', async () => {
   assert.equal((await status(srv.ok)).user, null);
-  assert.equal((await status(srv.ok, `kt=${ck.admin}`)).user.donateUrl, TEST_URL);
+  const st = await status(srv.ok, `kt=${ck.admin}`);
+  assert.equal(st.user.donateUrl, TEST_URL);
+  assert.equal(st.donateUrl, TEST_URL, 'apparna läser fältet på toppnivå');
+  assert.equal('donateUrl' in (await status(srv.ok)), false, 'inte utan inloggning');
   const S = (await srv.ok.req('/api/settings')).data;
   assert.equal(S.donateUrl, TEST_URL); assert.equal(S.showDonate, true);
 });
 
 test('donateUrl skickas inte till barnprofiler', async () => {
-  const u = (await status(srv.ok, `kt=${ck.lisa}`)).user;
+  const st = await status(srv.ok, `kt=${ck.lisa}`), u = st.user;
   assert.equal(u.kid, true);
   assert.equal('donateUrl' in u, false);
+  assert.equal('donateUrl' in st, false);
 });
 
 test('inställningen döljer länken för hela servern', async () => {
