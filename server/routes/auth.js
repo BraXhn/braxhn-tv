@@ -8,6 +8,7 @@ import { hasTmdb } from '../scanner.js';
 import * as pk from '../passkeys.js';
 import * as updates from '../updates.js';
 import { VERSION } from '../updates.js';
+import { donateUrlFor } from '../project.js';
 import * as screen from '../screentime.js';
 import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
 import * as invites from '../invites.js';
@@ -43,6 +44,8 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     lang: c.user.lang || null,
     // Rättigheter per användare (perms.js): webben döljer nedladdning när den inte är tillåten (nytt fält)
     canDownload: canDownload(c.user.id),
+    // Länken "Stöd projektet" (server/project.js, nytt fält): saknas för barnprofiler, när den är avslagen eller inte satt
+    donateUrl: donateUrlFor(c.user) || undefined,
     adminHere: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)),
     // Får rätta matchning och metadata härifrån (även utanför hemmet med tvåstegsverifiering – nytt fält)
     curateHere: curateHere(c.user, c.req),

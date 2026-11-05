@@ -1,0 +1,3 @@
+# Knappen "Sponsor" på GitHub: frivillig donation via PayPal till utvecklaren (kostnader och en riktig iOS-app).
+# Samma länk som DONATE_URL i server/project.js – byts den, ändra på båda ställena.
+custom: ["https://paypal.me/braxhn"]

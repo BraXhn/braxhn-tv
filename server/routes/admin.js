@@ -34,6 +34,7 @@ import * as listen from '../listening.js';
 import { normLibs, normQuality, normStreams } from '../perms.js';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { configuredDonateUrl, donateShown } from '../project.js';
 
 // Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
 let integCache = null, integAt = 0;
@@ -183,7 +184,9 @@ route('GET', '/api/settings', admin, (c) => {
     watchEnabled: getSetting('watch_enabled', process.env.WATCH_FILES || '1') === '1', watching: act.watchingCount(), allowUnrated: allowUnrated(),
     trickplay: getSetting('trickplay', process.env.TRICKPLAY || '1') === '1', detectRecap: getSetting('detect_recap', '1') === '1',
     bookMeta: bookmeta.enabled(), bookMetaStatus: bookmeta.status, bookMetaRegion: bookmeta.audibleRegion(), bookMetaRegions: Object.keys(bookmeta.AUDIBLE_REGIONS),
-    cinemaPreroll: cinema.prerollSetting(), cinemaPrerollFiles: cinema.prerollFiles(insideMedia).length
+    cinemaPreroll: cinema.prerollSetting(), cinemaPrerollFiles: cinema.prerollFiles(insideMedia).length,
+    // Länken "Stöd projektet" (null = ingen giltig länk) och om den visas (standard på)
+    donateUrl: configuredDonateUrl(), showDonate: donateShown()
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -238,6 +241,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   }
   if (b.trickplay != null) setSetting('trickplay', b.trickplay ? '1' : '0');
   if (b.detectRecap != null) setSetting('detect_recap', b.detectRecap ? '1' : '0');
+  if (b.showDonate != null) setSetting('show_donate', b.showDonate ? '1' : '0');
   if (b.bookMeta != null) setSetting('book_meta', b.bookMeta ? '1' : '0');
   if (typeof b.bookMetaRegion === 'string' && bookmeta.AUDIBLE_REGIONS[b.bookMetaRegion]) setSetting('book_meta_region', b.bookMetaRegion);
   if (b.subAuto != null) setSetting('sub_auto', b.subAuto ? '1' : '0');

@@ -52,6 +52,12 @@ Utan `cinema=1`, för avsnitt, vid fortsättning eller när bio-läget är av sa
 med `{ "lang": "sv" | "en" }` sparar valet (400 för andra värden). Webben väljer `index.html` efter det (svensk eller
 engelsk variant, se `server/http/static.js`); serverns felmeddelanden i API:t är alltid svenska. Apparna läser inte fältet.
 
+## Stöd projektet: `user.donateUrl` i `/api/status`
+
+Nytt, valfritt fält: en https-adress till PayPal (`server/project.js`). Saknas helt för barnprofiler, när
+administratören slagit av *Visa länken Stöd projektet* (`showDonate` i `/api/settings`) och när ingen giltig länk
+finns. Bara webben läser det; apparna ignorerar det.
+
 ## Enkel inloggning: `/api/sso/*` och `/api/me/sso`
 
 Bara webben använder dem; apparna loggar in som förut (LDAP-användare med `POST /api/login`, se nedan).

@@ -24,6 +24,10 @@
   - **Fjärrkontrollen:** titelsidan öppnas med fokus på *Spela*/*Fortsätt*, fel på startsidan, i biblioteket och på titelsidan har *Försök igen* med fokus (förut en tom sida), och *Spela in* i TV-guiden bekräftar eller visar felet.
   - **Stöd projektet:** en diskret rad längst ner i Inställningar som öppnar donationslänken i webbläsaren – bara när servern skickar `donateUrl` (https till paypal.com/paypal.me), aldrig för barnprofiler, inga popups eller påminnelser.
   - **Ingen långsam avkodarlista på huvudtråden** före uppspelning, och en låt med trasigt id i bilens kö kraschar inte tjänsten.
+- **Stöd projektet:** en diskret, helt frivillig länk för att donera via PayPal (för kostnader och en riktig iOS-app)
+  längst ner i *Mitt konto* och i versionsrutan under *Administration*. Visas aldrig för barnprofiler, kan döljas för
+  hela servern med inställningen *Visa länken Stöd projektet* (standard på), och servern kontaktar aldrig PayPal.
+  Länken finns på ett enda ställe (`server/project.js`) och i `.github/FUNDING.yml`. Även i README.
 
 ## 1.0.0 – 2026-11-04
 

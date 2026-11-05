@@ -215,6 +215,8 @@ views.admin = async (sec) => {
     ${UP.available ? `<p>${t('Uppdatera i Unraid: <b>Docker → BraXhn TV → Check for updates → Apply update</b>. Databasen uppgraderas automatiskt.')}</p>${UP.notes ? `<pre class="small" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(UP.notes)}</pre>` : ''}${UP.url ? `<p class="small"><a href="${esc(UP.url)}" target="_blank" rel="noopener">${t('Läs om utgåvan på GitHub')}</a></p>` : ''}` : ''}
     <p class="muted small">${t('{v}{v2}. Servern frågar GitHub ({repo}) högst en gång per dygn om senaste utgåvan och skickar ingenting om dig.', { v: UP.checked ? t('Senast kontrollerat ') + new Date(UP.checked).toLocaleString(locale) : t('Inte kontrollerat än'), v2: UP.error ? t(' – fel: ') + esc(t(UP.error)) : '', repo: esc(UP.repo) })}</p>
     <div class="row"><label class="switch" style="margin:0"><input type="checkbox" id="upen" ${UP.enabled ? 'checked' : ''}> ${t('Leta efter nya versioner')}</label><button class="ghost small" id="upchk">${t('Kontrollera nu')}</button></div>
+    ${S.donateUrl ? `<label class="switch"><input type="checkbox" id="sdon" ${S.showDonate ? 'checked' : ''}> ${t('Visa länken Stöd projektet')} <span class="muted">${t('(i Mitt konto och här, inte för barnprofiler)')}</span></label>
+    <p class="muted small" id="donate" ${S.showDonate ? '' : 'hidden'}>${t('BraXhn TV är gratis och utan reklam. Vill du hjälpa till med kostnader och en riktig iOS-app kan du donera via PayPal – helt frivilligt.')} <a href="${esc(S.donateUrl)}" target="_blank" rel="noopener noreferrer">${t('Stöd projektet')}</a></p>` : ''}
   </div>
   <div class="panel"><h2>${t('Live-TV och inspelning')}</h2>
     <p class="muted small">${t('<b>HDHomeRun</b> (antenn/kabel) eller <b>IPTV</b> med en M3U-lista. TV-guide från en XMLTV-adress (t.ex. från din IPTV-leverantör eller <i>xmltv.se</i>) – HDHomeRun har egen guide om ingen anges. Inspelningar sparas i <code>{dvrDir}</code> – lägg till sökvägen <code>/recordings</code> i Unraid-mallen.', { dvrDir: esc(LT.settings.dvrDir) })}</p>
@@ -386,6 +388,7 @@ views.admin = async (sec) => {
     if (body.require2faRemote && !me.totp) { if (!await confirmDialog(t('Du har själv inte tvåstegsverifiering. Du kommer inte kunna logga in utifrån förrän du aktiverat den. Fortsätta?'), { okLabel: t('Fortsätt') })) return; }
     try { await api('/settings', { method: 'PUT', body }); toast(t('Sparat')); route(); } catch (er) { toastErr(er); }
   };
+  if ($('#sdon')) $('#sdon').onchange = act(async () => { await api('/settings', { method: 'PUT', body: { showDonate: $('#sdon').checked } }); $('#donate').hidden = !$('#sdon').checked; toast(t('Sparat')); });
   $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast(t('Sparat')); });
   $('#upchk').onclick = act(async () => { const u = await api('/updates/check', { method: 'POST' }); toast(u.error ? t('Kunde inte kontrollera: ') + t(u.error) : u.available ? t('Version {latest} finns', { latest: u.latest }) : t('Du har senaste versionen')); route(); });
   const noSave = () => { const body = { kind: $('#nok').value, url: $('#nou').value, user: $('#nous').value, events: $$('[data-nev]').filter(x => x.checked).map(x => x.dataset.nev) };

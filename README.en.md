@@ -30,6 +30,7 @@ It's a hobby project that I maintain in my spare time. Most of it is well tested
 - [Environment variables](#environment-variables)
 - [Verify the image](#verify-the-image)
 - [Tested and untested](#tested-and-untested)
+- [Support the project](#support-the-project)
 - [Getting help, contributing and license](#getting-help-contributing-and-license)
 
 ## Install on Unraid
@@ -396,6 +397,13 @@ cosign verify ghcr.io/braxhn/braxhn-tv:latest \
 ## Tested and untested
 
 The whole test suite (`npm test`, about 30 minutes) runs before every Docker image is published, against real media files generated with ffmpeg, and the web UI is tested in Chromium at phone, desktop and TV sizes. It also runs as a regular user without write access to `/config`. Not tested here, among other things: GPU transcoding and tone mapping on real graphics cards, the arm64 image, Chromecast and AirPlay for real, Let's Encrypt with a public domain, real IPTV providers, HDHomeRun, Sonarr/Radarr and other services (simulated in the tests), real screen readers, the apps on real devices and the relay on a real VPS. The full list, with what each feature was tested with, is in [docs/testat.md](docs/testat.md) (Swedish).
+
+## Support the project
+
+BraXhn TV is free and has no ads, and it will stay that way. If you want to help with the costs and with making a
+proper iOS app, you can donate via [PayPal](https://paypal.me/braxhn) – completely optional. The same link is shown
+discreetly under *My account* and *Administration* (never for kids profiles, and an administrator can hide it). The
+server never contacts PayPal; that only happens if you click the link yourself.
 
 ## Getting help, contributing and license
 

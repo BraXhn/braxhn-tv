@@ -38,6 +38,7 @@ inte fungerar.
 - [Miljövariabler](#miljövariabler)
 - [Verifiera imagen](#verifiera-imagen)
 - [Testat och otestat](#testat-och-otestat)
+- [Stöd projektet](#stöd-projektet)
 - [Repots delar, bidrag och licens](#repots-delar-bidrag-och-licens)
 
 Mer i `docs/`: [alla funktioner i detalj](docs/funktioner.md), [guider](docs/guide.md) (live-TV, musikappar,
@@ -584,6 +585,13 @@ Det jag inte har kunnat prova här:
 - timeshift i Safari/AVPlayer och reklamdetektering på riktiga sändningar
 - DLNA mot en riktig TV, och import mot riktiga Plex- och Jellyfin-servrar (plex.tv:s växling av hemanvändare och `resources`, och en riktig `com.plexapp.plugins.library.db` från en aktuell Plex-version, är simulerade efter Plex dokumenterade/kända format)
 - TMDB-rollistor och personbilder mot riktiga TMDB (simulerat här)
+
+## Stöd projektet
+
+BraXhn TV är gratis och utan reklam, och så förblir det. Vill du hjälpa till med kostnaderna och med att jag kan göra
+en riktig iOS-app kan du donera via [PayPal](https://paypal.me/braxhn) – helt frivilligt. Samma länk finns diskret
+under *Mitt konto* och *Administration* (aldrig för barnprofiler, och en administratör kan dölja den). Servern
+kontaktar aldrig PayPal; det sker först om du själv klickar på länken.
 
 ## Repots delar, bidrag och licens
 

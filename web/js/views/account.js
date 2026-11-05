@@ -242,6 +242,8 @@ views.account = async () => {
   const fx = audioFx(); $('#anight').checked = fx.night; $('#adialog').checked = fx.dialog;
   $('#anight').onchange = $('#adialog').onchange = () => setAudioFx({ night: $('#anight').checked, dialog: $('#adialog').checked });
   await accountExtras();
+  // Stöd projektet: en diskret rad längst ner (servern skickar donateUrl bara när den får visas – aldrig för barnprofiler)
+  if (me.donateUrl && !me.kid) main.insertAdjacentHTML('beforeend', `<p class="muted small" id="donate">${t('BraXhn TV är gratis och utan reklam. Vill du hjälpa till med kostnader och en riktig iOS-app kan du donera via PayPal – helt frivilligt.')} <a href="${esc(me.donateUrl)}" target="_blank" rel="noopener noreferrer">${t('Stöd projektet')}</a></p>`);
 };
 
 // ---------- scrobbling av musik (ListenBrainz och Last.fm) ----------

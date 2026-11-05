@@ -4213,4 +4213,9 @@ self.BX_I18N = {
   "Skapar paketet…": "Creating the bundle…",
   "{n} filer i {name} · {size}": "{n} files in {name} · {size}",
   "Diagnostikpaketet finns inte längre – skapa det igen": "The diagnostics bundle no longer exists – create it again",
+  // Stöd projektet (views/account.js, views/admin.js)
+  "BraXhn TV är gratis och utan reklam. Vill du hjälpa till med kostnader och en riktig iOS-app kan du donera via PayPal – helt frivilligt.": "BraXhn TV is free and has no ads. If you want to help with the costs and a proper iOS app, you can donate via PayPal – completely optional.",
+  "Stöd projektet": "Support the project",
+  "Visa länken Stöd projektet": "Show the Support the project link",
+  "(i Mitt konto och här, inte för barnprofiler)": "(in My account and here, not for kids profiles)",
 };
