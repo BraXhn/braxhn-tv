@@ -25,7 +25,7 @@ process.env.PODCAST_DIR = path.join(ROOT, 'pod');
 delete process.env.TMDB_API_KEY;
 
 // ---------- simulerad Plex-server och plex.tv ----------
-const SECRETS = ['ownertok', 'anna-user', 'anna-srv', 'lilla-user', '1234'];
+const SECRETS = ['ownertok', 'anna-user', 'anna-srv', 'lilla-user', '73915268'];
 const T0 = 1700000000;
 const fileM = (...files) => files.map(f => ({ Part: [{ file: f }] }));
 const NFD = (s) => s.normalize('NFD');
@@ -86,7 +86,7 @@ const fake = http.createServer((q, r) => {
     if (sw && q.method === 'POST') {
       calls.switch++;
       if (tok !== 'ownertok') return J({}, 401);
-      if (sw[1] === 'uuid-anna') return u.searchParams.get('pin') === '1234' ? J({ authToken: 'anna-user' }) : J({ error: 'pin' }, 401);
+      if (sw[1] === 'uuid-anna') return u.searchParams.get('pin') === '73915268' ? J({ authToken: 'anna-user' }) : J({ error: 'pin' }, 401);
       if (sw[1] === 'uuid-lilla') return J({ authToken: 'lilla-user' });
       return J({}, 404);
     }
@@ -185,7 +185,7 @@ test('plex-api: ägaren, hemanvändare (PIN) och delade vänner – sidor som Pl
   const P2 = await imp.preview({ source: 'plex', url: FB + '/plex', token: 'ownertok', pathMap: PATHS, pins: { 'plex:12': '0000' }, rootId: 1 });
   assert.equal(P2.profiles[1].pinError, true); assert.equal(P2.profiles[1].needPin, true);
   noSecrets(P2, 'förhandsvisningen');
-  const P3 = await imp.preview({ source: 'plex', url: FB + '/plex', token: 'ownertok', pathMap: PATHS, pins: { 'plex:12': '1234' }, rootId: 1 });
+  const P3 = await imp.preview({ source: 'plex', url: FB + '/plex', token: 'ownertok', pathMap: PATHS, pins: { 'plex:12': '73915268' }, rootId: 1 });
   assert.equal(P3.profiles[1].needPin, false); assert.equal(P3.profiles[1].partial, false);
   assert.equal(P3.profiles[1].total, 2); assert.equal(P3.profiles[1].inProgress, 1);
   noSecrets(P3, 'förhandsvisningen');
@@ -243,7 +243,7 @@ test('plex-api: matchningen – flera versioner, NFD, samma titel olika år, ori
 test('plex-api: löpande synk – sparad token, bara nya ändringar, envägs, av som standard', async () => {
   assert.equal(imp.syncInfo().on, false, 'av som standard');
   assert.throws(() => imp.updateSync({ on: true }), /löpande synk ikryssad/);
-  const P = await imp.preview({ source: 'plex', url: FB + '/plex', token: 'ownertok', pathMap: PATHS, pins: { 'plex:12': '1234' }, rootId: 1 });
+  const P = await imp.preview({ source: 'plex', url: FB + '/plex', token: 'ownertok', pathMap: PATHS, pins: { 'plex:12': '73915268' }, rootId: 1 });
   const annaId = get("SELECT id FROM users WHERE name='Anna (Plex)'").id;
   await imp.runProfiles(P.id, P.profiles.map(p => p.link?.id ? { key: p.key, action: 'link', userId: p.link.id } : { key: p.key, action: 'skip' }), { rootId: 1, sync: { on: true, hours: 6 } });
   const S = imp.syncInfo();
@@ -391,7 +391,7 @@ test('http: importen kräver admin på hemnätet; token och PIN syns aldrig i sv
     const U = await req('/api/users', { method: 'POST', body: { name: 'vanlig', password: 'Grön-Ödla-2026!' } }); assert.equal(U.status, 200, U.text);
     assert.equal((await req('/api/login', { method: 'POST', body: { name: 'vanlig', password: 'Grön-Ödla-2026!' }, as: 'user' })).status, 200);
     const ext = { 'x-forwarded-for': '81.2.3.4' };
-    const body = { source: 'plex', url: FB + '/plex', token: 'ownertok', pins: { 'plex:12': '1234' } };
+    const body = { source: 'plex', url: FB + '/plex', token: 'ownertok', pins: { 'plex:12': '73915268' } };
     for (const [m, p, b] of [['POST', '/api/import/preview', body], ['POST', '/api/import/run', { id: 'x', profiles: [] }], ['GET', '/api/import/sync'], ['PUT', '/api/import/sync', { on: true }], ['POST', '/api/import/sync/run']]) {
       assert.equal((await req(p, { method: m, body: b, as: 'user' })).status, 403, `${p} kräver admin`);
       assert.equal((await req(p, { method: m, body: b, headers: ext })).status, 403, `${p} nekas utifrån`);
