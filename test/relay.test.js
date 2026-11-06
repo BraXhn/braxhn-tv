@@ -211,7 +211,7 @@ test('HLS: spellista och segment genom reläet', { skip: !hasFfmpeg && 'ffmpeg s
   await req(R, `/api/stream/${FILM_ID}/stop`, { method: 'POST', body: {}, headers: { origin: R } });
 });
 
-test('SSE (Spela på…): händelser kommer fram direkt och strömmen hålls öppen', async () => {
+test('SSE (Spela på…): händelser kommer fram direkt och strömmen hålls öppen', { timeout: 40000 }, async () => {
   const key = 'relatestnyckel-000001';
   const events = [];
   let wake = null;
@@ -222,12 +222,13 @@ test('SSE (Spela på…): händelser kommer fram direkt och strömmen hålls öp
   let buf = '';
   res.setEncoding('utf8');
   res.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n\n')) >= 0) { const b = buf.slice(0, i); buf = buf.slice(i + 2); const ev = /^event: (.*)$/m.exec(b)?.[1]; if (ev) { events.push({ ev, data: JSON.parse(/^data: (.*)$/m.exec(b)?.[1] || 'null') }); wake?.(); } } });
-  const next = (pred) => new Promise((ok, no) => { const t = setTimeout(() => no(new Error('ingen händelse')), 5000); const chk = () => { const e = events.find(x => !x.used && pred(x)); if (e) { e.used = true; clearTimeout(t); ok(e); } else wake = chk; }; chk(); });
-  const hello = await next(e => e.ev === 'hello');
+  // 15 s: CI-maskinen kör ffmpeg-testerna parallellt; lokalt kommer händelserna på några millisekunder
+  const next = (pred, what) => new Promise((ok, no) => { const t = setTimeout(() => no(new Error(`ingen händelse: ${what} (fick ${JSON.stringify(events.map(e => e.ev + ':' + (e.data?.name || '')))})`)), 15000); const chk = () => { const e = events.find(x => !x.used && pred(x)); if (e) { e.used = true; clearTimeout(t); ok(e); } else wake = chk; }; chk(); });
+  const hello = await next(e => e.ev === 'hello', 'hello vid anslutning');
   // Ändra namnet med ett annat anrop – mottagaren får det över den öppna strömmen
   const put = await req(R, `/api/remote/devices/${hello.data.id}`, { method: 'PUT', body: { name: 'Nytt namn' }, headers: { origin: R } });
   assert.equal(put.status, 200, JSON.stringify(put.data));
-  await next(e => e.ev === 'hello' && e.data.name === 'Nytt namn');
+  await next(e => e.ev === 'hello' && e.data.name === 'Nytt namn', 'hello med nytt namn');
   r.destroy();
 });
 
