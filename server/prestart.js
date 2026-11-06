@@ -6,7 +6,10 @@
 //
 // Vid uppspelning serveras de cachade byte-intervallen direkt (direktuppspelning med Range) eller matas till
 // ffmpeg som en sammansatt indata (remux/omkodning från början), medan originalfilen öppnas parallellt. När
-// cachen tar slut fortsätter läsningen från originalfilen – byte för byte samma innehåll.
+// cachen tar slut fortsätter läsningen från originalfilen – byte för byte samma innehåll. Börjar remuxen eller
+// omkodningen mitt i filen (Fortsätt titta, spolning) läser ffmpeg i stället via en intern adress på loopback
+// som går att söka i (HTTP med Range, seekableInput): huvudet, indexet och platsen där man slutade kommer ur
+// cachen, så ingen väntar på att disken snurrar upp.
 //
 // Kopieringen görs bara när disken ändå är vaken: I/O-räknarna i /sys/block (och hdparm -C om det finns) när
 // filens disk går att hitta, annars när servern själv nyss läst något i samma mapp (skanning, uppspelning,
@@ -14,6 +17,8 @@
 // Cachens filer har titelns id som namn (<id>.p0, <id>.p1 …, <id>.json) – inget annat i mappen rörs.
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
 import { Readable, pipeline } from 'node:stream';
 import { execFile } from 'node:child_process';
 import { all, get, getSetting, setSetting } from './db.js';
@@ -416,6 +421,7 @@ export function kick(delay = 5000) {
 }
 let timer = null;
 export function start() {
+  loopServer();
   if (timer) return;
   sampleDisks();
   timer = setInterval(() => tick().catch(() => {}), 60e3); timer.unref();
@@ -514,6 +520,70 @@ export function inputFor(it) {
   return composed(c, e, 0, e.size - 1);
 }
 
+// ---------------- sökbar indata till ffmpeg (mitt i filen) ----------------
+// ffmpeg kan inte söka i ett rör, så en fortsättning mitt i filen läste förut originalfilen – och väntade på disken.
+// En egen HTTP-server på 127.0.0.1 (slumpad port, slumpad nyckel per cachad titel) serverar samma sammansatta
+// byte som direktuppspelningen, med Range, så att ffmpeg kan läsa huvudet, söka till indexet och sedan till
+// platsen. Bara de demuxrar som aldrig öppnar andra adresser (Matroska, MP4/MOV, MPEG-TS) används.
+const tokens = new Map(); // nyckel → titelns id
+let loop = null, loopPort = 0;
+function loopServer() {
+  if (loop) return loop;
+  const srv = http.createServer((req, res) => {
+    const tok = String(req.url || '').slice(1);
+    const id = tokens.get(tok), c = cacheOn();
+    const e = id != null && c ? index.get(id) : null;
+    if (!e || e.tok !== tok || (req.method !== 'GET' && req.method !== 'HEAD')) { res.writeHead(404); res.end(); return; }
+    const size = e.size;
+    let start = 0, end = size - 1, code = 200;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+    if (m && (m[1] !== '' || m[2] !== '')) {
+      if (m[1] === '') start = Math.max(0, size - +m[2]);
+      else { start = +m[1]; if (m[2] !== '') end = Math.min(+m[2], size - 1); }
+      if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+      code = 206;
+    }
+    e.used = Date.now();
+    const h = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1 };
+    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
+    res.writeHead(code, h);
+    if (req.method === 'HEAD') { res.end(); return; }
+    // ffmpeg kopplar ner när den söker vidare – det är inget fel
+    pipeline(composed(c, e, start, end), res, (er) => { if (er && !/PREMATURE_CLOSE|EPIPE|ECONNRESET/.test(er.code || '')) console.warn('[snabbstart] sökbar:', er.message); saveStats(); });
+  });
+  srv.keepAliveTimeout = 30e3;
+  srv.on('error', (er) => { console.warn('[snabbstart] intern adress:', er.message); });
+  srv.listen(0, '127.0.0.1', () => { loopPort = srv.address().port; });
+  srv.unref();
+  return (loop = srv);
+}
+/** ffmpegs demuxer för containern (items.container är ffprobes format_name) – null för allt annat */
+export const demuxerFor = (container) => {
+  const f = String(container || '');
+  return /matroska|webm/.test(f) ? 'matroska' : /(^|,)(mov|mp4)(,|$)/.test(f) ? 'mov' : /(^|,)mpegts(,|$)/.test(f) ? 'mpegts' : null;
+};
+/** Byteposition (snitt över filen) för en tid – samma uppskattning som när fönstret kopierades */
+const offsetAt = (e, it, at) => it.duration > 0 ? Math.floor(e.size * Math.min(1, Math.max(0, at) / it.duration)) : 0;
+/**
+ * Sökbar indata när remux/omkodning börjar mitt i filen: { url, format } när platsen ligger i cachen,
+ * annars null (ffmpeg läser originalfilen som förut).
+ */
+export function seekableInput(it, at) {
+  const c = cacheOn(); if (!c) return null;
+  load(c);
+  const e = usable(it); if (!e) return null;
+  const format = demuxerFor(it.container); if (!format) return null;
+  const off = offsetAt(e, it, at);
+  if (!e.parts.some(p => p.from <= off && off <= p.to)) return null;
+  loopServer();
+  if (!loopPort) return null; // första sekunden efter start: servern lyssnar inte än
+  if (!e.tok) { e.tok = crypto.randomBytes(18).toString('hex'); tokens.set(e.tok, e.id); }
+  if (tokens.size > 5000) for (const [k, id] of tokens) if (index.get(id)?.tok !== k) tokens.delete(k);
+  e.used = Date.now();
+  touch(it);
+  return { url: `http://127.0.0.1:${loopPort}/${e.tok}`, format };
+}
+
 /** Uppspelning begärs (/playback): väck disken och räkna träff/miss för träffgraden */
 export function notePlay(it, startAt = 0, mode = 'direct') {
   if (!it?.path || !config().on) return;
@@ -526,7 +596,8 @@ export function notePlay(it, startAt = 0, mode = 'direct') {
     if (mode === 'direct') {
       const off = it.duration > 0 ? Math.floor(e.size * Math.min(1, startAt / it.duration)) : 0;
       hit = e.parts.some(p => p.from <= off && off <= p.to);
-    } else hit = startAt < 1 && e.pipe && e.parts[0]?.from === 0;
+    } else if (startAt < 1) hit = e.pipe && e.parts[0]?.from === 0;
+    else hit = !!demuxerFor(it.container) && e.parts.some(p => p.from <= offsetAt(e, it, startAt) && offsetAt(e, it, startAt) <= p.to);
   }
   if (hit) S().hits++; else S().misses++;
   saveStats();

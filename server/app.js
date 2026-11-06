@@ -113,6 +113,7 @@ photos.kickThumbs(30000);
 // Snabbstart: startcachen kopplas in i strömningen; nya titlar har just lästs av skanningen (disken är vaken)
 st.fastStart.direct = prestart.serveDirect;
 st.fastStart.input = prestart.inputFor;
+st.fastStart.seekable = prestart.seekableInput;
 prestart.hooks.keyframes = (it) => st.keyframesCached(it) ? null : st.computeKeyframes(it);
 prestart.start();
 hooks.newEpisodes = (ids) => follows.onNewEpisodes(ids, (uid, it) => allowedFor(uid, it));

@@ -539,7 +539,7 @@ function guessCharenc(file) {
 // ---------------- direktuppspelning ----------------
 // Snabbstart (server/prestart.js, kopplas in av app.js): direct serverar början/slutet ur startcachen medan
 // disken vaknar, input ger ffmpeg en sammansatt indata (cachen + originalfilen) vid start från början
-export const fastStart = { direct: null, input: null };
+export const fastStart = { direct: null, input: null, seekable: null };
 export function serveDirect(req, res, it) {
   const type = MIME[path.extname(it.path).toLowerCase()] || 'application/octet-stream';
   if (fastStart.direct?.(req, res, it, type)) return;
@@ -1106,13 +1106,17 @@ function startFfmpeg(s, it, n) {
   if (d.mode === 'transcode' && d.vc !== 'h264' && !encoderFor(d.vc)) fallbackH264(s, `${VC_LABEL[d.vc]} går inte att koda just nu`);
   // Från början utan inbränning: början av filen kan komma ur startcachen (ffmpeg läser då från stdin)
   const pipeIn = n === 0 && !d.burn && fastStart.input ? fastStart.input(it) : null;
-  const src = pipeIn ? 'pipe:0' : it.path;
+  // Mitt i filen (fortsättning, spolning): sökbar adress på loopback ur samma cache (prestart.seekableInput) –
+  // bara loopbackens http, och demuxern bestämd i förväg (Matroska/MP4/TS öppnar aldrig andra adresser)
+  const seekIn = !pipeIn && n > 0 && !d.burn && fastStart.seekable ? fastStart.seekable(it, t) : null;
+  const src = pipeIn ? 'pipe:0' : seekIn ? seekIn.url : it.path;
+  const IN = seekIn ? ['-protocol_whitelist', 'http,tcp', '-seekable', '1', '-f', seekIn.format] : SAFE_IN;
   let args, gpuRun = null, tmRun = null, encName = null;
   if (d.mode === 'remux' && d.fmt === 'fmp4') {
     // HEVC/HDR/Dolby Vision i fMP4: HLS-muxern med mycket kort hls_time delar på varje nyckelbild
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
       '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', '-tag:v', d.tag || 'hvc1', '-sn', '-dn', '-strict', 'unofficial',
       '-output_ts_offset', ss.toFixed(6),
       '-f', 'hls', '-hls_time', '0.1', '-hls_list_size', '0', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', `init_${n}.mp4`,
@@ -1127,7 +1131,7 @@ function startFfmpeg(s, it, n) {
     const next = segs[n + 1]?.start ?? it.duration;
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segTimes(segs, n, ss);
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...SAFE_IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
       '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
@@ -1140,7 +1144,7 @@ function startFfmpeg(s, it, n) {
     encName = d.vc !== 'h264' ? encoderFor(d.vc)?.name || null : null;
     const times = segTimes(segs, n, t);
     const fm = d.fmt === 'fmp4';
-    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...SAFE_IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', src,
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...va.pre, ...(va.dec || hwDecode()), ...IN, ...(n > 0 ? ['-ss', String(t)] : []), '-i', src,
       ...va.filter, ...va.map, ...audioArgs(d), ...transcodeAudio(d, it, familyAf(s, it, n > 0 ? t : 0)), ...va.enc, '-sn', '-dn',
       // avoid_negative_ts: utan detta förskjuts hela körningen om något paket har negativ tid, och segmenten
       // från en omstart (spolning) skulle inte passa ihop med de första. Bilden har inga B-bilder och ljudet
