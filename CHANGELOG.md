@@ -1,13 +1,13 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.1.0 – 2026-11-06
 - **Fortsätt titta startar direkt även när diskarna sover:** snabbstarten kopierade redan platsen där man slutade,
   men när strömmen remuxas eller omkodas läste ffmpeg ändå originalfilen och väntade 5–15 s på att arraydisken
   skulle vakna. Nu läser ffmpeg filens början, index och platsen ur cachen via en intern adress på loopback som går
   att söka i (HTTP med Range, bara 127.0.0.1 och en slumpad nyckel). Det som inte är cachat läses från disken, som
   väcks parallellt. Det gäller Matroska, MP4 och MPEG-TS. Träffgraden räknar nu även fortsättningar.
-
-## 1.1.0 – 2026-11-05
 - **Integritet och personuppgifter (GDPR):**
   - **Sidan *Integritet*** (under *Mitt konto*): vad servern sparar och hur länge, vilka externa tjänster som är på,
     vem som ansvarar och användarens rättigheter.
