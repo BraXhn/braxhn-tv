@@ -37,6 +37,10 @@ Allt ligger i databasen i `/config` på servern:
 | Kopplingar du själv gör (Trakt, Last.fm, ListenBrainz, musikappar, OPDS, kalender) | Funktionen du slagit på | Tills du kopplar bort eller kontot tas bort |
 | Säkerhetskopior av databasen | Återställning | De senaste 14 (inställbart) |
 
+**API-nycklar:** en administratör kan dela ut en nyckel så att ett annat system kan läsa *Nu spelas*, till exempel en
+väggskärm. Svaret innehåller profilernas namn och vad de spelar, men aldrig IP-adresser. Nycklarna gäller som
+standard bara hemma och syns, med senast använd, under *Administration → API-nycklar*.
+
 Webbläsaren sparar bara inloggningskakan och lokala val som språk, volym och tillgänglighet. Det finns inga kakor
 eller skript från tredje part för spårning eller reklam.
 

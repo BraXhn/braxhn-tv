@@ -5,6 +5,7 @@ import { boot, loadLibs, route } from '../router.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
 import { adminRelay } from './admin-relay.js';
+import { adminApiKeys } from './admin-apikeys.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { adminInvites, editPerms, permsSummary } from './admin-users.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
@@ -295,6 +296,7 @@ views.admin = async (sec) => {
     <pre id="aclog" class="small muted" style="white-space:pre-wrap;margin-top:10px;${AC.log.length ? '' : 'display:none'}">${esc(AC.log.join('\n'))}</pre>
   </div>
   <div class="panel" id="adm-relay">${loadingState()}</div>
+  <div class="panel" id="adm-apikeys">${loadingState()}</div>
   <div id="opsp"></div>
   <div class="panel"><h2>${t('Säkerhetslogg')}</h2>
     <div style="max-height:360px;overflow:auto"><table><tr><th>${t('Tid')}</th><th>${t('Händelse')}</th><th>${t('Användare')}</th><th>IP</th><th>${t('Detaljer')}</th></tr>
@@ -502,6 +504,7 @@ views.admin = async (sec) => {
   poll();
   adminOps().catch(e => { toastErr(e); });
   adminRelay().catch(e => { const r = $('#adm-relay'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
+  adminApiKeys().catch(e => { const r = $('#adm-apikeys'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   // #/admin/security, #/admin/acme (länkar från installationsguiden): visa avsnittet
   // (efter att route() skrollat till toppen)
   if (sec && /^[a-z]+$/.test(sec)) later(() => $('#adm-' + sec)?.scrollIntoView(), 50);

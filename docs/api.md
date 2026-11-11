@@ -58,6 +58,48 @@ Nytt, valfritt fält: en https-adress till PayPal (`server/project.js`). Saknas 
 administratören slagit av *Visa länken Stöd projektet* (`showDonate` i `/api/settings`) och när ingen giltig länk
 finns. Bara webben läser det; apparna ignorerar det.
 
+## API-nycklar: `/api/v1/*`
+
+Skrivskyddat API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Administratören skapar
+nycklar under *Administration → API-nycklar*. Där finns också `GET`/`POST /api/apikeys` och `DELETE /api/apikeys/:id`,
+som kräver admin och hemnätet. `POST` tar `{ name, scopes: ["nowplaying", "library"], homeOnly: true }` och svarar
+med `key`, som bara visas den gången.
+
+**Nyckeln:**
+- Skicka den i rubriken `X-Api-Key: bxtv_…` eller som `Authorization: Bearer bxtv_…`. Den tas aldrig emot i adressen.
+- Den gäller bara `/api/v1/*`, och `/api/v1/*` tar inte emot vanlig inloggning.
+- Med `homeOnly` (standard) nekas den utanför hemnätet och via reläet (403).
+- Högst 120 anrop per minut och nyckel (429).
+
+**Fel:** 401 betyder att nyckeln saknas, är fel eller är borttagen. 403 betyder att behörigheten saknas eller att
+anropet kom utifrån.
+
+| Väg | Behörighet | Svar |
+|---|---|---|
+| `GET /api/v1/status` | vilken som helst | `{ server: { name, version }, time }` |
+| `GET /api/v1/now-playing` | `nowplaying` | `{ server, time, count, sessions: [...] }` |
+| `GET /api/v1/library?limit=12` | `library` | `{ server, counts: { movies, shows, episodes, tracks, albums, audiobooks, podcasts }, recent: [{ kind, title, subtitle, year, added, image }] }` |
+| `GET /api/v1/image/:ref?w=300` | `nowplaying` eller `library` | JPEG, där `ref` är `v<titel>` (affisch), `a<album>` (omslag) eller `b<ljudbok>` (omslag) |
+
+**Fälten i `sessions[]`:**
+- `kind`: `movie`, `episode`, `music`, `audiobook` eller `podcast`.
+- `user`: profilens namn.
+- `title`: filmen, serien, låten, boken eller poddavsnittet.
+- `subtitle`: till exempel `S01E02 · Pilot`, `Artist · Album`, författaren eller podden.
+- `year`, `season`, `episode`.
+- `position` och `duration` i sekunder.
+- `paused`.
+- `device`, `remote` och `mode` (`direct`, `remux` eller `transcode`). Gäller bara film och serier.
+- `started`.
+- `image`: referensen till `/api/v1/image`.
+
+**Hur det räknas:**
+- Film och serier kommer från uppspelningssessionerna.
+- Musik är det senast startade spåret per profil, så länge det inte tagit slut.
+- Ljudböcker och poddar räknas som spelande om framsteg skickats de senaste 90 sekunderna.
+
+IP-adresser lämnas aldrig ut.
+
 ## Personuppgifter: `/api/privacy`, `/api/me/export`, `DELETE /api/me`
 
 Nya vägar, alla kräver inloggning. Apparna behöver inte använda dem, eftersom webben har sidan *Integritet*.

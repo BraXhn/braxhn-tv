@@ -1,6 +1,16 @@
 # Ändringar
 
 ## Ej utgiven
+- **API-nycklar för andra system:**
+  - Under *Administration → API-nycklar* delar du ut en nyckel som bara kan läsa. Behörigheterna är *Nu spelas*
+    (`/api/v1/now-playing`: film, serier, musik, ljudböcker och poddar, med vem, enhet och hur långt) och/eller
+    biblioteket (`/api/v1/library`: antal och nyligen tillagt). Affischer och omslag hämtas via
+    `/api/v1/image/:ref`.
+  - Nyckeln visas en gång och sparas bara som hash. Den skickas i rubriken `X-Api-Key` och gäller som standard bara
+    från hemnätet.
+  - Nyckeln gäller ingen annanstans, och `/api/v1/*` tar inte emot vanlig inloggning.
+  - Senast använd och varifrån syns i listan, och att nycklar skapas och tas bort loggas.
+- README: dubbletterna i *Appar och andra klienter* är borttagna.
 
 ## 1.1.0 – 2026-11-06
 - **Fortsätt titta startar direkt även när diskarna sover:** snabbstarten kopierade redan platsen där man slutade,

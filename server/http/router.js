@@ -70,6 +70,9 @@ export const route = (method, pattern, opts, fn) => {
 //   feed     – privata RSS-flöden för ljudböcker (/api/feeds/*, server/routes/books.js): routern sätter ALDRIG c.user där.
 //              Routen slår själv upp flödets nyckel i adressen (server/bookfeeds.js, tabellen book_feeds) och kontrollerar
 //              fjärrreglerna med remoteDenied(). /api/feeds/* matchar bara feed-routes och tvärtom, så nyckeln gäller inget annat.
+//   apikey   – det skrivskyddade API:t för andra system (/api/v1/*, server/routes/apikeys.js): routern sätter ALDRIG c.user där.
+//              Routen kontrollerar själv API-nyckeln (X-Api-Key eller Authorization: Bearer bxtv_…), dess behörigheter och
+//              om den bara gäller hemnätet (server/apikeys.js). /api/v1/* matchar bara apikey-routes och tvärtom.
 //   share    – delade ögonblick utanför hemmet (/api/share/*, server/routes/moments.js): routern sätter ALDRIG c.user där.
 //              Routen kontrollerar själv länkens signatur, utgång och återkallelse (server/moments.js). /api/share/* matchar
 //              bara share-routes och tvärtom, så länken ger ingen åtkomst till något annat än klippet.
@@ -174,12 +177,14 @@ export async function handle(req, res) {
   const opdsPath = url.pathname === '/api/opds' || url.pathname.startsWith('/api/opds/');
   const feedPath = url.pathname.startsWith('/api/feeds/');
   const sharePath = url.pathname.startsWith('/api/share/');
+  const v1Path = url.pathname.startsWith('/api/v1/');
   for (const r of routes) {
     if (r.method !== req.method) continue;
     if (rest !== !!r.subsonic) continue; // /rest/* når bara musikappens routes och tvärtom
     if (opdsPath !== !!r.opds) continue; // /api/opds/* når bara läsappens routes och tvärtom
     if (feedPath !== !!r.feed) continue; // /api/feeds/* når bara RSS-flödenas routes och tvärtom
     if (sharePath !== !!r.share) continue; // /api/share/* når bara delade ögonblick och tvärtom
+    if (v1Path !== !!r.apikey) continue; // /api/v1/* når bara API-nyckelns routes och tvärtom
     const m = r.re.exec(url.pathname);
     if (!m) continue;
     let p;
@@ -187,7 +192,7 @@ export async function handle(req, res) {
     // Token i adressen (?t=) tas bara emot på routes som tillåter media- eller bildtoken
     // Kalenderroutes slår bara upp kalendertoken – ingen annan inloggning används där
     // Musikappens routes får ingen inloggning härifrån (de loggar in själva med app-lösenordet)
-    const c = { req, res, q: url.searchParams, p, user: r.subsonic || r.opds || r.feed || r.share ? null : r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
+    const c = { req, res, q: url.searchParams, p, user: r.subsonic || r.opds || r.feed || r.share || r.apikey ? null : r.calendar ? calendarUser(url.searchParams) : userFromReq(req, url.searchParams, !!(r.media || r.img)) };
     // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
     if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;

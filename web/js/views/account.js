@@ -22,7 +22,7 @@ export const EVENTS = { login_ok: t('Inloggning'), login_fail: t('Misslyckad inl
   user_created: t('Användare skapad'), user_updated: t('Användare ändrad'), user_deleted: t('Användare borttagen'), settings_changed: t('Inställningar ändrade'),
   admin_denied: t('Admin nekad (utifrån)'), passkey_added: t('Passkey tillagd'), passkey_removed: t('Passkey borttagen'), passkey_add_fail: t('Passkey misslyckades'), acme_obtain: t('Certifikat begärt'), quickconnect_approved: t('Inloggning med kod godkänd'), quickconnect_fail: t('Fel kod för TV-inloggning'), quickconnect_denied: t('TV-inloggning nekad'), library_added: t('Bibliotek tillagt'), library_removed: t('Bibliotek borttaget'),
   sso_linked: t('Enkel inloggning kopplad'), sso_unlinked: t('Enkel inloggning bortkopplad'), sso_link_pending: t('Koppling väntar på bekräftelse'), sso_user_created: t('Konto skapat via enkel inloggning'), sso_error: t('Fel hos inloggningsleverantören'),
-  data_exported: t('Uppgifter nedladdade'), account_self_deleted: t('Konto raderat av användaren'), profile_deleted: t('Profil borttagen') };
+  data_exported: t('Uppgifter nedladdade'), account_self_deleted: t('Konto raderat av användaren'), apikey_created: t('API-nyckel skapad'), apikey_removed: t('API-nyckel borttagen'), profile_deleted: t('Profil borttagen') };
 const device = (ua) => {
   ua = ua || '';
   if (/BraXhnTV-Android|Android.*Automotive/i.test(ua)) return 'Android-app';

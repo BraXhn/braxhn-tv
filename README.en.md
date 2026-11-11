@@ -205,6 +205,7 @@ Three ways, which can be combined:
 - **Chromecast** (needs HTTPS – option 2 or 3 above) and **AirPlay** (Safari and the Apple apps; works at home without HTTPS).
 - **Play on another device:** any open BraXhn TV browser in the household can be remote-controlled from your phone (*Play on…*).
 - **DLNA** for smart TVs without an app: off by default, **Administration → DLNA** (or `DLNA=1`). Needs host networking (or br0) for multicast, answers only on the home network and shows its own selection of libraries **without sign-in** – set an age limit if the kids have their own devices.
+- **Other systems (wall display, Home Assistant, Homepage …):** under *Administration → API keys* you hand out a key that can only read *Now playing* and/or the library (`/api/v1/now-playing`, `/api/v1/library`). The key is sent in the `X-Api-Key` header, is shown once and by default only works from the home network. See [docs/api.md](docs/api.md#api-nycklar-apiv1) (Swedish).
 
 The iOS/tvOS app is in English and Swedish (following the device language); the Android app, notifications, the server log, the server's error messages and the offline page are still in Swedish.
 
