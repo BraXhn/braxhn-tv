@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.2.0 – 2026-11-12
 - **Musiken börjar direkt:** när man klickade på en låt hämtade och avkodade webbspelaren hela filen innan något
   hördes, eller gav upp efter 1,5 s och strömmade i stället. Nu börjar låten spela på de första tio sekunderna medan
   resten hämtas.

@@ -106,7 +106,7 @@ A free TMDB API key (themoviedb.org → Settings → API) gives posters, descrip
 | `ghcr.io/braxhn/braxhn-tv:latest` | Stable releases (default) |
 | `:beta` | Pre-releases before the next version |
 | `:edge` | Every change as it lands – you are the tester |
-| `:1.1.0` / `:sha-…` | A fixed version, e.g. to go back |
+| `:1.2.0` / `:sha-…` | A fixed version, e.g. to go back |
 
 - **Admin notification:** *Administration* shows when a new version is available (turn off with `UPDATE_CHECK=0`).
 - A backup is made every night in `/config/backups`. Make one by hand (*Statistics → Backups → Back up now*) before a big upgrade if you want to be able to go back.
