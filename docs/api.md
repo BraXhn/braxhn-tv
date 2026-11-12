@@ -64,6 +64,13 @@ finns. Bara webben läser det; apparna ignorerar det.
 har korta segment där uppspelningen börjar, så första bilden kommer fortare. Klienten ska använda adressen som den är
 och börja spela vid samma position. Utan `start` är listan som förut. Apparna (iOS/tvOS och Android) skickar `start`.
 
+## Förvärmning: `warm=1` i `/api/items/:id/playback`
+
+Valfritt för klienter som vill starta fortare: skicka samma frågesträng som den kommande uppspelningen (utan `audio`
+och `sub` – servern väljer profilens förval) plus `warm=1` när användaren pekar på eller fokuserar Spela. Svaret är
+`{ warm: true|false, mode }` och ingenting räknas som uppspelning. Begärs uppspelningen inom 20 s med samma val (och
+det förvalda ljudspåret) tar den över den redan startade strömmen. Webben gör detta; apparna behöver inte.
+
 ## API-nycklar: `/api/v1/*`
 
 Skrivskyddat API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Administratören skapar

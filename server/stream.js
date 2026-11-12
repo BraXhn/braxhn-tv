@@ -1374,7 +1374,8 @@ function ensureCapacity(s, userId) {
   return [...sessions.values()].filter(x => x !== s && x.proc && x.d.mode === 'transcode').length < lim.global;
 }
 
-function sessionFor(it, query, userId) {
+/** Sessionens parametrar och nyckel för en strömadress (samma adress = samma session) */
+function keyFor(it, query, userId) {
   const d = normParams(readParams(query));
   if (d.mode === 'remux' && !remuxBounds(it, d.fmt)) { d.mode = 'transcode'; normParams(d); }
   // Påtvingat familjefilter: klienten kan inte välja bort tystnaden genom att ta bort ff=1, välja am=copy eller audio=''
@@ -1385,11 +1386,17 @@ function sessionFor(it, query, userId) {
     if (d.audio === '') { const a = streamsOf(it).filter(x => x.type === 'audio'); const def = a.find(x => x.default) || a[0]; if (def) d.audio = String(def.index); }
   } else if (d.ff && d.audioMode === 'copy') d.audioMode = 'aac';
   const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}${d.hs ? '-hs' + d.hs : ''}`;
+  return { d, key };
+}
+function sessionFor(it, query, userId) {
+  const { d, key } = keyFor(it, query, userId);
   let s = sessions.get(key);
   if (!s) {
     // Diagnos: en ny session för samma titel och profil medan en annan ännu inte levererat något första segment =
     // spelaren gav upp (tidsgräns) och startade om – omkodningen börjar då om från noll och filmen kommer aldrig igång
     const t = Date.now();
+    // En förvärmd ström som inte passade (annat ljudspår, annan kvalitet): den nya tar över
+    for (const x of [...sessions.values()]) if (x.user === userId && x.item === it.id && x.warm) dropWarm(x);
     const prev = [...sessions.values()].find(x => x.user === userId && x.item === it.id && !x.firstLogged && t - x.created < 60e3);
     if (prev && d.mode === 'transcode') {
       restarts.n++;
@@ -1418,6 +1425,46 @@ export function prewarm(it, query, userId, start = 0) {
     while (n + 1 < segs.length && segs[n + 1].start <= start) n++;
     if (ensureCapacity(s, userId)) startFfmpeg(s, it, n);
   } catch (e) { console.warn('[hls] förstart:', e.message); }
+}
+
+// ---------------- förvärmning innan klicket ----------------
+// Pekaren eller fokus på en Spela-knapp (/playback?warm=1): ffmpeg startas redan då, så att första segmentet är
+// klart när uppspelningen begärs. Strömmen pausas efter WARM_AHEAD segment och tas bort om ingen tar över den inom
+// WARM_TTL. En förvärmning i taget per profil, och ingen omkodning förvärms medan en annan omkodning pågår.
+export const WARM_TTL = 20000, WARM_AHEAD = 2;
+function dropWarm(s) {
+  s.warm = 0;
+  stopProc(s);
+  if (sessions.get(s.key) === s) { sessions.delete(s.key); rmLater(s.dir); }
+}
+export function warm(it, query, userId, start = 0) {
+  for (const x of [...sessions.values()]) if (x.user === userId && x.warm) dropWarm(x);
+  const { d, key } = keyFor(it, query, userId);
+  if (sessions.has(key) || !it.duration) return false;
+  // Någon tittar på en omkodad ström just nu (segment hämtade senaste halvminuten): låt den ha processorn
+  if (d.mode === 'transcode' && [...sessions.values()].some(x => x.proc && !x.warm && x.d.mode === 'transcode' && Date.now() - (x.reqAt || 0) < 30000)) return false;
+  prewarm(it, query, userId, start);
+  const s = sessions.get(key);
+  if (!s) return false;
+  if (!s.proc) { dropWarm(s); return false; }
+  s.warm = Date.now();
+  const n0 = s.start;
+  const tick = setInterval(() => {
+    if (!s.warm) return clearInterval(tick);
+    if (Date.now() - s.warm > WARM_TTL) { clearInterval(tick); dropWarm(s); return; }
+    if (s.proc && !s.paused && highestFile(s) - n0 >= WARM_AHEAD) { s.proc.kill('SIGSTOP'); s.paused = true; }
+  }, 100);
+  tick.unref();
+  return true;
+}
+/** Uppspelningen begärs med samma val som förvärmningen: strömmen tas över (true) – annars finns den inte kvar */
+export function claimWarm(it, query, userId) {
+  const s = sessions.get(keyFor(it, query, userId).key);
+  if (!s?.warm) return false;
+  s.warm = 0; s.warmed = true;
+  s.created = s.last = Date.now();
+  resume(s);
+  return true;
 }
 
 // fMP4-initsegment (moov). Identiskt för alla körningar i samma session.
@@ -1517,7 +1564,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
   }
   if (!s.firstLogged) {
     s.firstLogged = true;
-    console.log(`[hls] ${s.title}: första segmentet klart ${((Date.now() - s.created) / 1000).toFixed(1)} s efter start (${d.mode}${d.mode === 'transcode' ? ', ' + (HW === 'none' ? 'processor' : HW) : ''})`);
+    console.log(`[hls] ${s.title}: första segmentet klart ${((Date.now() - s.created) / 1000).toFixed(1)} s efter start${s.warmed ? ' (förvärmd)' : ''} (${d.mode}${d.mode === 'transcode' ? ', ' + (HW === 'none' ? 'processor' : HW) : ''})`);
   }
   throttle(s, n);
   const file = segFile(s, n);

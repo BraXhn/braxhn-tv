@@ -66,6 +66,8 @@ export function startPlay(b, ...args) {
   return loadPlayer().then(m => { if (b) b.disabled = false; return m.startPlay(b, ...args); }, (e) => { if (b) b.disabled = false; toastErr(e); });
 }
 export const play = (...args) => loadPlayer().then(m => m.play(...args));
+/** Förvärm strömmen (pekaren eller fokus på en Spela-knapp) – se warmPlay i player/video.js */
+export const warmPlay = (...args) => loadPlayer().then(m => m.warmPlay(...args)).catch(() => {});
 export const playSpoken = (s) => need('audio.js').then(m => m.playSpoken(s)).catch(e => toastErr(e));
 /** "Spela på…": den här webbläsaren blir en enhet som kan styras (laddar spelaren – anropas när sidan är ritad) */
 export const startRemote = () => need('player/remote.js').then(m => m.startRemote()).catch(() => {});

@@ -1,10 +1,11 @@
 // Routing och appens skal: inloggning vid start (boot), route() med navigeringsgeneration, bibliotekslänkar,
 // användarmenyn, sökfältet, flikmenyn och installation som app
-import { $, $$, api, esc, isBackKey, isTyping, lang, leaveFns, store, libs, main, me, nextRoute, rememberLang, rememberPage, routeGen, setLibs, setLogin, setMe, setSpatialOn, spatialOn, toast, tvMode, views, t } from './core.js';
-import { closeAllPlayers, closeLiveAndRec, curPlayer, idle, loadPlayer, need, startRemote, stopAudio, stopRemote } from './lazy.js';
+import { $, $$, api, esc, resumeAt, isBackKey, isTyping, lang, leaveFns, store, libs, main, me, nextRoute, rememberLang, rememberPage, routeGen, setLibs, setLogin, setMe, setSpatialOn, spatialOn, toast, tvMode, views, t } from './core.js';
+import { closeAllPlayers, closeLiveAndRec, curPlayer, idle, loadPlayer, need, startRemote, stopAudio, stopRemote, warmPlay } from './lazy.js';
 import { refreshScreen, screenBadge } from './screentime.js';
 import { bindRetry, errorState, loadingState } from './ui/states.js';
 import { RAIL_ICON } from './ui/icons.js';
+import { cardItem } from './ui/cards.js';
 import { openMenu } from './ui/menu.js';
 // Laddas när de behövs (lazy.js): dialoger, administratörens aktivitetsruta, bandbreddsmätningen
 const openDialog = (o) => need('ui/dialog.js').then(m => m.openDialog(o));
@@ -170,7 +171,16 @@ function prefetch(e) {
   if (t.closest('.card')) need('ui/cardmenu.js').catch(() => {}); // ▶ ✎ ⋮ (kopplas i app.js)
   // Snabbstart: pekaren på ett korts Spela-knapp väcker titelns disk i förväg (servern läser lite av filen)
   const w = t.closest('[data-cplay]');
-  if (w) wakeDisk(+w.dataset.cplay);
+  if (w) { wakeDisk(+w.dataset.cplay); warmCard(w); }
+  // Spela-knappar med titel och position (titelsidan, avsnittslistan): strömmen förvärms
+  const wp = t.closest('[data-warm]');
+  if (wp) { const [id, pos] = wp.dataset.warm.split(':'); warmPlay(+id, +pos || 0); }
+}
+/** ▶ på ett kort: samma titel och position som klicket spelar (serier väljer avsnitt först vid klicket) */
+function warmCard(b) {
+  if (b.dataset.pos != null) return warmPlay(+b.dataset.cplay, +b.dataset.pos || 0);
+  const it = cardItem(b.dataset.cplay);
+  if (it && it.kind !== 'show') warmPlay(it.id, resumeAt(it.position, it.duration));
 }
 const woken = new Map();
 function wakeDisk(id) {

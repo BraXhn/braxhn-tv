@@ -322,6 +322,42 @@ function startSkipCountdown(cur, plan, v) {
   }, 1000);
 }
 
+/** Det spelaren skickar till /playback utöver spårvalen. Förvärmningen (warmPlay) skickar samma – annars passar
+ *  den förvärmda strömmen inte uppspelningen som följer. */
+function playbackBase({ q, version, forceHls, h264, cinema, start }, v = document.createElement('video')) {
+  const extra = { q: q === 'auto' ? '' : q };
+  if (version) extra.version = version; // spårlistan hör till just den versionen
+  if (forceHls) extra.force = 'hls';
+  if (h264) extra.tc = ''; // HEVC/AV1 fungerade inte – omkodning till H.264
+  if (cinema) extra.cinema = '1';
+  Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
+  extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
+  if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
+  if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
+  // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
+  // sedan, så en förstart mitt i filmen skulle bara stoppas och startas om
+  if (start > 0 && !extra.nhls) extra.start = String(Math.floor(start));
+  return extra;
+}
+
+// Förvärmning: pekaren eller fokus på en Spela-knapp – servern startar strömmen redan nu (/playback?warm=1), så att
+// första segmentet är klart vid klicket. Samma titel och position förvärms högst var 15:e sekund.
+const warmedAt = new Map();
+export function warmPlay(id, start = 0, opts = {}) {
+  id = +id; start = +start || 0;
+  if (!id || P?.it?.id === id) return;
+  const key = `${id}:${Math.floor(start)}`;
+  if (Date.now() - (warmedAt.get(key) || 0) < 15000) return;
+  if (warmedAt.size > 100) warmedAt.clear();
+  warmedAt.set(key, Date.now());
+  const extra = playbackBase({ q: quality, version: opts.version || store.get('version.' + id, ''), cinema: !(start > 0), start });
+  // Utanför hemmet väljs kvaliteten efter uppmätt uppkoppling – utan mätning går det inte att förutse valet
+  if (status.remote) { const bw = lastBandwidth(); if (!bw) return; extra.bw = String(bw); if (saveData()) extra.save = '1'; }
+  extra.warm = '1';
+  // Vanlig fetch (inte api()): ett bakgrundsanrop som får misslyckas tyst
+  fetch(`/api/items/${id}/playback?${capsQuery(extra)}`, { credentials: 'same-origin' }).catch(() => {});
+}
+
 // play: false = byt ström men låt filmen stå pausad (den var pausad när inställningen ändrades)
 async function load(start, { play = true } = {}) {
   const cur = P; if (!cur) return;
@@ -333,18 +369,8 @@ async function load(start, { play = true } = {}) {
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
-  const extra = { q: cur.q === 'auto' ? '' : cur.q, audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
-  if (it.version) extra.version = it.version; // spårlistan hör till just den versionen
-  if (cur.forceHls) extra.force = 'hls';
-  if (cur.h264) extra.tc = ''; // HEVC/AV1 fungerade inte – omkodning till H.264
-  if (cur.cinema) extra.cinema = '1';
-  Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
-  extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
-  if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
-  if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
-  // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
-  // sedan, så en förstart mitt i filmen skulle bara stoppas och startas om
-  if (start > 0 && !extra.nhls) extra.start = String(Math.floor(start));
+  const extra = { ...playbackBase({ q: cur.q, version: it.version, forceHls: cur.forceHls, h264: cur.h264, cinema: cur.cinema, start }, v),
+    audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   // Utanför hemmet: uppmätt uppkoppling (väntar högst 1,5 s på en ny mätning) och "Spara data" i telefonen
   if (status.remote) {
     const bw = lastBandwidth() || await Promise.race([measureBandwidth(), new Promise(r => setTimeout(() => r(0), 1500))]);

@@ -89,8 +89,30 @@ route('GET', '/api/speedtest', user, (c) => {
   c.res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': kb * 1024, 'Cache-Control': 'no-store' });
   c.res.end(c.req.method === 'HEAD' ? undefined : NOISE.subarray(0, kb * 1024));
 });
+// ---------- förvärmning (warm=1) ----------
+// Webben anropar /playback?warm=1 när pekaren eller fokus hamnar på en Spela-knapp: servern fattar samma beslut som
+// vid uppspelning och startar strömmen (stream.js warm), men ingenting räknas som uppspelning (ingen "spelas nu",
+// historik, scrobbling eller token). När uppspelningen sedan begärs med samma val tar den över strömmen.
+const warmed = new Map(); // "profil:titel" → { sig, pid }
+/** Strömmens val utan uppspelningens egna delar (pid, token) – lika = samma ström */
+const warmSig = (hp) => [...hp].filter(([k]) => k !== 'pid' && k !== 't').map(([k, v]) => `${k}=${v}`).sort().join('&');
+/** Skulle webbspelaren bränna in profilens förvalda undertext (bildundertext som den inte ritar själv)? */
+function warmBurns(it, audios, o, prefs) {
+  const a = audios.find(x => String(x.index) === String(o.audio)) || audios.find(x => x.default) || audios[0];
+  const sub = pp.pickSub(st.subtitlesOf(it), a, prefs, { pgs: true });
+  return !!(sub?.bitmap && !sub.pgs);
+}
+// Högst 30 förvärmningar per minut och profil (en klient som sveper över alla kort ska inte starta ffmpeg i ett)
+const warmRate = new Map();
+function warmAllowed(uid) {
+  const t = Date.now(), w = warmRate.get(uid);
+  if (!w || t - w.t > 60e3) { if (warmRate.size > 5000) warmRate.clear(); warmRate.set(uid, { t, n: 1 }); return true; }
+  return ++w.n <= 30;
+}
+
 route('GET', '/api/items/:id/playback', user, async (c) => {
   const row = mediaItem(c); if (!row) return;
+  const warm = c.q.get('warm') === '1';
   const main = ver.mainOf(row);
   if (act.isStopped(c.user.id, main.id)) return fail(c.res, 403, 'Uppspelningen stoppades av administratören');
   if (c.q.get('info') !== '1' && screenBlock(c)) return;
@@ -138,6 +160,8 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const audios = st.streamsOf(it).filter(s => s.type === 'audio');
   const prefAudio = pp.pickAudio(audios, prefs);
   if (!o.audio && prefAudio && prefAudio !== (audios.find(a => a.default) || audios[0])) o.audio = String(prefAudio.index);
+  // Förvärmning: klienten har inte spårlistan än – samma förval som webbspelaren sedan skickar (audio=<förvalt spår>)
+  if (warm && !o.audio) { const a = prefAudio || audios.find(x => x.default) || audios[0]; if (a) o.audio = String(a.index); }
   // Familjefilter (profilens val): tysta intervall ur undertexterna i ljudspårets språk. Klienter som tystar själva
   // (webbspelaren, ffc=1) får bara planen; övriga (apparna, Chromecast) får ljudet tystat av servern (o.mute → decide)
   const fmode = family.modeFor(c.user.id);
@@ -158,18 +182,28 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Strömlänkar får en egen kortlivad token som bara gäller den här titeln (aldrig kontots token i URL:er)
   let token = null;
   const needTok = c.q.get('cast') === '1' || c.user.via !== 'cookie';
-  if (c.q.get('info') !== '1' && needTok) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
+  if (c.q.get('info') !== '1' && !warm && needTok) token = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const hp = d.mode === 'direct' ? null : st.hlsParams(d, o, token);
   // Fortsätt titta: korta segment där uppspelningen börjar, så att första bilden kommer lika fort som från början
   const hs = Math.floor(Math.max(0, +c.q.get('start') || 0));
   if (hp && hs >= 6) hp.set('hs', String(hs));
+  // Förvärmd ström (warm=1 strax före, samma val): uppspelningen tar över den – första segmentet är redan klart
+  const wkey = `${c.user.id}:${it.id}`;
+  if (hp && !warm && c.q.get('info') !== '1' && c.q.get('queue') !== '1') {
+    const w = warmed.get(wkey);
+    if (w) {
+      warmed.delete(wkey);
+      const q2 = new URLSearchParams(hp); q2.set('pid', w.pid);
+      if (w.sig === warmSig(hp) && st.claimWarm(it, q2, c.user.id)) hp.set('pid', w.pid);
+    }
+  }
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${hp}`;
   // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning.
   // queue=1: Chromecast köar nästa avsnitt (länkar och token nu, uppspelningen börjar senare) – ingen förstart eller "spelas nu".
   const queued = c.q.get('queue') === '1';
-  const info = c.q.get('info') === '1' || queued;
+  const info = c.q.get('info') === '1' || queued || warm;
   const startAt = Math.max(0, +c.q.get('start') || 0);
   // Bio-läge (cinema=1, bara filmer från början): trailers och förfilm före filmen
   const preroll = c.q.get('info') !== '1' && !queued && c.q.get('cinema') === '1' && main.kind === 'movie' && startAt < 1
@@ -180,6 +214,17 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Snabbstart: väck disken direkt och räkna träff/miss i startcachen (före ffmpeg, som kan läsa ur den)
   if (!info) prestart.notePlay(it, startAt, d.mode);
   if (hp && !info && !d.abr && !preroll.length) st.prewarm(it, hp, c.user.id, startAt);
+  if (warm) {
+    // Inget förvärms när trailers spelas först, vid anpassningsbar kvalitet eller när en bildundertext ska brännas in
+    // (klienten väljer den först när den har spårlistan). Direktuppspelning behöver ingen ström – disken väcks ovan.
+    let ok = false;
+    if (hp && !d.abr && !preroll.length && !warmBurns(it, audios, o, prefs) && warmAllowed(c.user.id)) {
+      prestart.wake(it);
+      ok = st.warm(it, hp, c.user.id, startAt);
+      if (ok) { if (warmed.size > 500) warmed.clear(); warmed.set(wkey, { sig: warmSig(hp), pid: hp.get('pid') }); }
+    } else if (!hp) prestart.wake(it);
+    return send(c.res, 200, { warm: ok, mode: d.mode });
+  }
   if (it.duration && !info) trakt.scrobble(c.user.id, main, 'start', startAt / it.duration * 100).catch(() => {});
   // Diagnos i loggen: vad som valdes och hur lång tid beslutet tog (långsam start felsöks härifrån)
   if (!info) console.log(`[uppspelning] ${main.title}: ${d.mode}${d.q && d.q !== 'orig' ? ' ' + d.q + 'p' : ''}${remote ? ' (utanför hemmet)' : ''} – ${d.reasons.join(', ') || 'direkt'} – beslut på ${((Date.now() - t0) / 1000).toFixed(1)} s`);

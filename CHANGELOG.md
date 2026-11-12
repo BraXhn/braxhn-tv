@@ -9,6 +9,15 @@
   - Uppmätt på testmaskinen, tid till första segment: omkodning 720p mitt i filen 1,05 → 0,6 s, 1080p 1,2 → 0,7 s,
     remux 0,35 → 0,23–0,28 s. Vinsten är störst där omkodningen är långsam (4K, tonmappning).
   - Android-appen skickar nu startpositionen till servern, så att strömmen förbereds på rätt ställe.
+- **Strömmen förbereds redan innan klicket:** när pekaren eller fokus hamnar på en Spela-knapp (kortens ▶,
+  titelsidans *Spela*, *Fortsätt* och avsnittslistan) startar servern strömmen direkt. Vid klicket är första
+  segmentet redan klart.
+  - Uppmätt i webbläsaren med pekaren på knappen 0,4 s före klicket: första segmentet 0,09–0,13 s efter klicket, mot
+    0,31–0,36 s utan förvärmning (remux). På TV, där fokus står på *Spela* när titelsidan öppnas, hinner även en
+    omkodning bli klar.
+  - Förvärmningen räknas inte som uppspelning: ingen historik, inget "spelas nu" och ingen scrobbling.
+  - Den pausas efter två segment och tas bort efter 20 s om ingen spelar. Högst en i taget per profil, och ingen
+    omkodning förvärms medan någon annan tittar på en omkodad ström.
 - **API-nycklar för andra system:**
   - Under *Administration → API-nycklar* delar du ut en nyckel som bara kan läsa. Behörigheterna är *Nu spelas*
     (`/api/v1/now-playing`: film, serier, musik, ljudböcker och poddar, med vem, enhet och hur långt) och/eller

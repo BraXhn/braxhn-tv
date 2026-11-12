@@ -140,3 +140,62 @@ t('remux: korta segment från början och från nyckelbilden före start=, och d
   await check(P.segs[i - 1], 'remux segmentet före', { tol: 0.25 });
   await check(P0.segs[0], 'remux segment 0', { tol: 0.25 });
 });
+
+// ---------- förvärmning innan klicket (/playback?warm=1) ----------
+const sessions = () => [...st._slots.sessions.values()];
+const pidOf = (url) => new URL(url, B).searchParams.get('pid');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const getJson = async (q) => (await fetch(`${B}/api/items/${it.id}/playback?${q}`, { headers: A() })).json();
+
+t('förvärmning: strömmen startas vid warm=1, pausas efter några segment och tas över av uppspelningen', async () => {
+  const act = await import('../server/activity.js');
+  // Spelaren från förra testet stängs (som /stop) – en pågående omkodning hindrar annars förvärmningen
+  const stopAll = () => { for (const x of sessions()) st.stopUserSessions(it.id, x.user); for (const x of sessions()) x.reqAt = 0; };
+  stopAll();
+  const plays0 = D.get('SELECT COUNT(*) AS n FROM plays').n, active0 = act.listActive().length;
+  // Webbspelaren skickar inget ljudspår vid förvärmningen – servern väljer samma förval som spelaren sedan skickar
+  const w = await getJson('force=transcode&q=480&start=43.7&warm=1');
+  assert.deepEqual(w, { warm: true, mode: 'transcode' });
+  assert.equal(D.get('SELECT COUNT(*) AS n FROM plays').n, plays0, 'förvärmningen är ingen uppspelning (historik)');
+  assert.equal(act.listActive().length, active0, 'och syns inte som "spelas nu"');
+  const s = sessions().find(x => x.warm);
+  assert.ok(s?.proc, 'ffmpeg är igång');
+  for (let i = 0; i < 80 && !s.paused; i++) await sleep(100);
+  assert.ok(s.paused, 'pausad efter de första segmenten');
+  const files = fs.readdirSync(s.dir).filter(f => /^seg_/.test(f)).length;
+  assert.ok(files >= 2 && files <= st.WARM_AHEAD + 2, `${files} segment förberedda`);
+  // Uppspelningen med samma val (spelaren skickar nu det förvalda ljudspåret) tar över strömmen
+  const audio = JSON.parse(it.streams).find(x => x.type === 'audio').index;
+  const P = await playlist(`force=transcode&q=480&start=43.7&audio=${audio}`);
+  assert.equal(pidOf(P.pb.url), s.d.pid, 'samma ström som förvärmdes');
+  assert.ok(!s.warm && s.warmed && !s.paused);
+  const t0 = Date.now();
+  await check(P.segs.find(x => x.start === 42), 'förvärmt segment 42');
+  assert.ok(Date.now() - t0 < 400, `segmentet var redan klart (${Date.now() - t0} ms)`);
+  await check(P.segs.find(x => x.start === 44), 'segment 44'); await check(P.segs.find(x => x.start === 48), 'segment 48');
+  assert.ok(act.listActive().some(x => x.itemId === it.id));
+});
+
+t('förvärmning: andra val vid uppspelningen ger en egen ström, och en ny förvärmning ersätter den förra', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  assert.equal((await getJson('force=transcode&q=480&start=20&warm=1')).warm, true);
+  const w1 = sessions().find(x => x.warm);
+  // Samma profil pekar på en annan knapp: bara en förvärmning i taget
+  assert.equal((await getJson('force=hls&start=30&warm=1')).warm, true);
+  assert.ok(!sessions().includes(w1) && !w1.proc, 'den förra är stoppad och borttagen');
+  const w2 = sessions().find(x => x.warm);
+  assert.equal(w2.d.mode, 'remux');
+  // Uppspelningen väljer en annan kvalitet: egen ström, förvärmningen tas bort
+  const P = await playlist('force=transcode&q=720&start=30');
+  assert.notEqual(pidOf(P.pb.url), w2.d.pid);
+  await check(P.segs.find(x => x.start === 30), 'egen ström');
+  assert.ok(!sessions().some(x => x.warm), 'ingen förvärmning kvar');
+  // Direktuppspelning behöver ingen ström
+  const d = await getJson('warm=1&c=mkv&v=h264&a=ac3,aac');
+  if (d.mode === 'direct') assert.equal(d.warm, false);
+  // info=1 och vanliga anrop påverkas inte av en förvärmning som aldrig tas över
+  assert.equal((await getJson('force=hls&start=50&warm=1')).warm, true);
+  const info = await getJson('force=hls&info=1');
+  assert.equal(info.mode, 'remux');
+  assert.ok(sessions().some(x => x.warm), 'info=1 tar inte över förvärmningen');
+});
