@@ -318,16 +318,26 @@ async function runCase(src, it, c, seen) {
     const mid = Math.floor(pl.segments.length / 2);
     if (pl.segments.length >= 5) {
       // Ny uppspelning med start mitt i (ny session: ffmpeg startar med -ss), sedan bakåt ett segment (omstart)
-      const pb2 = await playback(it, c, `start=${Math.floor(pl.segments[mid].start + 0.5)}`);
+      // start= ger korta segment just där (hs i adressen): listan skiljer sig från den första men täcker samma film,
+      // och samma start ger samma lista
+      const pos = Math.floor(pl.segments[mid].start + 0.5);
+      const pb2 = await playback(it, c, `start=${pos}`);
       const m2 = parseMaster((await get(pb2.url)).toString());
       const v2 = m2.variants.find(v => v.attrs.RESOLUTION === variant.attrs.RESOLUTION) || m2.variants[0];
       const v2Url = new URL(v2.uri, srv.base + pb2.url).href;
       const pl2 = parseMedia((await get(v2Url)).toString());
-      check(pl2.segments.length === pl.segments.length && pl2.segments.every((s, i) => Math.abs(s.dur - pl.segments[i].dur) < 1e-6), 'spellistan ändrades mellan två uppspelningar');
+      const total = (l) => l.segments.reduce((n, x) => n + x.dur, 0);
+      check(Math.abs(total(pl2) - total(pl)) < 1e-3, 'spellistans längd ändrades med start=');
+      const pb3 = await playback(it, c, `start=${pos}`);
+      const m3 = parseMaster((await get(pb3.url)).toString());
+      const v3 = m3.variants.find(v => v.attrs.RESOLUTION === variant.attrs.RESOLUTION) || m3.variants[0];
+      const pl3 = parseMedia((await get(new URL(v3.uri, srv.base + pb3.url).href)).toString());
+      check(pl3.segments.length === pl2.segments.length && pl3.segments.every((x, i) => Math.abs(x.dur - pl2.segments[i].dur) < 1e-6), 'spellistan ändrades mellan två uppspelningar med samma start');
+      const mid2 = Math.max(1, pl2.segments.findIndex(x => x.start <= pos && x.start + x.dur > pos));
       if (fm) init = await get(new URL(pl2.map, v2Url).href);
-      segs.s0 = await fetchSeg(v2Url, pl2, mid, 'spol');
-      if (mid + 1 < pl2.segments.length) segs.s1 = await fetchSeg(v2Url, pl2, mid + 1, 'spol');
-      segs.sb = await fetchSeg(v2Url, pl2, mid - 1, 'spol');
+      segs.s0 = await fetchSeg(v2Url, pl2, mid2, 'spol');
+      if (mid2 + 1 < pl2.segments.length) segs.s1 = await fetchSeg(v2Url, pl2, mid2 + 1, 'spol');
+      segs.sb = await fetchSeg(v2Url, pl2, mid2 - 1, 'spol');
     }
 
     // ---- kontroller per segment ----

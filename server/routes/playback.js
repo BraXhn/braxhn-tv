@@ -162,6 +162,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const tq = token ? `?t=${token}` : '';
   const base = `/api/stream/${it.id}`;
   const hp = d.mode === 'direct' ? null : st.hlsParams(d, o, token);
+  // Fortsätt titta: korta segment där uppspelningen börjar, så att första bilden kommer lika fort som från början
+  const hs = Math.floor(Math.max(0, +c.q.get('start') || 0));
+  if (hp && hs >= 6) hp.set('hs', String(hs));
   const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${hp}`;
   // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning.
   // queue=1: Chromecast köar nästa avsnitt (länkar och token nu, uppspelningen börjar senare) – ingen förstart eller "spelas nu".

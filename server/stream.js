@@ -655,13 +655,25 @@ export function computeKeyframes(it, { priority = false } = {}) {
 // Segmentgränser: första nyckelbild ≥ föregående gräns + SEG
 // ts (H.264): egna gränser ≈ SEG s via segment-muxern. fmp4 (HEVC): ett segment per GOP – ffmpegs
 // HLS-muxer med mycket kort hls_time delar på varje nyckelbild, vilket blir deterministiskt vid omstart.
-function remuxBounds(it, fmt = 'ts') {
+// Korta segment där uppspelningen börjar (HEAD_GAP s i stället för SEG s): första bilden kan visas när ETT segment är
+// klart, och tiden dit går åt till att läsa och – när ljudet konverteras till AAC – koda segmentets ljud (~30 ms per
+// sekund ljud: 8 s segment ≈ 0,35 s, 2 s ≈ 0,1 s). Från början alltid; mitt i filen (hs = sekunden där uppspelningen
+// börjar, ur adressen) i fönstret från nyckelbilden före hs. Samma hs ger alltid samma lista.
+const HEAD_GAP = 1.5;
+function remuxBounds(it, fmt = 'ts', hs = 0) {
   const kf = keyframesReady(it);
   if (!kf || kf.length < 2) return null;
   if (fmt === 'fmp4') return [0, ...kf.filter(t => t > 0.05 && t < it.duration - 0.5)];
+  // Fönstret mitt i filen börjar på sista nyckelbilden ≤ hs (binärsökning)
+  let w = -1;
+  if (hs > SEG) { let lo = 0, hi = kf.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (kf[m] <= hs) lo = m; else hi = m - 1; } if (kf[lo] <= hs) w = kf[lo]; }
+  const short = (t) => t < SEG || (w >= 0 && t >= w && t < w + SEG);
   const b = [0];
   let last = 0;
-  for (const t of kf) if (t >= last + SEG - 0.001 && t < it.duration - 0.5) { b.push(t); last = t; }
+  for (const t of kf) {
+    if (t >= it.duration - 0.5) break;
+    if (t >= last + (short(t) ? HEAD_GAP : SEG) - 0.001) { b.push(t); last = t; }
+  }
   return b;
 }
 
@@ -800,7 +812,9 @@ function readParams(q) {
     ab: [96, 128, 160, 192].includes(+q.get('ab')) ? +q.get('ab') : null,
     startBw: Math.max(0, Math.min(1e6, parseInt(q.get('sbw')) || 0)) || null,
     night: q.get('night') === '1', dialog: q.get('dialog') === '1', ff: q.get('ff') === '1',
-    vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264'
+    vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264',
+    // Sekunden där uppspelningen börjar (Fortsätt titta): korta segment just där, se segmentsOf
+    hs: Math.max(0, Math.min(1e6, Math.floor(+q.get('hs') || 0)))
   };
 }
 /**
@@ -908,13 +922,24 @@ export function serveSubPlaylist(res, it, sid, query) {
     { 'Content-Type': 'application/vnd.apple.mpegurl' });
 }
 
+/** Omkodningens segmentstarter: 0, 2, 4, 6, 12 … – och med hs (≥ SEG) korta segment även där uppspelningen börjar:
+ *  … G, B, B+2, B+4, B+6, B+12 … där B = hs avrundat nedåt till jämn sekund och G = sista vanliga gränsen före B */
+export function transcodeStarts(duration, hs = 0) {
+  const end = duration - 0.5;
+  const starts = HEAD.filter(t => t === 0 || t < end);
+  const B = hs >= SEG ? Math.floor(hs / 2) * 2 : 0;
+  if (!B || B + 2 >= end) { for (let t = SEG; t < end; t += SEG) starts.push(t); return starts; }
+  for (let t = SEG; t < B; t += SEG) starts.push(t);
+  for (const t of [B, B + 2, B + 4]) if (t < end) starts.push(t);
+  for (let t = B + SEG; t < end; t += SEG) starts.push(t);
+  return starts;
+}
 function segmentsOf(it, d) {
   if (d.mode === 'remux') {
-    const b = remuxBounds(it, d.fmt);
+    const b = remuxBounds(it, d.fmt, d.hs);
     if (b) return b.map((t, i) => ({ start: t, dur: (b[i + 1] ?? it.duration) - t }));
   }
-  const starts = HEAD.filter(t => t === 0 || t < it.duration - 0.5);
-  for (let t = SEG; t < it.duration - 0.5; t += SEG) starts.push(t);
+  const starts = transcodeStarts(it.duration, d.hs);
   return starts.map((t, i) => ({ start: t, dur: (starts[i + 1] ?? it.duration) - t }));
 }
 
@@ -939,16 +964,28 @@ export function servePlaylist(res, it, query) {
 const TM_CPU = (hdr) => `setparams=color_trc=${hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084'}:color_primaries=bt2020:colorspace=bt2020nc:range=tv,` +
   `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=${TONEMAP}:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`;
 
-// Tvingade nyckelbilder exakt på segmentgränserna (relativt ffmpegs start). Från början: 0, 2, 4, 6, 12 …
-// – annars var SEG s. Mitt i de korta startsegmenten startar ffmpeg alltid om från början (se startFfmpeg).
-const forcedKeys = (fromStart) => fromStart
-  ? `expr:if(lt(n_forced,${HEAD.length}),gte(t,${HEAD[1] - HEAD[0]}*n_forced),gte(t,${SEG}*(n_forced-${HEAD.length - 1})))`
-  : `expr:gte(t,n_forced*${SEG})`;
+// Tvingade nyckelbilder exakt på segmentgränserna, relativt ffmpegs start: rel = [0, nästa gräns − start, …].
+// Gränserna är några få jämna följder (2 s i de korta startsegmenten, annars SEG s), så uttrycket blir en kort kedja
+// "nyckelbild nummer n ligger vid t0 + steg·(n − n0)" – den sista följden fortsätter med SEG s till filens slut.
+export function forcedKeys(rel) {
+  const runs = [];
+  for (let i = 1; i < rel.length; i++) {
+    const step = Math.round((rel[i] - rel[i - 1]) * 1000) / 1000, r = runs.at(-1);
+    if (r && r.step === step) r.len++;
+    else runs.push({ n0: i - 1, t0: rel[i - 1], step, len: 1 });
+  }
+  // Det sista segmentet i filen kan vara kortare eller längre än SEG – efter det finns inga gränser kvar
+  if (!runs.length || runs.at(-1).step !== SEG) runs.push({ n0: Math.max(0, rel.length - 1), t0: rel.at(-1) ?? 0, step: SEG, len: 0 });
+  const at = (r) => `gte(t,${r.t0}+${r.step}*(n_forced-${r.n0}))`;
+  let e = at(runs.at(-1));
+  for (let i = runs.length - 2; i >= 0; i--) e = `if(lt(n_forced,${runs[i].n0 + runs[i].len}),${at(runs[i])},${e})`;
+  return 'expr:' + e;
+}
 
 // Källans färgegenskaper (före tonmappning med grafikkortet; Dolby Vision 5 får sina från RPU-metadatan i libplacebo)
 const hdrParams = (hdr, dv5) => `setparams=color_trc=${hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084'}:color_primaries=bt2020${dv5 ? '' : ':colorspace=bt2020nc'}:range=tv`;
 
-function videoArgs(it, d, fromStart) {
+function videoArgs(it, d, keys) {
   const Q = QUALITIES[d.q] || QUALITIES.orig;
   const v = videoOf(it);
   const h = Q.h && v?.height && v.height > Q.h ? Q.h : null;
@@ -960,7 +997,8 @@ function videoArgs(it, d, fromStart) {
   // Inga B-bilder: med B-bilder börjar varje segments DTS före föregående segments sista DTS (ffmpegs TS-muxer
   // skjuter bara fram det första segmentet), och Chrome avbryter då uppspelningen ("formatet stöds inte").
   // Utan B-bilder är DTS = PTS och segmenten passar exakt ihop, oavsett kodare.
-  const gop = ['-force_key_frames', forcedKeys(fromStart), '-bf', '0'];
+  // keys: uttrycket från forcedKeys(); true/false (tester) = från början resp. efter spolning utan korta segment
+  const gop = ['-force_key_frames', typeof keys === 'string' ? keys : forcedKeys(keys ? [0, 2, 4, 6, 12] : [0, 6, 12]), '-bf', '0'];
   // Tonmappad bild märks uttryckligen som SDR/BT.709 (annars kan källans HDR-märkning följa med)
   const sdr = d.tonemap ? ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'] : [];
   // Filterkedja i mjukvara (inbränning, skalning, tonmappning) innan ev. hårdvaruuppladdning
@@ -1099,8 +1137,6 @@ function startFfmpeg(s, it, n) {
   stopProc(s);
   const d = s.d;
   const segs = segmentsOf(it, d);
-  // Nyckelbildsmönstret för de korta startsegmenten gäller bara när omkodningen börjar från början
-  if (d.mode === 'transcode' && n > 0 && n < HEAD.length) n = 0;
   const t = segs[n].start;
   // HEVC/AV1-kodaren har slutat fungera (eller admin har valt bort den): H.264 i samma fMP4-session
   if (d.mode === 'transcode' && d.vc !== 'h264' && !encoderFor(d.vc)) fallbackH264(s, `${VC_LABEL[d.vc]} går inte att koda just nu`);
@@ -1139,7 +1175,7 @@ function startFfmpeg(s, it, n) {
   } else {
     // Omkodning: segment-muxern delar exakt på de tvingade nyckelbilderna (extra nyckelbilder från kodaren,
     // t.ex. vid scenbyten i hårdvarukodare, ger inga extra segment – listan förblir deterministisk)
-    const va = videoArgs(it, d, n === 0);
+    const va = videoArgs(it, d, forcedKeys(segs.slice(n).map(x => x.start - t)));
     gpuRun = va.gpu || null; tmRun = va.tm || null;
     encName = d.vc !== 'h264' ? encoderFor(d.vc)?.name || null : null;
     const times = segTimes(segs, n, t);
@@ -1348,7 +1384,7 @@ function sessionFor(it, query, userId) {
     if (d.audioMode === 'copy') d.audioMode = 'aac';
     if (d.audio === '') { const a = streamsOf(it).filter(x => x.type === 'audio'); const def = a.find(x => x.default) || a[0]; if (def) d.audio = String(def.index); }
   } else if (d.ff && d.audioMode === 'copy') d.audioMode = 'aac';
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}${d.hs ? '-hs' + d.hs : ''}`;
   let s = sessions.get(key);
   if (!s) {
     // Diagnos: en ny session för samma titel och profil medan en annan ännu inte levererat något första segment =

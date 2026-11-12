@@ -1,6 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+- **Snabbare start mitt i filmen eller avsnittet (Fortsätt titta):** första bilden kan visas när ett segment är klart,
+  och hur fort det går beror på hur långt segmentet är. Från början var segmenten redan korta vid omkodning, men mitt
+  i filen var första segmentet 6 s (omkodning) eller 6–8 s (remux).
+  - Nu läggs korta segment (2 s vid omkodning, en nyckelbildsperiod vid remux) precis där uppspelningen börjar.
+  - Remux från början får också korta första segment. När ljudet konverteras till AAC tog ett 8 s-segment 0,35 s.
+  - Uppmätt på testmaskinen, tid till första segment: omkodning 720p mitt i filen 1,05 → 0,6 s, 1080p 1,2 → 0,7 s,
+    remux 0,35 → 0,23–0,28 s. Vinsten är störst där omkodningen är långsam (4K, tonmappning).
+  - Android-appen skickar nu startpositionen till servern, så att strömmen förbereds på rätt ställe.
 - **API-nycklar för andra system:**
   - Under *Administration → API-nycklar* delar du ut en nyckel som bara kan läsa. Behörigheterna är *Nu spelas*
     (`/api/v1/now-playing`: film, serier, musik, ljudböcker och poddar, med vem, enhet och hur långt) och/eller

@@ -156,8 +156,10 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 runCatching { Api.get<CinemaPrefs>("/api/me/cinema").on }.getOrDefault(false)
             // Avkodarlistan (MediaCodecList) är långsam första gången – inte på huvudtråden
             val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(req.audio, sub) }
+            // start: servern förbereder strömmen där uppspelningen börjar (Fortsätt titta) – korta segment just där
             val p: Playback = Api.get("/api/items/${req.id}/playback", caps + Api.comfortQuery() +
-                ("cinema" to (if (cinema) "1" else null)))
+                ("cinema" to (if (cinema) "1" else null)) +
+                ("start" to (if (req.start >= 1 && !cinema) req.start.toLong().toString() else null)))
             pb = p
             currentSub = sub
             status = listOfNotNull(when (p.mode) { "direct" -> "Direkt"; "remux" -> "Remux"; else -> "Omkodning" },

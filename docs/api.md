@@ -58,6 +58,12 @@ Nytt, valfritt fält: en https-adress till PayPal (`server/project.js`). Saknas 
 administratören slagit av *Visa länken Stöd projektet* (`showDonate` i `/api/settings`) och när ingen giltig länk
 finns. Bara webben läser det; apparna ignorerar det.
 
+## Startposition: `start=` i `/api/items/:id/playback`
+
+`start=<sekunder>` (valfritt, fanns redan för förstart) gör nu också att strömmens adress får `hs=<sekund>`: HLS-listan
+har korta segment där uppspelningen börjar, så första bilden kommer fortare. Klienten ska använda adressen som den är
+och börja spela vid samma position. Utan `start` är listan som förut. Apparna (iOS/tvOS och Android) skickar `start`.
+
 ## API-nycklar: `/api/v1/*`
 
 Skrivskyddat API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Administratören skapar

@@ -50,7 +50,7 @@ test('grafikkortets kedja i omkodningen: -g, -forced-idr och -force_key_frames i
   for (const hw of ['nvenc', 'qsv', 'vaapi']) {
     const code = `const st = await import(${JSON.stringify(new URL('../server/stream.js', import.meta.url).href)});
       const it = { id: 1, hdr: null, streams: JSON.stringify([{ type: 'video', index: 0, codec: 'h264', pix: 'yuv420p', width: 1920, height: 1080, fps: 23.976 }]) };
-      const out = { start: st._segs.videoArgs(it, { q: '1080', mode: 'transcode' }, true).enc, seek: st._segs.videoArgs(it, { q: '720', mode: 'transcode' }, false).enc };
+      const out = { start: st._segs.videoArgs(it, { q: '1080', mode: 'transcode' }, st.forcedKeys(st.transcodeStarts(7200))).enc, seek: st._segs.videoArgs(it, { q: '720', mode: 'transcode' }, st.forcedKeys([0, 2, 4, 6, 12])).enc };
       console.log(JSON.stringify(out)); process.exit(0);`;
     const env = { ...process.env, HWACCEL: hw, TRANSCODE_PROBE: '0', CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-gop-hw-')), TRANSCODE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-gop-tc-')) };
     const r = JSON.parse(execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', code], { env }).toString().trim().split('\n').pop());
