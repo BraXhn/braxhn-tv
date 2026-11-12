@@ -58,8 +58,8 @@ views.item = async (id, season) => {
   const verSel = it.versions ? (it.versions.some(v => String(v.id) === String(chosen)) ? String(chosen) : '') : '';
   const resume = resumeAt(it.position, it.duration) > 0;
   const actions = `<div class="row">
-    ${resume ? `<button class="primary" data-play="${it.position}" data-warm="${+it.id}:${+it.position || 0}" data-tvfocus>${t('▶ Fortsätt från {position}', { position: fmtTime(it.position) })}</button><button class="ghost" data-play="0" data-warm="${+it.id}:0">${t('Börja om')}</button>`
-      : `<button class="primary" data-play="0" data-warm="${+it.id}:0" data-tvfocus>${t('▶ Spela')}</button>`}
+    ${resume ? `<button class="primary" data-play="${it.position}" data-warm="${+it.id}:${+it.position || 0}:${it.kind === 'movie' ? 'm' : ''}" data-tvfocus>${t('▶ Fortsätt från {position}', { position: fmtTime(it.position) })}</button><button class="ghost" data-play="0" data-warm="${+it.id}:0:${it.kind === 'movie' ? 'm' : ''}">${t('Börja om')}</button>`
+      : `<button class="primary" data-play="0" data-warm="${+it.id}:0:${it.kind === 'movie' ? 'm' : ''}" data-tvfocus>${t('▶ Spela')}</button>`}
     ${remoteButton('playon')}
     <button class="ghost" id="seen">${it.watched ? t('Markera som osedd') : t('Markera som sedd')}</button>
     <button class="ghost" id="wl">${it.inWatchlist ? t('✓ I Min lista') : t('+ Min lista')}</button>${it.kind === 'movie' ? t('<button class="ghost" id="addcol" aria-haspopup="dialog">+ Samling</button>') : ''}${trailerBtns(it)}

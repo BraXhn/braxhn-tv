@@ -115,15 +115,19 @@ before(async () => {
 });
 
 // HLS: hämta mastern → spellistan → segmenten (från första till sista eller bara ett) och spara dem som en TS-fil
+// only = { from, to }: bara segmenten som överlappar tiden (sekunder) – segmentgränserna beror på startpositionen
 async function hlsFile(url, out, only = null) {
   const abs = (u, base) => new URL(u, base).href;
   const master = B + url;
   const mtext = await (await fetch(master)).text();
   const idx = abs(mtext.split('\n').find(l => l && !l.startsWith('#')), master);
-  const list = (await (await fetch(idx)).text()).split('\n').filter(l => l && !l.startsWith('#')).map(l => abs(l, idx));
+  const text = await (await fetch(idx)).text();
+  const list = text.split('\n').filter(l => l && !l.startsWith('#')).map(l => abs(l, idx));
+  const durs = [...text.matchAll(/#EXTINF:([\d.]+)/g)].map(m => +m[1]);
+  const starts = durs.map((_, i) => durs.slice(0, i).reduce((n, x) => n + x, 0));
   const bufs = [];
   for (const [i, u] of list.entries()) {
-    if (only != null && i !== only) continue;
+    if (only && !(starts[i] < only.to - 0.01 && starts[i] + durs[i] > only.from + 0.01)) continue;
     const r = await fetch(u); assert.equal(r.status, 200, u);
     bufs.push(Buffer.from(await r.arrayBuffer()));
   }
@@ -233,14 +237,14 @@ t('servern tystar ljudet i HLS-strömmen: remux från början, remux och omkodni
   assertMuted(all, [[0.3, 2.5, false], [3.0, 4.6, true], [5.2, 15.4, false], [16.0, 17.6, true], [18.2, 29, false]]);
   // Spolning: en ny uppspelning från 12 s – ffmpeg startar med -ss mitt i filmen, intervallet ska ändå hamna rätt
   const seek = (await req(`/api/items/${S.film}/playback?start=12`, { tok: S.lill })).data;
-  const s2 = await hlsFile(seek.url, path.join(ROOT, 'remux-seg2.ts'), 2); // 12–18 s
+  const s2 = await hlsFile(seek.url, path.join(ROOT, 'remux-seg2.ts'), { from: 12, to: 18 }); // 12–18 s (korta segment vid 12 s)
   const st = audioStart(s2);
   assert.ok(st > 11 && st < 13, 'segmentet börjar vid 12 s: ' + st);
   assertMuted(s2, [[12.5, 15.4, false], [16.0, 17.6, true]]); // TS-tiderna är filmens tider
-  // Omkodning (force=transcode) från 12 s: segmentet 12–18 s (segmentindex 4: 0, 2, 4, 6, 12)
+  // Omkodning (force=transcode) från 12 s: segmenten 12–18 s (0, 2, 4, 6, 12, 14, 16, 18 – korta där uppspelningen börjar)
   const tc = (await req(`/api/items/${S.film}/playback?force=transcode&start=12`, { tok: S.lill })).data;
   assert.equal(tc.mode, 'transcode');
-  const s4 = await hlsFile(tc.url, path.join(ROOT, 'tc-seg4.ts'), 4);
+  const s4 = await hlsFile(tc.url, path.join(ROOT, 'tc-seg4.ts'), { from: 12, to: 18 });
   assertMuted(s4, [[12.5, 15.4, false], [16.0, 17.6, true]]);
   await req(`/api/stream/${S.film}/stop`, { method: 'POST', tok: S.lill });
 });

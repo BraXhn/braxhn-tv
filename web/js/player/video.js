@@ -343,6 +343,7 @@ function playbackBase({ q, version, forceHls, h264, cinema, start }, v = documen
 // Förvärmning: pekaren eller fokus på en Spela-knapp – servern startar strömmen redan nu (/playback?warm=1), så att
 // första segmentet är klart vid klicket. Samma titel och position förvärms högst var 15:e sekund.
 const warmedAt = new Map();
+// opts.movie: titeln är en film (bio-läget gäller bara filmer från början – samma som play())
 export function warmPlay(id, start = 0, opts = {}) {
   id = +id; start = +start || 0;
   if (!id || P?.it?.id === id) return;
@@ -350,7 +351,7 @@ export function warmPlay(id, start = 0, opts = {}) {
   if (Date.now() - (warmedAt.get(key) || 0) < 15000) return;
   if (warmedAt.size > 100) warmedAt.clear();
   warmedAt.set(key, Date.now());
-  const extra = playbackBase({ q: quality, version: opts.version || store.get('version.' + id, ''), cinema: !(start > 0), start });
+  const extra = playbackBase({ q: quality, version: opts.version || store.get('version.' + id, ''), cinema: !!opts.movie && !(start > 0), start });
   // Utanför hemmet väljs kvaliteten efter uppmätt uppkoppling – utan mätning går det inte att förutse valet
   if (status.remote) { const bw = lastBandwidth(); if (!bw) return; extra.bw = String(bw); if (saveData()) extra.save = '1'; }
   extra.warm = '1';

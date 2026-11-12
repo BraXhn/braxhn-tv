@@ -174,13 +174,13 @@ function prefetch(e) {
   if (w) { wakeDisk(+w.dataset.cplay); warmCard(w); }
   // Spela-knappar med titel och position (titelsidan, avsnittslistan): strömmen förvärms
   const wp = t.closest('[data-warm]');
-  if (wp) { const [id, pos] = wp.dataset.warm.split(':'); warmPlay(+id, +pos || 0); }
+  if (wp) { const [id, pos, kind] = wp.dataset.warm.split(':'); warmPlay(+id, +pos || 0, { movie: kind === 'm' }); }
 }
 /** ▶ på ett kort: samma titel och position som klicket spelar (serier väljer avsnitt först vid klicket) */
 function warmCard(b) {
-  if (b.dataset.pos != null) return warmPlay(+b.dataset.cplay, +b.dataset.pos || 0);
+  if (b.dataset.pos != null) return warmPlay(+b.dataset.cplay, +b.dataset.pos || 0); // nästa avsnitt i en serie
   const it = cardItem(b.dataset.cplay);
-  if (it && it.kind !== 'show') warmPlay(it.id, resumeAt(it.position, it.duration));
+  if (it && it.kind !== 'show') warmPlay(it.id, resumeAt(it.position, it.duration), { movie: it.kind === 'movie' });
 }
 const woken = new Map();
 function wakeDisk(id) {
