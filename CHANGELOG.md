@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Musiken börjar direkt:** när man klickade på en låt hämtade och avkodade webbspelaren hela filen innan något
+  hördes, eller gav upp efter 1,5 s och strömmade i stället. Nu börjar låten spela på de första tio sekunderna medan
+  resten hämtas.
+  - När hela låten är avkodad byter spelaren till den på exakt samma sampel, så den glapplösa uppspelningen och
+    övertoningen fungerar som förut.
+  - Uppmätt i webbläsaren på testmaskinen, en fyra minuter lång låt: FLAC 0,54 → 0,14 s, MP3 0,65 → 0,14 s från klick
+    till ljud.
+  - Är nätet för långsamt för att resten ska hinna fram väntar spelaren som förut, och utanför hemmet börjar
+    strömningen direkt i stället för efter 1,5 s.
 - **Snabbare start mitt i filmen eller avsnittet (Fortsätt titta):** första bilden kan visas när ett segment är klart,
   och hur fort det går beror på hur långt segmentet är. Från början var segmenten redan korta vid omkodning, men mitt
   i filen var första segmentet 6 s (omkodning) eller 6–8 s (remux).

@@ -1,7 +1,7 @@
 // Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå.
 // Musik spelas glapplöst/med övertoning av Web Audio-motorn (audioengine.js) när det går, annars av <audio id="maudio">.
 // M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
-import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, mediaKey, routeGen, store, toast, t } from './core.js';
+import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, mediaKey, routeGen, status, store, toast, t } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
 import { castAudio, castReady } from './player/cast.js';
@@ -69,7 +69,8 @@ const HOOKS = {
   ended: () => nextTrack(true),
   time: () => timeUI(),
   state: (playing) => setPlaying(playing),
-  stopElement: () => stopVideo(M.el)
+  stopElement: () => stopVideo(M.el),
+  underrun: (t, i, pos) => elementTakeover(t, pos)
 };
 function upcoming() {
   if (M.spoken || SLEEP.end || !M.queue.length) return null;
@@ -248,7 +249,10 @@ async function loadTrack(i) {
     const p = AE.prepare(t).catch(() => null);
     AE.stop();
     if (!el.paused) el.pause();
-    const dec = await Promise.race([p, new Promise(r => setTimeout(r, AE.GRACE))]);
+    // Snabbstart: början av låten räcker för att börja spela (motorn byter till hela låten när den är avkodad).
+    // Utanför hemmet tar hämtningen tid – där börjar elementet direkt och motorn tar nästa låt.
+    const q = AE.quick(t).then(x => x || p);
+    const dec = await Promise.race([p, q, new Promise(r => setTimeout(r, status.remote ? 0 : AE.GRACE))]);
     if (seq !== M.loadSeq) return; // en annan låt hann starta
     if (dec) { stopVideo(el); AE.play(t, i, dec); return; }
   } else AE.stop();
@@ -258,6 +262,22 @@ async function loadTrack(i) {
   el.src = M.url;
   el.play().catch(() => {});
   fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
+}
+/** Motorn har bara början av låten och resten hann inte komma (eller spolning förbi början): elementet fortsätter från pos. */
+async function elementTakeover(t, pos) {
+  if (M.cur !== t) return;
+  const seq = ++M.loadSeq, el = M.el;
+  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  let tc = false;
+  try { tc = (await fetch(M.url, { method: 'HEAD' })).headers.get('x-transcoded') === '1'; } catch {}
+  if (seq !== M.loadSeq || M.cur !== t) return;
+  AE.stop();
+  AE.E.elT = t; AE.E.paused = false; AE.applyGains();
+  M.transcoded = tc;
+  // Omkodade strömmar saknar Range – de startas på rätt position; filer spolas när de laddats
+  if (tc) { M.offset = pos; el.src = M.url + '&ss=' + pos; }
+  else { M.offset = 0; el.src = M.url; el.addEventListener('loadedmetadata', () => { if (seq === M.loadSeq) el.currentTime = pos; }, { once: true }); }
+  el.play().catch(() => {});
 }
 /** Visar låten i spelaren och gör det som hör till en ny låt (text, mediesession, låtradio, "spelad"). */
 function showTrack(t, i) {

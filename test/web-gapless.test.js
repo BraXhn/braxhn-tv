@@ -65,6 +65,8 @@ before(async () => {
   // Övertoning: spår 1 → 2 på samma album går ihop, spår 2 → nästa album tonas över
   splitTone(path.join(M, 'Albumet A'), 'Albumet A', 300, [2, 6], FLAC, 'flac');
   splitTone(path.join(M, 'Albumet B'), 'Albumet B', 700, [6], FLAC, 'flac');
+  // Snabbstart: en lång MP3 (2,2 MB) – spelaren börjar på första megabyten och byter till hela låten
+  splitTone(path.join(M, 'Snabbstart'), 'Snabbstart', 660, [70, 3], MP3, 'mp3');
   // Jämn ljudnivå: amplitud 0,5 (toppvärde 0,5) med kända taggar
   splitTone(path.join(M, 'Nivåer'), 'Nivåer', 500, [3, 3], FLAC, 'flac', [
     { REPLAYGAIN_TRACK_GAIN: '-6.02 dB', REPLAYGAIN_ALBUM_GAIN: '-12.04 dB', REPLAYGAIN_TRACK_PEAK: '0.5' },
@@ -152,11 +154,11 @@ t('förberedelse: konto, musikbibliotek och analys', async () => {
   for (let i = 0; i < 240; i++) {
     await sleep(500);
     const r = (await req('/api/scan')).data;
-    if (!r.running && r.last && db.prepare('SELECT COUNT(*) AS n FROM tracks WHERE gl IS NULL').get().n === 0 && db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n === 10) break;
+    if (!r.running && r.last && db.prepare('SELECT COUNT(*) AS n FROM tracks WHERE gl IS NULL').get().n === 0 && db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n === 12) break;
   }
   for (const r of db.prepare('SELECT id, title FROM albums').all()) S[r.title] = r.id;
   db.close();
-  assert.ok(S['Glapplöst'] && S['Livealbum'] && S['Albumet A'] && S['Albumet B'] && S['Nivåer'], JSON.stringify(S));
+  assert.ok(S['Glapplöst'] && S['Livealbum'] && S['Albumet A'] && S['Albumet B'] && S['Nivåer'] && S['Snabbstart'], JSON.stringify(S));
   const al = (await req('/api/music/albums/' + S['Livealbum'])).data;
   const g = al.trackList[0].gapless;
   assert.equal(g.sampleRate, SR);
@@ -216,6 +218,65 @@ t('glapplöst: MP3 med kodarfördröjning – ingen tystnad i skarven', async ()
   assert.ok(res.max < 0.1, `skarv i MP3: residual ${res.max.toFixed(4)} vid ${(res.at - a) / SR} s`);
   const want = Math.round((2.0113 + 2.5) * SR);
   assert.ok(Math.abs((b - a + 1) - want) < SR * 0.01, `längd ${b - a + 1} mot ${want} sampel (fördröjning/utfyllnad kvar?)`);
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+// Nätet stryps (Chromiums nätverksemulering) så att början av filen säkert är avkodad före hela filen
+async function throttle(page, mbit) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: mbit * 125000, uploadThroughput: mbit * 125000 });
+}
+const engine = (page) => page.evaluate(async () => (await import('/m/js/audioengine.js')).debugState());
+
+t('snabbstart: låten börjar på första megabyten och byter till hela låten utan hörbar skarv', async () => {
+  await req('/api/me/listening', { method: 'PUT', body: { normMode: 'off', gapless: true, crossfade: 0 } });
+  const { page, errors, close } = await newPage();
+  await throttle(page, 40); // 1 MB på 0,2 s, hela filen (2,2 MB) på 0,45 s plus avkodningen av 70 s
+  await page.goto(B + '/#/album/' + S['Snabbstart']);
+  await page.evaluate(async () => { window.__ae = await import('/m/js/audioengine.js'); }); // för väntan utan löften
+  const t0 = Date.now();
+  await page.click('tr[data-ti="0"]');
+  // Något spelar: motorn (en buffert) eller, om början inte hann, ljudelementet
+  await page.waitForFunction(() => { const el = document.querySelector('#maudio'); return window.__ae.debugState().on || (el && !el.paused && el.currentTime > 0); }, null, { timeout: 30000 });
+  const started = Date.now() - t0;
+  const st1 = await engine(page);
+  assert.ok(st1.on, 'motorn spelar (inte elementet): ' + JSON.stringify(st1));
+  await page.evaluate(() => { window.__rec.chunks.length = 0; window.__rec.n = 0; }); // inspelningen börjar när ljudet gör det
+  await page.waitForFunction((n) => (window.__rec.n || 0) >= n, Math.round(5 * SR), { timeout: 60000 });
+  const st2 = await engine(page);
+  assert.equal(st2.upgrades, 1, 'bytet till hela låten gjordes en gång: ' + JSON.stringify(st2));
+  assert.equal(st2.partial, false);
+  assert.ok(Math.abs(st2.len - 70) < 0.1, 'hela låtens längd efter bytet: ' + st2.len);
+  // Första megabyten räcker för att börja – hela filen behövs inte
+  assert.ok(started < 1100, `ljudet började efter ${started} ms`);
+  const x = await page.evaluate(() => { const c = window.__rec.chunks; const out = new Float32Array(c.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of c) { out.set(a, o); o += a.length; } return Array.from(out); });
+  const [a] = activeRange(x);
+  // En skarv på ett enda sampel ger residual ≈ amplituden (0,5) – MP3 är förstörande, därav 0,1
+  const res = sineResidual(x, a + Math.round(0.05 * SR), a + Math.round(4.5 * SR), 660);
+  assert.ok(res.max < 0.1, `skarv vid bytet: residual ${res.max.toFixed(4)} vid ${((res.at - a) / SR).toFixed(3)} s`);
+  // Ingen tystnad heller (ett glapp där båda buffertarna är tysta)
+  let run = 0, worst = 0;
+  for (let i = a; i < a + Math.round(4.5 * SR); i++) { if (Math.abs(x[i]) < 0.02) { run++; worst = Math.max(worst, run); } else run = 0; }
+  assert.ok(worst < SR * 0.002, `tystnad: ${(worst / SR * 1000).toFixed(1)} ms`);
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+t('snabbstart: spolning förbi det som hunnit hämtas – ljudelementet fortsätter från positionen', async () => {
+  const { page, errors, close } = await newPage();
+  await throttle(page, 10); // början på 0,8 s, hela filen först efter 1,8 s – spolningen sker medan bara början finns
+  await page.goto(B + '/#/album/' + S['Snabbstart']);
+  await page.evaluate(async () => { window.__ae = await import('/m/js/audioengine.js'); }); // för väntan utan löften
+  await page.click('tr[data-ti="0"]');
+  await page.waitForFunction(() => window.__ae.debugState().partial, null, { timeout: 30000 });
+  await page.evaluate(async () => (await import('/m/js/audio.js')).seekTo(50));
+  await page.waitForFunction(() => { const el = document.querySelector('#maudio'); return el && !el.paused && el.currentTime > 50.3; }, null, { timeout: 30000 });
+  const st = await engine(page);
+  assert.equal(st.on, false, 'elementet spelar');
+  const ct = await page.evaluate(() => document.querySelector('#maudio').currentTime);
+  assert.ok(ct > 50 && ct < 60, 'positionen: ' + ct);
   assert.deepEqual(errors, []);
   await close();
 });
