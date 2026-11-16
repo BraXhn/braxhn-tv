@@ -1,6 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+- **App för Expo Go** (`apps/expo`): prova BraXhn TV som app på iPhone eller Android utan Mac, Xcode eller
+  utvecklarkonto. Den ser ut som webbappen på en telefon.
+  - Servrar läggs till med *Lägg till server*. En ensam server öppnas direkt, och med flera väljer man vid start.
+  - Inloggning (även tvåstegsverifiering), startsida med *Fortsätt titta*, bibliotek, sök, Min lista, titelsida med
+    säsonger och avsnitt, och spelare med telefonens egen spelare.
+  - Skickar startpositionen till servern och förvärmer strömmen när fingret landar på Spela.
+  - Musik, ljudböcker, poddar, live-TV, nedladdning och profilbyte finns inte än. MKV och liknande packas om av
+    servern, som för webbappen.
 - **Fortsätt titta på iPhone och iPad (webben):** Safaris egen HLS-spelare hämtade alltid filmens första segment och
   spolade sedan till rätt ställe. Servern fick därför aldrig veta var uppspelningen skulle börja, och varken
   förstarten eller de korta segmenten från 1.2.0 användes där. Nu skickar webben startpositionen även på iPhone, och

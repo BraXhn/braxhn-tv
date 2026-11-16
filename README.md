@@ -309,6 +309,7 @@ Ungefär som Plex fjärråtkomst, men med ett relä som du kör själv: BraXhn T
 - **Webben:** fungerar i alla moderna webbläsare och kan installeras som app (se nedan). På TV-webbläsare (Google TV, Fire TV, LG, Samsung) styrs hela appen med pilar, OK och Bakåt.
 - **iPhone, iPad och Apple TV:** en SwiftUI-app som du bygger själv med Xcode, se [apps/apple/README.md](apps/apple/README.md). Apparna finns inte i App Store. Appen följer enhetens språk (svenska eller engelska) och fungerar även via BraXhn Relay (ange reläets `https://`-adress).
 - **Android (Google TV, Android TV, telefon och bilar med Android Automotive):** APK:n byggs av GitHub Actions – ladda ner den från senaste körningen av *Android Automotive-app* under *Actions → Artifacts*, se [apps/automotive/README.md](apps/automotive/README.md). Hemma räcker serverns IP-adress (http); utanför hemmet en https-adress (BraXhn Relay, Let's Encrypt eller egen proxy – ett domännamn utan `https://` blir https). *Apple-app*-körningen kontrollerar bara att koden kompilerar.
+- **Expo Go (iPhone och Android, för att prova):** en app som körs i Expo Go utan Mac, Xcode eller utvecklarkonto, med webbappens utseende – filmer och serier, Fortsätt titta, sök och Min lista. Se [apps/expo/README.md](apps/expo/README.md).
 - **Andra system (väggskärm, Home Assistant, Homepage …):** under *Administration → API-nycklar* delar du ut en nyckel som bara kan läsa *Nu spelas* och/eller biblioteket (`/api/v1/now-playing`, `/api/v1/library`). Nyckeln skickas i rubriken `X-Api-Key`, visas en gång och gäller som standard bara från hemnätet. Se [docs/api.md](docs/api.md#api-nycklar-apiv1).
 - **Logga in på TV:n med kod:** TV:n visar en sexsiffrig kod och en QR-kod som du godkänner från telefonen.
 - **Musikappar (Subsonic):** Symfonium, Amperfy, play:Sub, Feishin, Supersonic, substreamer och Music Assistant. Skapa ett eget lösenord under **Mitt konto → Musikappar** och lägg till servern som en *Subsonic*-server. Hela guiden och vad som stöds: [docs/guide.md](docs/guide.md#musikappar-subsonic).
@@ -617,6 +618,7 @@ server/   Node.js-server (inga npm-beroenden): API, skanner, strömning, intro-d
 web/      Webbgränssnitt (fungerar i alla webbläsare, installerbart som webbapp)
 apps/apple/       App för iPhone, iPad och Apple TV (SwiftUI)  → se apps/apple/README.md
 apps/automotive/  Android-app för bilen (Android Automotive, t.ex. Polestar 4) och Google TV/Android TV (Kotlin) → se apps/automotive/README.md
+apps/expo/        App för Expo Go (React Native) – prova på iPhone eller Android utan Mac och Xcode → se apps/expo/README.md
 braxhn-tv.xml     Unraid-mall (Community Applications), braxhn-tv-nvidia.xml för NVIDIA, ikon i unraid/
                   Dockerfile / docker-compose.yml / install.sh
 ```

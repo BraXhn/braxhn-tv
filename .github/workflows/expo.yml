@@ -1,0 +1,24 @@
+name: Expo-app (typkontroll och bygge)
+on:
+  push:
+    branches: [main]
+    paths: ['apps/expo/**', '.github/workflows/expo.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/expo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: '22' }
+      - run: npm ci --no-audit --no-fund
+      - name: Typkontroll
+        run: npm run typecheck
+      # Bygget för webben går igenom hela appen med Metro – samma kod som Expo Go kör på telefonen
+      - name: Bygg
+        run: npx expo export --platform web

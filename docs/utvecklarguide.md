@@ -18,7 +18,7 @@ runt 30 minuter; kör en enskild fil medan du arbetar (`node --test test/x.test.
 
 ## Grundregler
 
-- **Inga npm-beroenden.** Servern använder bara Nodes inbyggda moduler (Node 22+, imagen kör Node 24 LTS) (`node:sqlite`, `http`, `crypto` …) plus ffmpeg. Lös det med standardbiblioteket.
+- **Inga npm-beroenden.** Servern använder bara Nodes inbyggda moduler (Node 22+, imagen kör Node 24 LTS) (`node:sqlite`, `http`, `crypto` …) plus ffmpeg. Lös det med standardbiblioteket. Undantaget är Expo-appen i `apps/expo`, som är ett eget projekt med egen `package.json` (Expo och React Native kräver det) – inget därifrån används av servern eller webben, och mappen följer inte med i Docker-imagen.
 - **Tredjepartsfiler** för webben ligger i `web/vendor/` med SHA-256 i `web/vendor/checksums.json`. Byts en fil uppdateras checksumman och `VENDOR.md` i samma commit. Inget laddas från CDN (CSP tillåter det inte).
 - **Apparna går inte att bygga lokalt.** De kompileras av GitHub Actions vid push (`apple.yml`, `android-automotive.yml`). Skriv försiktig kod mot iOS/tvOS 16, Media3 1.4.1 och Compose BOM 2024.09 och titta på CI-körningen efter push – kompileringsfel visas som annoteringar.
 - **Avsluta processer via PID.** `pkill -f <mönster>` träffar även det egna skalet.
