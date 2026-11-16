@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- **Fortsätt titta på iPhone och iPad (webben):** Safaris egen HLS-spelare hämtade alltid filmens första segment och
+  spolade sedan till rätt ställe. Servern fick därför aldrig veta var uppspelningen skulle börja, och varken
+  förstarten eller de korta segmenten från 1.2.0 användes där. Nu skickar webben startpositionen även på iPhone, och
+  spellistan talar om för spelaren var den ska börja (`EXT-X-START`). Inte provat på en riktig iPhone än.
 
 ## 1.2.0 – 2026-11-12
 - **Musiken börjar direkt:** när man klickade på en låt hämtade och avkodade webbspelaren hela filen innan något

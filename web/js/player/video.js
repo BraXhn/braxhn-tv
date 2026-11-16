@@ -334,9 +334,9 @@ function playbackBase({ q, version, forceHls, h264, cinema, start }, v = documen
   extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
-  // Servern förbereder rätt segment direkt. Inte för Safaris egen HLS: den hämtar alltid segment 0 först och spolar
-  // sedan, så en förstart mitt i filmen skulle bara stoppas och startas om
-  if (start > 0 && !extra.nhls) extra.start = String(Math.floor(start));
+  // Servern förbereder rätt segment direkt. Safaris egen HLS (iPhone) får startpositionen i spellistan
+  // (EXT-X-START), så att den börjar där i stället för att hämta segment 0 först och sedan spola
+  if (start > 0) extra.start = String(Math.floor(start));
   return extra;
 }
 

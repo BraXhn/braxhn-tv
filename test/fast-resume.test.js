@@ -199,3 +199,25 @@ t('förvärmning: andra val vid uppspelningen ger en egen ström, och en ny för
   assert.equal(info.mode, 'remux');
   assert.ok(sessions().some(x => x.warm), 'info=1 tar inte över förvärmningen');
 });
+
+t('Safaris egen HLS (iPhone): startpositionen står i spellistorna, och strömmen förbereds där', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const text = async (u) => (await fetch(new URL(u, B), { headers: A() })).text();
+  // nhls=1 med start: EXT-X-START i både huvudlistan och medialistan, och korta segment vid positionen
+  const pb = await getJson('force=hls&nhls=1&start=40.4');
+  assert.match(pb.url, /[?&]xs=40(&|$)/); assert.match(pb.url, /[?&]hs=40(&|$)/);
+  const master = await text(pb.url);
+  assert.match(master, /#EXT-X-START:TIME-OFFSET=40,PRECISE=YES/);
+  const media = await text(pb.url.replace('master.m3u8', 'index.m3u8'));
+  assert.match(media, /#EXT-X-START:TIME-OFFSET=40,PRECISE=YES/);
+  // ffmpeg är förstartad på segmentet där 40 s ligger – inte på segment 0
+  const s = sessions().find(x => x.d.pid === pidOf(pb.url));
+  assert.ok(s?.proc && s.segs[s.start].start >= 39 && s.segs[s.start].start <= 40.4, `förstartad vid ${s?.segs?.[s.start]?.start}`);
+  // Andra spelare (hls.js, apparna) sätter positionen själva: ingen tagg
+  const other = await getJson('force=hls&start=40.4');
+  assert.ok(!other.url.includes('xs='));
+  assert.ok(!(await text(other.url)).includes('EXT-X-START'));
+  // Från början: ingen tagg
+  const zero = await getJson('force=hls&nhls=1');
+  assert.ok(!(await text(zero.url)).includes('EXT-X-START'));
+});

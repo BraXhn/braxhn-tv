@@ -189,6 +189,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   // Fortsätt titta: korta segment där uppspelningen börjar, så att första bilden kommer lika fort som från början
   const hs = Math.floor(Math.max(0, +c.q.get('start') || 0));
   if (hp && hs >= 6) hp.set('hs', String(hs));
+  // Safaris egen HLS-spelare (iPhone, nhls=1): spellistan säger var uppspelningen börjar (EXT-X-START) – annars
+  // hämtar den segment 0 först och spolar sedan, och förstarten mitt i filmen stoppas och startas om
+  if (hp && hs >= 1 && o.nativeHls) hp.set('xs', String(hs));
   // Förvärmd ström (warm=1 strax före, samma val): uppspelningen tar över den – första segmentet är redan klart
   const wkey = `${c.user.id}:${it.id}`;
   if (hp && !warm && c.q.get('info') !== '1' && c.q.get('queue') !== '1') {

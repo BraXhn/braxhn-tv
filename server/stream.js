@@ -814,7 +814,9 @@ function readParams(q) {
     night: q.get('night') === '1', dialog: q.get('dialog') === '1', ff: q.get('ff') === '1',
     vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264',
     // Sekunden där uppspelningen börjar (Fortsätt titta): korta segment just där, se segmentsOf
-    hs: Math.max(0, Math.min(1e6, Math.floor(+q.get('hs') || 0)))
+    hs: Math.max(0, Math.min(1e6, Math.floor(+q.get('hs') || 0))),
+    // Startposition i spellistan (EXT-X-START) för spelare som annars börjar på segment 0 (Safaris egen HLS)
+    xs: Math.max(0, Math.min(1e6, Math.floor(+q.get('xs') || 0)))
   };
 }
 /**
@@ -867,6 +869,8 @@ export function abrVariants(it, d) {
   return out;
 }
 
+/** EXT-X-START: var uppspelningen börjar (xs ur adressen) – för spelare som annars börjar på segment 0 */
+const startTag = (it, d) => d.xs > 0 && d.xs < it.duration - 1 ? `#EXT-X-START:TIME-OFFSET=${d.xs},PRECISE=YES\n` : '';
 export function serveMaster(res, it, query) {
   const d = normParams(readParams(query));
   if (d.abr && d.mode === 'transcode') return serveAbrMaster(res, it, query, d);
@@ -879,7 +883,7 @@ export function serveMaster(res, it, query) {
   const bw = Q.br ? abrVariants(it, d)[0].bw : (d.mode === 'remux' ? Math.max(4000, Math.round((it.size * 8 / (it.duration || 1)) / 1000)) : h >= 2000 ? 40000 : h >= 1000 ? 12000 : 6000) * 1000;
   const params = new URLSearchParams(query); params.delete('hlssubs');
   const subs = subsMedia(it, query, d);
-  let m = '#EXTM3U\n#EXT-X-VERSION:4\n' + subs.m;
+  let m = '#EXTM3U\n#EXT-X-VERSION:4\n' + startTag(it, d) + subs.m;
   // VIDEO-RANGE talar om för Apple-enheter att strömmen är HDR (krävs för att HDR-läget ska slås på)
   const vr = d.mode === 'remux' && d.vr ? `,VIDEO-RANGE=${d.vr}` : '';
   m += `#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${w}x${h}${vr}${subs.attr}\nindex.m3u8?${params}\n`;
@@ -900,7 +904,7 @@ function subsMedia(it, query, d) {
 // Flera varianter: vald kvalitet först (Apple-enheter startar på första varianten), sedan fallande
 function serveAbrMaster(res, it, query, d) {
   const subs = subsMedia(it, query, d);
-  let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + subs.m;
+  let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + startTag(it, d) + subs.m;
   // Steget som ryms i den uppmätta bandbredden först – iPhone/Safari börjar på första varianten och byter
   // annars ner först efter att ha fastnat på ett för tungt steg
   let vs = abrVariants(it, d);
@@ -952,6 +956,7 @@ export function servePlaylist(res, it, query) {
   const target = Math.ceil(Math.max(...segs.map(s => s.dur)));
   const fm = d.fmt === 'fmp4';
   let m = `#EXTM3U\n#EXT-X-VERSION:${fm ? 7 : 3}\n#EXT-X-TARGETDURATION:${target}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n`;
+  m += startTag(it, d);
   if (fm) m += `#EXT-X-MAP:URI="init.mp4?${qs}"\n`;
   segs.forEach((s, i) => { m += `#EXTINF:${s.dur.toFixed(6)},\nseg-${i}.${fm ? 'm4s' : 'ts'}?${qs}\n`; });
   m += '#EXT-X-ENDLIST\n';
