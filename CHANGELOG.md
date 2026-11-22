@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.2.1 – 2026-11-22
 - **Hack och frysningar i Chrome är rättade:** Chrome har fått en egen inbyggd HLS-spelare och svarar numera ja på
   frågan om den kan spela HLS. Webbappen lät därför Chromes spelare ta över i stället för sin egen (hls.js). Den
   inbyggda spelaren klarar inte remux av filer med öppen GOP, som är vanligt i riktiga filer: bufferten tömdes och
