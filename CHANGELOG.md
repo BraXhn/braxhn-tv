@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**
   - Hastighetsprovet mätte fel. Det hämtade 256 kB och räknade med svarstiden och uppkopplingens uppstart, så en
     snabb uppkoppling såg ut som några få Mbit/s. Nu hämtas upp till 4 MB under högst en sekund, och takten räknas
