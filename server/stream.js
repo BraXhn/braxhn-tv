@@ -1136,6 +1136,10 @@ export function fragStart(file) {
 // exakt vid -ss – de första ~0,25 s av segmentet blev tysta och ljudet glappade mot föregående segment.
 // Utan exakt sökning avkodas ljudet från samma ställe som bilden.
 const REMUX_SEEK = ['-noaccurate_seek'];
+// TS-remux: SPS/PPS framför varje nyckelbild. ffmpeg lägger dem annars bara framför IDR-bilder, och med öppen GOP
+// (vanligt i riktiga filer) börjar segmenten på I-bilder som inte är IDR – segmentet gick då inte att avkoda för sig
+// (EXT-X-INDEPENDENT-SEGMENTS), och inbyggda HLS-spelare (Safari, Chrome) tappade bilden.
+const TS_INDEPENDENT = ['-bsf:v', 'h264_mp4toannexb,dump_extra=freq=keyframe'];
 const STREAM_NICE = Math.max(0, Math.min(19, parseInt(process.env.STREAM_NICE ?? '3', 10) || 0));
 
 function startFfmpeg(s, it, n) {
@@ -1173,7 +1177,7 @@ function startFfmpeg(s, it, n) {
     const ss = n > 0 ? t + Math.min(0.25, (next - t) / 2) : 0;
     const times = segTimes(segs, n, ss);
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...IN, ...(n > 0 ? ['-ss', ss.toFixed(6), ...REMUX_SEEK] : []), '-i', src,
-      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', '-sn', '-dn',
+      '-map', '0:v:0', ...audioArgs(d), ...comfortArgs(d, it, familyAf(s, it, ss)), '-c:v', 'copy', ...TS_INDEPENDENT, '-sn', '-dn',
       '-output_ts_offset', ss.toFixed(6), '-muxdelay', '0', '-muxpreload', '0',
       '-f', 'segment', '-segment_format', 'mpegts', ...(times.length ? ['-segment_times', times.join(',')] : ['-segment_time', '999999']),
       '-segment_start_number', String(n), '-reset_timestamps', '0', path.join(s.dir, 'seg_%05d.ts')];

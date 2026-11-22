@@ -5,6 +5,7 @@
 // Hoppa över. Laddas med need('player/recap.js') från views/item.js och player/video.js.
 import { $, api, esc, store, sxe, t, tn } from '../core.js';
 import { openDialog } from '../ui/dialog.js';
+import { nativeHls } from './caps.js';
 import { P, loadHls, startPlay } from './video.js';
 
 /** "Säsong 1 · 3 avsnitt · cirka 1 min" */
@@ -43,7 +44,7 @@ export async function openRecap(id, { next = null } = {}) {
     say('');
     v.hidden = false;
     v.onended = () => d.close('ended');
-    if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = info.url; v.onerror = cannot; }
+    if (nativeHls(v)) { v.src = info.url; v.onerror = cannot; }
     else {
       const Hls = await loadHls().catch(() => null);
       if (gone) return;

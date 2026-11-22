@@ -9,6 +9,17 @@ try {
   navigator.mediaCapabilities?.decodingInfo({ type: 'media-source', video: { contentType: 'video/mp4; codecs="av01.0.08M.08"', width: 1920, height: 1080, bitrate: 4e6, framerate: 30 } })
     .then(r => { av1Smooth = !!(r.supported && r.smooth); }).catch(() => {});
 } catch {}
+/**
+ * Ska webbläsarens egen HLS-spelare användas? Bara i Safari (och på enheter utan Media Source, som äldre iPhone).
+ * Chrome svarar numera också ja på frågan om den kan spela HLS, men dess inbyggda spelare klarar inte våra
+ * remux-segment (öppen GOP: bufferten töms och bilden fryser) – där ska hls.js användas, som strömmarna är provade med.
+ */
+export function nativeHls(v = document.createElement('video')) {
+  if (!v.canPlayType('application/vnd.apple.mpegurl')) return false;
+  if (!window.MediaSource && !window.ManagedMediaSource) return true;
+  const ua = navigator.userAgent || '';
+  return /AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/.test(ua);
+}
 export function capsQuery(extra = {}) {
   if (!CAPS) {
     const v = document.createElement('video');

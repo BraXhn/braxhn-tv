@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Hack och frysningar i Chrome är rättade:** Chrome har fått en egen inbyggd HLS-spelare och svarar numera ja på
+  frågan om den kan spela HLS. Webbappen lät därför Chromes spelare ta över i stället för sin egen (hls.js). Den
+  inbyggda spelaren klarar inte remux av filer med öppen GOP, som är vanligt i riktiga filer: bufferten tömdes och
+  bilden frös medan tiden gick vidare.
+  - Webbappen använder nu den inbyggda spelaren bara i Safari. Chrome, Edge och andra får hls.js som förut.
+  - Uppmätt i riktig Chrome med fem testavsnitt: före rättningen visades en tredjedel av bildrutorna i fyra av dem.
+    Efter visas alla, med högst en tappad bildruta per avsnitt.
+- **Remux-segment går att avkoda var för sig:** segmenten får videons inställningsdata (SPS/PPS) framför varje
+  nyckelbild. Förut saknades den i filer med öppen GOP, där segmenten börjar på en I-bild som inte är IDR.
 - **App för Expo Go** (`apps/expo`): prova BraXhn TV som app på iPhone eller Android utan Mac, Xcode eller
   utvecklarkonto. Den ser ut som webbappen på en telefon.
   - Servrar läggs till med *Lägg till server*. En ensam server öppnas direkt, och med flera väljer man vid start.

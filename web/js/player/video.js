@@ -1,7 +1,7 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
 import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
-import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, saveData } from './caps.js';
+import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, saveData } from './caps.js';
 import { watchStall } from './stall.js';
 import { abrClass, hlsConfig } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
@@ -333,7 +333,7 @@ function playbackBase({ q, version, forceHls, h264, cinema, start }, v = documen
   Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
   extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
-  if (v.canPlayType('application/vnd.apple.mpegurl')) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
+  if (nativeHls(v)) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
   // Servern förbereder rätt segment direkt. Safaris egen HLS (iPhone) får startpositionen i spellistan
   // (EXT-X-START), så att den börjar där i stället för att hämta segment 0 först och sedan spola
   if (start > 0) extra.start = String(Math.floor(start));
@@ -404,7 +404,7 @@ async function load(start, { play = true } = {}) {
   pm.textContent = `${label}${vcl}${pb.quality && pb.quality !== 'orig' ? ' · ' + pb.quality + 'p' : ''}${pb.tonemap ? ' · HDR→SDR' : ''}${pb.remote ? t(' · utanför hemmet') : ''}`;
   pm.title = pb.reasons.join(', ');
   v.autoplay = play; // pausad vid bytet: den nya strömmen ska inte starta av sig själv
-  if (pb.mode === 'direct' || v.canPlayType('application/vnd.apple.mpegurl')) {
+  if (pb.mode === 'direct' || nativeHls(v)) {
     v.src = pb.url;
   } else {
     let Hls;
