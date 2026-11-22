@@ -146,7 +146,15 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const bw = Math.max(0, Math.min(1e6, parseInt(c.q.get('bw')) || 0));
   // Hemma gäller användarens standardkvalitet (Auto = original), utanför hemmet användarens val inom taket
   // (taket = det lägsta av serverns, kontots och profilens – rättigheter per användare)
-  if (auto) { const aq = pp.autoQuality(prefs, remote, remote ? remoteMax(c.user.id) : adminCap); o.q = remote ? remoteQuality(aq.cap, bw, c.q.get('save') === '1') : aq.q || o.q; }
+  // Utanför hemmet med Auto: taket (inställningen, eller 480p med "Spara data") är det högsta steget. Den uppmätta
+  // bandbredden väljer bara var uppspelningen BÖRJAR (fitQ) – spelaren växlar sedan upp eller ner efter vad nätet
+  // faktiskt klarar. Förut blev det uppmätta steget tak för hela filmen: en för låg mätning gav 480p utan väg upp.
+  let fitQ = null;
+  if (auto) {
+    const aq = pp.autoQuality(prefs, remote, remote ? remoteMax(c.user.id) : adminCap);
+    if (remote) { const save = c.q.get('save') === '1'; o.q = remoteQuality(aq.cap, 0, save); fitQ = remoteQuality(aq.cap, bw, save); }
+    else o.q = aq.q || o.q;
+  }
   // Användarens kvalitetstak utanför hemmet gäller även när klienten valt kvalitet själv (strömmarna kontrollerar det också)
   else if (remote && pm.remoteQuality) o.q = minQuality(o.q, pm.remoteQuality);
   o.maxBitrate = st.QUALITIES[o.q]?.br || null;
@@ -173,7 +181,13 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     if (c.q.get('ffc') !== '1' || family.enforced(c.user.id)) o.mute = fmute;
     if (!family.indexed(it)) sublines.kick(5000); // undertexterna har inte lästs än – nästa uppspelning har planen
   }
-  const d = st.decide(it, o);
+  let d = st.decide(it, o);
+  // Remux och direktuppspelning har inga lägre steg att växla till. Ryms filen inte i den uppmätta bandbredden
+  // kodas den om i stället – med alla steg upp till taket, så att kvaliteten kan gå upp igen.
+  if (auto && remote && bw && d.mode !== 'transcode' && fitQ !== o.q) {
+    const kb = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
+    if (!kb || kb * 1.15 + 128 > bw * 0.75) { o.force = 'transcode'; d = st.decide(it, o); }
+  }
   // Automatisk kvalitet vid omkodning: mastern listar även lägre steg så att spelaren kan växla ner
   // Bara utanför hemmet: hemma räcker bandbredden, och byten mellan steg startar om omkodningen i onödan
   d.abr = auto && remote && d.mode === 'transcode';

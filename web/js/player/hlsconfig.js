@@ -87,3 +87,15 @@ export function abrClass(Hls) {
     }
   };
 }
+
+// ---------- uppkopplingens takt (hastighetsprovet i caps.js) ----------
+/** Takt (kbit/s) ur tidsmärken [ms, byte hittills] – räknar på det som kom efter den första tredjedelen */
+export function rateOf(marks) {
+  if (marks.length < 2) return 0;
+  const last = marks[marks.length - 1], total = last[1];
+  const from = marks.find(m => m[1] >= total / 3) || marks[0];
+  // För lite kvar att räkna på (allt kom i en eller två bitar): hela provet från första byte
+  const a = last[0] - from[0] >= 20 && last[1] > from[1] ? from : marks[0];
+  const ms = Math.max(1, last[0] - a[0]), bytes = Math.max(0, last[1] - a[1]);
+  return bytes ? Math.round(bytes * 8 / ms) : 0; // byte/ms × 8 = kbit/s
+}

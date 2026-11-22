@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**
+  - Hastighetsprovet mätte fel. Det hämtade 256 kB och räknade med svarstiden och uppkopplingens uppstart, så en
+    snabb uppkoppling såg ut som några få Mbit/s. Nu hämtas upp till 4 MB under högst en sekund, och takten räknas
+    på det som kom efter den första tredjedelen.
+  - Det uppmätta värdet var ett tak: hamnade mätningen på 480p fanns inga högre steg att växla upp till. Nu väljer
+    mätningen bara var uppspelningen börjar. Alla steg upp till din högsta tillåtna kvalitet finns kvar, och
+    spelaren går upp så fort uppkopplingen visar att den klarar det.
+  - Spelarens egen mätning under uppspelningen sparas och används vid nästa start, i stället för ett nytt prov.
+  - En fil som skulle skickas som den är men inte ryms i uppkopplingen kodas om, med stegen kvar.
 
 ## 1.2.1 – 2026-11-22
 - **Hack och frysningar i Chrome är rättade:** Chrome har fått en egen inbyggd HLS-spelare och svarar numera ja på

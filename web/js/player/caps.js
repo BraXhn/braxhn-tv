@@ -1,6 +1,7 @@
 // Vad klarar den här webbläsaren? Video- och ljudformat som skickas till servern
 // ---------- uppspelning: vad klarar den här webbläsaren? ----------
 import { t } from '../core.js';
+import { rateOf } from './hlsconfig.js';
 let CAPS = null;
 // AV1 som omkodningsmål bara när webbläsaren avkodar det jämnt (ofta hårdvara) – mäts i bakgrunden när modulen
 // laddas; tills svaret kommit (eller utan Media Capabilities) blir det HEVC eller H.264
@@ -51,27 +52,41 @@ export const canAirPlay = () => !!window.WebKitPlaybackTargetAvailabilityEvent;
 const net = { kbps: 0, at: 0, running: null };
 export const lastBandwidth = () => (Date.now() - net.at < 10 * 60e3 ? net.kbps : 0);
 export const saveData = () => !!navigator.connection?.saveData;
-async function sample(kb) {
-  const t0 = performance.now();
-  const r = await fetch(`/api/speedtest?kb=${kb}&n=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+// Takten räknas på det som kommer EFTER den första tredjedelen av provet. Svarstiden och anslutningens uppstart
+// (TCP börjar långsamt) hör inte till uppkopplingens takt: med hela provets tid mättes en snabb uppkoppling med
+// 100 ms svarstid till ~3 Mbit/s, och filmen började på 480p. Provet avbryts efter SAMPLE_MS – på en långsam
+// uppkoppling räcker det som hunnit komma.
+const SAMPLE_KB = 4096, SAMPLE_MS = 1000;
+async function sample() {
+  const ctl = new AbortController();
+  const r = await fetch(`/api/speedtest?kb=${SAMPLE_KB}&n=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
   if (!r.ok) throw new Error();
-  const b = await r.arrayBuffer();
-  return { bytes: b.byteLength, ms: Math.max(1, performance.now() - t0) };
+  const rd = r.body?.getReader?.();
+  if (!rd) { const t0 = performance.now(); const b = await r.arrayBuffer(); return Math.round(b.byteLength * 8 / Math.max(1, performance.now() - t0)); }
+  const marks = [[performance.now(), 0]]; // första märket: när svaret började komma
+  let got = 0;
+  for (;;) {
+    const { done, value } = await rd.read();
+    if (done) break;
+    got += value.length;
+    const now = performance.now();
+    marks.push([now, got]);
+    if (now - marks[0][0] > SAMPLE_MS) { ctl.abort(); break; }
+  }
+  return rateOf(marks);
 }
 export function measureBandwidth() {
   if (lastBandwidth()) return Promise.resolve(net.kbps);
   if (net.running) return net.running;
   net.running = (async () => {
-    try {
-      // Litet prov först (svarstiden väger tungt); går det snabbt mäts ett större för ett säkrare värde
-      let s = await sample(256);
-      if (s.ms < 600) s = await sample(2048);
-      net.kbps = Math.round(s.bytes * 8 / s.ms); // byte/ms × 8 = kbit/s
-      net.at = Date.now();
-    } catch { net.kbps = 0; }
+    try { net.kbps = await sample(); net.at = Date.now(); } catch { net.kbps = 0; }
     return net.kbps;
   })().finally(() => { net.running = null; });
   return net.running;
+}
+/** Takten som spelaren själv mäter på riktiga segment (hls.js) – färskare och säkrare än provet */
+export function noteBandwidth(kbps) {
+  if (kbps > 0 && Number.isFinite(kbps)) { net.kbps = Math.round(kbps); net.at = Date.now(); }
 }
 
 // ================= MUSIK =================

@@ -1,7 +1,7 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
 import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
-import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, saveData } from './caps.js';
+import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
 import { abrClass, hlsConfig } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
@@ -423,7 +423,8 @@ async function load(start, { play = true } = {}) {
     });
     // Fatala fel: försök igen några gånger, men inte i all oändlighet (utgången inloggning, borttagen fil …)
     let netTries = 0, mediaTries = 0;
-    hls.on(Hls.Events.FRAG_LOADED, () => { netTries = 0; });
+    // Utanför hemmet: spelarens egen mätning på riktiga segment gäller nästa gång något startas
+    hls.on(Hls.Events.FRAG_LOADED, () => { netTries = 0; if (status.remote && hls.bandwidthEstimate > 0) noteBandwidth(hls.bandwidthEstimate / 1000); });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (!d.fatal || cur.hls !== hls || !live()) return;
       const code = d.response?.code;

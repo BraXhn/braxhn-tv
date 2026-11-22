@@ -234,6 +234,34 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
   assert.ok(Math.abs(starts[0] - 2) < 0.05, `segment 1 börjar vid 2 s (${starts[0]})`);
 });
 
+t('utanför hemmet med Auto: uppmätt bandbredd väljer var uppspelningen börjar – stegen upp till taket finns kvar', async () => {
+  const hi = film.versions.find(v => v.height === 720);
+  const R = { headers: { 'x-forwarded-for': '81.2.3.4' } };
+  const steps = async (q) => {
+    const pb = (await req(`/api/items/${film.id}/playback?version=${hi.id}&${q}`, R)).data;
+    const m = (await req(pb.url)).data.toString();
+    return { pb, h: [...m.matchAll(/RESOLUTION=\d+x(\d+)/g)].map(x => +x[1]) };
+  };
+  // Låg mätning (2,6 Mbit/s): börjar på 480p, men 720p finns kvar att växla upp till (förut var 480p taket)
+  const low = await steps('force=transcode&bw=2600');
+  assert.equal(low.h[0], 480, 'börjar på steget som ryms');
+  assert.ok(low.h.includes(720) && low.h.includes(360), `alla steg finns: ${low.h}`);
+  // Hög mätning: börjar högst upp
+  assert.equal((await steps('force=transcode&bw=50000')).h[0], 720);
+  // En fil som annars skickas som den är men inte ryms i bandbredden: kodas om, med stegen kvar
+  const asis = (await req(`/api/items/${film.id}/playback?version=${hi.id}&bw=50000`, R)).data;
+  if (asis.mode !== 'transcode') {
+    const tight = await steps('bw=150');
+    assert.equal(tight.pb.mode, 'transcode', 'ryms inte: omkodning i stället för remux utan steg');
+    assert.equal(tight.h[0], 360); assert.ok(tight.h.includes(720), `kan gå upp igen: ${tight.h}`);
+  }
+  // "Spara data" i telefonen: högst 480p
+  assert.ok((await steps('force=transcode&bw=50000&save=1')).h.every(x => x <= 480));
+  // Hemma påverkar bw ingenting
+  const home = (await req(`/api/items/${film.id}/playback?version=${hi.id}&bw=150`)).data;
+  assert.notEqual(home.mode, 'transcode');
+});
+
 t('huvudfilen försvinner: en kvarvarande version tar över med framsteg kvar', async () => {
   const mainFile = film.versions.find(v => v.id === film.id);
   const p = mainFile.height === 720 ? 'Film (2020) - 720p.mkv' : "Film (2020) - Director's Cut.mp4";

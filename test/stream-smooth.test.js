@@ -349,3 +349,20 @@ t('hack: spelarens rapport loggas med orsak och syns i aktiviteten', async () =>
   assert.equal((await req(`/api/stream/${id}/stall`, { method: 'POST', body: 'x' })).status, 200);
   await req(`/api/stream/${id}/stop?pid=${pid}`, { method: 'POST' });
 });
+
+test('hastighetsprovet: takten räknas utan svarstid och uppstart', async () => {
+  const { rateOf } = await import('../web/js/player/hlsconfig.js');
+  // 50 Mbit/s efter en långsam start: 100 kB på de första 300 ms, sedan 6,25 kB/ms
+  const marks = [[0, 0], [300, 100e3]];
+  for (let t = 320; t <= 800; t += 20) marks.push([t, 100e3 + (t - 300) * 6250]);
+  const r = rateOf(marks);
+  assert.ok(r > 45000 && r < 55000, `50 Mbit/s mäts som ${r} kbit/s`);
+  // Hela provets tid (som förut) hade gett mycket mindre
+  assert.ok(marks.at(-1)[1] * 8 / marks.at(-1)[0] < r * 0.8);
+  // Jämn långsam uppkoppling: 3 Mbit/s = 375 byte/ms
+  const slow = []; for (let t = 0; t <= 1000; t += 50) slow.push([t, t * 375]);
+  assert.ok(Math.abs(rateOf(slow) - 3000) < 100, String(rateOf(slow)));
+  // Allt i en bit (mycket snabbt nät) och tomma prov
+  assert.ok(rateOf([[0, 0], [4, 4e6]]) > 1e6);
+  assert.equal(rateOf([]), 0); assert.equal(rateOf([[0, 0]]), 0); assert.equal(rateOf([[0, 0], [500, 0]]), 0);
+});
