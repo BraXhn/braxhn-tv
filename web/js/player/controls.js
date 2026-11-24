@@ -5,6 +5,7 @@ import { P, closePlayer } from './video.js';
 import { setIconButton } from '../ui/buttons.js';
 import { preKey } from './cinema.js';
 import { move } from '../ui/spatial.js';
+import { subLabel } from '../ui/tracklabel.js';
 
 /** Spelarens egna kontroller (raden längst ner): spela/pausa, hopp, kapitel/nästa, tid, volym och helskärm */
 export function bindControls(cur, v) {
@@ -12,6 +13,11 @@ export function bindControls(cur, v) {
   const chaps = it.chapters || [];
   const dur = () => cur.it.duration || (isFinite(v.duration) ? v.duration : 0);
   const playBtn = q('#cplay'), muteBtn = q('#cmute'), vol = q('#cvol'), ct = q('#ctime');
+  // Undertextlistorna: språkets namn i stället för filens språkkod ("Svenska (fil)", inte "sv (fil)")
+  for (const o of [...(q('#ps')?.options || []), ...(q('#ps2')?.options || [])]) {
+    const s = (it.subtitles || []).find(x => x.id === o.value);
+    if (s) o.textContent = subLabel(s);
+  }
   const sync = () => { setIconButton(playBtn, v.paused ? 'play' : 'pause', v.paused ? t('Spela (mellanslag)') : t('Pausa (mellanslag)')); el.classList.toggle('paused', v.paused); };
   // Familjefiltret (familyfilter.js) tystar med video.muted – knappen visar användarens eget val
   const userMuted = () => cur.ff?.muted ? cur.ff.user : v.muted;

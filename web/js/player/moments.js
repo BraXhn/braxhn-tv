@@ -4,6 +4,7 @@
 // Laddas med need('player/moments.js') från video.js när knappen ✂ Ögonblick används.
 import { api, esc, fmtTime, toast, t } from '../core.js';
 import { openDialog } from '../ui/dialog.js';
+import { subLabel } from '../ui/tracklabel.js';
 
 /** "1:23", "1:02:03", "83.5" eller "1:23,5" → sekunder (NaN om det inte går) */
 export function parseClock(s) {
@@ -32,7 +33,7 @@ export function openMoment(cur, v) {
         <button type="button" class="ghost small" id="msetstart">${t('Start = {t}', { t: clock(pos) })}</button>
         <button type="button" class="ghost small" id="msetend">${t('Slut = {t}', { t: clock(pos) })}</button></div>
       <p class="muted small" id="mlen" role="status"></p>
-      ${sub ? `<label class="chk"><input type="checkbox" id="msub"> ${t('Bränn in undertexten ({label})', { label: esc(sub.label) })}</label>` : ''}
+      ${sub ? `<label class="chk"><input type="checkbox" id="msub"> ${t('Bränn in undertexten ({label})', { label: esc(subLabel(sub)) })}</label>` : ''}
       <label class="chk"><input type="checkbox" id="mmark"> ${t('Liten vattenstämpel med titeln')}</label>`,
     actions: [{ label: t('Avbryt'), value: null }, { label: t('Spara ögonblick'), kind: 'primary', submit: true, id: 'msave',
       onClick: async (h) => {

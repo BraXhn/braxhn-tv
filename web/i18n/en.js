@@ -4427,4 +4427,11 @@ self.BX_I18N = {
   "Nyckeln har inte den behörigheten – skapa en ny under Administration → API-nycklar": "The key does not have that permission – create a new one under Administration → API keys",
   "BraXhn TV körs på en egen server hemma hos den som bjudit in dig. Det är den personen som ansvarar för uppgifterna – inte utvecklarna av BraXhn TV, som inte får någon information från servern. Enda undantaget är feedback och felrapporter som administratören själv har godkänt (se nedan).": "BraXhn TV runs on a private server at the home of the person who invited you. That person is responsible for the data – not the developers of BraXhn TV, who receive no information from the server. The only exception is feedback and bug reports that the administrator has personally approved (see below).",
   "<b>Feedback och felrapporter:</b> det du skickar med knappen Feedback sparas på servern tills kontot eller ärendet tas bort. En administratör läser ärendet först. Bara om administratören godkänner det kan utvecklarna av BraXhn TV hämta det – utan ditt namn och utan IP-adress. Du ser dina ärenden under <a href=\"#/support\">Mina ärenden</a>.": "<b>Feedback and bug reports:</b> what you send with the Feedback button is stored on the server until the account or the report is removed. An administrator reads the report first. Only if the administrator approves it can the developers of BraXhn TV fetch it – without your name and without an IP address. You see your reports under <a href=\"#/support\">My reports</a>.",
+  // ui/tracklabel.js (undertextspårens namn)
+  "tvingad": "forced",
+  "(fil)": "(file)",
+  "(bild)": "(image)",
+  "(nedladdad)": "(downloaded)",
+  "Spår {n}": "Track {n}",
+  "Extern": "External",
 };

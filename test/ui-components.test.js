@@ -189,3 +189,31 @@ test('stjärnbetyg: reglage med aria-värden, halva stjärnor, escapad etikett o
   assert.ok(lab({ id: 1, kind: 'movie', title: 'F', position: 0 }).includes('Betygsätt…'));
   assert.ok(lab({ id: 1, kind: 'movie', title: 'F', position: 0, userRating: 4.5 }).includes('Mitt betyg: 4,5 – ändra…'));
 });
+
+test('undertextspårens namn: språkkoden blir språkets namn, tilläggen behålls', async () => {
+  const { subLabel, langName } = await import('../web/js/ui/tracklabel.js');
+  const sub = (label, lang, source = 'external') => ({ label, lang, source });
+  // Fil bredvid filmen (servern: "<tillägg> (fil)")
+  assert.equal(subLabel(sub('sv (fil)', 'sv')), 'Svenska (fil)');
+  assert.equal(subLabel(sub('en (fil)', 'en'), 'en'), 'English (fil)');
+  assert.equal(subLabel(sub('en.forced (fil)', 'en')), 'Engelska · tvingad (fil)');
+  assert.equal(subLabel(sub('swe.sdh (fil)', 'swe')), 'Svenska · SDH (fil)');
+  assert.equal(subLabel(sub('Extern (fil)', null)), 'Extern (fil)');
+  assert.equal(subLabel(sub('forced (fil)', 'forced')), 'tvingad (fil)', '"forced" är inget språk');
+  assert.equal(subLabel(sub('sdh (fil)', 'sdh')), 'SDH (fil)', '"sdh" ska inte bli sydkurdiska');
+  assert.equal(subLabel(sub('commentary (fil)', 'commentary')), 'commentary (fil)', 'okänt tillägg visas som det är');
+  // Språket rättat i hälsokontrollen (s.lang) går före filnamnet
+  assert.equal(subLabel(sub('en (fil)', 'sv')), 'Svenska (fil)');
+  // Nedladdad och inbäddad (servern: "titel · kod", "(bild)" för bildundertexter)
+  assert.equal(subLabel(sub('sv (nedladdad)', 'sv', 'downloaded')), 'Svenska (nedladdad)');
+  assert.equal(subLabel(sub('swe', 'swe', 'embedded')), 'Svenska');
+  assert.equal(subLabel(sub('Kommentar · eng (bild)', 'eng', 'embedded')), 'Kommentar · Engelska (bild)');
+  assert.equal(subLabel(sub('Svenska · swe', 'swe', 'embedded')), 'Svenska', 'språket står redan i titeln');
+  assert.equal(subLabel(sub('Signs & Songs', null, 'embedded')), 'Signs & Songs');
+  assert.equal(subLabel(sub('Spår 3', null, 'embedded')), 'Spår 3');
+  assert.equal(subLabel({}), '');
+  // Okänd eller trasig kod: som den är (aldrig ett undantag)
+  assert.equal(langName('xx'), 'xx');
+  assert.equal(langName('<b>'), '<b>');
+  assert.equal(langName(''), '');
+});
