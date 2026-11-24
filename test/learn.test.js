@@ -219,7 +219,7 @@ tw('webbspelaren: dubbla undertexter, paus efter repliken, upprepa, långsamt, n
     await page.evaluate(() => {
       const v = document.querySelector('#vid'); v.pause();
       const pick = (sel, lang) => { const s = document.querySelector(sel); s.value = [...s.options].find(o => o.textContent.startsWith(lang)).value; s.dispatchEvent(new Event('change')); };
-      pick('#ps', 'en'); pick('#ps2', 'sv');
+      pick('#ps', 'Engelska'); pick('#ps2', 'Svenska'); // listan visar språkets namn (ui/tracklabel.js)
     });
     await page.waitForFunction(() => document.querySelector('#lhint')?.textContent === '');
     await page.evaluate(() => { const v = document.querySelector('#vid'); v.currentTime = 2.4; v.play(); });
