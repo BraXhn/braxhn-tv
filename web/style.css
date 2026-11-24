@@ -115,6 +115,10 @@ label{display:block;font-size:.8125rem;color:var(--dim);margin:12px 0 5px}
 .section.has-nav h2{padding-right:76px}
 .section h2 a{font-size:.8125rem;color:var(--dim);font-weight:600;display:inline-block;padding:4px 0} /* klickytan minst 24 px (2.5.8) */
 .section h2 a:hover{color:var(--text)}
+/* En knapp i rubriken (+ Ny smart spellista) är en knapp, inte rubrikens textlänk: texten mitt i knappen (på pekskärm
+   är den 44 px hög) och knappens egen textfärg */
+.section h2 a.btn{display:inline-flex;align-self:center;color:var(--text)}
+.section h2 a.btn.primary{color:#1a0d08}
 .shelf-nav{position:absolute;right:0;top:-3px;display:flex;gap:6px}
 .snav{width:30px;height:30px;border-radius:50%;border:0;background:var(--bg3);color:var(--text);font-size:1.375rem;line-height:1;display:flex;align-items:center;justify-content:center;padding:0 0 3px}
 .snav:hover:not(:disabled){background:var(--accent);color:#1a0d08}
