@@ -35,6 +35,12 @@ runt 30 minuter; kör en enskild fil medan du arbetar (`node --test test/x.test.
   - Gemensamma gränssnittsbitar finns i `js/ui/` – använd dem i stället för egna varianter: dialoger (`dialog.js`, aldrig `confirm()`/`prompt()`/`alert()`), tomt/fel/laddning (`states.js`), `toast`/`toastErr` med ev. Ångra (`core.js`), ikonknappar med namn (`buttons.js`), flikar (`tabs.js`), meny/popover/snabbmeny (`menu.js`), kort med ⋮-meny (`cards.js`, `cardmenu.js`). API, exempel och riktlinjer (fokus, TV, telefon): [ui-komponenter.md](ui-komponenter.md).
 - Texter i gränssnittet, felmeddelanden och README är på svenska och skrivna för en hemanvändare på Unraid.
 
+## Backloggen
+
+Teamets arbetslista finns i [backlog.md](backlog.md): vad som pågår, vad som står näst på tur (rangordnat efter nyttan
+för en familj som använder servern varje dag) och vad som väntar på ägaren. Läs den i början av varje arbetspass och
+uppdatera den i slutet, i samma gren som arbetet.
+
 ## Leverans
 
 Push till `main` bygger och signerar Docker-imagen `ghcr.io/braxhn/braxhn-tv` (amd64 + arm64) och bygger apparna.

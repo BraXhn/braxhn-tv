@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som
+  väntar på ägaren.
 - **Säkerhet och stabilitet: fjärde granskningen av servern.** Alla adresser provades som en användare med begränsade
   bibliotek, som en barnprofil, utan inloggning och med trasiga värden. Rättat (varje punkt har ett test i
   `test/security-review4.test.js`):
