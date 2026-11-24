@@ -1,9 +1,6 @@
 # Ändringar
 
 ## Ej utgiven
-- **Support via ärenden på GitHub:** ägarens egna felrapporter godkänns direkt och rättas av teamet. Andras
-  rapporter får svaret att ärendet är mottaget och väntar på granskning; inget rättas förrän ägaren själv har satt
-  etiketten *godkänd* (`.github/workflows/support.yml`).
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**
