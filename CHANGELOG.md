@@ -56,6 +56,15 @@
 - **Engelska:** *free of 270 GB* under Inspelningar (ordet *av* var oöversatt).
 - **Testerna granskar sökresultaten:** tillgänglighets-, språk- och kvalitetstesterna öppnade `#/search?q=…`, som
   är den tomma söksidan. Nu öppnas både den och `#/search/<ord>`.
+- **Spolning och Fortsätt titta fastnar inte längre på filer med öppen GOP (webben):** i webbläsare som avkodar
+  H.264 i mjukvara (Chrome utan grafikkortsavkodning) gav sådana filer avkodningsfel när uppspelningen började mitt
+  i filen: *Fortsätt titta* visade ingen bild, och en spolning kunde få filmen att börja om från början.
+  - Segmentet som uppspelningen börjar i skickas utan de bilder som hör till GOP:en före (`ra=` i segmentets
+    adress, `server/tslead.js`). De ligger före startpunkten och visas ändå inte. Bilden kopieras som förut.
+  - Efter ett avkodningsfel fortsätter spelaren där filmen var, i stället för på strömmens startposition, och den
+    märker felet även när bufferten är full. En pausad film står kvar pausad.
+  - Går filen ändå inte att avkoda från den punkten kodas bilden om, från samma ställe och resten av uppspelningen.
+    Samma titel startas då omkodad direkt nästa gång under besöket.
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**

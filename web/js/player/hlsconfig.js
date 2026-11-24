@@ -88,6 +88,39 @@ export function abrClass(Hls) {
   };
 }
 
+// ---------- segment som avkodningen börjar på (öppen GOP) ----------
+// Filer med öppen GOP har efter varje nyckelbild några bilder som behöver GOP:en före. Börjar avkodningen på en
+// nyckelbild utan att bilderna före har avkodats (start, fortsättning, spolning, återhämtning efter ett fel) avbryter
+// Chromes mjukvaruavkodare hela uppspelningen på de bilderna. Spelaren ber därför om segmentet som avkodningen
+// börjar i med ra=<sekunder in i segmentet>, och servern tar bort bilderna fram till dit (server/tslead.js) – de
+// ligger före positionen och visas ändå inte. Segment som spelas vidare in i från det buffrade hämtas som vanligt.
+/**
+ * Börjar avkodningen i segmentet som startar på fragStart? buffered = [[start, slut], …], pos = där spelaren står
+ * (eller ska börja), hole = största glapp spelaren går över. Ja när inget är buffrat alldeles före segmentet, eller
+ * när spelaren redan står i det (spolning dit, eller bufferten tog slut precis där).
+ * Ger sekunder in i segmentet där uppspelningen börjar, eller null = segmentet fortsätter på det buffrade.
+ */
+export function randomAccess(buffered, fragStart, pos, hole = 0.5) {
+  const joined = buffered.some(([a, b]) => a < fragStart - 0.1 && b > fragStart - hole);
+  if (joined && !(pos >= fragStart - 0.1)) return null;
+  return Math.max(0, (Number(pos) || 0) - fragStart);
+}
+/** Segmentets nummer ur adressen till ett TS-segment (seg-12.ts?…), annars null */
+export function segNo(url) { const m = /\/seg-(\d+)\.ts(?:\?|$)/.exec(String(url || '')); return m ? +m[1] : null; }
+/** Adressen med ra=<sekunder in i segmentet> */
+export const randomAccessUrl = (url, at = 0) => url + (url.includes('?') ? '&' : '?') + 'ra=' + (Math.round(at * 100) / 100);
+
+/**
+ * Återhämtning efter ett avkodningsfel: ska spelaren försöka igen på positionen pos (sekunder)?
+ * prev = { at, pos, n } från förra försöket (eller null), now = klockan i ms. Högst max försök på samma ställe inom
+ * 15 s – ett fel som kommer tillbaka direkt går inte att spela sig förbi. Ger nästa läge, eller null = ge upp.
+ */
+export function recoverPlan(prev, pos, now, max = 2) {
+  const same = prev && Math.abs(pos - prev.pos) < 2 && now - prev.at < 15000;
+  const n = same ? prev.n + 1 : 1;
+  return n > max ? null : { at: now, pos, n };
+}
+
 // ---------- uppkopplingens takt (hastighetsprovet i caps.js) ----------
 /** Takt (kbit/s) ur tidsmärken [ms, byte hittills] – räknar på det som kom efter den första tredjedelen */
 export function rateOf(marks) {

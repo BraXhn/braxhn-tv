@@ -12,6 +12,7 @@ import * as jobs from './jobs.js';
 import { SubReader, vttParser } from './subreader.js';
 import { ffcaps, ffReady, vulkanDevice } from './ffcaps.js';
 import { autoMaxTranscodes } from './envcheck.js';
+import { dropLeading } from './tslead.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
@@ -1584,7 +1585,17 @@ export async function serveSegment(req, res, it, n, query, userId) {
     if (at < 0) return fail(res, 404, 'Segmentet försvann – försök igen');
     return sendSegment(req, res, file, 'video/iso.segment', at, waitMs);
   }
+  // ra=<sekunder in i segmentet>: spelaren börjar avkoda här (start, fortsättning, spolning, återhämtning) – se tslead.js
+  const ra = query.get('ra');
+  if (ra != null && d.mode === 'remux' && d.fmt === 'ts') return sendRandomAccess(req, res, file, waitMs, Math.max(0, Math.min(600, parseFloat(ra) || 0)));
   sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t', 0, waitMs);
+}
+/** TS-remux utan de bilder i början som behöver föregående segment (öppen GOP). Går något fel skickas filen som den är. */
+async function sendRandomAccess(req, res, file, waitMs, upTo) {
+  let buf;
+  try { buf = dropLeading(await fs.promises.readFile(file), upTo); } catch { return sendSegment(req, res, file, 'video/mp2t', 0, waitMs); }
+  res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Content-Length': buf.length, 'Cache-Control': 'no-store', 'X-Seg-Wait': String(waitMs) });
+  res.end(req.method === 'HEAD' ? undefined : buf);
 }
 /** Väntar tills segment n är klart (startar ffmpeg vid behov). Allt annat än true = ett felsvar har skickats. */
 async function awaitSegment(req, res, it, s, n, userId) {

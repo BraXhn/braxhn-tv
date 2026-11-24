@@ -3,7 +3,7 @@ import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } 
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
-import { abrClass, hlsConfig } from './hlsconfig.js';
+import { abrClass, hlsConfig, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
@@ -33,6 +33,8 @@ let rate = 1; // uppspelningshastighet – följer med till nästa avsnitt under
 // Kvalitet vald under ⚙ – gäller resten av besöket. Auto = kontots standardkvalitet (Mitt konto → Uppspelning).
 let quality = 'auto';
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+// Titlar som webbläsaren inte kunde avkoda som remux under besöket (se remuxFallback) – de omkodas direkt nästa gång
+const noRemux = new Set();
 let playSeq = 0; // ökas för varje play() och när alla spelare stängs – äldre anrop avbryter sig själva
 export function loadHls() {
   if (window.Hls) return Promise.resolve(window.Hls);
@@ -75,7 +77,7 @@ export async function play(id, start = 0, opts = {}) {
   const defSub = it.defaultSub ? it.subtitles.find(s => s.id === it.defaultSub) : null;
   const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
   const cur = P = { it, el, q: quality, audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
-    party: partyId, es: keepParty, applying: false, tok: null, lmd: null, skipDone: new Set(), skipTimer: null,
+    party: partyId, es: keepParty, applying: false, tok: null, lmd: null, skipDone: new Set(), skipTimer: null, forceTc: noRemux.has(it.id),
     // Bio-läge: trailers före filmen – bara filmer som startas från början (inte avsnitt, Fortsätt titta eller Titta tillsammans)
     cinema: it.kind === 'movie' && !(start > 0) && !partyId && !opts.noCinema, pre: null };
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
@@ -246,7 +248,14 @@ export async function play(id, start = 0, opts = {}) {
   track.onclick = (e) => { v.currentTime = tAt(e.clientX, track.getBoundingClientRect()); };
   v.addEventListener('pause', () => P === cur && sendProgress());
   v.addEventListener('ended', () => P === cur && onEnded());
+  // Spelar filmen (eller ska den spela)? Behövs när strömmen laddas om efter ett fel – en pausad film ska stå kvar pausad.
+  // Webbläsaren pausar själv vid ett fel; den pausen räknas inte.
+  v.addEventListener('play', () => { cur.wantPlay = true; });
+  v.addEventListener('pause', () => { if (!v.error) cur.wantPlay = false; });
   v.addEventListener('error', () => {
+    // Avkodningsfel i en HLS-ström: bufferten töms och uppspelningen fortsätter där den var (se load); hjälper inte
+    // det på en remux omkodas bilden i stället
+    if (P === cur && cur.hls && v.error?.code === 3 && (cur.recover?.() || remuxFallback(cur))) return;
     if (P === cur && cur.pb?.mode === 'direct' && !cur.forceHls) { toast(t('Webbläsaren kunde inte spela filen direkt – byter läge')); cur.forceHls = true; reload(true); }
     else if (P === cur && h264Fallback(cur)) return;
     else if (P === cur && v.error) toast(t('Kunde inte spela upp ({v}) – prova en lägre kvalitet under ⚙', { v: ['', t('avbrutet'), t('nätverksfel'), t('avkodningsfel'), t('formatet stöds inte')][v.error.code] || 'fel' }));
@@ -324,10 +333,11 @@ function startSkipCountdown(cur, plan, v) {
 
 /** Det spelaren skickar till /playback utöver spårvalen. Förvärmningen (warmPlay) skickar samma – annars passar
  *  den förvärmda strömmen inte uppspelningen som följer. */
-function playbackBase({ q, version, forceHls, h264, cinema, start }, v = document.createElement('video')) {
+function playbackBase({ q, version, forceHls, forceTc, h264, cinema, start }, v = document.createElement('video')) {
   const extra = { q: q === 'auto' ? '' : q };
   if (version) extra.version = version; // spårlistan hör till just den versionen
-  if (forceHls) extra.force = 'hls';
+  if (forceTc) extra.force = 'transcode'; // remuxen gick inte att avkoda här (remuxFallback)
+  else if (forceHls) extra.force = 'hls';
   if (h264) extra.tc = ''; // HEVC/AV1 fungerade inte – omkodning till H.264
   if (cinema) extra.cinema = '1';
   Object.assign(extra, serverFxParams()); // Safari: servern filtrerar ljudet (nattläge/tydligare dialog)
@@ -351,7 +361,7 @@ export function warmPlay(id, start = 0, opts = {}) {
   if (Date.now() - (warmedAt.get(key) || 0) < 15000) return;
   if (warmedAt.size > 100) warmedAt.clear();
   warmedAt.set(key, Date.now());
-  const extra = playbackBase({ q: quality, version: opts.version || store.get('version.' + id, ''), cinema: !!opts.movie && !(start > 0), start });
+  const extra = playbackBase({ q: quality, version: opts.version || store.get('version.' + id, ''), forceTc: noRemux.has(id), cinema: !!opts.movie && !(start > 0), start });
   // Utanför hemmet väljs kvaliteten efter uppmätt uppkoppling – utan mätning går det inte att förutse valet
   if (status.remote) { const bw = lastBandwidth(); if (!bw) return; extra.bw = String(bw); if (saveData()) extra.save = '1'; }
   extra.warm = '1';
@@ -368,9 +378,10 @@ async function load(start, { play = true } = {}) {
   const tok = cur.tok = Symbol();
   const live = () => P === cur && cur.tok === tok && v.isConnected;
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
+  cur.recover = null; cur.wantPlay = play;
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
-  const extra = { ...playbackBase({ q: cur.q, version: it.version, forceHls: cur.forceHls, h264: cur.h264, cinema: cur.cinema, start }, v),
+  const extra = { ...playbackBase({ q: cur.q, version: it.version, forceHls: cur.forceHls, forceTc: cur.forceTc, h264: cur.h264, cinema: cur.cinema, start }, v),
     audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   // Utanför hemmet: uppmätt uppkoppling (väntar högst 1,5 s på en ny mätning) och "Spara data" i telefonen
   if (status.remote) {
@@ -416,13 +427,39 @@ async function load(start, { play = true } = {}) {
     // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner. Buffertar, glapp, väntetider
     // och bandbreddsmätningen (från första byte – serverns omkodning är inte nätet): se hlsconfig.js
     const est = lastBandwidth() ? lastBandwidth() * 1000 * 0.8 : 6e6;
-    const hls = cur.hls = new Hls(hlsConfig({ start, est, Abr: abrClass(Hls), xhrSetup: (x) => { x.withCredentials = true; } }));
+    // Remux i TS: segment som avkodningen börjar i hämtas med ra=<sekunder in> – se hlsconfig.js (randomAccess)
+    const ra = pb.mode === 'remux' ? new Map() : null;
+    const hls = cur.hls = new Hls(hlsConfig({ start, est, Abr: abrClass(Hls), xhrSetup: (x, url) => {
+      const at = ra?.get(segNo(url));
+      if (at != null) x.open('GET', randomAccessUrl(url, at), true);
+      x.withCredentials = true;
+    } }));
+    if (ra) hls.on(Hls.Events.FRAG_LOADING, (_, d) => {
+      const n = d.frag?.type === 'main' ? segNo(d.frag.url) : null; if (n == null) return;
+      const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
+      // Innan videon har data (start, återhämtning) står currentTime på 0 – då gäller positionen hls.js laddar för
+      const at = randomAccess(b, d.frag.start, v.readyState ? v.currentTime : d.targetBufferTime ?? hls.config.startPosition);
+      if (at == null) ra.delete(n); else ra.set(n, at);
+    });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
       if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = t('{label}{vcl} · {height}p (anpassas){v}', { label, vcl, height: l.height, v: pb.remote ? t(' · utanför hemmet') : '' });
     });
     // Fatala fel: försök igen några gånger, men inte i all oändlighet (utgången inloggning, borttagen fil …)
-    let netTries = 0, mediaTries = 0;
+    let netTries = 0, rec = null;
+    // Avkodnings- och buffertfel: töm bufferten och fortsätt där filmen var. hls.js egen återhämtning börjar annars om
+    // på strömmens startposition (filmen hoppade till början), och den märker inte felet alls när bufferten är full.
+    // Segmentet som då hämtas är ett som avkodningen börjar i (ra ovan). false = samma fel igen på samma ställe.
+    const recover = cur.recover = () => {
+      if (cur.hls !== hls || !live()) return false;
+      const next = recoverPlan(rec, v.currentTime, performance.now(), pb.mode === 'remux' ? 1 : 2);
+      if (!next) return false;
+      rec = next;
+      hls.config.startPosition = next.pos;
+      v.autoplay = !!cur.wantPlay;
+      hls.recoverMediaError();
+      return true;
+    };
     // Utanför hemmet: spelarens egen mätning på riktiga segment gäller nästa gång något startas
     hls.on(Hls.Events.FRAG_LOADED, () => { netTries = 0; if (status.remote && hls.bandwidthEstimate > 0) noteBandwidth(hls.bandwidthEstimate / 1000); });
     hls.on(Hls.Events.ERROR, (_, d) => {
@@ -430,7 +467,8 @@ async function load(start, { play = true } = {}) {
       const code = d.response?.code;
       if (code === 401 || code === 403) { toast(code === 401 ? t('Inloggningen har gått ut – logga in igen') : t('Uppspelningen nekades')); return closePlayer(false); }
       if (d.type === 'networkError' && ++netTries <= 3) return void setTimeout(() => cur.hls === hls && hls.startLoad(), 1000 * netTries);
-      if (d.type === 'mediaError' && ++mediaTries <= 2) return hls.recoverMediaError();
+      // Videoelementet har redan ett fel: dess error-händelse sköter återhämtningen (den kommer en gång per fel)
+      if (d.type === 'mediaError' && (v.error || recover() || remuxFallback(cur))) return;
       if (d.type === 'mediaError' && h264Fallback(cur)) return;
       toast(d.type === 'networkError' ? t('Ingen kontakt med servern – uppspelningen stoppades') : t('Uppspelningsfel: ') + d.details);
     });
@@ -484,6 +522,19 @@ function h264Fallback(cur) {
   cur.h264 = true;
   toast(t('Enheten kunde inte spela {v} – byter till H.264', { v: cur.pb.vcodec === 'av1' ? t('AV1') : 'HEVC' }));
   reload(true);
+  return true;
+}
+/**
+ * Remux som webbläsaren inte kan avkoda från den här punkten: bilden omkodas i stället, från samma position och resten
+ * av uppspelningen. Gäller filer med öppen GOP i Chromes mjukvaruavkodare – bilderna efter en nyckelbild kan hänvisa
+ * till bilder före den, och avkodaren avbryter då i stället för att gå vidare. Omkodningen har stängd GOP.
+ * true = laddar om.
+ */
+function remuxFallback(cur) {
+  if (P !== cur || cur.forceTc || cur.pb?.mode !== 'remux') return false;
+  cur.forceTc = true;
+  noRemux.add(cur.it.id);
+  reload(!!cur.wantPlay);
   return true;
 }
 function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
