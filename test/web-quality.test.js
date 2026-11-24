@@ -126,7 +126,7 @@ for (const mode of ['phone', 'desktop', 'tv']) {
   t(`ingen vågrät rullning, bilder med mått och ingen layoutförskjutning (${mode})`, async () => {
     const { p, errors, close } = await page(mode);
     const found = [];
-    for (const hash of ['', `lib/${S.movie}`, `lib/${S.show}`, `item/${S.alfa}`, 'search?q=alfa', 'account', 'admin']) {
+    for (const hash of ['', `lib/${S.movie}`, `lib/${S.show}`, `item/${S.alfa}`, 'search', 'search/alfa', 'account', 'admin']) {
       await open(p, hash);
       const r = await p.evaluate(() => ({
         wide: document.scrollingElement.scrollWidth > innerWidth + 1 ? document.scrollingElement.scrollWidth : 0,

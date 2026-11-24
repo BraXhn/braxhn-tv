@@ -124,7 +124,7 @@ function diskBar(d) {
   const tight = d.free != null && d.upcoming > d.free * 0.9;
   return `<div class="dvrdisk" role="group" aria-label="${t('Diskutrymme för inspelningar')}">
     ${pct != null ? `<div class="dvrdisk-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${t('Använt utrymme')}"><i style="width:${pct}%"></i></div>` : ''}
-    <div class="small">${t('<b>{free}</b> ledigt{v} · inspelningar tar {used} · kommande vecka ≈ {upcoming}', { free: GB(d.free), v: d.total ? ` av ${GB(d.total)}` : '', used: GB(d.used), upcoming: GB(d.upcoming) })}
+    <div class="small">${t('<b>{free}</b> ledigt{v} · inspelningar tar {used} · kommande vecka ≈ {upcoming}', { free: GB(d.free), v: d.total ? t(' av {total}', { total: GB(d.total) }) : '', used: GB(d.used), upcoming: GB(d.upcoming) })}
       <span class="muted">${t('({bytesPerHour}/timme)', { bytesPerHour: GB(d.bytesPerHour) })}</span>${tight ? t(' · <span class="warn-badge">Utrymmet kan ta slut</span>') : ''}</div></div>`;
 }
 

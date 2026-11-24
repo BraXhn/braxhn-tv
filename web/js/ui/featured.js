@@ -14,7 +14,9 @@ function meta(it) {
   if (it.year) p.push(esc(String(it.year)));
   if (it.kind === 'show') { if (it.seasons) p.push(it.seasons === 1 ? t('1 säsong') : t('{seasons} säsonger', { seasons: +it.seasons })); }
   else if (it.duration) p.push(esc(fmtDur(it.duration)));
-  if (it.cert) p.push(esc(it.cert));
+  // Åldersgränsen som på titelsidan ("13+", ursprungsmärkningen som tooltip) – inte landskoden "US:PG-13"
+  if (it.age != null) p.push(`<span class="agebadge" title="${esc(it.cert || '')}">${+it.age === 0 ? t('Barntillåten') : +it.age + '+'}</span>`);
+  else if (it.cert) p.push(esc(String(it.cert).replace(/^[A-Z]{2}:/, '')));
   if (it.rating) p.push(`<span class="star" aria-hidden="true">★</span> ${fmtRating(it.rating)}<span class="sr-only"> ${t('i betyg')}</span>`);
   return p.map(x => `<span>${x}</span>`).join('');
 }

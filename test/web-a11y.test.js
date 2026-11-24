@@ -164,7 +164,7 @@ t('förberedelse: konto, bibliotek, IPTV och skanning', async () => {
 const VIEWS = () => [
   ['', 'Hem'], [`lib/${S.movie}`, 'Filmer'], [`lib/${S.show}`, 'Serier'], [`item/${S.alfa}`, 'Film'], [`item/${S.show}`, 'Serie'],
   [`music/${S.music}`, 'Musik'], ...(S.album ? [[`album/${S.album}`, 'Album']] : []), ...(S.artist ? [[`artist/${S.artist}`, 'Artist']] : []), [`books/${S.audiobook}`, 'Ljudböcker'], ...(S.book ? [[`book/${S.book}`, 'Ljudbok']] : []),
-  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search?q=alfa', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
+  ['podcasts', 'Poddar'], [`photos/${S.photo}`, 'Foton'], [`ebooks/${S.ebook}`, 'E-böcker'], [`ebook/${S.epub}`, 'E-bok'], [`read/${S.epub}`, 'Läsaren (EPUB)'], [`read/${S.comic}`, 'Läsaren (serietidning)'], ['search', 'Sök (tom)'], ['search/alfa', 'Sök'], ['watchlist', 'Min lista'], ['calendar', 'Kommande'],
   ['collections', 'Samlingar'], ['account', 'Mitt konto'], ['admin', 'Administration'], ['stats', 'Statistik'], ['wrapped', 'Årssammanfattning'],
   ['requests', 'Önskningar'], ['support', 'Mina ärenden'], ['history', 'Historik'], ['playstats', 'Tittarstatistik'], ['webhooks', 'Webhooks'], ['downloads', 'Nedladdat'],
   ['live', 'Live-TV'], ['epg', 'TV-guide'], ['vod', 'VOD'], ['iptvadmin', 'IPTV'], ['dvr', 'Inspelningar'], ['health', 'Hälsokontroll'], ['shrink', 'Diskrådgivaren'],

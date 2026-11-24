@@ -16,6 +16,7 @@ i själva filen – den här sidan är översikten.
 | `ui/cards.js` | `card`, `seasonCard`, `art`, `shelf`, `shelfHtml`, `colCard`, `personCard`, `cardItem`, `ebookCard`, `ebookCover` | – |
 | `ui/shelves.js` | `initShelves`, `initCardSize` | – (‹ › på hyllor, kortstorlek) |
 | `ui/spatial.js` | `move`, `focusFirst`, `firstIn`, `focusEl`, `reveal`, `scopeOf` | – (rumslig navigering med fjärrkontroll/piltangenter, laddas vid behov) |
+| `ui/tracklabel.js` | `subLabel(spår)`, `langName(kod)` | – (undertextspårens namn: språkkoden i serverns etikett blir språkets namn – *Svenska (fil)* – och tilläggen översätts; används av titelsidan, spelarens listor och Ögonblick) |
 | `ui/cardmenu.js` | `initCardMenus`, `openCardMenu`, `cardActions` | – (snabbåtgärder på korten) |
 | `ui/activity.js` | `startActivity`, `stopActivity` | – (aktivitetsindikatorn för administratörer) |
 
@@ -200,10 +201,15 @@ den aldrig.
   Använder komponenten inte pilen (t.ex. vid änden av en lista) – låt bli, så går fokus vidare rumsligt.
 - **Textfält:** ← → flyttar markören och lämnar fältet bara vid kanten av texten; ↑ ↓ lämnar fältet (flerradiga
   fält vid första/sista raden). Reglage (`input[type=range]`, `role=slider`) och video behåller ← →; ett reglage
-  vid sitt min/max släpper pilen vidare. Rullistor (`select`) navigeras som knappar – Enter öppnar dem.
+  vid sitt min/max (`aria-valuemin`/`aria-valuemax` för `role=slider`) släpper pilen vidare. Ett eget reglage får
+  därför inte ta ↑ ↓ eller en ← → som inte ändrar något när navigeringen är på (`spatialOn`) – stjärnorna i
+  `ui/rating.js` gör så. Rullistor (`select`) navigeras som knappar – Enter öppnar dem.
 - **Mål:** synliga, fokuserbara element som inte ligger i något `inert`. I ett `.card` är bara `.clink` ett mål;
   `data-nav-skip` tar bort ett element (och allt i det). Element med `tabindex="-1"` (roving tabindex i flikar,
-  menyer och rutnät) är inga mål – bara det valda.
+  menyer och rutnät) är inga mål – bara det valda. Innehållet i ett fällt `<details>` är inga mål (bara dess
+  `summary`): fälten har kvar sina mått i Chrome men kan inte få fokus. En kryssruta eller ett radioval mäts som
+  hela sin `label`, så att den lilla rutan inte hamnar utanför kolumnen man rör sig i.
+- **Sidomenyn** nås från huvudytan bara med ←: ↑ ↓ från `#main` väljer aldrig en länk i `#rail`.
 - **Område:** översta öppna `<dialog>` (fokusfällan gäller även pilarna), helskärmsspelaren (en öppen panel i den:
   inställningar, kapitel), annars hela sidan. Öppna menyer (`.pop`) sköter sina pilar själva.
 - **Grupper:** i menyraden, sidomenyn, knapprader (`.row`, `.crow`, `.pbar`, `.tabs`) går pilen längs gruppen så länge

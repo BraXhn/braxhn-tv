@@ -33,6 +33,26 @@
     (`GET /api/v1/support`) och sätter status och svar (`POST /api/v1/support/:id`). Det är det enda en API-nyckel
     kan skriva. Teamet ser aldrig namn på användare, bara om ärendet kommer från en administratör eller en användare.
   - Ärendena följer med i *Ladda ner mina uppgifter* och tas bort när kontot raderas.
+- **Fjärrkontroll och TV-skärm (webbappen):**
+  - Spelarens inställningar (⚙) går att nå med pilarna. Förut gjorde ↑ från kugghjulet ingenting, så kvalitet och
+    undertexter gick inte att välja med fjärrkontroll: navigeringen valde ett fält i den fällda delen *Undertextens
+    utseende*, som inte kan få fokus.
+  - Kryssrutorna i panelen (Nattläge, Tydligare dialog, Språkinlärning) hoppas inte längre över, pilarna flyttar
+    fokus från dem, och raden man står på är inramad. Bakåt/Escape stänger panelen även från en rullista.
+  - Stjärnorna *Mitt betyg* fångar inte fokus: ↑ och ↓ går vidare i stället för att ändra betyget (varje tryck
+    sparade ett betyg). ← och → ändrar betyget som förut.
+  - ↑ och ↓ från innehållet hamnar aldrig i sidomenyn (den nås med ←). Förut kunde ↑ från ett kort eller från
+    *Spela* välja en länk i sidomenyn som råkade ligga närmast.
+  - Spelarens knappar, tidslinje och inställningar är större i TV-läge (32 px-ikoner i stället för 22).
+- **Undertexter heter som språket:** *Svenska (fil)* och *Engelska · tvingad (fil)* i stället för *sv (fil)* och
+  *en.forced (fil)* – på titelsidan, i spelarens listor och i Ögonblick. På engelska: *Swedish (file)*.
+- **Telefon:** spelarens översta rad ryms på en rad (*Titta tillsammans* visas som ikon och titeln kortas av).
+- **Skivor, böcker och poddar har inte längre en ram runt kortet:** stilen för Ögonblick-korten gällde av misstag
+  alla kort med omslag (album, artister, ljudböcker, e-böcker, poddar, stationer och smarta listor).
+- **Startsidan:** åldersgränsen i den utvalda titeln visas som på titelsidan (*13+*), inte som *US:PG-13*.
+- **Engelska:** *free of 270 GB* under Inspelningar (ordet *av* var oöversatt).
+- **Testerna granskar sökresultaten:** tillgänglighets-, språk- och kvalitetstesterna öppnade `#/search?q=…`, som
+  är den tomma söksidan. Nu öppnas både den och `#/search/<ord>`.
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**
