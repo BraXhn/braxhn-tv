@@ -20,12 +20,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Pågår
 
-| Vad | Gren | Sedan |
-|---|---|---|
-| Uppspelning i webben: start, spolning och hack (`web/js/player/*`, delar av `server/stream.js` och `server/routes/playback.js`) | `team/uppspelning-2026-11-24` | 2026-11-24 |
-| Webbens utseende | `team/webb-2026-11-24` | 2026-11-24 |
-| Musik i webben (`web/js/audio*.js`) | `team/musik-2026-11-24` | 2026-11-24 |
-| Fjärde granskningen av servern (skärmtid från strömmen, skanningens status, sortering) – väntar på granskning och hela testsviten | `team/granskning-2026-11-24` | 2026-11-24 |
+*(inget just nu)*
 
 ## Näst på tur
 
@@ -133,6 +128,32 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
+**Från arbetspasset 2026-11-24 (sett men inte gjort)**
+- Musikkön finns bara i minnet och försvinner när sidan laddas om (`web/js/audio.js`). Spara kön och positionen.
+- Öppen GOP: titlar som måste omkodas i webben minns bara under besöket (`noRemux` i `web/js/player/video.js`).
+  Känn igen dem på servern vid nyckelbildsindexeringen, så slipper man 1–2 s vid första spolningen varje gång.
+- Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
+- Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
+- `/api/libraries` visar serverns sökvägar för alla inloggade, även barnprofiler (`server/routes/library.js`). Ta
+  bort `path`/`paths` för andra än administratörer när det är säkert att apparna inte läser dem.
+- Skärmtiden går att kringgå genom att hämta hela originalfilen snabbt via `/direct`. Begränsa hastigheten för
+  profiler med skärmtid (`serveDirect` i `server/stream.js`).
+- `POST /api/media-token` skapar en rad i `sessions` per anrop utan tak per användare.
+- Reläets spärr mot fel admintoken kontrolleras efter token (`relay/server.js`), så den bromsar inte gissning.
+- Datum i UTC i stället för lokal tid i inspelningars metadata och exporters filnamn (`server/dvr.js`,
+  `routes/history.js`, `routes/vocab.js`, `routes/privacy.js`).
+- Feedback: notis till administratören när ett ärende väntar; öppna ett avslutat ärende igen; gallra gamla ärenden;
+  Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
+- Musikfältets knappar är emoji och klipps på 390 px bredd (`web/js/audio.js`, `#mbar`).
+- Kvalitetsmenyn erbjuder 1080p och 720p för en källa med lägre upplösning (`web/js/player/video.js`).
+- Chromecast och fjärrstyrningen får fortfarande undertexternas råa namn (*sv (fil)*); ljudspår visas med språkkod.
+- Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
+- Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
+- M4A med `moov` sist kan inte snabbstartas (1,6 s på 20 Mbit/s); servern kan skicka `moov` först.
+- FLAC 96 kHz på långsamt nät hackar: webben begär aldrig omkodning av musik (`br=` används inte).
+- `test/familyfilter.test.js` (webbspelarens tystning) och samplingsfrekvenstestet i `test/web-audio-robust.test.js`
+  har fallit någon gång under hög belastning. Gör tidsgränserna tåligare.
+
 **Uppspelning och stabilitet**
 - `docs/jamforelse.md` är inaktuell: den säger att fjärråtkomst utan portöppning saknas (BraXhn Relay finns) och att
   apparna är pausade. Skriv om den efter läget i 1.2.2.
@@ -169,9 +190,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
-*(tomt – fyll på här med datum och version när något ur listan ovan är klart)*
+- 2026-11-24 (efter 1.2.2, i `:edge`): Feedback och felrapporter i appen med granskning under Administration → Support.
+- 2026-11-24: Öppen GOP i webben – Fortsätt titta och spolning fastnar inte längre på avkodningsfel.
+- 2026-11-24: Fjärde granskningen av servern (skärmtid räknas från strömmen, skanningens status, sortering).
+- 2026-11-24: Webben på TV och telefon (fjärrkontroll i spelarens inställningar, större reglage, undertexternas namn).
+- 2026-11-24: Musikspelaren (minnesläcka vid glapplöst, avbrutna hämtningar, nätavbrott, växande början).
 
 ## Bara Anton kan göra
+
+- Ge teamet serverns adress utifrån och en API-nyckel med behörigheten *Support* (utan *Bara från hemnätet*), så att godkända ärenden kan hämtas.
+- Läs den nya formuleringen i `PRIVACY.md` om feedback och felrapporter.
 
 - **Supporttråd på Unraid-forumet:** skapa tråden och skicka länken, så att `<Support>` i `braxhn-tv.xml` och
   `braxhn-tv-nvidia.xml` kan peka dit (i dag pekar den på GitHub-ärenden).
