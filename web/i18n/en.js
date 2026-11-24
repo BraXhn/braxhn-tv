@@ -55,6 +55,7 @@ self.BX_I18N = {
   "Kö": "Queue",
   "Stäng spelaren": "Close the player",
   "Kunde inte spela låten": "Could not play the song",
+  "Inget nät – musiken fortsätter när det är tillbaka": "No connection – the music continues when it is back",
   "{b} sekunder bakåt": "{b} seconds back",
   "{f} sekunder framåt": "{f} seconds forward",
   "Tiden är slut för idag": "Time is up for today",

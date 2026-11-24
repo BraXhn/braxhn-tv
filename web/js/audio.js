@@ -41,8 +41,8 @@ export function stopAudio() {
   if (!M.audio) return;
   if (M.spoken) spokenSave();
   M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.loadSeq++; M.radio = null;
-  setSleep(0); showLyrics(false);
-  AE.stop(); AE.E.elT = null;
+  setSleep(0); showLyrics(false); clearWait();
+  AE.stop(); AE.only(null); AE.E.elT = null;
   stopVideo(M.el);
   const bar = $('#mbar'); if (bar) bar.hidden = true;
   document.body.classList.remove('hasbar');
@@ -96,7 +96,7 @@ function ensureBar() {
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
   a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) setPlaying(true); };
   a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); };
-  a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; toast(t('Kunde inte spela låten'), { error: true }); };
+  a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; if (M.spoken || !M.cur?.id) return toast(t('Kunde inte spela låten'), { error: true }); elementFailed(); };
   $('#mplay').onclick = () => M.audio.paused ? M.audio.play() : M.audio.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
   $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (M.audio.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
@@ -163,7 +163,8 @@ export function playSpoken(s) {
   closeAllPlayers();
   if (M.spoken) spokenSave();
   M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++;
-  AE.stop(); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet (musikens jämna ljudnivå gäller inte)
+  clearWait();
+  AE.stop(); AE.only(null); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet (musikens jämna ljudnivå gäller inte)
   if (LPREFS.speechLevel) ensureEngine(); // jämn ljudnivå för tal går genom Web Audio (i användarens klick)
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
   enginePrefs();
@@ -235,7 +236,7 @@ export function playQueue(tracks, i, opts = {}) {
   if (M.spoken) { spokenSave(); M.spoken = null; }
   setBarMode(false);
   closeAllPlayers();
-  ensureEngine(); // i användarens klick – annars får ljudsammanhanget inte starta
+  ensureEngine(tracks[i]); // i användarens klick – annars får ljudsammanhanget inte starta
   loadListenPrefs();
   M.queue = tracks; loadTrack(i);
 }
@@ -244,18 +245,24 @@ async function loadTrack(i) {
   const t = M.queue[i]; if (!t) return;
   const seq = ++M.loadSeq, el = M.el;
   showTrack(t, i);
-  M.offset = 0; M.transcoded = false; // inte föregående spårs (eller bokens) värden
-  if (AE.wants(t)) {
-    const p = AE.prepare(t).catch(() => null);
-    AE.stop();
+  M.offset = 0; M.transcoded = false; M.want = 0; // inte föregående spårs (eller bokens) värden
+  clearWait();
+  AE.stop();
+  AE.only(t.id); // låtar som hoppats över hämtas inte färdigt
+  // Utanför hemmet tar hämtningen tid – där börjar elementet direkt och motorn tar nästa låt.
+  if (AE.wants(t) && !status.remote) {
+    AE.prepare(t).catch(() => {});
     if (!el.paused) el.pause();
-    // Snabbstart: början av låten räcker för att börja spela (motorn byter till hela låten när den är avkodad).
-    // Utanför hemmet tar hämtningen tid – där börjar elementet direkt och motorn tar nästa låt.
-    const q = AE.quick(t).then(x => x || p);
-    const dec = await Promise.race([p, q, new Promise(r => setTimeout(r, status.remote ? 0 : AE.GRACE))]);
+    // Snabbstart: början av låten räcker för att börja spela (motorn byter till mer och till sist hela låten medan
+    // den spelar). null = hämtningen går för långsamt eller misslyckades – vänta inte.
+    let dec = await Promise.race([AE.first(t), new Promise(r => setTimeout(r, AE.GRACE))]);
+    // Långsamt nät där hämtningen ändå hinner med låten: början är snart framme – vänta på den i stället för att börja om i elementet
+    if (!dec && seq === M.loadSeq && AE.hopeful(t)) dec = await Promise.race([AE.first(t), new Promise(r => {
+      const end = Date.now() + 2 * AE.GRACE, iv = setInterval(() => { if (Date.now() > end || seq !== M.loadSeq || !AE.hopeful(t)) { clearInterval(iv); r(null); } }, 150); })]);
     if (seq !== M.loadSeq) return; // en annan låt hann starta
     if (dec) { stopVideo(el); AE.play(t, i, dec); return; }
-  } else AE.stop();
+    AE.drop(t.id); // elementet hämtar låten själv – två hämtningar samtidigt halverar farten på långsamt nät
+  }
   // Elementet: nästa låt kan ändå bli en buffert (motorn tar över vid övergången)
   AE.E.elT = t; AE.E.paused = false; AE.applyGains();
   M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
@@ -272,13 +279,47 @@ async function elementTakeover(t, pos) {
   try { tc = (await fetch(M.url, { method: 'HEAD' })).headers.get('x-transcoded') === '1'; } catch {}
   if (seq !== M.loadSeq || M.cur !== t) return;
   AE.stop();
+  AE.drop(t.id); // elementet hämtar själv – motorns hämtning av samma låt avbryts
   AE.E.elT = t; AE.E.paused = false; AE.applyGains();
   M.transcoded = tc;
+  M.want = pos; // dit elementet ska – används om nätet försvinner innan det hunnit dit
   // Omkodade strömmar saknar Range – de startas på rätt position; filer spolas när de laddats
   if (tc) { M.offset = pos; el.src = M.url + '&ss=' + pos; }
   else { M.offset = 0; el.src = M.url; el.addEventListener('loadedmetadata', () => { if (seq === M.loadSeq) el.currentTime = pos; }, { once: true }); }
+  el.addEventListener('playing', () => { if (seq === M.loadSeq) M.want = 0; }, { once: true });
   el.play().catch(() => {});
 }
+// ---------- nätavbrott: vänta och fortsätt ----------
+// Låten kunde inte laddas. Är det nätet (servern svarar inte) väntar spelaren och fortsätter av sig själv från samma
+// ställe när servern svarar igen; svarar servern är det låten som inte går att spela.
+const RETRIED = new WeakSet();
+function clearWait() { if (M.wait) { clearTimeout(M.wait.timer); M.wait = null; } }
+async function elementFailed() {
+  const tr = M.cur, el = M.el;
+  if (!tr?.id || M.wait?.tr === tr) return;
+  const pos = Math.max((el.currentTime || 0) + (M.offset || 0), M.want || 0);
+  const w = M.wait = { tr, pos, n: 0, timer: 0, told: false, again: null };
+  const reach = async () => { try { return (await fetch(`/api/music/tracks/${tr.id}/stream?a=${audioCaps()}`, { method: 'HEAD', cache: 'no-store' })).ok; } catch { return false; } };
+  w.again = async () => {
+    clearTimeout(w.timer);
+    const ok = await reach();
+    if (M.wait !== w) return;
+    if (M.cur !== tr) return clearWait();
+    if (!ok) {
+      if (!w.told) { w.told = true; toast(t('Inget nät – musiken fortsätter när det är tillbaka')); }
+      w.timer = setTimeout(w.again, Math.min(15000, 1000 * 2 ** w.n++));
+      return;
+    }
+    M.wait = null;
+    // Servern svarar: ett nytt försök (nätet kan ha kommit tillbaka nyss). Går det inte då är det låten.
+    if (!w.told && RETRIED.has(tr)) return toast(t('Kunde inte spela låten'), { error: true });
+    RETRIED.add(tr);
+    AE.forgetErrors();
+    if (w.pos > 1) elementTakeover(tr, w.pos); else loadTrack(M.idx);
+  };
+  w.again();
+}
+window.addEventListener('online', () => M.wait?.again());
 /** Visar låten i spelaren och gör det som hör till en ny låt (text, mediesession, låtradio, "spelad"). */
 function showTrack(t, i) {
   M.idx = i; M.cur = t;
@@ -413,9 +454,9 @@ export async function renderListenPrefs(box) {
 // ---------- jämn ljudnivå och motorn ----------
 // Web Audio (GainNode) kan även höja tysta låtar och gör glapplöst/övertoning möjligt. iOS-Safari pausar Web Audio när
 // skärmen låses, så där används den inte (och där går det inte heller att ändra volymen – normaliseringen gör då ingenting).
-function ensureEngine() {
+function ensureEngine(first) {
   if (!M.el) return;
-  if (AE.init(M.el, HOOKS, audioCaps())) { enginePrefs(); applyVolume(); }
+  if (AE.init(M.el, HOOKS, audioCaps(), first?.gapless?.sampleRate)) { enginePrefs(); applyVolume(); }
 }
 /** Volym = reglaget × sovtimerns nedtoning; spårets förstärkning i motorn (eller bara dämpning om Web Audio saknas) */
 export function applyVolume() {

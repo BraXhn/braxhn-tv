@@ -65,6 +65,25 @@
     märker felet även när bufferten är full. En pausad film står kvar pausad.
   - Går filen ändå inte att avkoda från den punkten kodas bilden om, från samma ställe och resten av uppspelningen.
     Samma titel startas då omkodad direkt nästa gång under besöket.
+- **Musikspelaren på webben – minne, hopp i kön och dåligt nät** (mätt i Chrome med ett testbibliotek i FLAC, MP3 och
+  AAC, 44,1/48/96 kHz):
+  - **Minnet växte för varje låt.** Vid en glapplös övergång låg den spelade låtens avkodade ljud kvar i minnet tills
+    någon spolade eller bytte låt (ungefär 20 MB per minut musik). Ett album som fick spela klart kunde ta flera
+    gigabyte. Nu släpps låten när den spelat färdigt.
+  - **Överhoppade låtar hämtades färdigt.** Tjugo snabba tryck på Nästa i ett FLAC-album hämtade och avkodade 457 MB
+    i bakgrunden. Nu avbryts hämtningen när låten inte längre ska spelas (59 MB i samma prov).
+  - **Dubbel hämtning på långsamt nät.** När låten inte hann avkodas i tid började ljudelementet hämta samma låt medan
+    den första hämtningen fortsatte. På 1 Mbit/s gav det hack i ljudet. Nu avbryts den första. Utanför hemmet
+    hämtades första låten alltid två gånger – inte längre.
+  - **Nätavbrott vid ett låtbyte stoppade musiken för gott** ("Kunde inte spela låten"). Nu väntar spelaren, säger
+    "Inget nät – musiken fortsätter när det är tillbaka" och fortsätter av sig själv från samma ställe.
+  - **Snabbstarten fungerar även när hela låten inte hinner fram direkt.** Början av låten växer medan resten hämtas
+    (spelaren byter till den längre biten på samma sampel), så det räcker att nätet är snabbare än låten spelas.
+    Förut väntade spelaren 1,5 s och började sedan om i ljudelementet. FLAC på 20 Mbit/s: 1,6 s → 0,25–0,7 s till
+    ljud. MP3 320 på 1 Mbit/s: 2,9–3,3 s → 2,0–2,4 s, utan hack, och nästa låt börjar glapplöst (förut 3,5 s tystnad).
+  - **Skarven i album med annan samplingsfrekvens än ljudkortets.** Ljudet får nu den första låtens samplingsfrekvens
+    (44,1 eller 48 kHz), så spåren räknas inte om var för sig. 48 kHz-album på en enhet i 44,1 kHz tappade ett sampel
+    i varje skarv; nu är skarven exakt. Gäller tills sidan laddas om.
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**
