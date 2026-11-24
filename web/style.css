@@ -650,6 +650,8 @@ dialog.trailer video{width:100%;max-height:70vh;background:#000;border-radius:8p
 #player .setp .psync{display:flex;flex-direction:column;gap:6px}
 #player .setp .psyncs{color:#ccd}
 #player .setp label.chk{flex-direction:row;align-items:center;gap:8px;font-size:.8125rem;color:#eee;flex-wrap:wrap}
+#player .setp label.chk:has(input:focus-visible){outline:3px solid var(--accent,#e5a00d);outline-offset:4px;border-radius:6px}
+#player .setp label.chk:has(input:focus-visible) input{outline:none}
 #player .setp label.chk .muted{font-size:.6875rem;width:100%;padding-left:24px;margin-top:-4px}
 /* Fjärrkontroll/tangentbord: tydlig markering i spelaren (mot mörk bild) */
 #player .ctl button:focus-visible{outline:3px solid var(--accent,#e5a00d);outline-offset:2px;color:#fff;background:rgba(255,255,255,.18)}
@@ -1722,6 +1724,10 @@ body.rd-open{overflow:hidden}
 .mpending{padding:var(--sp-5);background:var(--bg2);border-radius:var(--r);text-align:center}
 .mrange{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
 .mbtns{flex-wrap:wrap;gap:6px}
+/* Smal skärm: även Titta tillsammans blir bara sin ikon, så att spelarens översta rad ryms på en rad (texten finns
+   kvar för skärmläsare; knappens text sätts av video.js/party.js och har ingen egen span att dölja) */
+@media (max-width:600px){#player .pbar #pparty{font-size:0}#player .pbar #pparty::before{content:'👥';font-size:.875rem;line-height:1.4}
+  #player .pbar{gap:8px}#player .pbar .title{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 @media (max-width:600px){#player .pbar .pmlabel{display:none}.mgrid{grid-template-columns:1fr}.mcform{flex-direction:column;align-items:stretch}}
 .mcard .mreacts{gap:4px}
 .mcard .mreact{min-width:36px;min-height:36px;padding:2px 6px}
@@ -1737,6 +1743,23 @@ html.tv .card .art{transition:transform var(--dur),box-shadow var(--dur)}
 html.tv .card .t{margin-top:12px}
 html.tv .card>.clink:focus-visible .art{outline:4px solid var(--focus);outline-offset:3px;box-shadow:0 0 0 7px rgba(0,0,0,.55),0 0 28px 6px color-mix(in srgb,var(--focus) 55%,transparent);transform:scale(1.06)}
 html.tv #player .ctl button:focus-visible,html.tv #player .pbar button:focus-visible{outline-width:4px;box-shadow:0 0 0 8px rgba(0,0,0,.5)}
+/* Spelaren på TV: knapparna och texten i kontrollraden och inställningarna syns från soffan (22 px-ikoner på en
+   1080p-skärm är för små på tre meters håll) */
+@media (min-width:1600px){
+  html.tv #player:not(.mini) .ctl button{padding:12px}
+  html.tv #player:not(.mini) .ctl button svg{width:32px;height:32px}
+  html.tv #player:not(.mini) .ctl button.big{padding:14px}
+  html.tv #player:not(.mini) .cmid,html.tv #player:not(.mini) .cright{gap:14px}
+  html.tv #player:not(.mini) .crow{padding:12px 28px 18px}
+  html.tv #player:not(.mini) .cinfo{font-size:.875rem}
+  html.tv #player:not(.mini) .cinfo b{font-size:1.0625rem}
+  html.tv #player:not(.mini) .ctl .track{height:6px}
+  html.tv #player:not(.mini) .setp{min-width:440px;gap:14px;padding:18px}
+  html.tv #player:not(.mini) .setp label{font-size:.875rem}
+  html.tv #player:not(.mini) .setp select,html.tv #player:not(.mini) .setp label.chk{font-size:1rem}
+  html.tv #player:not(.mini) .setp label.chk .muted{font-size:.8125rem;padding-left:28px}
+  html.tv #player:not(.mini) .setp .setgrp>b,html.tv #player:not(.mini) .setp summary{font-size:.875rem}
+}
 html.tv .mi:focus-visible{box-shadow:inset 0 0 0 3px var(--focus);background:var(--bg3)}
 @media (prefers-reduced-motion:reduce){html.tv .card>.clink:focus-visible .art{transform:none}}
 html.reduce-motion.tv .card>.clink:focus-visible .art{transform:none}
