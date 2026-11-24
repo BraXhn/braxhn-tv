@@ -74,7 +74,7 @@ const SELECT = `SELECT p.id, p.ts, p.ended, p.item_id, COALESCE(i.parent_id, p.s
   i.id IS NOT NULL AS exists_`;
 /** Historiken (sida för sida). sort: ts|title|user|played|device, dir: asc|desc */
 export function history(f, { limit = 50, offset = 0, sort = 'ts', dir = 'desc' } = {}) {
-  const ord = SORTS[sort] || 'p.ts';
+  const ord = Object.hasOwn(SORTS, sort) ? SORTS[sort] : 'p.ts'; // bara egna nycklar (inte constructor/__proto__ ur adressen)
   const rows = all(`${SELECT} ${FROM}${f.sql} ORDER BY ${ord} ${dir === 'asc' ? 'ASC' : 'DESC'}, p.id DESC LIMIT ? OFFSET ?`,
     ...f.params, Math.max(1, Math.min(500, +limit || 50)), Math.max(0, +offset || 0));
   const total = get(`SELECT COUNT(*) AS n, COALESCE(SUM(p.played),0) AS played ${FROM}${f.sql}`, ...f.params);

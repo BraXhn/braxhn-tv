@@ -91,8 +91,9 @@ route('POST', '/api/scan', admin, (c) => { scan(); send(c.res, 200, { ok: true }
 // Status för skanningen; användare som bara får se vissa bibliotek får inte veta namnen på de andra
 route('GET', '/api/scan', user, (c) => {
   if (!restricted(c.user.id)) return send(c.res, 200, scanStatus);
-  const { library, analysis, warnings, ...rest } = scanStatus;
-  send(c.res, 200, { ...rest, analysis: analysis ? { running: !!analysis.running } : analysis });
+  // Bara det som inte nämner något bibliotek: nya fält i scanStatus (t.ex. scanned = alla biblioteks namn) följer inte med av sig själva
+  const { running, phase, done, total, last, started, analysis } = scanStatus;
+  send(c.res, 200, { running, phase, done, total, last, started, analysis: analysis ? { running: !!analysis.running } : analysis });
 });
 route('GET', '/api/fs', admin, (c) => {
   const p = insideMedia(c.q.get('path') || MEDIA_ROOT);

@@ -1,6 +1,20 @@
 # Ändringar
 
 ## Ej utgiven
+- **Säkerhet och stabilitet: fjärde granskningen av servern.** Alla adresser provades som en användare med begränsade
+  bibliotek, som en barnprofil, utan inloggning och med trasiga värden. Rättat (varje punkt har ett test i
+  `test/security-review4.test.js`):
+  - **Skärmtiden räknas på servern även när klienten inte rapporterar.** Tiden räknades bara när spelaren skickade
+    framsteg. Den som öppnade strömmens adress i en annan spelare, eller stoppade rapporterna, kunde titta utan att
+    tiden gick. Nu är varje hämtat segment ett livstecken, som för live-TV, och när originalfilen läses i ett långt
+    svar räknas tiden var 20:e sekund så länge data skickas. Svaret bryts när tiden är slut. Paus räknas inte, och
+    nedladdning för offline räknas som förut inte som tittande.
+  - **Skanningens status visade namnen på alla bibliotek.** `GET /api/scan` lämnade ut listan över skannade bibliotek
+    även till användare och barnprofiler som inte får se dem. De får nu bara veta om skanningen pågår och hur långt
+    den kommit.
+  - **Internt fel vid sortering med `constructor` eller `__proto__`.** `?sort=constructor` i Min historik, i
+    statistiken och i diskrådgivaren, och ett sådant språk i familjefiltrets provruta, gav svaret 500 och ett
+    stackspår i loggen. Nu gäller standardvalet.
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**

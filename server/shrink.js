@@ -241,7 +241,7 @@ export function report(o = {}) {
   const sorted = (m) => [...m.values()].sort((a, b) => b.bytes - a.bytes).map(g => ({ ...g, minutes: Math.round(g.minutes), mbPerMin: g.minutes ? Math.round(g.bytes / 1e6 / g.minutes * 10) / 10 : 0 }));
   const lib = o.lib ? +o.lib : null;
   const pick = list.filter(r => !lib || r.libraryId === lib);
-  const key = SORTS[o.sort] || SORTS.size;
+  const key = Object.hasOwn(SORTS, o.sort ?? '') ? SORTS[o.sort] : SORTS.size; // bara egna nycklar (inte constructor/__proto__ ur adressen)
   pick.sort((a, b) => key(b) - key(a) || b.size - a.size);
   const limit = Math.max(1, Math.min(2000, +o.limit || 300));
   return { at, codec, notSeenDays: notSeen, totals, libraries: sorted(by.library), shows: sorted(by.show).slice(0, 100), resolutions: sorted(by.res), codecs: sorted(by.codec),

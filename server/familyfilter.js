@@ -51,7 +51,7 @@ export function setMode(uid, v) {
 
 // ---------------- ordlistorna ----------------
 const LANGS = { sv: 'sv', swe: 'sv', sve: 'sv', en: 'en', eng: 'en' };
-export const langOf = (l) => LANGS[String(l || '').toLowerCase().split(/[-_]/)[0]] || null;
+export const langOf = (l) => { const k = String(l || '').toLowerCase().split(/[-_]/)[0]; return Object.hasOwn(LANGS, k) ? LANGS[k] : null; }; // bara egna nycklar (inte constructor)
 const cleanWord = (w) => String(w ?? '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, MAX_WORD);
 const validWord = (w) => /[\p{L}\p{N}]/u.test(w) && /^\*?[^*!]+\*?!?$/u.test(w) && !(w.endsWith('*!'));
 function parseList(v) {

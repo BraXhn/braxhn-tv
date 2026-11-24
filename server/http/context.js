@@ -258,11 +258,38 @@ export const mediaItem = (c) => {
     // Skärmtid: strömmar nekas när tiden är slut (nedladdningar för offline räknas inte som tittande)
     if (!/\/(offline-file|download)$/.test(p) && screenBlock(c)) return null;
     act.touch(c.user.id, ver.mainIdOf(it));
+    // Skärmtiden räknas även här (som för live-TV): en klient som inte rapporterar framsteg ska inte kunna titta utan att tiden går
+    if (STREAM_DATA.test(p)) countStream(c, ver.mainIdOf(it));
   }
   return it;
 };
 
 // ---------- Skärmtid ----------
+// Strömmens data: originalfilen och HLS-segmenten (inte spellistor, undertexter, statistik eller nedladdning)
+const STREAM_DATA = /\/(direct|hls\/(init\.mp4|seg-\d+\.(ts|m4s)))$/;
+const STREAM_TICK = Math.max(200, +process.env.SCREEN_STREAM_TICK_MS || 20000);
+/**
+ * Räknar tittandet på servern för profiler med skärmtid: varje hämtat segment är ett livstecken, och ett långt svar
+ * (originalfilen i en spelare som läser i takt med uppspelningen) ger ett livstecken var 20:e sekund så länge data
+ * skickas. Pausad uppspelning läser inget och räknas inte. När tiden är slut bryts svaret.
+ */
+function countStream(c, id) {
+  const uid = c.user.id, key = 'i:' + id;
+  if (c.req.method === 'HEAD' || !screen.rulesFor(uid)) return;
+  screen.heartbeat(uid, key);
+  const sock = c.req.socket;
+  let sent = sock?.bytesWritten || 0;
+  const t = setInterval(() => {
+    if (c.res.writableEnded || c.res.destroyed) return clearInterval(t);
+    const n = sock?.bytesWritten || 0;
+    if (n === sent) return; // inget skickat sedan sist: pausat eller full buffert hos klienten
+    sent = n;
+    const s = screen.heartbeat(uid, key);
+    if (s && !s.allowed) { clearInterval(t); c.res.destroy(); }
+  }, STREAM_TICK);
+  t.unref();
+  c.res.once('close', () => clearInterval(t));
+}
 /** Neka med skärmtidens förklaring. Returnerar true om förfrågan nekades. audio: ljud (musik/böcker/poddar) */
 export function screenBlock(c, opts) {
   const s = screen.check(c.user.id, opts);
