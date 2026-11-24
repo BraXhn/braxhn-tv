@@ -48,7 +48,8 @@
   *en.forced (fil)* – på titelsidan, i spelarens listor och i Ögonblick. På engelska: *Swedish (file)*.
 - **Telefon:** spelarens översta rad ryms på en rad (*Titta tillsammans* visas som ikon och titeln kortas av).
 - **Skivor, böcker och poddar har inte längre en ram runt kortet:** stilen för Ögonblick-korten gällde av misstag
-  alla kort med omslag (album, artister, ljudböcker, e-böcker, poddar, stationer och smarta listor).
+  alla kort med omslag (album, artister, ljudböcker, e-böcker, poddar, stationer och smarta listor). Av samma skäl
+  låg affischen ovanför texten i träfflistan under *Fel titel?* och *Önskningar*; nu ligger den bredvid igen.
 - **Musik:** en smart lista med en låt visar *1 låt*, inte *1 låtar*, och knappen *+ Ny smart spellista* har texten
   mitt i knappen på telefon och samma textfärg som andra knappar.
 - **Startsidan:** åldersgränsen i den utvalda titeln visas som på titelsidan (*13+*), inte som *US:PG-13*.
