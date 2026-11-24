@@ -1,7 +1,8 @@
-// API-nycklar: administratören delar ut skrivskyddad åtkomst till utvalda data åt andra system (en väggskärm,
-// Home Assistant, Homepage …). Nyckeln visas en gång och sparas bara som SHA-256. Varje nyckel har behörigheter
-// (SCOPES) och gäller som standard bara från hemnätet. Den ger aldrig åtkomst till något annat än /api/v1/*
-// (router.js, routealternativet apikey) och kan inte strömma eller ändra något.
+// API-nycklar: administratören delar ut åtkomst till utvalda data åt andra system (en väggskärm, Home Assistant,
+// Homepage …). Nyckeln visas en gång och sparas bara som SHA-256. Varje nyckel har behörigheter (SCOPES) och gäller
+// som standard bara från hemnätet. Den ger aldrig åtkomst till något annat än /api/v1/* (router.js, routealternativet
+// apikey) och kan inte strömma något. Nycklarna kan bara läsa – med ett undantag: behörigheten support låter
+// utvecklarteamet läsa de felrapporter administratören godkänt och sätta status och svar på dem (routes/support.js).
 import crypto from 'node:crypto';
 import { db, all, get, run, now } from './db.js';
 import * as act from './activity.js';
@@ -13,7 +14,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS api_keys(id INTEGER PRIMARY KEY, name TEXT N
 /** Behörigheter som en nyckel kan få (namnen visas i Administration) */
 export const SCOPES = {
   nowplaying: 'Vad som spelas just nu (titel, vem, enhet och hur långt)',
-  library: 'Biblioteket: antal titlar och nyligen tillagt'
+  library: 'Biblioteket: antal titlar och nyligen tillagt',
+  support: 'Support: läsa felrapporter som du har godkänt och svara på dem (det enda en nyckel kan skriva)'
 };
 export const MAX_KEYS = 50;
 const PREFIX = 'bxtv_';
@@ -28,7 +30,7 @@ export function create({ name, scopes, homeOnly = true }, userId) {
   name = String(name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
   if (!name) throw Object.assign(new Error('Ge nyckeln ett namn, t.ex. var den ska användas'), { status: 400 });
   const sc = [...new Set((Array.isArray(scopes) ? scopes : []).map(String))].filter(s => s in SCOPES);
-  if (!sc.length) throw Object.assign(new Error('Välj minst en sak som nyckeln får läsa'), { status: 400 });
+  if (!sc.length) throw Object.assign(new Error('Välj minst en sak som nyckeln får göra'), { status: 400 });
   if (get('SELECT COUNT(*) AS n FROM api_keys').n >= MAX_KEYS) throw Object.assign(new Error(`Högst ${MAX_KEYS} nycklar – ta bort någon du inte använder`), { status: 400 });
   const key = PREFIX + crypto.randomBytes(30).toString('base64url');
   const id = Number(run('INSERT INTO api_keys(name,key_hash,prefix,scopes,home_only,created,created_by) VALUES(?,?,?,?,?,?,?)',
@@ -58,7 +60,7 @@ export function check(req, scope, { trusted, ip }) {
   const r = get('SELECT * FROM api_keys WHERE key_hash=?', sha(k));
   if (!r) return { status: 401, error: 'API-nyckeln finns inte (den kan ha tagits bort)' };
   const has = r.scopes.split(','), want = scope == null ? has : [].concat(scope);
-  if (!want.some(x => has.includes(x))) return { status: 403, error: 'Nyckeln får inte läsa det här – ändra den under Administration → API-nycklar' };
+  if (!want.some(x => has.includes(x))) return { status: 403, error: 'Nyckeln har inte den behörigheten – skapa en ny under Administration → API-nycklar' };
   if (r.home_only && !trusted) return { status: 403, error: 'Nyckeln gäller bara på hemnätverket' };
   const t = Date.now(), w = rate.get(r.id);
   if (!w || t - w.t > 60e3) rate.set(r.id, { t, n: 1 });

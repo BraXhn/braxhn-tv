@@ -445,6 +445,19 @@ CREATE INDEX IF NOT EXISTS whq_hook ON webhook_queue(hook_id, id);
 CREATE INDEX IF NOT EXISTS whlog_hook ON webhook_log(hook_id, id);
 CREATE INDEX IF NOT EXISTS artist_meta_mbid ON artist_meta(mbid);`);
 
+// Feedback och felrapporter (server/support.js): ärenden som användare skickar från webben. status = pending (väntar på
+// administratörens granskning), approved (godkänt – syns för teamet via /api/v1/support), working, needinfo, fixed
+// (version = åtgärdat i) eller rejected. kind = 'bug' (fel) | 'idea' (förslag eller synpunkt), area = vad det gäller (AREAS i support.js).
+// title/text = det användaren skrev, out_title/out_text = administratörens ändrade text (NULL = oförändrad) – det är
+// den som lämnar servern. context = teknisk information som JSON (NULL = inget bifogas; aldrig IP-adresser),
+// thread = JSON-lista med teamets svar och svaren på dem. Raderna följer kontot (export och radering, privacy.js).
+db.exec(`CREATE TABLE IF NOT EXISTS support_tickets(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  by_admin INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'bug', area TEXT NOT NULL DEFAULT 'annat', title TEXT, text TEXT NOT NULL,
+  out_title TEXT, out_text TEXT, context TEXT, status TEXT NOT NULL DEFAULT 'pending', version TEXT, thread TEXT NOT NULL DEFAULT '[]',
+  created INTEGER NOT NULL, updated INTEGER NOT NULL, reviewed INTEGER);
+CREATE INDEX IF NOT EXISTS support_user ON support_tickets(user_id, created);
+CREATE INDEX IF NOT EXISTS support_status ON support_tickets(status, updated);`);
+
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');
 

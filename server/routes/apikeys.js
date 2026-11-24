@@ -4,6 +4,7 @@
 //   GET /api/v1/now-playing                      – vad som spelas just nu (behörigheten nowplaying)
 //   GET /api/v1/library                          – antal och nyligen tillagt (behörigheten library)
 //   GET /api/v1/image/:ref?w=                    – affisch (v<titel>), albumomslag (a<album>), ljudboksomslag (b<bok>)
+//   GET /api/v1/support, POST /api/v1/support/:id – felrapporter för teamet (behörigheten support): routes/support.js
 // /api/v1/* får aldrig någon inloggning från routern (routealternativet apikey) – bara nyckeln gäller där.
 import fs from 'node:fs';
 import { send, fail, readJson, clientIp } from '../util.js';

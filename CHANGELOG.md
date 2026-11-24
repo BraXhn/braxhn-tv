@@ -17,6 +17,22 @@
   - **Internt fel vid sortering med `constructor` eller `__proto__`.** `?sort=constructor` i Min historik, i
     statistiken och i diskrådgivaren, och ett sådant språk i familjefiltrets provruta, gav svaret 500 och ett
     stackspår i loggen. Nu gäller standardvalet.
+- **Feedback och felrapporter i appen:** en liten knapp *Feedback* nere till höger öppnar en dialog där alla
+  inloggade kan lämna ett förslag eller rapportera ett fel. Allt sker i appen – inget på GitHub.
+  - Man väljer typ (*Förslag eller synpunkt* / *Något fungerar inte*) och vad det gäller, och skriver vad som hände.
+    Teknisk information (appversion, sida, webbläsare, skärmstorlek, titeln man står på, senaste uppspelningen och
+    de senaste felen på sidan) följer med om krysset är i. *Visa vad som skickas med* visar exakt vad det är.
+    IP-adresser, token och nycklar tas aldrig med.
+  - **Inget lämnar servern förrän administratören har godkänt det.** Andra än administratören får svaret *Ärendet är
+    mottaget och väntar på granskning.* Under *Administration → Support* läser administratören ärendet, kan ändra
+    texten och välja bort den tekniska informationen, och godkänner, avslår eller tar bort. Administratörens egna
+    ärenden är godkända direkt. En siffra på knappen och vid *Administration* visar hur många som väntar.
+  - **Mina ärenden** (kontomenyn) visar de egna ärendena, deras status och teamets svar. Ber teamet om mer
+    information svarar man där. Svaret från en vanlig användare granskas också av administratören först.
+  - **Teamet hämtar själv** godkända ärenden med en API-nyckel som har den nya behörigheten *Support*
+    (`GET /api/v1/support`) och sätter status och svar (`POST /api/v1/support/:id`). Det är det enda en API-nyckel
+    kan skriva. Teamet ser aldrig namn på användare, bara om ärendet kommer från en administratör eller en användare.
+  - Ärendena följer med i *Ladda ner mina uppgifter* och tas bort när kontot raderas.
 
 ## 1.2.2 – 2026-11-22
 - **Utanför hemmet börjar uppspelningen inte längre på onödigt låg kvalitet:**

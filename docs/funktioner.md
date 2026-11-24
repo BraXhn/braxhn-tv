@@ -378,6 +378,10 @@ Krypterad kopia (AES-256-GCM) varje natt till en annan disk/NAS eller S3-lagring
 
 *Administration → Hälsokontroll → Skapa diagnostikpaket*: ett `.tar.gz` att bifoga i en buggrapport med version, miljö, hårdvaruacceleration, logg, databasens och bibliotekens storlek – token, lösenord, e-post och IP-adresser maskerade, filnamn bara om du väljer det. Innehållet visas före nedladdningen (se *Diagnostikpaket för supporten*).
 
+### Feedback och felrapporter
+
+Knappen *Feedback* nere till höger (inte i spelaren och inte på inloggningssidan) öppnar en dialog: *Förslag eller synpunkt* eller *Något fungerar inte*, vad det gäller och ett meddelande. Teknisk information (appversion, sida, webbläsare, skärmstorlek, titel, senaste uppspelning och fel på sidan) följer med om man vill, och *Visa vad som skickas med* visar exakt vad. Inget lämnar servern förrän administratören har godkänt ärendet under *Administration → Support*, där texten också kan ändras. Administratörens egna ärenden godkänns direkt. Utvecklarteamet hämtar godkända ärenden med en API-nyckel (behörigheten *Support*), utan namn, och svarar med status: åtgärdas, behöver mer information eller åtgärdat i en viss version. *Mina ärenden* i kontomenyn visar status och svar. Barnprofiler kan rapportera och ser bara sina egna ärenden.
+
 ### Serverlogg och diagnostik
 
 *Administration → Serverlogg* visar serverns händelser med filter, även fel som uppstått i webbappen hos användarna. Loggen sparas också i `/config/logs` (sju dagar). *Ladda ner diagnostik* ger versioner, maskin, hårdvarukodning och loggen i en fil att bifoga vid felsökning – nycklar och lösenord maskeras.

@@ -18,11 +18,16 @@ const report = (msg, stack, where) => {
   fetch('/api/clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
     body: JSON.stringify({ msg: String(msg).slice(0, 300), stack: String(stack || '').slice(0, 1500), where: `${location.hash} ${where || ''}`.slice(0, 200), ua: navigator.userAgent }) }).catch(() => {});
 };
+// De senaste felen på sidan (högst fem, bara i minnet): följer med en felrapport om användaren väljer det (js/feedback.js)
+const recent = self.bxErrors = [];
+const keep = (msg) => { recent.push(`${new Date().toTimeString().slice(0, 8)} ${String(msg).slice(0, 280)}`); if (recent.length > 5) recent.shift(); };
+addEventListener('error', (e) => { if (e.message) keep(`${e.message} (${String(e.filename || '').replace(location.origin, '').split('?')[0]}:${e.lineno || 0})`); });
 addEventListener('error', (e) => { if (e.filename?.startsWith(location.origin)) report(e.message, e.error?.stack, `${e.filename.replace(location.origin, '')}:${e.lineno}`); });
 addEventListener('unhandledrejection', (e) => {
   const r = e.reason;
   // Avbrutna anrop (navigering) och nätverksfel är inga programfel
   if (!r || r.name === 'AbortError' || r.aborted || r.offline || r.code || (typeof r === 'object' && 'data' in r) || /^(Fel|Error) \d|Inte inloggad|Not signed in/.test(r.message || '')) return;
+  keep(r.message || r);
   if (r instanceof Error && !(r.stack || '').includes(location.origin)) return;
   report(r.message || r, r.stack);
 });
@@ -65,6 +70,7 @@ prefetchView(location.hash.slice(2).split('/')[0] || 'home');
   self.__bxBooted?.();
   idle(() => {
     loadPlayer().then(() => need('player/cast.js')).then(m => m.initCast()).catch(() => {});
+    need('feedback.js').then(m => m.initFeedback()).catch(() => {}); // knappen Feedback nere till höger
     if (me) { need('views/item.js').catch(() => {}); need('views/search.js').catch(() => {}); cardMenus().catch(() => {}); }
     // Offline: nedladdningar som inte är klara och positioner som sparats utan nät fortsätter
     if (me && store.get('dlwork', false)) need('offline.js').then(m => m.resume()).catch(() => {});

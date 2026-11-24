@@ -1,10 +1,12 @@
-// Administration – API-nycklar: dela ut skrivskyddad åtkomst till Nu spelas och biblioteket åt andra system
-// (väggskärm, Home Assistant, Homepage …). Nyckeln visas en gång. Servern: server/apikeys.js, server/routes/apikeys.js.
+// Administration – API-nycklar: dela ut åtkomst till Nu spelas och biblioteket åt andra system (väggskärm, Home
+// Assistant, Homepage …) och – med behörigheten Support – låt utvecklarteamet läsa godkända felrapporter och svara på dem.
+// Nyckeln visas en gång. Servern: server/apikeys.js, server/routes/apikeys.js.
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, toast, t } from '../core.js';
 import { confirmDialog, openDialog } from '../ui/dialog.js';
 
-const SCOPE_LABEL = () => ({ nowplaying: t('Vad som spelas just nu (titel, vem, enhet och hur långt)'), library: t('Biblioteket: antal titlar och nyligen tillagt') });
+const SCOPE_LABEL = () => ({ nowplaying: t('Vad som spelas just nu (titel, vem, enhet och hur långt)'), library: t('Biblioteket: antal titlar och nyligen tillagt'),
+  support: t('Support: läsa felrapporter som du har godkänt och svara på dem (det enda en nyckel kan skriva)') });
 
 function keyDialog(k) {
   openDialog({
@@ -23,7 +25,8 @@ export async function adminApiKeys() {
   if (!el.isConnected) return;
   const L = SCOPE_LABEL();
   el.innerHTML = `<h2>${t('API-nycklar')}</h2>
-    <p class="muted small">${t('Låt andra system läsa vad som spelas eller vad som finns i biblioteket, t.ex. en väggskärm eller Home Assistant. Nycklarna kan bara läsa – aldrig strömma eller ändra något. Se <i>docs/api.md</i> för adresserna.')}</p>
+    <p class="muted small">${t('Låt andra system läsa vad som spelas eller vad som finns i biblioteket, t.ex. en väggskärm eller Home Assistant. Nycklarna kan bara läsa och aldrig strömma något. Enda undantaget är behörigheten Support. Se <i>docs/api.md</i> för adresserna.')}</p>
+    <p class="muted small">${t('<b>Support</b> är för utvecklarteamet: nyckeln kan läsa de felrapporter du har godkänt under Support här ovanför (aldrig väntande eller avslagna, och aldrig namn på användare) och sätta status och svar på dem. Den kan inte läsa eller ändra något annat. Finns teamet utanför hemmet: stäng av <i>Bara från hemnätet</i> för den nyckeln.')}</p>
     ${K.keys.length ? `<table>${K.keys.map(k => `<tr><td><b>${esc(k.name)}</b> <code class="muted small">${esc(k.prefix)}…</code>
       <div class="muted small">${k.scopes.map(s => esc(L[s] || s)).join(' · ')}${k.homeOnly ? ' · ' + t('bara hemnätet') : ' · ' + t('även utanför hemmet')}</div>
       <div class="muted small">${k.lastUsed ? t('Senast använd {v} från {ip}', { v: fmtDate(k.lastUsed), ip: esc(k.lastIp || '–') }) : t('Inte använd än')}</div></td>

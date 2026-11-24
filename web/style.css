@@ -219,6 +219,51 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 .toast-act:hover{background:rgba(255,255,255,.06)}
 body:has(#tabbar:not([hidden])) #toast,body.hasbar #toast{bottom:calc(96px + env(safe-area-inset-bottom))}
 
+/* Feedback: knappen nere till höger (js/feedback.js), dialogen och Mina ärenden (js/views/support.js). Knappen ligger
+   under bottenmenyn och minispelarna i djupled och flyttas upp över dem; den visas inte på inloggningssidan (menyraden
+   dold), i spelaren, läsaren, bildvisningen eller när låttexterna är öppna. */
+#fbbox{position:fixed;right:calc(18px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));z-index:34}
+#fbfab{display:inline-flex;align-items:center;gap:6px;
+  min-height:36px;padding:7px 14px 7px 11px;border:0;border-radius:var(--r-pill);background:var(--accent);color:#1a0d08;font-weight:700;font-size:.8125rem;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+#fbfab:hover{background:var(--accent2)}
+#fbfab:focus-visible{outline:3px solid #fff;outline-offset:2px}
+body:has(#top[hidden]) #fbbox,body:has(#player:not([hidden]):not(.mini)) #fbbox,body:has(.pv,.rd,.dlplayer) #fbbox,body:has(#lyrics:not([hidden])) #fbbox,html.kbd-open #fbbox{display:none}
+body.hasbar #fbbox,body.hasmini #fbbox,body.hasrbar #fbbox,body.hascast #fbbox{bottom:calc(104px + env(safe-area-inset-bottom))}
+.fbn{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:#1a0d08;color:#fff;font-size:.6875rem;font-weight:700;text-align:center}
+#usermenu .fbn{background:var(--accent);color:#1a0d08}
+@media (max-width:760px){
+  body:has(#tabbar:not([hidden])) #fbbox{bottom:calc(70px + env(safe-area-inset-bottom))}
+  body.hasbar:has(#tabbar:not([hidden])) #fbbox,body.hasmini:has(#tabbar:not([hidden])) #fbbox{bottom:calc(154px + env(safe-area-inset-bottom))}
+  body.hasrbar:has(#tabbar:not([hidden])) #fbbox{bottom:calc(270px + env(safe-area-inset-bottom))}
+  body.hasrbar.hasbar:has(#tabbar:not([hidden])) #fbbox,body.hasrbar.hasmini:has(#tabbar:not([hidden])) #fbbox{bottom:calc(346px + env(safe-area-inset-bottom))}
+  body.hascast:has(#tabbar:not([hidden])) #fbbox{bottom:calc(var(--casth,170px) + 70px + env(safe-area-inset-bottom))}
+}
+.fbkind{border:0;padding:0;margin:var(--sp-2) 0 var(--sp-3);min-width:0;display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2)}
+.fbopt{display:flex!important;gap:10px;align-items:flex-start;margin:0;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--text);cursor:pointer}
+.fbopt:has(input:checked){border-color:var(--accent);background:rgba(255,107,74,.1)}
+.fbopt:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.fbopt input{flex:none;width:20px;height:20px;margin:1px 0 0;padding:0;accent-color:var(--accent)}
+.fbopt b{display:block;font-size:.875rem}
+.fbopt small{display:block;color:var(--dim);font-size:.8125rem;font-weight:400}
+.fbdlg .field{margin-bottom:var(--sp-3)}
+.fbdlg textarea,.fbreply textarea{width:100%;resize:vertical}
+.fbdlg h3{font-size:1rem;margin:var(--sp-4) 0 var(--sp-2)}
+.fbtech{align-items:flex-start!important}
+.fbtech input{flex:none;margin-top:2px}
+#fbdet{margin:var(--sp-2) 0}
+#fbdet summary,.fbticket summary{cursor:pointer;color:var(--dim)}
+.fbctx{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:var(--sp-2) 0;font-size:.8125rem}
+.fbctx dt{color:var(--dim)}
+.fbctx dd{margin:0;overflow-wrap:anywhere}
+.fbtxt{white-space:pre-wrap;overflow-wrap:anywhere;margin:var(--sp-2) 0}
+.fbquote{border-left:3px solid var(--line);padding-left:12px}
+.fbmsg{border-left:3px solid var(--line);padding:2px 0 2px 12px;margin:var(--sp-3) 0}
+.fbmsg.team{border-left-color:var(--accent)}
+.fbmsg p{margin:var(--sp-1) 0 0}
+.fbticket h2{margin:10px 0 0}
+.fbreply{margin:var(--sp-3) 0}
+.fbnote a,.fbmine .state a{color:var(--accent);text-decoration:underline}
+
 @media (max-width:760px){
   /* Telefon: logga, sök och användare överst; biblioteken som en rad med knappar under; flikmenyn längst ner */
   #top{display:flex;height:auto;padding:8px 12px;gap:8px}

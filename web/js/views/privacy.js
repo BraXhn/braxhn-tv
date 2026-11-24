@@ -29,7 +29,7 @@ views.privacy = async () => {
   ];
   main.innerHTML = `<section class="privacy"><h1>${t('Integritet')}</h1>
   <div class="panel"><h2>${t('Vem ansvarar?')}</h2>
-    <p>${t('BraXhn TV körs på en egen server hemma hos den som bjudit in dig. Det är den personen som ansvarar för uppgifterna – inte utvecklarna av BraXhn TV, som aldrig får någon information från servern.')}</p>
+    <p>${t('BraXhn TV körs på en egen server hemma hos den som bjudit in dig. Det är den personen som ansvarar för uppgifterna – inte utvecklarna av BraXhn TV, som inte får någon information från servern. Enda undantaget är feedback och felrapporter som administratören själv har godkänt (se nedan).')}</p>
     <p>${P.contact ? t('Kontakt för frågor om dina uppgifter: {c}', { c: `<b>${esc(P.contact)}</b>` }) : t('Frågor om dina uppgifter ställer du till serverns administratör.')}</p></div>
   <div class="panel"><h2>${t('Vad servern sparar')}</h2>
     <ul>
@@ -37,6 +37,7 @@ views.privacy = async () => {
       <li>${t('<b>Tittande och lyssnande:</b> var du är i filmer, avsnitt, böcker och musik, betyg, listor och favoriter – så att du kan fortsätta där du var.')}</li>
       <li>${t('<b>Historik:</b> vad som spelats, när och på vilken enhet. Sparas {d}. IP-adressen i historiken tas bort efter {ip}.', { d: days(R.historyDays), ip: days(R.ipDays) })}</li>
       <li>${t('<b>Inloggade enheter:</b> enhetstyp och IP-adress för varje inloggning, tills du loggar ut eller inloggningen går ut.')}</li>
+      <li>${t('<b>Feedback och felrapporter:</b> det du skickar med knappen Feedback sparas på servern tills kontot eller ärendet tas bort. En administratör läser ärendet först. Bara om administratören godkänner det kan utvecklarna av BraXhn TV hämta det – utan ditt namn och utan IP-adress. Du ser dina ärenden under <a href="#/support">Mina ärenden</a>.')}</li>
       <li>${t('<b>Säkerhetsloggen:</b> inloggningar, misslyckade försök och ändringar, med IP-adress. Sparas {d} för att upptäcka intrång.', { d: days(R.auditDays) })}</li>
     </ul>
     <p class="muted small">${t('Inget säljs, ingen reklam och ingen spårning. Webbläsaren sparar bara det som behövs för inloggningen och dina val (t.ex. språk och volym) – inga kakor från tredje part.')}</p></div>

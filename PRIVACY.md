@@ -2,8 +2,9 @@
 
 *English below.*
 
-**Kortversion:** BraXhn TV är ingen molntjänst. Allt sparas på din egen server, projektet får aldrig några uppgifter
-från den och apparna spårar ingenting. Den som kör servern ansvarar för uppgifterna om dem som bjuds in, och
+**Kortversion:** BraXhn TV är ingen molntjänst. Allt sparas på din egen server, projektet får inga uppgifter
+från den och apparna spårar ingenting. Enda undantaget är feedback och felrapporter som serverns administratör
+själv har läst och godkänt. Den som kör servern ansvarar för uppgifterna om dem som bjuds in, och
 BraXhn TV har verktygen som behövs för att följa dataskyddsförordningen (GDPR).
 
 ## Vem ansvarar för vad
@@ -11,7 +12,8 @@ BraXhn TV har verktygen som behövs för att följa dataskyddsförordningen (GDP
 - **Projektet och utvecklaren** (BraXhn) samlar inte in några personuppgifter. Det finns ingen telemetri, inga
   kraschrapporter, inga konton hos oss och ingen reklam. Servern och apparna skickar aldrig något till projektet.
   Den enda kontakten är kontrollen av nya versioner, som hämtar en fil från GitHub (går att stänga av) och inte
-  skickar något om dig. Donerar du via PayPal gäller PayPals villkor. Vi får bara det PayPal visar för en
+  skickar något om dig. Feedback och felrapporter kan utvecklarna hämta först när serverns administratör har
+  godkänt dem och själv gett utvecklarna en nyckel (se *Feedback och felrapporter* nedan). Donerar du via PayPal gäller PayPals villkor. Vi får bara det PayPal visar för en
   mottagare.
 - **Den som kör servern** är personuppgiftsansvarig för uppgifterna om användarna. Delar du servern bara med din
   familj omfattas det normalt av GDPR:s undantag för privat bruk (artikel 2.2 c). Bjuder du in vänner eller
@@ -40,6 +42,14 @@ Allt ligger i databasen i `/config` på servern:
 **API-nycklar:** en administratör kan dela ut en nyckel så att ett annat system kan läsa *Nu spelas*, till exempel en
 väggskärm. Svaret innehåller profilernas namn och vad de spelar, men aldrig IP-adresser. Nycklarna gäller som
 standard bara hemma och syns, med senast använd, under *Administration → API-nycklar*.
+
+**Feedback och felrapporter:** det en användare skickar med knappen *Feedback* sparas på servern: texten, typ och
+område och, om användaren inte kryssat ur det, teknisk information (appversion, sida, webbläsare, skärmstorlek,
+titeln man stod på, senaste uppspelningen och fel på sidan). IP-adresser sparas inte, och token, nycklar och
+e-postadresser maskeras. Användaren ser innan vad som bifogas. **Ett ärende lämnar servern till utvecklarna först
+när en administratör har läst och godkänt det** (*Administration → Support*), och då utan användarens namn.
+Administratörens egna ärenden godkänns direkt. Utvecklarna hämtar godkända ärenden med en API-nyckel som
+administratören själv har skapat. Ärendena följer med i *Ladda ner mina uppgifter* och tas bort med kontot.
 
 Webbläsaren sparar bara inloggningskakan och lokala val som språk, volym och tillgänglighet. Det finns inga kakor
 eller skript från tredje part för spårning eller reklam.
@@ -108,15 +118,20 @@ det krävs.
 
 # Privacy and personal data
 
-**Summary:** BraXhn TV is not a cloud service. Everything is stored on your own server, the project never receives
-any data from it and the apps don't track anything. Whoever runs the server is responsible for the data about the
+**Summary:** BraXhn TV is not a cloud service. Everything is stored on your own server, the project receives no
+data from it and the apps don't track anything. The only exception is feedback and bug reports that the server's
+administrator has personally read and approved. Whoever runs the server is responsible for the data about the
 people they invite, and BraXhn TV has the tools needed to comply with the GDPR.
 
 - **The project and its developer** collect no personal data:
   - no telemetry, crash reports, accounts or ads;
   - the only contact is the update check, which downloads a file from GitHub (it can be turned off) and sends
     nothing about you;
-  - donations via PayPal are covered by PayPal's terms.
+  - donations via PayPal are covered by PayPal's terms;
+  - feedback and bug reports sent with the *Feedback* button stay on the server. The developers can fetch a report
+    only after an administrator has read and approved it (*Administration → Support*), without the user's name
+    and without IP addresses, using an API key the administrator has created. Users see what is attached before
+    sending. Reports are included in *Download my data* and removed with the account.
 - **The person running the server** is the data controller:
   - Sharing only with your family is normally covered by the GDPR's household exemption (Article 2(2)(c)).
   - Inviting friends or others outside the household, or running the server for an association or a company,

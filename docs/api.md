@@ -73,10 +73,12 @@ det förvalda ljudspåret) tar den över den redan startade strömmen. Webben g�
 
 ## API-nycklar: `/api/v1/*`
 
-Skrivskyddat API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Administratören skapar
-nycklar under *Administration → API-nycklar*. Där finns också `GET`/`POST /api/apikeys` och `DELETE /api/apikeys/:id`,
-som kräver admin och hemnätet. `POST` tar `{ name, scopes: ["nowplaying", "library"], homeOnly: true }` och svarar
-med `key`, som bara visas den gången.
+API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Det är skrivskyddat med ett
+undantag: med behörigheten `support` kan utvecklarteamet sätta status och svar på felrapporter som administratören
+har godkänt (se [Support](#support-felrapporter-för-teamet)). Administratören skapar nycklar under
+*Administration → API-nycklar*. Där finns också `GET`/`POST /api/apikeys` och `DELETE /api/apikeys/:id`,
+som kräver admin och hemnätet. `POST` tar `{ name, scopes: ["nowplaying", "library", "support"], homeOnly: true }`
+och svarar med `key`, som bara visas den gången.
 
 **Nyckeln:**
 - Skicka den i rubriken `X-Api-Key: bxtv_…` eller som `Authorization: Bearer bxtv_…`. Den tas aldrig emot i adressen.
@@ -93,6 +95,8 @@ anropet kom utifrån.
 | `GET /api/v1/now-playing` | `nowplaying` | `{ server, time, count, sessions: [...] }` |
 | `GET /api/v1/library?limit=12` | `library` | `{ server, counts: { movies, shows, episodes, tracks, albums, audiobooks, podcasts }, recent: [{ kind, title, subtitle, year, added, image }] }` |
 | `GET /api/v1/image/:ref?w=300` | `nowplaying` eller `library` | JPEG, där `ref` är `v<titel>` (affisch), `a<album>` (omslag) eller `b<ljudbok>` (omslag) |
+| `GET /api/v1/support` | `support` | `{ server, time, count, tickets: [...] }` – bara godkända ärenden som inte är avslutade |
+| `POST /api/v1/support/:id` | `support` | Sätter status och svar. Svarar med ärendet. Det enda en nyckel kan skriva |
 
 **Fälten i `sessions[]`:**
 - `kind`: `movie`, `episode`, `music`, `audiobook` eller `podcast`.
@@ -110,6 +114,59 @@ anropet kom utifrån.
 - Film och serier kommer från uppspelningssessionerna.
 - Musik är det senast startade spåret per profil, så länge det inte tagit slut.
 - Ljudböcker och poddar räknas som spelande om framsteg skickats de senaste 90 sekunderna.
+
+### Support: felrapporter för teamet
+
+Användarna skickar feedback och felrapporter med knappen *Feedback* i webben. Ingenting skickas någonstans: teamet
+hämtar själv, och ser bara det en administratör har godkänt under *Administration → Support*. Administratörens egna
+ärenden är godkända direkt.
+
+`GET /api/v1/support` ger godkända ärenden som inte är avslutade (status `approved`, `working` eller `needinfo`),
+äldst först. Väntande, avslagna, borttagna och åtgärdade ärenden finns aldrig med.
+
+**Fälten i `tickets[]`:**
+- `id`.
+- `kind`: `bug` (något fungerar inte) eller `idea` (förslag eller synpunkt).
+- `area`: vad det gäller, till exempel `Film och serier`, `Musik`, `Live-TV` eller `Uppspelning`.
+- `title` (kan vara `null`) och `text`: det administratören godkände. Administratören kan ha ändrat texten.
+- `from`: `admin` eller `användare`. Namn på användare skickas aldrig.
+- `status`: `approved` (nytt, eller ett svar har kommit), `working` eller `needinfo`.
+- `version`: `null` tills ärendet är åtgärdat.
+- `created` och `updated` (unix-sekunder).
+- `thread`: tidigare svar, `[{ from: "team" | "admin" | "användare", text, created, status?, version? }]`.
+- `context`: teknisk information, eller `null` om användaren eller administratören valde bort den:
+  `version` (serverns), `page` (hash-rutten utan frågedel), `browser` (user agent), `screen`, `lang`, `installed`,
+  `title: { id, kind, name, year, format }` om man stod på en titel, `lastPlayback: { item, name, format, mode,
+  quality, position, duration, remote, minutesAgo }` (bara `bug`, senaste dygnet) och `pageErrors` (högst fem, bara
+  `bug`). IP-adresser finns aldrig med, och token, nycklar och e-postadresser maskeras.
+
+`POST /api/v1/support/:id` tar `{ status, reply?, version? }`:
+- `status`: `working`, `needinfo` (kräver `reply` med frågan) eller `fixed`.
+- `reply`: teamets svar till den som rapporterade, högst 4000 tecken. Visas som text, aldrig som HTML.
+- `version`: versionen felet är åtgärdat i (med `fixed`), högst 30 tecken av bokstäver, siffror, `.`, `+` och `-`.
+- Förfrågan får vara högst 16 kB (413).
+
+Bara godkända, öppna ärenden kan ändras. Allt annat ger 404: väntande, avslagna, åtgärdade och okända ärenden.
+Efter `fixed` är ärendet avslutat och lämnar listan.
+
+Med `needinfo` kan den som rapporterade (eller en administratör) svara under *Mina ärenden*. Administratörens svar
+syns direkt i `thread` och ärendet blir `approved` igen. Svaret från en vanlig användare syns först när en
+administratör har godkänt det.
+
+```bash
+curl -H "X-Api-Key: bxtv_…" https://tv.example.org/api/v1/support
+curl -H "X-Api-Key: bxtv_…" -H "Content-Type: application/json" \
+  -d '{"status":"fixed","reply":"Rättat.","version":"1.2.3"}' https://tv.example.org/api/v1/support/12
+```
+
+Finns teamet utanför hemmet måste nyckeln skapas utan *Bara från hemnätet*.
+
+**Webbens egna vägar** (vanlig inloggning, inte API-nyckel): `POST /api/support` (nytt ärende: `{ kind, area, text,
+tech, context }`, högst 5 per timme för andra än administratörer), `POST /api/support/context` (förhandsvisning av
+det som bifogas), `GET /api/support` (mina ärenden), `GET /api/support/count`, `GET /api/support/:id` och
+`POST /api/support/:id/reply`. Man når bara sina egna ärenden; någon annans ger 404. Administratören (hemnätet):
+`GET /api/admin/support`, `PUT /api/admin/support/:id`, `POST …/approve`, `…/reject`, `…/reply`,
+`…/reply/approve`, `…/reply/reject` och `DELETE /api/admin/support/:id`.
 
 IP-adresser lämnas aldrig ut.
 
