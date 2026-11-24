@@ -49,6 +49,7 @@
 - **Telefon:** spelarens översta rad ryms på en rad (*Titta tillsammans* visas som ikon och titeln kortas av).
 - **Skivor, böcker och poddar har inte längre en ram runt kortet:** stilen för Ögonblick-korten gällde av misstag
   alla kort med omslag (album, artister, ljudböcker, e-böcker, poddar, stationer och smarta listor).
+- **Musik:** en smart lista med en låt visar *1 låt*, inte *1 låtar*.
 - **Startsidan:** åldersgränsen i den utvalda titeln visas som på titelsidan (*13+*), inte som *US:PG-13*.
 - **Engelska:** *free of 270 GB* under Inspelningar (ordet *av* var oöversatt).
 - **Testerna granskar sökresultaten:** tillgänglighets-, språk- och kvalitetstesterna öppnade `#/search?q=…`, som

@@ -1700,7 +1700,8 @@ body.rd-open{overflow:hidden}
 /* ---------- Ögonblick (views/moments.js, player/moments.js) ---------- */
 .moments{max-width:1200px}
 .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--sp-4)}
-.mcard{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+/* article: klassen .mcard delas med korten med omslag (a.card.mcard: album, böcker, poddar) och matchningsdialogerna */
+article.mcard{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
 .mthumb{position:relative;display:block;aspect-ratio:16/9;background:#000}
 .mthumb img{width:100%;height:100%;object-fit:cover;display:block}
 .mthumb:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}

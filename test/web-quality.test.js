@@ -50,6 +50,14 @@ test('.small ger bara knappar inre luft (text med .small ligger i linje med text
   assert.deepEqual(bare.map(m => m[2].trim()), []);
 });
 
+test('.mcard utan ram och bakgrund: klassen delas av album-, bok- och poddkorten (Ögonblick-kortens stil gäller bara dem)', () => {
+  // Ögonblick-kortens regel hade bara .mcard som väljare – alla kort med omslag (a.card.mcard) fick ram, bakgrund och
+  // text kant i kant med ramen
+  const rules = [...CSS.matchAll(/(^|\})\s*([^{}@]+)\{([^}]*)\}/g)].filter(m => /(^|;)\s*(border|background)\s*:/.test(m[3]));
+  const bare = rules.filter(m => m[2].split(',').some(s => s.trim() === '.mcard'));
+  assert.deepEqual(bare.map(m => `${m[2].trim()}{${m[3]}}`), []);
+});
+
 test('sidomenyn glider bara när användaren fäller ut den (ingen övergång på main vid start)', () => {
   const tr = [...CSS.matchAll(/([^{}]+)\{[^}]*transition:[^}]*margin-left[^}]*\}/g)].map(m => m[1].trim());
   assert.ok(tr.length, 'övergången för sidomenyn saknas');

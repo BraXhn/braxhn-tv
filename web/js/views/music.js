@@ -200,7 +200,7 @@ function smartCard(lid, x) {
   const c = x.covers || [];
   const art = c.length >= 4 ? `<div class="cover smartmosaic">${c.slice(0, 4).map(id => `<img loading="lazy" decoding="async" ${imgSrc(`/api/music/cover/${+id}`, cardW() * 0.6)} alt="" width="300" height="300" data-fb="1">`).join('')}</div>`
     : cover(c[0] || x.id, !!c.length);
-  return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(smartName(x))}</div><div class="s">${t('{count} låtar', { count: x.count })}</div></a>`;
+  return `<a class="card mcard" href="#/smart/${+lid}/${encodeURIComponent(x.id)}">${art}<div class="t">${esc(smartName(x))}</div><div class="s">${tn(x.count, '{n} låt', '{n} låtar')}</div></a>`;
 }
 views.smart = async (lid, sid) => {
   const p = await api(`/music/${encodeURIComponent(lid)}/smart/${encodeURIComponent(sid)}`);
