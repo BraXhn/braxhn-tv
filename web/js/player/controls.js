@@ -112,8 +112,12 @@ export function keys(e) {
   // Fält: rullistor och reglage ger ↑/↓ till navigeringen (fjärrkontrollen), annars skriver/väljer man i dem
   const tag = e.target.tagName;
   if (tag === 'SELECT' || tag === 'INPUT') {
-    if (e.key.startsWith('Arrow') && (tag === 'SELECT' || e.target.type === 'range' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) && navigate(e)) return;
-    return;
+    // (kryssrutor, radioval och färgval har inga egna piltangenter – där navigerar alla fyra pilarna)
+    const ty = e.target.type;
+    if (e.key.startsWith('Arrow') && (tag === 'SELECT' || ty === 'checkbox' || ty === 'radio' || ty === 'color' || ty === 'range' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) && navigate(e)) return;
+    // Escape/Bakåt i ett fält i inställnings- eller kapitelpanelen stänger panelen (längre ner) – förut hände inget,
+    // och med fjärrkontroll kom man inte ur panelen från en rullista
+    if (!(e.key === 'Escape' && e.target.closest('#setp, #chlist'))) return;
   }
   if (P.pre && preKey(e, P)) return; // trailers före filmen spelas
   if (P.learn?.key(e)) return; // språkinlärningen (learn.js): a/d, r, x, p, w och pilarna mellan orden

@@ -272,6 +272,107 @@ t('många kort: varje tryck mäter bara kandidaterna nära fokus', async () => {
   await close();
 });
 
+// Var fokus står: i sidomenyn, i menyraden, i spelarens inställningspanel
+const where = (page) => page.evaluate(() => { const a = document.activeElement; return { id: a?.id || '', rail: !!a?.closest?.('#rail'), top: !!a?.closest?.('#top'), setp: !!a?.closest?.('#setp'), tag: a?.tagName }; });
+
+t('↑ från innehållet går aldrig till sidomenyn (den nås med ←)', async () => {
+  const { page, errors, close } = await newPage();
+  // Titelsidan: ↑ från Spela ska till menyraden – sidomenyns länkar ligger snett ovanför och närmare
+  await open(page, `item/${S.alfa}`);
+  await press(page, 'ArrowDown');
+  await until(page, x => x.play, 'fokus på Spela');
+  await press(page, 'ArrowUp');
+  let w = await where(page);
+  assert.ok(!w.rail, '↑ från Spela hamnade i sidomenyn: ' + JSON.stringify(w));
+  // Startsidan: ett kort i första kolumnen, rullat så att en länk i sidomenyn ligger precis ovanför kortets överkant
+  await open(page, '');
+  await page.waitForSelector('.shelf .card > .clink');
+  for (const y of [300, 390, 480]) {
+    await page.evaluate((y) => {
+      const c = [...document.querySelectorAll('.shelf .card > .clink')].find(e => e.getBoundingClientRect().left < 200);
+      c.focus({ preventScroll: true });
+      window.scrollTo({ top: scrollY + c.getBoundingClientRect().top - y, behavior: 'instant' });
+    }, y);
+    await sleep(100);
+    await press(page, 'ArrowUp');
+    await sleep(200);
+    w = await where(page);
+    assert.ok(!w.rail, `↑ från ett kort (överkant ${y} px) hamnade i sidomenyn: ${JSON.stringify(w)}`);
+  }
+  // ← från första kolumnen når fortfarande sidomenyn
+  await page.evaluate(() => [...document.querySelectorAll('.shelf .card > .clink')].find(e => e.getBoundingClientRect().left < 200).focus({ preventScroll: true }));
+  await press(page, 'ArrowLeft');
+  await sleep(200);
+  assert.ok((await where(page)).rail, '← från första kortet går till sidomenyn');
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+t('stjärnorna på titelsidan: ↑ ↓ går vidare utan att sätta betyg, ← → ändrar betyget', async () => {
+  const { page, errors, close } = await newPage();
+  await open(page, `item/${S.alfa}`);
+  await press(page, 'ArrowDown');
+  await until(page, x => x.play, 'fokus på Spela');
+  await press(page, 'ArrowDown');
+  await until(page, x => x.id === 'myrate', '↓ till stjärnorna');
+  const rated = () => page.evaluate(() => document.querySelector('#myrate').getAttribute('aria-valuenow'));
+  await press(page, 'ArrowDown');
+  let f = await until(page, x => x.id !== 'myrate', '↓ lämnar stjärnorna');
+  assert.equal(await rated(), '0', '↓ satte inget betyg');
+  await press(page, 'ArrowUp');
+  await until(page, x => x.id === 'myrate', '↑ tillbaka till stjärnorna');
+  // ← utan betyg (reglaget står på sitt minsta värde) ändrar inget; → sätter betyg och ← tar bort det igen
+  await press(page, 'ArrowLeft');
+  assert.equal(await rated(), '0');
+  await page.evaluate(() => document.querySelector('#myrate').focus());
+  await press(page, 'ArrowRight');
+  await page.waitForFunction(() => +document.querySelector('#myrate').getAttribute('aria-valuenow') > 0);
+  assert.equal((await focus(page)).id, 'myrate', '→ ändrar betyget och fokus står kvar');
+  await press(page, 'ArrowLeft');
+  await page.waitForFunction(() => +document.querySelector('#myrate').getAttribute('aria-valuenow') === 0);
+  await press(page, 'ArrowUp');
+  f = await until(page, x => x.id !== 'myrate', '↑ lämnar stjärnorna');
+  assert.equal(await rated(), '0', '↑ satte inget betyg');
+  assert.deepEqual(errors, []);
+  await close();
+});
+
+t('spelarens inställningar: pilarna når kvalitet och undertexter, och fastnar inte på fällda fält', async () => {
+  const { page, errors, close } = await newPage();
+  await open(page, `item/${S.alfa}`);
+  await press(page, 'ArrowDown');
+  await until(page, x => x.play, 'fokus på Spela');
+  await press(page, 'Enter');
+  await page.waitForSelector('#player:not([hidden]):not(.mini) #vid');
+  await until(page, x => x.inPlayer && x.id === 'cplay', 'fokus på Spela/pausa');
+  await press(page, 'Enter'); // paus: kontrollerna ligger kvar
+  await page.waitForFunction(() => document.querySelector('#vid').paused);
+  for (let i = 0; i < 10 && (await focus(page)).id !== 'cset'; i++) await press(page, 'ArrowRight');
+  assert.equal((await focus(page)).id, 'cset', '→ når kugghjulet');
+  await press(page, 'Enter');
+  await page.waitForFunction(() => !document.querySelector('#setp').hidden);
+  // "Undertextens utseende" är fälld (details): fälten i den får inte vara mål – förut valdes ett av dem, fokus gick
+  // inte att sätta och pilen gjorde ingenting
+  const seen = [];
+  for (let i = 0; i < 14; i++) {
+    await press(page, 'ArrowUp');
+    const w = await where(page);
+    if (i === 0) assert.ok(w.setp, '↑ från kugghjulet går in i panelen: ' + JSON.stringify(w));
+    assert.ok(w.setp, 'fokus stannar i panelen: ' + JSON.stringify(w));
+    assert.ok(!/^pst-/.test(w.id), 'fokus på ett fällt fält: ' + w.id);
+    seen.push(w.id || w.tag);
+  }
+  assert.ok(seen.includes('pq'), 'kvaliteten nås med ↑: ' + seen.join(' '));
+  assert.ok(seen.includes('ps'), 'undertexterna nås med ↑: ' + seen.join(' '));
+  // Kryssrutorna (små rutor längst till vänster i sin rad) hoppas inte över
+  assert.ok(seen.includes('pnight') && seen.includes('pdialog'), 'kryssrutorna under Ljud nås med ↑: ' + seen.join(' '));
+  await press(page, 'Escape');
+  await until(page, x => x.id === 'cset', 'Escape stänger panelen med fokus på kugghjulet');
+  await page.evaluate(() => document.querySelector('#cstop')?.click());
+  assert.deepEqual(errors, []);
+  await close();
+});
+
 t('utan TV-läge: pilarna gör inget förrän något saknar fokus, sedan rumslig navigering', async () => {
   const { page, errors, close } = await newPage({ viewport: { width: 1280, height: 800 } });
   await open(page, '');

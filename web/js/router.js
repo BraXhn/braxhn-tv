@@ -293,7 +293,8 @@ window.addEventListener('keydown', (e) => {
   if (isTyping(a) && !leavesField(a, dir)) return;
   // Reglage och video: ←/→ ändrar värdet (vid änden av ett reglage går pilen vidare), ↑/↓ navigerar
   if ((dir === 'left' || dir === 'right') && a?.matches('input[type=range], [role=slider], video')
-    && !(a.type === 'range' && +a.value === +(dir === 'left' ? a.min || 0 : a.max || 100))) return;
+    && !(a.type === 'range' && +a.value === +(dir === 'left' ? a.min || 0 : a.max || 100))
+    && !(a.matches('[role=slider]') && a.getAttribute('aria-valuenow') === a.getAttribute(dir === 'left' ? 'aria-valuemin' : 'aria-valuemax'))) return;
   if (!spatialOn) setSpatialOn();
   e.preventDefault();
   withSpatial(m => m.move(dir));

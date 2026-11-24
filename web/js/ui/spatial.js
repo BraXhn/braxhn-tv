@@ -11,6 +11,7 @@
 //   raden/kolumnen följer med när man trycker flera gånger längs samma axel (så länge målen ligger i den), så att
 //   ner-ner-upp genom olika breda rader kommer tillbaka till samma kort.
 // - I en hylla (vågrät rullning) stannar ←/→ i hyllan; → vid slutet gör ingenting, ← vid början går vidare (sidomenyn).
+// - Sidomenyn nås från innehållet bara med ←: ↑/↓ från huvudytan väljer aldrig en länk där (från menyraden går ↓ dit).
 // - Prestanda: bara elementen nära det fokuserade i dokumentordning (±WINDOW) plus de fasta delarna (menyraden,
 //   sidomenyn, flikmenyn, ljudspelaren, mini-spelaren) mäts – aldrig tusentals kort per tryck. Hittas inget där
 //   provas hela området en gång.
@@ -28,13 +29,18 @@ function eligible(el) {
   if (el.disabled || el.getAttribute('tabindex') === '-1' || el.getAttribute('aria-disabled') === 'true' && el.tagName !== 'A') return false;
   if (el.matches('#skiplink, .pageh, video, audio, dialog, .pop')) return false;
   if (el.closest('[inert], [data-nav-skip]')) return false;
+  // Fällt innehåll (<details> utan open): fälten har kvar sina mått i Chrome (content-visibility) men kan inte få
+  // fokus – de är inga mål, bara rubriken (summary) som fäller ut dem
+  const d = el.closest('details:not([open])');
+  if (d && !(el.tagName === 'SUMMARY' && el.parentElement === d)) return false;
   const c = el.closest('.card');
   if (c && el !== c && !el.matches('.clink')) return false;
   return true;
 }
-/** Synlig ruta (null om elementet inte syns) */
+/** Synlig ruta (null om elementet inte syns). En kryssruta eller ett radioval mäts som hela sin rad (etiketten):
+ *  själva rutan är så liten att den annars hamnar utanför kolumnen man rör sig i och hoppas över. */
 function box(el) {
-  const r = el.getBoundingClientRect();
+  const r = ((el.type === 'checkbox' || el.type === 'radio') && el.closest('label') || el).getBoundingClientRect();
   return r.width > 0 && r.height > 0 ? r : null;
 }
 const shown = (el) => { const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity !== 0; };
@@ -88,9 +94,13 @@ function pick(from, r, dir, cands) {
   const [lo, hi] = bandOf(from, r, axis), ref = (lo + hi) / 2;
   const scroller = dx ? hScroller(from) : null;
   const group = from.closest(GROUP);
+  const rail = document.getElementById('rail'), fromMain = !!from.closest('#main');
   const scored = [];
   for (const el of cands) {
     if (el === from || el.contains(from) || from.contains(el) || !eligible(el)) continue;
+    // Sidomenyn ligger till vänster om innehållet och nås med ←: ↑/↓ från innehållet går aldrig dit, hur nära en
+    // länk där än råkar ligga (den står still medan sidan rullar)
+    if (dy && fromMain && rail?.contains(el)) continue;
     const q = box(el); if (!q) continue;
     // Målet ska ligga bortom kanten i pilens riktning (högst lite överlapp: förstorat fokus, avrundning) – ett
     // element bredvid som sticker upp en bit (sidomenyn) räknas inte som "ovanför"

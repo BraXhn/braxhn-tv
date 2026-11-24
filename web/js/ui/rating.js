@@ -1,8 +1,8 @@
 // Egna betyg (server/ratings.js): stjärnor 1–5 i halva steg för titlar, album och låtar.
 // starsHtml() ritar en reglage-kontroll (role="slider"), bindStars() gör den klickbar och styrbar med tangentbordet
-// (←/→ halva steg, 1–5 hela stjärnor, 0/Delete tar bort), rateDialog() är dialogen som kortmenyn och låtarnas ⋮ öppnar.
+// (←/→ halva steg – med fjärrkontroll går ↑/↓ vidare till nästa element –, 1–5 hela stjärnor, 0/Delete tar bort), rateDialog() är dialogen som kortmenyn och låtarnas ⋮ öppnar.
 // Klicka på vänstra halvan av en stjärna = halv stjärna. Samma stjärna igen tar bort betyget.
-import { act, api, esc, toast, t } from '../core.js';
+import { act, api, esc, spatialOn, toast, t } from '../core.js';
 import { openDialog } from './dialog.js';
 
 /** "4,5" – stjärnor med svenskt decimaltecken */
@@ -68,7 +68,11 @@ export function bindStars(el, onChange) {
   el.addEventListener('pointerleave', () => setStars(el, el.dataset.v));
   el.addEventListener('keydown', (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const v = keyValue(e.key, +el.dataset.v || 0);
+    const cur = +el.dataset.v || 0;
+    // Fjärrkontroll (rumslig navigering): ↑/↓ går vidare till det som ligger över och under, och ←/→ som inte
+    // ändrar något (inget betyg, högsta betyget) släpps också vidare – annars fastnar fokus på stjärnorna
+    if (spatialOn && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' && cur === 0 || e.key === 'ArrowRight' && cur === 5)) return;
+    const v = keyValue(e.key, cur);
     if (v == null) return;
     e.preventDefault(); e.stopPropagation();
     commit(v);
