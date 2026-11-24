@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.3.0 – 2026-11-24
 - **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som
   väntar på ägaren.
 - **Säkerhet och stabilitet: fjärde granskningen av servern.** Alla adresser provades som en användare med begränsade
