@@ -308,12 +308,13 @@ export function unsubscribe(id) {
 }
 
 // ---------- uppspelning ----------
-export async function stream(req, res, ep) {
+// pace (valfri): async (fil, { size, duration, mtime }) → takten för den nedladdade filen eller null (spokenPace i routes/books.js)
+export async function stream(req, res, ep, pace = null) {
   if (ep.file) {
     const f = path.join(DIR, path.basename(ep.file));
     let st; try { st = fs.statSync(f); } catch { run('UPDATE podcast_episodes SET file=NULL WHERE id=?', ep.id); return stream(req, res, { ...ep, file: null }); }
     // streamFile: korrekt Range-hantering och pipeline (stänger filen när spelaren avbryter vid spolning)
-    return streamFile(req, res, f, st.size, { 'Content-Type': ep.mime && /^audio\//.test(ep.mime) ? ep.mime : 'audio/mpeg', 'Cache-Control': 'private, max-age=3600' });
+    return streamFile(req, res, f, st.size, { 'Content-Type': ep.mime && /^audio\//.test(ep.mime) ? ep.mime : 'audio/mpeg', 'Cache-Control': 'private, max-age=3600' }, { through: pace ? await pace(f, { size: st.size, duration: ep.duration, mtime: st.mtimeMs }) : null });
   }
   // Inte nedladdat: vidarebefordra från poddens server (med Range) och ladda ner i bakgrunden
   download(ep.id);

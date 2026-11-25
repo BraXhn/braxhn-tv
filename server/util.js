@@ -281,7 +281,7 @@ export function streamFile(req, res, file, size, headers = {}, { ranges = true, 
   if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
   res.writeHead(code, h);
   if (req.method === 'HEAD' || size <= 0) return res.end();
-  if (through) pipeline(fs.createReadStream(file, { start, end }), through(), res, () => {});
+  if (through) pipeline(fs.createReadStream(file, { start, end }), through({ start, end }), res, () => {}); // through får byteintervallet (server/pace.js)
   else pipeline(fs.createReadStream(file, { start, end }), res, () => {});
 }
 

@@ -413,7 +413,11 @@ samma rubriker (`Content-Length`, `Content-Range`, `Accept-Ranges`) oavsett om d
 HLS-adresserna är oförändrade. För profiler med skärmtid skickar servern `/direct` i högst fyra gånger filens
 bithastighet (minst 1 MB/s) efter en snabb start på två minuters video (minst 32 MB), gemensamt för alla förfrågningar
 mot samma fil (`server/pace.js`). En spelare som läser i normal takt märker inget; hela filen går inte att kopiera på
-några sekunder. Nedladdning (`/download`, `/offline-file`) och profiler utan skärmtid påverkas inte. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
+några sekunder. Nedladdning (`/download`, `/offline-file`) och profiler utan skärmtid påverkas inte.
+Ljudböcker och nedladdade poddavsnitt (`/api/audiobooks/files/:fid/stream`, `/api/podcasts/episodes/:eid/stream`) går
+utanför hemmet i åtta gånger filens bithastighet (minst 48 kB/s) när webbläsarens ljudelement hämtar dem
+(`Sec-Fetch-Dest: audio`): varje förfrågan börjar med minst 2 MB i full fart, och filens huvud (MP4:s `moov`, MP3:s
+ID3) räknas inte. Hemma, nedladdning för offline (fetch) och appar får filen i full fart som förut. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
 `POST /api/ops/prestart/clear` och `POST /api/ops/prestart/fill`.
 
 ### Statistik och hack (tillägg)

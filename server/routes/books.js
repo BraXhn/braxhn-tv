@@ -11,9 +11,10 @@ import * as booktools from '../booktools.js';
 import * as feeds from '../bookfeeds.js';
 import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
+import * as pace from '../pace.js';
 import { reqLang } from '../i18n.js';
 import { sized } from '../imgsize.js';
-import { route, user, img, admin, feed, remoteDenied } from '../http/router.js';
+import { route, user, img, admin, feed, remoteDenied, isTrusted } from '../http/router.js';
 import { screenBlock, ctx, libOk, canDownload } from '../http/context.js';
 import { libraryView } from '../libpaths.js';
 
@@ -136,7 +137,19 @@ const bookFile = (c) => { const f = books.fileRow(+c.p.fid); if (!f || !libOk(c.
 const BOOK_SCOPE = 2e9, POD_SCOPE = 3e9;
 const bookStream = { auth: true, media: true, scope: (p) => BOOK_SCOPE + (books.fileRow(+p.fid)?.book_id || 0) };
 const podStream = { auth: true, media: true, scope: (p) => POD_SCOPE + (+p.eid) };
-route('GET', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q, c.user.id); });
+// Webbläsarens ljudelement utanför hemmet (Sec-Fetch-Dest audio/video) får talat ljud i åtta gånger filens takt efter
+// en kort start (server/pace.js) – annars tar en lång bok hela uppladdningen och sidorna väntar. Nedladdning för
+// offline (fetch), apparna, Chromecast och allt hemma går i full fart som förut.
+async function spokenPace(c, file, f) {
+  if (isTrusted(c.req) || !/^(audio|video)$/.test(String(c.req.headers['sec-fetch-dest'] || ''))) return null;
+  const free = await pace.headerOf(file, f.size, f.mtime);
+  const opts = { ...pace.audioPaceFor(f), free };
+  return (r) => pace.pacer(c.user.id, null, { ...opts, start: r?.start || 0 });
+}
+route('GET', '/api/audiobooks/files/:fid/stream', bookStream, async (c) => {
+  const f = bookFile(c); if (!f || screenBlock(c, { audio: true })) return;
+  music.streamTrack(c.req, c.res, f, c.q, c.user.id, { through: await spokenPace(c, f.path, f) });
+});
 route('HEAD', '/api/audiobooks/files/:fid/stream', bookStream, (c) => { const f = bookFile(c); if (f && !screenBlock(c, { audio: true })) music.streamTrack(c.req, c.res, f, c.q, c.user.id); });
 route('GET', '/api/audiobooks/book/:bid/play', user, (c) => {
   const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
@@ -239,7 +252,7 @@ route('GET', '/api/podcasts/episodes/:eid/play', user, (c) => {
   if (screenBlock(c, { audio: true })) return;
   send(c.res, 200, { url: `/api/podcasts/episodes/${e.id}/stream?t=${createSession(c.user.id, 'media', { item: POD_SCOPE + e.id, ip: clientIp(c.req) })}` });
 });
-route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
+route('GET', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e, (file, f) => spokenPace(c, file, f)).catch(er => fail(c.res, 502, er.message)); });
 route('HEAD', '/api/podcasts/episodes/:eid/stream', podStream, async (c) => { const e = podEp(c); if (e && !screenBlock(c, { audio: true })) await pods.stream(c.req, c.res, e).catch(er => fail(c.res, 502, er.message)); });
 
 // ---------- RSS-flöden för poddappar (/api/feeds/<nyckel>/…, routealternativet feed) ----------

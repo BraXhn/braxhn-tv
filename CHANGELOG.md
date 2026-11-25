@@ -13,6 +13,13 @@
   och liknande) i stället för titelns nuvarande, kanske felaktiga, namn – så rätt serie syns direkt i listan.
 - **Ihopskrivna seriernamn hittas.** En mapp som heter *bigbang theory* matchas nu till *The Big Bang Theory*
   (tidigare ingen träff).
+- **Sidorna laddar fort även när en ljudbok startar utanför hemmet.** När man började lyssna på en bok, eller bytte
+  till en annan, hämtade webbläsaren flera megabyte ljud i full fart, och utanför hemmet (särskilt via reläet) fick
+  sidor, omslag och knappar vänta bakom ljudet i 2–6 sekunder. Nu skickas ljudböcker och nedladdade poddavsnitt
+  till webbläsaren utanför hemmet i några gånger den takt de spelas i, efter en snabb start. Mätt via reläet med
+  10 Mbit/s uppladdning: en boksida som öppnas direkt efter bytet tar 0,1–1,7 s i stället för 1,8–3,4 s, och
+  den nya boken börjar spela fortare (2,1 s i stället för 3,6 s, en lång M4B 8 s i stället för 15 s). Hemma,
+  nedladdning för offline och apparna påverkas inte.
 - **Ljudböcker matchas igen.** Google Books svarar numera "för många anrop" på alla sökningar utan egen nyckel, och
   då stannade hela matchningen vid första boken: inga böcker fick beskrivning, omslag eller serie, och *Administration*
   visade bara *Senaste fel: … för många anrop*. Nu hoppas en källa som inte svarar över, och Audible och Open Library

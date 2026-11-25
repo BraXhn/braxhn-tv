@@ -269,7 +269,8 @@ const audioJobs = new Set();
 export const AUDIO_LIMITS = { user: 3, total: 8 };
 export const audioTranscodes = () => audioJobs.size;
 /** Direkt om klienten klarar formatet (med Range för spolning), annars omkodning till AAC (eller MP3) i realtid. */
-export function streamTrack(req, res, t, query, uid = 0) {
+// through (valfri): takten för ljudböcker i webbläsaren utanför hemmet (server/pace.js) – bara när filen skickas som den är
+export function streamTrack(req, res, t, query, uid = 0, { through = null } = {}) {
   const caps = new Set(String(query.get('a') || 'mp3,aac,flac,opus,vorbis').split(','));
   const ext = path.extname(t.path).toLowerCase();
   const direct = caps.has(t.codec) && EXT_MIME[ext] && !(t.codec === 'alac');
@@ -278,8 +279,8 @@ export function streamTrack(req, res, t, query, uid = 0) {
     let st; try { st = fs.statSync(t.path); } catch { return fail(res, 404, 'Filen saknas'); }
     const headers = { 'Content-Type': EXT_MIME[ext], 'Cache-Control': 'private, max-age=3600' };
     // M4A/M4B med moov sist (eller ett stort omslag i taggarna): moov skickas först så att spelaren kan börja direkt (moovfirst.js)
-    if (moovfirst.EXTS.has(ext)) return void moovfirst.planFor(t.path, st).then(plan => plan ? moovfirst.servePlan(req, res, t.path, plan, headers) : streamFile(req, res, t.path, st.size, headers));
-    return streamFile(req, res, t.path, st.size, headers);
+    if (moovfirst.EXTS.has(ext)) return void moovfirst.planFor(t.path, st).then(plan => plan ? moovfirst.servePlan(req, res, t.path, plan, headers, { through }) : streamFile(req, res, t.path, st.size, headers, { through }));
+    return streamFile(req, res, t.path, st.size, headers, { through });
   }
   const ss = Math.max(0, parseFloat(query.get('ss')) || 0);
   const kbps = Math.min(320, maxKbps || 256);

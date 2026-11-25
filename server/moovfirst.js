@@ -159,7 +159,8 @@ async function* bytesOf(file, plan, start, end) {
   }
 }
 /** Som util.streamFile, men för den omskrivna filen (Range mot den nya ordningen) */
-export function servePlan(req, res, file, plan, headers = {}) {
+// through (valfri): takten för ljudböcker utanför hemmet (pace.js), som i util.streamFile
+export function servePlan(req, res, file, plan, headers = {}, { through = null } = {}) {
   const size = plan.size;
   let start = 0, end = size - 1, code = 200;
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
@@ -173,5 +174,7 @@ export function servePlan(req, res, file, plan, headers = {}) {
   if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
   res.writeHead(code, h);
   if (req.method === 'HEAD') return res.end();
-  pipeline(Readable.from(bytesOf(file, plan, start, end), { objectMode: false }), res, () => {});
+  const src = Readable.from(bytesOf(file, plan, start, end), { objectMode: false });
+  if (through) pipeline(src, through({ start, end }), res, () => {});
+  else pipeline(src, res, () => {});
 }
