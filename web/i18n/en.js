@@ -4610,4 +4610,5 @@ self.BX_I18N = {
   "Det här fungerar bara på hemnätverket": "This only works on the home network",
   "Länken har redan använts eller gått ut – öppna den igen från Mitt konto": "The link has already been used or has expired – open it again from My account",
   "Hemadressen ska vara t.ex. http://192.168.1.10:8420": "The home address should be e.g. http://192.168.1.10:8420",
+  "Den inbyggda spelaren kunde inte spela filmen – webbspelaren tar över": "The built-in player couldn't play the video – the web player takes over",
 };

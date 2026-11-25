@@ -24,6 +24,8 @@ import { showScreenLeft } from './screenleft.js';
 import { ICON } from '../ui/icons.js';
 import { need, provide } from '../lazy.js';
 import { audioLabel } from '../ui/tracklabel.js';
+import { playNative, stopNative } from './native.js';
+import { inWindowsApp } from './nativeplan.js';
 import * as self from './video.js';
 provide('video', self); // fasaderna i lazy.js når modulen härifrån
 
@@ -67,6 +69,15 @@ export async function play(id, start = 0, opts = {}) {
   catch (e) { if (seq === playSeq) toastErr(e); return; }
   if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
   const partyId = opts.party || (P && P.party) || null;
+  // Windows-appen: den inbyggda spelaren (mpv) spelar originalfilen när servern kan skicka den orörd (player/native.js).
+  // Inte i Titta tillsammans; annars spelar webbspelaren som vanligt.
+  if (!partyId && !opts.noNative && inWindowsApp()) {
+    const defA = it.audio.find(a => it.defaultAudio != null && a.index === it.defaultAudio) || it.audio.find(a => a.default) || it.audio[0];
+    const ok = await playNative(it, { start, audio: defA ? defA.index : '', version: it.version, q: quality, sub: it.defaultSub || '',
+      cinema: it.kind === 'movie' && !(start > 0) && !opts.noCinema, onNext: (nextId) => play(nextId, 0) });
+    if (seq !== playSeq) { if (ok) stopNative(); return; }
+    if (ok) { if (P) closePlayer(false); if (M.audio && !M.audio.paused) M.audio.pause(); return; }
+  }
   // Behåll anslutningen till rummet vid byte av avsnitt – tas över först nu när hämtningen lyckats
   const keepParty = P && P.party && P.party === partyId ? P.es : null;
   if (keepParty) P.es = null;
