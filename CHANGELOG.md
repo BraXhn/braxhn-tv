@@ -23,6 +23,14 @@
 - **API-nycklar kan ändras.** Under *Administration → API-nycklar* kan administratören byta namn, behörigheter och
   *Bara från hemnätet* på en befintlig nyckel (*Ändra*, `PUT /api/apikeys/:id`) i stället för att skapa en ny. Själva
   nyckeln är densamma och visas aldrig igen, så det som använder den fortsätter fungera.
+- **Expo-appen: musik, ljudböcker och poddar.** Ny flik *Musik* med musikbiblioteken (översikt, album, artister,
+  spellistor och smarta listor, sökning), ljudböckerna och poddarna. Album- och artistsidan har *Spela*, *Blanda* och
+  *Låtradio*, och varje låt kan spelas härnäst eller läggas sist i kön. Minispelaren ligger ovanför flikraden och öppnar
+  helskärmsspelaren med tidslinje, kö, upprepa och blanda – för böcker och poddar i stället 15 s bakåt, 30 s framåt,
+  hastighet och kapitel. Kön sparas på servern för profilen och delas med webbappen: efter omstart visas den pausad där
+  man var. Ljudböcker och poddavsnitt fortsätter där man slutade, och skärmtiden gäller. Nästa låt laddas i förväg.
+  Ljudet spelas med `expo-audio` och visas på låsskärmen; bakgrundsljud och låsskärmen är inte provade på en riktig
+  telefon, och nästa/föregående låt på låsskärmen saknas än.
 - **Expo-appen: profilbyte.** Har kontot flera profiler visar appen *Vem tittar?* efter inloggningen, med en ruta per
   profil som i webbappen. Profiler med PIN frågar efter den, och från en barnprofil till en profil med högre
   åldersgräns krävs huvudkontots lösenord. Under *Konto* finns *Byt profil*. Barnprofiler ser bara det de får se,

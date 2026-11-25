@@ -59,13 +59,18 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
   har kört provet med NVENC (se *Bara Anton kan göra*).
 
-### 4. Expo-appen: musik, ljudböcker och poddar
+### 4. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
 
-- **Vad:** flikar för musik, ljudböcker och poddar med bakgrundsuppspelning, sparad position och låsskärmens knappar.
-- **Varför:** Spotify/Plexamp och Audiobookshelf används mest på telefonen, med låst skärm och i hörlurar. Appen
-  har i dag bara film och serier.
-- **Filer:** `apps/expo/src/screens/*` (nya skärmar), `apps/expo/src/api.ts`, `apps/expo/package.json`.
-- **Klart när:** en ljudbok fortsätter där man slutade efter att appen stängts, och musiken spelar med låst skärm.
+- **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
+  bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
+  musiken vidare med låst skärm i mer än tre minuter, fungerar hörlurarnas knappar, och visas omslaget? Lägg sedan
+  till nästa/föregående låt på låsskärmen – `expo-audio` ger de knapparna bara för `AudioPlaylist`, så kön behöver
+  matas in där (adresserna hämtas per låt med `/api/music/tracks/:tid/play`).
+- **Varför:** Spotify/Plexamp används mest med låst skärm och i hörlurar; utan nästa låt på låsskärmen och i
+  hörlurarna är appen sämre än dem just där det räknas.
+- **Filer:** `apps/expo/src/music.ts`, `apps/expo/app.json`, `apps/expo/README.md`.
+- **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
+  hörlurarna byter låt.
 
 ### 5. Expo-appen: nedladdning för offline
 
@@ -117,8 +122,12 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Musik: en bok eller podd återställs inte i minispelaren efter omladdning (`playSpoken` i `web/js/audio.js`).
 - Musik: spolning i elementet efter att nästa buffert startat tappas tyst (`web/js/audio.js`).
 - Musikfältets knappar är 34 px på telefon, under 44 px som rekommenderas för fingrar (`.mic` i `web/style.css`).
-- Expo-appen använder inte den sparade musikkön (`/api/me/queue`) – hör till musiken i punkt 4 (förslag på
-  uppläggning i gren `team/expo-2026-11-25`, rapporten).
+- Expo-appen: en ljudbok eller ett poddavsnitt visas inte i minispelaren efter omstart (bara musikkön återställs);
+  boksidan har *Fortsätt från …* (`restoreQueue` i `apps/expo/src/music.ts`).
+- Expo-appen: jämn ljudnivå (ReplayGain, fälten `gain`/`albumGain` finns i spåren), övertoning, sovtimer, låttexter,
+  bokmärken, favoriter och spellistor går inte att ändra i appen än (`apps/expo/src/music.ts`, `screens/Music.tsx`).
+- Expo-appen saknas i `test/contracts/apps.json`: testet känner bara `ios` och `android` (`APPS`, typnamnens slut,
+  `TOK` per app i `test/api-contract.test.js`), så en tredje app kräver ändringar i testet.
 - iOS- och Android-apparna sparar bildtoken bara i minnet och tar en ny vid varje start (`restore()` i
   `apps/apple/Shared/AppModel.swift`, `refreshImageToken` i `apps/automotive/.../Api.kt`) – samma knuff mot taket på
   50 som Expo-appen hade. Spara den som Expo-appen gör nu.
@@ -173,6 +182,10 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   åldersgräns, nedladdning, startsidans hyllnamn, *Avsnitt N*, spårens och versionernas namn, notiserna och
   offlinesidan följer profilens språk (annars kakan/`Accept-Language`) med webbens katalog (`server/i18n.js`,
   `test/server-i18n.test.js`).
+- 2026-11-25: Expo-appen – musik, ljudböcker och poddar: fliken *Musik* (översikt, album, artister, spellistor,
+  sökning, ljudböcker, poddar), albumsida, minispelare och helskärmsspelare med `expo-audio`; kön delas med webben via
+  `/api/me/queue` och visas pausad efter omstart; ljudböcker och avsnitt fortsätter där man slutade. Visat i
+  webbläget (Chrome 390×844); bakgrundsljud och låsskärm inte provade på riktig telefon (punkt 4).
 - 2026-11-25: Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
