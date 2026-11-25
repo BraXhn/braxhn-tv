@@ -221,14 +221,28 @@ t('öppen GOP-provet: stängd GOP, öppen GOP där ra räcker, och öppen GOP so
   assert.equal(await og.classify(FILM, st.keyframesReady(rowOf(FILM)), 60, { at: 21 }), null);
 });
 
-t('webbspelaren (mse=1) får omkodning direkt för öppen GOP som inte går att börja mitt i – inte apparna eller Safari', async () => {
+t('webbspelaren (mse=1): öppen GOP som inte går att börja mitt i remuxas från början och omkodas vid Fortsätt titta – inte apparna eller Safari', async () => {
   const flat = rowOf(FLAT), open = rowOf(FILM), closed = rowOf(CLOSED);
   assert.equal(await st.probeGop(flat), 'tc');
+  const k1 = st.keyframesReady(flat)[1];
+  assert.ok(k1 > 1 && k1 < 3, `andra nyckelbilden ${k1}`);
+  // Fall 1: från början (och före andra nyckelbilden) – remux, snabbast att starta; svaret säger att filen är tc
+  for (const q of ['mse=1', `mse=1&start=${Math.floor(k1 - 1)}`]) {
+    const a = await info(flat, q);
+    assert.equal(a.mode, 'remux', q);
+    assert.equal(a.gop, 'tc', `${q}: spelaren får veta att spolning kräver omkodning`);
+  }
+  // Fall 2: mitt i filen (Fortsätt titta) – omkodning direkt, utan fel först
   const web = await info(flat, 'mse=1&start=21');
   assert.equal(web.mode, 'transcode', 'webbspelaren: omkodning från början, utan fel först');
   assert.match(web.reasons.join(', '), /öppen GOP/);
+  assert.equal(web.gop, undefined);
+  assert.equal((await info(flat, `mse=1&start=${Math.ceil(k1)}`)).mode, 'transcode', 'från andra nyckelbilden');
+  assert.equal(st.decide(flat, { ...st.parseCaps(new URLSearchParams('mse=1&start=21')) }).mode, 'transcode');
+  assert.equal(st.decide(flat, { ...st.parseCaps(new URLSearchParams('mse=1')) }).gop, 'tc');
   // Apparna (ingen mse), Safari (nhls=1) och Chromecast: remux som förut – deras avkodare har inte felet
   assert.equal((await info(flat, 'start=21')).mode, 'remux');
+  assert.equal((await info(flat, 'start=0')).gop, undefined, 'apparna får inget gop-fält');
   assert.equal((await info(flat, 'mse=1&nhls=1')).mode, 'remux');
   // Öppen GOP där ra räcker och stängd GOP: remux även i webben
   assert.equal((await info(open, 'mse=1&start=21')).mode, 'remux');

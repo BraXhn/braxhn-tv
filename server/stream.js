@@ -753,6 +753,8 @@ export function parseCaps(q, ua = '') {
     // Webbspelaren med hls.js och Media Source (Chrome, Edge, Firefox): filer med öppen GOP som inte går att börja
     // avkoda mitt i omkodas direkt (gopOf). Apparna, Safari och Chromecast skickar det inte.
     mse: q.get('mse') === '1',
+    // Sekunden där uppspelningen börjar (Fortsätt titta) – avgör om en fil med öppen GOP kan remuxas (decide)
+    start: Math.max(0, Math.min(1e6, parseFloat(q.get('start')) || 0)),
     // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
     nativeHls: q.get('nhls') === '1',
     // Tittarkomfort: nattläge (jämnare ljudnivå) och tydligare dialog – ljudet omkodas med filter
@@ -804,9 +806,11 @@ export function decide(it, o) {
   // Familjefilter (o.mute = tysta intervall ur familyfilter.js): servern tystar ljudet med ett volymfilter – också omkodat ljud
   const fam = !!(aSel && o.mute?.length);
   if (comfort || fam) am = 'aac';
-  // Öppen GOP som webbläsarens avkodare inte kan börja mitt i (opengop.js): remux skulle ge fel vid spolning och
-  // Fortsätt titta – bilden kodas om från början i stället
-  const gopTc = !!(o.mse && !o.nativeHls && v?.codec === 'h264' && gopOf(it) === 'tc');
+  // Öppen GOP som webbläsarens avkodare inte kan börja mitt i (opengop.js). Från början remuxas filen ändå – första
+  // nyckelbilden är alltid IDR, och remux startar snabbast. Börjar uppspelningen efter andra nyckelbilden (Fortsätt
+  // titta) kodas bilden om direkt. Spolning i en sådan remux: spelaren byter själv till omkodning (gop i svaret).
+  const gopKnown = !!(o.mse && !o.nativeHls && v?.codec === 'h264' && gopOf(it) === 'tc');
+  const gopTc = gopKnown && (o.start || 0) >= ((keyframesReady(it) || [])[1] ?? 0) - 0.05;
   if (!comfort && !fam && !burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
   else if (!burn && !scale && !tonemap && !gopTc && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
@@ -842,7 +846,8 @@ export function decide(it, o) {
   let ab = null;
   if (o.remote && mode === 'transcode') { if (am !== 'aac') reasons.push('ljudet blir stereo för mobil uppkoppling'); am = 'aac'; ab = 128; }
   return { mode, reasons, audio: aSel ? String(aSel.index) : '', audioMode: am, ab, burn, tonemap, q: o.q, fmt, tag, hdr: mode === 'remux' ? it.hdr : null,
-    night: comfort && !!o.night, dialog: comfort && !!o.dialog, vc, vcodec: mode === 'transcode' ? vc : v?.codec || null, ff: fam };
+    night: comfort && !!o.night, dialog: comfort && !!o.dialog, vc, vcodec: mode === 'transcode' ? vc : v?.codec || null, ff: fam,
+    gop: gopKnown && mode === 'remux' && fmt === 'ts' ? 'tc' : null };
 }
 function copyAudio(a, o) { return ['aac', 'mp3', 'ac3', 'eac3'].includes(a.codec) && o.acodecs.has(a.codec) && (a.codec !== 'aac' || (a.channels || 2) <= 6); }
 // Ljud: skicka orört om enheten klarar det; annars surround → Dolby Digital Plus 5.1 (om enheten klarar E-AC-3), annars AAC stereo

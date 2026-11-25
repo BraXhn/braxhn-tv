@@ -36,10 +36,15 @@
   namn för skärmläsare (*Låttext* saknade det), och på en telefon ryms hela raden: på 390 px bredd klipptes låtradion
   förut av.
 - **Filer med öppen GOP startar direkt i rätt läge i webben:** servern provar nu själv, en gång per fil efter
-  nyckelbildsindexeringen, om filen går att börja spela mitt i (`server/opengop.js`). Går den inte det omkodas den
-  direkt för webbspelaren i Chrome, Edge och Firefox – förut kom ett avkodningsfel och 1–2 s väntan vid första
-  spolningen eller *Fortsätt titta*, vid varje nytt besök. Filer där det räcker att ta bort bilderna före
-  nyckelbilden (`ra=`) kopieras som förut. Apparna, Safari och Chromecast påverkas inte.
+  nyckelbildsindexeringen, om filen går att börja spela mitt i (`server/opengop.js`). Förut kom ett avkodningsfel och
+  1–2 s väntan vid första spolningen eller *Fortsätt titta*, vid varje nytt besök. Går filen inte att börja mitt i
+  gäller nu för webbspelaren i Chrome, Edge och Firefox:
+  - Från början kopieras bilden som förut (snabbast start).
+  - *Fortsätt titta* mitt i filen startar omkodat direkt.
+  - En spolning utanför det som redan är hämtat byter till omkodning direkt, utan att vänta på felet. Inom det hämtade
+    fortsätter kopian.
+  Filer där det räcker att ta bort bilderna före nyckelbilden (`ra=`) kopieras som förut. Apparna, Safari och
+  Chromecast påverkas inte.
   - Proven körs i en egen kö med lägsta prioritet: två korta ffmpeg-körningar för en vanlig fil (stängd GOP), upp till
     åtta för en fil med öppen GOP. Skanningen och den som trycker på Spela väntar inte på dem.
   - Missar proven en fil och spelaren ändå måste byta till omkodning, säger den till servern var. Servern provar

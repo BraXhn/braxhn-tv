@@ -204,6 +204,33 @@ test('öppen GOP som Chrome inte kan börja avkoda mitt i: servern vet det och o
   await close();
 });
 
+test('öppen GOP som Chrome inte kan börja avkoda mitt i: start från början remuxas, spolning utanför bufferten byter till omkodning direkt', { skip }, async () => {
+  assert.equal(await webMode(flat.id, 'transcode'), 'transcode', 'servern har provat filen');
+  const { p, close } = await page();
+  await helpers(p);
+  const r = await p.evaluate(async (id) => {
+    const t0 = performance.now(); window.__L.play(id, 0); const f = await window.__frame(t => t >= 0, 30000); const startMs = Math.round(performance.now() - t0);
+    const v = document.querySelector('#vid'), gop = window.__V.P?.pb?.gop, m0 = [...window.__modes];
+    // Spolning inom bufferten: inget byte
+    while (!(v.buffered.length && v.buffered.end(0) > 3)) await new Promise(r => setTimeout(r, 20));
+    v.currentTime = 1.5; const a = await window.__frame(t => t >= 1.2 && t < 6); const mA = [...window.__modes];
+    // Spolning utanför bufferten (direkt, innan den hunnit fyllas dit)
+    const bufEnd = v.buffered.end(v.buffered.length - 1); const to = 64;
+    const e0 = window.__errors; v.currentTime = to; const b = await window.__frame(t => t >= to - 0.6 && t < to + 5, 30000);
+    return { f, startMs, gop, m0, a, mA, bufEnd, to, b, modes: window.__modes, errors: window.__errors - e0 };
+  }, flat.id);
+  assert.ok(r.f.ms != null, `ingen bild vid start: ${r.f.state}`);
+  assert.deepEqual(r.m0, ['remux'], 'från början: remux (snabbast)');
+  assert.equal(r.gop, 'tc', 'svaret säger att filen inte går att börja mitt i');
+  assert.ok(r.a.ms != null, `spolning inom bufferten: ${r.a.state}`);
+  assert.deepEqual(r.mA, ['remux'], 'spolning inom bufferten byter inte');
+  assert.ok(r.bufEnd < r.to - 1, `förutsättning: ${r.to} s ligger utanför bufferten (slut ${r.bufEnd.toFixed(1)})`);
+  assert.ok(r.b.ms != null, `spolning till ${r.to} s gav ingen bild: ${r.b.state}`);
+  assert.deepEqual(r.modes, ['remux', 'transcode'], 'omkodning vid spolningen');
+  assert.equal(r.errors, 0, 'inget avkodningsfel – bytet kom före felet');
+  await close();
+});
+
 test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {
   const { p, close } = await page();
   const r = await p.evaluate(async ([small, mid]) => {

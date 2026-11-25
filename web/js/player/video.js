@@ -490,6 +490,22 @@ async function load(start, { play = true } = {}) {
     setSubs();
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
+  // Remux av en fil som webbläsaren inte kan börja avkoda mitt i (pb.gop = 'tc', server/opengop.js): en spolning
+  // utanför bufferten skulle ge ett avkodningsfel – byt till omkodning direkt, från spolningens mål. Inom bufferten
+  // fortsätter avkodningen och inget byte behövs. Nästa start från början remuxas igen (snabbast).
+  if (pb.gop === 'tc' && pb.mode === 'remux') {
+    const onSeek = () => {
+      if (!live()) return v.removeEventListener('seeking', onSeek);
+      const t = v.currentTime;
+      if (t < 1 && !v.played.length) return; // hls.js ställer sig på starten (och hoppar över glappet i början)
+      for (let i = 0; i < v.buffered.length; i++) if (t >= v.buffered.start(i) - 0.1 && t < v.buffered.end(i) - 0.5) return;
+      v.removeEventListener('seeking', onSeek);
+      if (cur.forceTc) return;
+      cur.forceTc = true;
+      reload(!!cur.wantPlay);
+    };
+    v.addEventListener('seeking', onSeek);
+  }
   // Starta (även efter byte av kvalitet, ljud, nattläge m.m.) av sig själv. play() försöks direkt, när spellistan
   // är inläst, vid varje tecken på att det finns data (loadeddata/canplay/canplaythrough) och med en vakt varje
   // sekund i 20 s – tills filmen faktiskt spelar. Förut räckte det att de första försöken avbröts ("interrupted by

@@ -267,6 +267,9 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const imageSubs = allSubs.filter(s => s.pgs).map(s => ({ id: s.id, label: s.label, lang: s.lang, forced: s.forced, url: `${base}/pgs/${s.id}?v=${it.mtime | 0}${token ? '&t=' + token : ''}` }));
   send(c.res, 200, {
     mode: d.mode, url, reasons: d.reasons, hdr: it.hdr, tonemap: d.tonemap, burn: d.burn || null,
+    // Remux av en fil med öppen GOP som webbläsaren inte kan börja avkoda mitt i (bara mse=1): spolning utanför
+    // bufferten byter till omkodning direkt (video.js), i stället för att vänta på avkodningsfelet
+    ...(d.gop ? { gop: d.gop } : {}),
     // Videons codec i strömmen (tillägg): vid omkodning h264, hevc eller av1 (tc=), annars källans
     vcodec: d.vcodec,
     duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,
