@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream';
 import { getSetting, setSetting, all, run, now, get, tx, RESTORE_FILE } from '../db.js';
-import { send, readJson, fail, isLocalReq, isHttps, clientIp, peerIp, isPrivate } from '../util.js';
+import { send, readJson, fail, isLocalReq, isHttps, clientIp, peerIp, isPrivate, localDate } from '../util.js';
 import { audit, weakPassword, hashPw, require2faRemote, quickConnectOn } from '../auth.js';
 import { autoSubs, scan } from '../scanner.js';
 import * as st from '../stream.js';
@@ -149,7 +149,7 @@ route('POST', '/api/invites', admin, async (c) => {
   const b = await readJson(c.req);
   try {
     const r = invites.create(c.user.id, b);
-    audit('invite_created', { ...ctx(c), detail: `${r.invite.note || 'inbjudan'} – giltig till ${new Date(r.invite.expires * 1000).toISOString().slice(0, 10)}` });
+    audit('invite_created', { ...ctx(c), detail: `${r.invite.note || 'inbjudan'} – giltig till ${localDate(new Date(r.invite.expires * 1000))}` });
     send(c.res, 200, { ...r.invite, token: r.token, path: `/#/invite/${r.token}` });
   } catch (e) { fail(c.res, e.status || 400, e.message); }
 });
@@ -524,7 +524,7 @@ route('GET', '/api/logs/diagnostics', admin, async (c) => {
   // Samma maskering som diagnostikpaketet i Hälsokontrollen (token, lösenord, e-post, IP-adresser) – filnamnen behålls här
   const body = maskSupport(`BraXhn TV – diagnostik ${new Date().toISOString()}\n\n${JSON.stringify(info, null, 2)}\n\n--- Logg (senaste ${logs.lines({ limit: 2000 }).length} raderna) ---\n`
     + logs.lines({ limit: 2000 }).map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(5)} ${l.msg}`).join('\n') + '\n', { names: true });
-  send(c.res, 200, Buffer.from(body), { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="braxhn-diagnostik-${new Date().toISOString().slice(0, 10)}.txt"` });
+  send(c.res, 200, Buffer.from(body), { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="braxhn-diagnostik-${localDate()}.txt"` });
 });
 // Fel i webbappen hos användarna hamnar i serverloggen (Safari/iPhone, TV-webbläsare … som CI inte kör).
 // Högst 20 rapporter per användare och 10 minuter; korta, maskerade och utan HTML.

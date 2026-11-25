@@ -60,6 +60,10 @@ export function weakPassword(pw, name = '') {
 const TTL = { web: 30 * 86400, app: 365 * 86400, media: 24 * 3600, img: 7 * 86400 };
 /** Högsta antal bildtoken per användare */
 export const IMG_MAX = 50;
+/** Högsta antal medietoken per användare (en per uppspelningsanrop, gäller 24 h). Rymmer ett stort album offline
+ *  (en token per spår) och flera flikar, appar och Chromecast samtidigt – bara de äldsta försvinner. */
+export const MEDIA_MAX = 300;
+const CAP = { img: IMG_MAX, media: MEDIA_MAX };
 const SHORT = 12 * 3600; // webbinloggning utan "Håll mig inloggad": utgår efter 12 h utan aktivitet
 const ttlOf = (kind, remember) => kind === 'web' && !remember ? SHORT : TTL[kind];
 export const sha = (t) => createHash('sha256').update(String(t)).digest('hex');
@@ -69,10 +73,11 @@ export function createSession(userId, kind = 'web', { item = null, ua = null, ip
   const token = randomBytes(32).toString('hex');
   run(`INSERT INTO sessions(token,user_id,created,kind,expires,scope_item,ua,ip,last_seen,remember) VALUES(?,?,?,?,?,?,?,?,?,?)`,
     sha(token), userId, now(), kind, now() + ttlOf(kind, remember), item, ua ? String(ua).slice(0, 200) : null, ip, now(), remember ? 1 : 0);
-  // Bildtoken (POST /api/media-token) kan inte återanvändas (bara hashen sparas): de äldsta utöver taket tas bort.
-  // Apparna förnyar en gång per dygn och token gäller 7 dygn, så taket räcker gott för hushållets alla enheter.
-  if (kind === 'img') run(`DELETE FROM sessions WHERE user_id=?1 AND kind='img' AND rowid NOT IN
-    (SELECT rowid FROM sessions WHERE user_id=?1 AND kind='img' ORDER BY created DESC, rowid DESC LIMIT ?2)`, userId, IMG_MAX);
+  // Bild- och medietoken kan inte återanvändas (bara hashen sparas): de äldsta utöver taket tas bort.
+  // Bild: apparna förnyar en gång per dygn och token gäller 7 dygn, så taket räcker gott för hushållets alla enheter.
+  // Media: en ny token per uppspelningsanrop – utan tak kunde en app i en slinga fylla tabellen under ett dygn.
+  if (CAP[kind]) run(`DELETE FROM sessions WHERE user_id=?1 AND kind=?2 AND rowid NOT IN
+    (SELECT rowid FROM sessions WHERE user_id=?1 AND kind=?2 ORDER BY created DESC, rowid DESC LIMIT ?3)`, userId, kind, CAP[kind]);
   // Rensa utgångna sessioner högst en gång per minut (inte vid varje ny session)
   if (now() - lastCleanup >= 60) { lastCleanup = now(); run('DELETE FROM sessions WHERE expires < ?', now()); }
   return token;

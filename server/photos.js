@@ -37,6 +37,8 @@ export const isPhotoFile = (name) => IMAGE_EXT.has(ext(name)) || VIDEO_EXT.has(e
 // ---------- tid ----------
 /** Unix-sekunder → serverns lokala väggklocka räknad som UTC-sekunder (så sparas taken) */
 export const wallClock = (unix) => unix - new Date(unix * 1000).getTimezoneOffset() * 60;
+// taken är redan väggklockan räknad som UTC (EXIF, Apples createdLocal, wallClock ovan) – därför ger UTC-datumet
+// den lokala dagen. util.localDate här skulle flytta bilder tagna strax före midnatt en dag fel.
 const dayOf = (t) => new Date(t * 1000).toISOString().slice(0, 10);
 const pad = (n) => String(n).padStart(2, '0');
 /** Dagens datum ('YYYY-MM-DD') i serverns tidszon */

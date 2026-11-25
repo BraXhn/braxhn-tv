@@ -93,6 +93,19 @@ test('GET /api/libraries: sökvägarna (path, paths) bara för administratörer'
   }
 });
 
+test('GET /api/libraries: andra än administratörer får bara fälten klienterna läser (vitlista)', async () => {
+  // anime, nfo och kids är administratörens inställningar; home_video behövs i webbens bibliotekssida (home.js)
+  D.run('UPDATE libraries SET anime=1, nfo=0, kids=1 WHERE id=?', S.F);
+  try {
+    const a = (await req('/api/libraries')).data.find(l => l.id === S.F);
+    assert.equal(a.anime, 1); assert.equal(a.nfo, 0); assert.equal(a.kids, 1);
+    for (const tok of [bo, kid]) {
+      const l = (await req('/api/libraries', { tok })).data.find(x => x.id === S.F);
+      assert.deepEqual(Object.keys(l).sort(), ['count', 'home_video', 'id', 'name', 'type']);
+    }
+  } finally { D.run('UPDATE libraries SET anime=0, nfo=1, kids=0 WHERE id=?', S.F); }
+});
+
 // ---------- 2. /direct i takt för profiler med skärmtid ----------
 /** Läser /direct så fort det går i ms millisekunder (eller tills svaret är slut). Flera parallella med n > 1. */
 function readFast(tok, ms, { range, id = S.stor } = {}) {
@@ -177,6 +190,33 @@ test('POST /api/media-token: högst ett tak av bildtoken per användare, den nya
   assert.equal((await req('/api/libraries', { tok: bo })).status, 200);
 });
 
+// ---------- 3b. medietoken ----------
+test('medietoken: högst ett tak per användare, flera flikar på samma titel fungerar samtidigt', async () => {
+  const uid = D.get("SELECT id FROM users WHERE name='bo'").id;
+  const play = async () => {
+    const r = await req(`/api/items/${S.film}/playback`, { tok: bo });
+    assert.equal(r.status, 200);
+    const t = /[?&]t=([0-9a-f]+)/.exec(JSON.stringify(r.data))?.[1];
+    assert.ok(t, 'appen får en medietoken i strömlänken');
+    return t;
+  };
+  // Två flikar (eller en app och en Chromecast) på samma film: båda token fungerar
+  const a = await play(), b = await play();
+  for (const t of [a, b]) assert.equal((await req(`/api/stream/${S.film}/direct?t=${t}`, { tok: '', headers: { range: 'bytes=0-9' } })).status, 206);
+  // Många uppspelningsanrop (t.ex. en app som startar om i en slinga): taket håller, den nyaste fungerar
+  let last = '';
+  auth.createSession(uid, 'img');
+  for (let i = 0; i < 400; i++) last = auth.createSession(uid, 'media', { item: S.film });
+  const n = D.get("SELECT COUNT(*) AS n FROM sessions WHERE user_id=? AND kind='media'", uid).n;
+  assert.ok(n <= auth.MEDIA_MAX, `${n} medietoken sparade för samma användare (tak ${auth.MEDIA_MAX})`);
+  assert.ok(auth.MEDIA_MAX >= 200 && auth.MEDIA_MAX < 400, 'taket räcker för ett album offline och flera enheter samtidigt');
+  assert.equal((await req(`/api/stream/${S.film}/direct?t=${last}`, { tok: '', headers: { range: 'bytes=0-9' } })).status, 206);
+  assert.equal((await req(`/api/stream/${S.film}/direct?t=${a}`, { tok: '', headers: { range: 'bytes=0-9' } })).status, 401, 'den äldsta är borttagen');
+  // Bildtoken och appens egen token påverkas inte av taket för medietoken
+  assert.equal((await req('/api/libraries', { tok: bo })).status, 200);
+  assert.ok(D.get("SELECT COUNT(*) AS n FROM sessions WHERE user_id=? AND kind='img'", uid).n > 0);
+});
+
 // ---------- 5. kontospärrens nyckel ----------
 test('kontospärren: användarnamnet i nyckeln är kortat (långa namn ger inte långa nycklar i minnet)', () => {
   const base = 'å'.repeat(64);
@@ -222,6 +262,28 @@ test('exporters filnamn: lokal dag strax efter midnatt (historik, statistik, ord
       assert.match(await name('/api/playstats/history.csv'), new RegExp(`-${day}\\.csv$`), `${utc}: statistiken`);
       assert.match(await name('/api/vocab/export'), new RegExp(`-${day}\\.txt$`), `${utc}: ordlistan`);
       assert.match(await name('/api/me/export'), new RegExp(`-${day}\\.json$`), `${utc}: mina uppgifter`);
+    } finally { mock.timers.reset(); }
+  }
+});
+
+test('inbjudan och diagnostik: lokal dag strax efter midnatt (audit-texten och filnamnen)', { timeout: 30000 }, async () => {
+  for (const [utc, day] of MIDNIGHTS.slice(0, 4)) {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse(utc) });
+    try {
+      const tok = auth.createSession(D.get("SELECT id FROM users WHERE name='admin'").id, 'app');
+      // Inbjudan som gäller 1 dygn: giltig till morgondagens lokala datum
+      const inv = await req('/api/invites', { method: 'POST', tok, body: { days: 1, note: 'test ' + utc } });
+      assert.equal(inv.status, 200);
+      const until = util.localDate(new Date(Date.parse(utc) + 86400000));
+      const row = D.get("SELECT detail FROM audit WHERE event='invite_created' ORDER BY rowid DESC LIMIT 1");
+      assert.equal(row.detail, `test ${utc} – giltig till ${until}`, `${utc}: audit-texten`);
+      D.run('DELETE FROM invites WHERE id=?', inv.data.id);
+      // Diagnostiken i loggvyn och paketet i Hälsokontrollen
+      const cd = (await req('/api/logs/diagnostics', { tok })).headers.get('content-disposition') || '';
+      assert.match(cd, new RegExp(`braxhn-diagnostik-${day}\\.txt`), `${utc}: loggvyns diagnostik`);
+      const pkg = await req('/api/admin/health/diagnostics', { method: 'POST', tok, body: {} });
+      assert.equal(pkg.status, 200);
+      assert.equal(pkg.data.filename, `braxhn-diagnostik-${day}.tar.gz`, `${utc}: diagnostikpaketet`);
     } finally { mock.timers.reset(); }
   }
 });

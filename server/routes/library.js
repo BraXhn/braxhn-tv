@@ -45,10 +45,10 @@ route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   WHEN l.type='ebook' THEN (SELECT COUNT(*) FROM ebooks e WHERE e.library_id=l.id)
   ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook','photo','ebook'), l.type, l.name`)
   .filter(l => l.type === 'photo' ? c.user.kind !== 'app' && photos.canSeeLib(c.user.id, l) : l.type === 'ebook' ? c.user.kind !== 'app' && ebooks.canSeeLib(c.user.id, l) : libOk(c.user.id, l.id)).map(l => {
-    // Serverns sökvägar bara för administratörer (admin-sidan och första start visar dem; apparna läser dem inte)
+    // Allt (sökvägar och inställningar) bara för administratörer – admin-sidan och första start visar dem.
+    // Övriga får en vitlista: apparna läser id, name, type, count (test/contracts/apps.json), webben även home_video
     if (c.user.is_admin) return { ...l, paths: rootsOf(l) };
-    const { path: _p, ...rest } = l;
-    return rest;
+    return { id: l.id, name: l.name, type: l.type, count: l.count, home_video: l.home_video };
   })));
 /** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
 function checkPaths(list) {

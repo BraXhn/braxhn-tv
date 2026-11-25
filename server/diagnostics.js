@@ -17,6 +17,7 @@ import * as jobs from './jobs.js';
 import * as diskmon from './diskmon.js';
 import { librariesWithRoots } from './libpaths.js';
 import { maskSupport, safeEnv, tarGz } from './supportpack.js';
+import { localDate } from './util.js';
 
 const LOG_LINES = 2000, KEEP_MS = 15 * 60e3, MAX_KEPT = 4;
 const kept = new Map(); // id → { at, archive, filename }
@@ -154,7 +155,7 @@ export async function build({ names = false } = {}) {
     { name: 'jobs.json', text: m(json({ jobs: jobs.list(), disk: diskmon.snapshot() })) },
     { name: 'log.txt', text: m(logLines.map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(5)} ${l.msg}`).join('\n') + '\n') }
   ];
-  const day = new Date().toISOString().slice(0, 10);
+  const day = localDate(); // serverns lokala dag (TZ), som exporternas filnamn
   const dir = `braxhn-diagnostik-${day}`;
   const archive = tarGz(files.map(f => ({ name: `${dir}/${f.name}`, text: f.text })));
   const id = crypto.randomBytes(12).toString('hex');
