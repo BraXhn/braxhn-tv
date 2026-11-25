@@ -4,7 +4,7 @@
 // rätten att ladda ner, tas inte ut för barnprofiler med påtvingat familjefilter (ljudet vore otystat) och har ett
 // tak för samtidiga ffmpeg (taget innan något väntar).
 import { get } from '../db.js';
-import { send, fail, readJson } from '../util.js';
+import { send, fail, readJson, localDate } from '../util.js';
 import * as vocab from '../vocab.js';
 import * as family from '../familyfilter.js';
 import { route, user } from '../http/router.js';
@@ -30,7 +30,7 @@ route('POST', '/api/vocab', user, async (c) => {
 route('GET', '/api/vocab/export', user, async (c) => {
   const format = ['csv', 'tsv', 'zip'].includes(c.q.get('format')) ? c.q.get('format') : 'tsv';
   const rows = rowsFor(c);
-  const day = new Date().toISOString().slice(0, 10);
+  const day = localDate();
   if (format !== 'zip') {
     return send(c.res, 200, '﻿' + vocab.exportText(rows, format), { 'Content-Type': `text/${format === 'csv' ? 'csv' : 'tab-separated-values'}; charset=utf-8`,
       'Content-Disposition': `attachment; filename="ordlista-${day}.${format === 'csv' ? 'csv' : 'txt'}"`, 'Cache-Control': 'private, no-store' });

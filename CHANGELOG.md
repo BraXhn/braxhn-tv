@@ -1,6 +1,21 @@
 # Ändringar
 
 ## Ej utgiven
+- **Säkerhet: femte granskningen av servern** (det som blev kvar efter den fjärde; varje punkt har ett test i
+  `test/security-review5.test.js`, reläets i `test/relay.test.js`):
+  - **Skärmtiden gick att kringgå genom att hämta hela originalfilen snabbt** och titta ur en egen kopia. För profiler
+    med skärmtid skickas originalfilen nu i högst fyra gånger filens bithastighet, efter en snabb start på två minuters
+    video. En spelare märker inget, men en kopia kostar minst en fjärdedel av filmens längd i skärmtid. Många
+    parallella anrop delar på samma takt. Profiler utan skärmtid och nedladdning för offline påverkas inte.
+  - **Bibliotekslistan visade serverns mappar för alla**, även barnprofiler. Nu ser bara administratörer dem. Ingen app
+    läser fälten.
+  - **Bildtoken för apparna hade inget tak** – varje anrop sparade en ny rad. Nu sparas högst 50 per användare och de
+    äldsta tas bort. Apparna förnyar en gång per dygn och märker inget.
+  - **Reläets spärr mot fel admintoken bromsade inte gissning:** rätt token släpptes igenom även när spärren slagit
+    till. Nu kontrolleras spärren först.
+  - **Datum i UTC i stället för svensk tid:** strax efter midnatt fick inspelningens metadata och exporterade filer
+    (Min historik, statistiken, ordlistan, Mina uppgifter) gårdagens datum. Nu gäller serverns lokala tid (`TZ`).
+  - Kontospärrens nyckel (kontonamnet) är kortad till 64 tecken och antalet nycklar har ett tak.
 
 ## 1.3.0 – 2026-11-24
 - **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som

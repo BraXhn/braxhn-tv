@@ -44,7 +44,12 @@ route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   WHEN l.type='photo' THEN (SELECT COUNT(*) FROM photos p WHERE p.library_id=l.id)
   WHEN l.type='ebook' THEN (SELECT COUNT(*) FROM ebooks e WHERE e.library_id=l.id)
   ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook','photo','ebook'), l.type, l.name`)
-  .filter(l => l.type === 'photo' ? c.user.kind !== 'app' && photos.canSeeLib(c.user.id, l) : l.type === 'ebook' ? c.user.kind !== 'app' && ebooks.canSeeLib(c.user.id, l) : libOk(c.user.id, l.id)).map(l => ({ ...l, paths: rootsOf(l) }))));
+  .filter(l => l.type === 'photo' ? c.user.kind !== 'app' && photos.canSeeLib(c.user.id, l) : l.type === 'ebook' ? c.user.kind !== 'app' && ebooks.canSeeLib(c.user.id, l) : libOk(c.user.id, l.id)).map(l => {
+    // Serverns sökvägar bara för administratörer (admin-sidan och första start visar dem; apparna läser dem inte)
+    if (c.user.is_admin) return { ...l, paths: rootsOf(l) };
+    const { path: _p, ...rest } = l;
+    return rest;
+  })));
 /** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
 function checkPaths(list) {
   const out = [];

@@ -374,3 +374,15 @@ test('hemservern ansluter inte till ett relä som inte kan bevisa hemligheten', 
   await relay.unpair();
   fake.closeAllConnections?.(); fake.close();
 });
+
+// Sist i filen: spärren gäller sedan reläets adminsida från 127.0.0.1 en stund
+test('reläets admin: spärren mot felaktiga token kontrolleras först – rätt token släpps inte igenom när den slagit till', async () => {
+  const wrong = (i) => req(R, '/_relay/api/status', { ck: false, headers: { Authorization: 'Bearer fel-token-' + i + '-' + 'x'.repeat(20) } });
+  let first429 = -1;
+  for (let i = 0; i < 15; i++) { const s = (await wrong(i)).status; if (s === 429 && first429 < 0) first429 = i; else if (first429 < 0) assert.equal(s, 401); }
+  assert.ok(first429 > 0 && first429 <= 12, `spärren slog till efter ${first429} fel`);
+  // Spärren gäller oavsett token: ett svar som inte är 429 får inte avslöja att gissningen var rätt
+  assert.equal((await adminApi('status')).status, 429, 'rätt token under spärren ger också 429');
+  // Spärren släpper efter en stund (20 per minut fylls på: en ny chans var 3:e sekund)
+  await waitFor(async () => (await adminApi('status')).status === 200, 10000, 'att spärren släpper');
+});

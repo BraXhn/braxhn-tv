@@ -4,7 +4,7 @@
 //   /api/webhooks*           – profilens egna webhooks (inte barnprofiler, aldrig lokala adresser)
 //   /api/admin/webhooks*     – serverns webhooks (alla händelser, lokala adresser kan tillåtas uttryckligen)
 import { setSetting } from '../db.js';
-import { send, fail, readJson } from '../util.js';
+import { send, fail, readJson, localDate } from '../util.js';
 import { audit } from '../auth.js';
 import * as ps from '../playstats.js';
 import * as wh from '../webhooks.js';
@@ -15,7 +15,7 @@ const sendCsv = (c, name, body) => {
   c.res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store' });
   c.res.end(body);
 };
-const stamp = () => new Date().toISOString().slice(0, 10);
+const stamp = () => localDate();
 const page = (c) => ({ limit: c.q.get('limit'), offset: c.q.get('offset'), sort: c.q.get('sort'), dir: c.q.get('dir') });
 
 // ---------- Min historik ----------

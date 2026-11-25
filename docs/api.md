@@ -2,7 +2,9 @@
 
 iOS/tvOS-appen (`apps/apple`) och Android-appen (`apps/automotive`) använder samma `/api` som webben, med
 apptoken i `Authorization: Bearer …` (inloggning med `"app": true`) och kortlivade medie- och bildtoken i
-`?t=` för strömmar och bilder. Webben levereras med servern, men **installerade appar uppdateras inte när servern
+`?t=` för strömmar och bilder. Bildtoken (`POST /api/media-token`, `{ token, ttl }`, gäller 7 dygn) kan inte
+återanvändas, så servern sparar högst 50 per användare och tar bort de äldsta – förnya en gång per dygn, som apparna
+gör, och inte vid varje bild. Webben levereras med servern, men **installerade appar uppdateras inte när servern
 uppdateras**. En app från i våras ska fungera mot nästa års server.
 
 ## Version
@@ -393,7 +395,10 @@ servern, så apparna behöver inte anropa den – den är till för fokus på en
 
 Startcachen (`server/prestart.js`) är osynlig för klienterna: `/api/stream/:id/direct` svarar med samma byte och
 samma rubriker (`Content-Length`, `Content-Range`, `Accept-Ranges`) oavsett om de kommer ur cachen eller filen, och
-HLS-adresserna är oförändrade. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
+HLS-adresserna är oförändrade. För profiler med skärmtid skickar servern `/direct` i högst fyra gånger filens
+bithastighet (minst 1 MB/s) efter en snabb start på två minuters video (minst 32 MB), gemensamt för alla förfrågningar
+mot samma fil (`server/pace.js`). En spelare som läser i normal takt märker inget; hela filen går inte att kopiera på
+några sekunder. Nedladdning (`/download`, `/offline-file`) och profiler utan skärmtid påverkas inte. Administration (betrott nät): `GET/PUT /api/ops/prestart` (`on`, `maxGb`),
 `POST /api/ops/prestart/clear` och `POST /api/ops/prestart/fill`.
 
 ### Statistik och hack (tillägg)
@@ -414,7 +419,8 @@ loggas och syns i `/api/activity` (`stalls`, `stallCause`, `stallAt`). Apparna k
 Administratören kan begränsa ett konto eller en profil (`server/perms.js`). Inga fält har ändrats – apparna märker det
 bara som att titlar saknas och att vissa anrop nekas:
 
-- **Bibliotek:** `/api/libraries` och alla listor visar bara tillåtna bibliotek. En titel, låt, bok, bild eller ström i ett
+- **Bibliotek:** `/api/libraries` och alla listor visar bara tillåtna bibliotek. Serverns sökvägar (`path`, `paths`)
+  finns bara i svaret till administratörer – ingen app läser dem (apparna avkodar `id`, `name`, `type`, `count`). En titel, låt, bok, bild eller ström i ett
   otillåtet bibliotek ger **403** eller **404**, precis som en titel över barnprofilens åldersgräns.
   Fotobibliotek (typen `photo`, `/api/photos/*`) är bara för webben: de listas inte i `/api/libraries` för apptoken
   (apparna känner inte till typen), och `/api/home` har fältet `photoMemories` som alltid är tomt för appar.
@@ -796,7 +802,8 @@ Bara webbens administration använder routes nedan. Hemligheten lämnas aldrig u
 Reläets egna adresser (`relay/server.js`): `GET /_relay/health`, `GET /_relay/admin` (adminsida), `GET /_relay/challenge?server=`,
 `GET /_relay/tunnel` (uppgradering, se arkitektur.md, bro 35), `POST /_relay/pair`, `POST /_relay/unpair` och adminens API med
 `Authorization: Bearer <RELAY_ADMIN_TOKEN>`: `GET /_relay/api/status`, `POST /_relay/api/codes` `{ host? }` → `{ code, expires }`,
-`PUT /_relay/api/servers/:id` `{ hosts: [] }`, `DELETE /_relay/api/servers/:id`.
+`PUT /_relay/api/servers/:id` `{ hosts: [] }`, `DELETE /_relay/api/servers/:id`. Fel token ger **401**; efter 10 fel
+från samma IP-adress ger alla anrop **429** – även med rätt token – tills spärren släppt (en ny chans var 3:e sekund).
 
 ## Kontraktstestet
 

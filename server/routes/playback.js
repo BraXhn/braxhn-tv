@@ -22,6 +22,8 @@ import { TRAILER_SCOPE } from '../trailers.js';
 import * as libfilter from '../libfilter.js';
 import * as subsync from '../subsync.js';
 import * as prestart from '../prestart.js';
+import * as pace from '../pace.js';
+import * as screen from '../screentime.js';
 import * as family from '../familyfilter.js';
 import * as sublines from '../sublines.js';
 import crypto from 'node:crypto';
@@ -340,7 +342,10 @@ route('POST', '/api/items/:id/wake', user, (c) => {
   }
   send(c.res, 200, { ok: true, woke: prestart.wake(row, c.user.id) });
 });
-route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDirect(c.req, c.res, it); });
+// Profiler med skärmtid får originalfilen i några gånger filens bithastighet (server/pace.js): en spelare märker inget,
+// men hela filen går inte att hämta på några sekunder och ses ur en egen kopia utan att skärmtiden går
+const directPace = (c, it) => screen.rulesFor(c.user.id) ? () => pace.pacer(c.user.id, it) : null;
+route('GET', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDirect(c.req, c.res, it, directPace(c, it)); });
 route('HEAD', '/api/stream/:id/direct', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDirect(c.req, c.res, it); });
 route('GET', '/api/stream/:id/download', user, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) st.serveDownload(c.req, c.res, it); });
 route('GET', '/api/stream/:id/hls/master.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveMaster(c.res, it, c.q); });

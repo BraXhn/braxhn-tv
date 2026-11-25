@@ -58,6 +58,8 @@ export function weakPassword(pw, name = '') {
 // Token lagras som SHA-256 i databasen – ett läckt databasutdrag går inte att logga in med.
 // kind: web (cookie), app (Bearer, TV/mobil/bil), media (kortlivad, en titel, för strömmar/cast), img (bilder i appar)
 const TTL = { web: 30 * 86400, app: 365 * 86400, media: 24 * 3600, img: 7 * 86400 };
+/** Högsta antal bildtoken per användare */
+export const IMG_MAX = 50;
 const SHORT = 12 * 3600; // webbinloggning utan "Håll mig inloggad": utgår efter 12 h utan aktivitet
 const ttlOf = (kind, remember) => kind === 'web' && !remember ? SHORT : TTL[kind];
 export const sha = (t) => createHash('sha256').update(String(t)).digest('hex');
@@ -67,6 +69,10 @@ export function createSession(userId, kind = 'web', { item = null, ua = null, ip
   const token = randomBytes(32).toString('hex');
   run(`INSERT INTO sessions(token,user_id,created,kind,expires,scope_item,ua,ip,last_seen,remember) VALUES(?,?,?,?,?,?,?,?,?,?)`,
     sha(token), userId, now(), kind, now() + ttlOf(kind, remember), item, ua ? String(ua).slice(0, 200) : null, ip, now(), remember ? 1 : 0);
+  // Bildtoken (POST /api/media-token) kan inte återanvändas (bara hashen sparas): de äldsta utöver taket tas bort.
+  // Apparna förnyar en gång per dygn och token gäller 7 dygn, så taket räcker gott för hushållets alla enheter.
+  if (kind === 'img') run(`DELETE FROM sessions WHERE user_id=?1 AND kind='img' AND rowid NOT IN
+    (SELECT rowid FROM sessions WHERE user_id=?1 AND kind='img' ORDER BY created DESC, rowid DESC LIMIT ?2)`, userId, IMG_MAX);
   // Rensa utgångna sessioner högst en gång per minut (inte vid varje ny session)
   if (now() - lastCleanup >= 60) { lastCleanup = now(); run('DELETE FROM sessions WHERE expires < ?', now()); }
   return token;
@@ -162,15 +168,21 @@ export function ipBlocked(ip) {
   ipFails.set(ip, f);
   return f.length >= 10;
 }
+// Nyckeln är kortad: namn i inloggningar är högst 64 tecken, och ett längre namn ska inte ge en lång nyckel i minnet
+const userKey = (name) => String(name).toLowerCase().slice(0, 64);
 export function userLocked(name) {
-  const u = userFails.get(String(name).toLowerCase());
+  const u = userFails.get(userKey(name));
   return !!(u && u.until > Date.now());
 }
 export function noteFail(ip, name) {
   ip = ipKey(ip);
   ipFails.set(ip, [...(ipFails.get(ip) || []), Date.now()]);
   if (name) {
-    const k = String(name).toLowerCase();
+    const k = userKey(name);
+    // Tak för antalet nycklar: det äldsta som inte är spärrat får ge plats (en spärr försvinner aldrig av att kartan fylls)
+    if (!userFails.has(k) && userFails.size >= 50000) {
+      for (const [x, v] of userFails) if (v.until < Date.now()) { userFails.delete(x); break; }
+    }
     const u = userFails.get(k) || { n: 0, until: 0, last: 0 };
     if (Date.now() - u.last > 3600e3) u.n = 0;
     u.n++; u.last = Date.now();
@@ -181,7 +193,7 @@ export function noteFail(ip, name) {
   }
   return false;
 }
-export function clearFails(name) { userFails.delete(String(name).toLowerCase()); }
+export function clearFails(name) { userFails.delete(userKey(name)); }
 setInterval(() => {
   for (const [k, v] of ipFails) if (!v.some(t => Date.now() - t < WINDOW)) ipFails.delete(k);
   for (const [k, v] of userFails) if (v.until < Date.now() && Date.now() - v.last > 3600e3) userFails.delete(k);

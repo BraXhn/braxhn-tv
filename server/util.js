@@ -254,12 +254,16 @@ export function deletionBlocked({ name, rootOk, files, known, missing, allowMass
 // (även filen själv: en trasig symbolisk länk till en fil)
 export const underFailed = (file, failed) => failed.some(d => file === d || file.startsWith(d + path.sep));
 
+/** Dagens datum (ÅÅÅÅ-MM-DD) i serverns lokala tid (TZ, som i Dockerfile) – inte UTC, som är gårdagen strax efter midnatt */
+export const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 // ---- filströmning med Range-stöd ----
 /**
  * Skickar en fil (ev. del av den enligt Range). pipeline stänger filen även om klienten avbryter,
- * och läsfel kraschar inte servern. Tomma filer ger 200 med tom kropp.
+ * och läsfel kraschar inte servern. Tomma filer ger 200 med tom kropp. through: funktion som ger en Transform som
+ * datan går genom (takten för /direct) – anropas bara när data faktiskt skickas.
  */
-export function streamFile(req, res, file, size, headers = {}, { ranges = true } = {}) {
+export function streamFile(req, res, file, size, headers = {}, { ranges = true, through = null } = {}) {
   let start = 0, end = size - 1, code = 200;
   const m = ranges && size > 0 ? /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim()) : null;
   if (m && (m[1] !== '' || m[2] !== '')) {
@@ -273,7 +277,8 @@ export function streamFile(req, res, file, size, headers = {}, { ranges = true }
   if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
   res.writeHead(code, h);
   if (req.method === 'HEAD' || size <= 0) return res.end();
-  pipeline(fs.createReadStream(file, { start, end }), res, () => {});
+  if (through) pipeline(fs.createReadStream(file, { start, end }), through(), res, () => {});
+  else pipeline(fs.createReadStream(file, { start, end }), res, () => {});
 }
 
 // Bakgrundsjobb (förhandsbilder, intro-detektering, platshållarfärger …) körs med lägsta prioritet – processor (nice 19)

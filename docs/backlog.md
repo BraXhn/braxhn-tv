@@ -134,14 +134,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   Känn igen dem på servern vid nyckelbildsindexeringen, så slipper man 1–2 s vid första spolningen varje gång.
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
-- `/api/libraries` visar serverns sökvägar för alla inloggade, även barnprofiler (`server/routes/library.js`). Ta
-  bort `path`/`paths` för andra än administratörer när det är säkert att apparna inte läser dem.
-- Skärmtiden går att kringgå genom att hämta hela originalfilen snabbt via `/direct`. Begränsa hastigheten för
-  profiler med skärmtid (`serveDirect` i `server/stream.js`).
-- `POST /api/media-token` skapar en rad i `sessions` per anrop utan tak per användare.
-- Reläets spärr mot fel admintoken kontrolleras efter token (`relay/server.js`), så den bromsar inte gissning.
-- Datum i UTC i stället för lokal tid i inspelningars metadata och exporters filnamn (`server/dvr.js`,
-  `routes/history.js`, `routes/vocab.js`, `routes/privacy.js`).
 - Feedback: notis till administratören när ett ärende väntar; öppna ett avslutat ärende igen; gallra gamla ärenden;
   Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
 - Musikfältets knappar är emoji och klipps på 390 px bredd (`web/js/audio.js`, `#mbar`).

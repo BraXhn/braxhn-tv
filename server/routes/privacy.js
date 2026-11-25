@@ -4,7 +4,7 @@
 //   DELETE /api/me               – radera det egna kontot (inte administratörer och profiler; kräver lösenordet)
 //   GET    /api/tmdbimg/:size/:f – TMDB-bilder via servern, så att webbläsaren aldrig kontaktar TMDB (CSP spärrar det)
 import { get, run, tx } from '../db.js';
-import { send, fail, readJson, clientIp } from '../util.js';
+import { send, fail, readJson, clientIp, localDate } from '../util.js';
 import { audit, checkPw, ipBlocked, noteFail, clearCookies } from '../auth.js';
 import * as privacy from '../privacy.js';
 import { route, user } from '../http/router.js';
@@ -23,7 +23,7 @@ route('GET', '/api/me/export', user, (c) => {
   audit('data_exported', ctx(c));
   c.res.writeHead(200, {
     'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
-    'Content-Disposition': `attachment; filename="braxhn-tv-mina-uppgifter-${new Date().toISOString().slice(0, 10)}.json"`
+    'Content-Disposition': `attachment; filename="braxhn-tv-mina-uppgifter-${localDate()}.json"`
   });
   c.res.end(JSON.stringify(data, null, 1));
 });

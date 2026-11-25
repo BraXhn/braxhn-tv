@@ -18,7 +18,7 @@ import * as growing from './dvrlive.js';
 import { simulate, inWindow, episodeKey, outcomeText, worse } from './dvrplan.js';
 import { notify } from './notify.js';
 import * as webhooks from './webhooks.js';
-import { fail, streamFile } from './util.js';
+import { fail, streamFile, localDate } from './util.js';
 import * as jobs from './jobs.js';
 
 // Tabellerna dvr_rules och recordings skapas och migreras i db.js
@@ -485,7 +485,7 @@ function metaArgs(rec) {
   if (rec.episode != null) add('episode_sort', rec.episode);
   add('network', rec.channel_name);
   add('description', rec.description);
-  add('date', new Date(rec.start * 1000).toISOString().slice(0, 10));
+  add('date', localDate(new Date(rec.start * 1000))); // sändningens lokala dag, som i NFO-filen
   return m;
 }
 /** ffmpeg-argument att prova i tur och ordning (utan utfil). copyOk = videon kan kopieras (H.264, ej flätad) */

@@ -485,7 +485,7 @@ function composed(c, e, start, end) {
  * Direktuppspelning ur cachen. Returnerar false (anroparen serverar filen som vanligt) när cachen är av,
  * titeln saknas eller förfrågans början inte ligger i en cachad del.
  */
-export function serveDirect(req, res, it, type) {
+export function serveDirect(req, res, it, type, through = null) {
   const c = cacheOn(); if (!c) return false;
   load(c);
   const e = usable(it); if (!e) return false;
@@ -505,7 +505,8 @@ export function serveDirect(req, res, it, type) {
   if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
   res.writeHead(code, h);
   if (req.method === 'HEAD') { res.end(); return true; }
-  pipeline(composed(c, e, start, end), res, (er) => { if (er && er.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.warn('[snabbstart] direkt:', er.message); saveStats(); });
+  // through: takten för profiler med skärmtid (server/pace.js)
+  pipeline(...[composed(c, e, start, end), ...(through ? [through()] : []), res], (er) => { if (er && er.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.warn('[snabbstart] direkt:', er.message); saveStats(); });
   return true;
 }
 

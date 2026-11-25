@@ -360,7 +360,9 @@ async function internal(req, res, cl, p) {
   // Admin (RELAY_ADMIN_TOKEN)
   if (p.startsWith(PREFIX + 'api/')) {
     if (ADMIN_TOKEN.length < 16) return json(res, 403, { error: 'Admin är avstängd – sätt RELAY_ADMIN_TOKEN (minst 16 tecken)' });
-    if (!adminOk(req)) { if (!allowAdmin(cl.ip)) return json(res, 429, { error: 'För många försök' }); return json(res, 401, { error: 'Fel admintoken' }); }
+    // Spärren först: under spärren får inte ens rätt token något annat svar (annars bromsar den inte gissning)
+    if (allowAdmin.blocked(cl.ip)) return json(res, 429, { error: 'För många försök' });
+    if (!adminOk(req)) { allowAdmin(cl.ip); return json(res, 401, { error: 'Fel admintoken' }); }
     let origin = cl.host; try { if (req.headers.origin) origin = new URL(req.headers.origin).host; } catch { origin = ''; }
     if (['POST', 'PUT', 'DELETE'].includes(req.method) && origin !== cl.host) return json(res, 403, { error: 'Annan webbplats' });
     const sub = p.slice(PREFIX.length + 4);

@@ -541,11 +541,12 @@ function guessCharenc(file) {
 // Snabbstart (server/prestart.js, kopplas in av app.js): direct serverar början/slutet ur startcachen medan
 // disken vaknar, input ger ffmpeg en sammansatt indata (cachen + originalfilen) vid start från början
 export const fastStart = { direct: null, input: null, seekable: null };
-export function serveDirect(req, res, it) {
+// through: funktion som ger en Transform för takten (profiler med skärmtid, server/pace.js), annars null
+export function serveDirect(req, res, it, through = null) {
   const type = MIME[path.extname(it.path).toLowerCase()] || 'application/octet-stream';
-  if (fastStart.direct?.(req, res, it, type)) return;
+  if (fastStart.direct?.(req, res, it, type, through)) return;
   let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen hittades inte'); }
-  streamFile(req, res, it.path, st.size, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  streamFile(req, res, it.path, st.size, { 'Content-Type': type, 'Cache-Control': 'no-store' }, { through });
 }
 
 export function serveDownload(req, res, it) {
