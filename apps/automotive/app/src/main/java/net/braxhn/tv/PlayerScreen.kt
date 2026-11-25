@@ -55,7 +55,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var item by remember(req) { mutableStateOf<MediaItem?>(null) }
     var pb by remember(req) { mutableStateOf<Playback?>(null) }
     var error by remember(req) { mutableStateOf<String?>(null) }
-    var skip by remember(req) { mutableStateOf<String?>(null) }
+    var skip by remember(req) { mutableStateOf<String?>(null) } // "pre" | "recap" | "intro" | "next"
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
     var menu by remember { mutableStateOf<String?>(null) } // "tracks" | "chapters" | "speed"
@@ -77,7 +77,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var localAudio by remember(req) { mutableStateOf<Int?>(null) }
     var modeNote by remember { mutableStateOf<String?>(null) }
     // Familjefiltret (överhoppad scen) och automatisk undertextsynk visas en stund i statusraden
-    var note by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }; var noteSticky by remember { mutableStateOf(false) }
     // Stoppad av servern (en vuxen i Föräldraöversikten, administratören eller skärmtiden): serverns/appens förklaring
     var stopped by remember(req) { mutableStateOf<String?>(null) }
     // Slutrapport och stopp av strömmen skickas en gång per uppspelning (Stäng + att vyn stängs gav dubbla anrop)
@@ -105,9 +105,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         player.pause()
         player.stop()
         val st = r.screenTime
-        stopped = if (st != null && !st.allowed) st.message ?: "Skärmtiden är slut för idag."
-                  else if (Session.kid.value) "En vuxen stoppade uppspelningen"
-                  else "Uppspelningen stoppades av administratören"
+        stopped = if (st != null && !st.allowed) st.message ?: context.getString(R.string.player_screen_time_up)
+                  else if (Session.kid.value) context.getString(R.string.player_stopped_by_adult)
+                  else context.getString(R.string.player_stopped_by_admin)
     }
 
     fun report(final: Boolean = false) {
@@ -132,7 +132,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     LaunchedEffect(req) {
         // Nedladdad fil: spela lokalt (fungerar utan nät)
         Downloads.localFile(req.id)?.let { f ->
-            status = "Offline"; offline = true
+            status = context.getString(R.string.player_offline); offline = true
             // Starta den lokala filen först – nätanropen nedan kan ta lång tid eller misslyckas utan täckning
             player.setMediaItem(M3Item.fromUri(Uri.fromFile(f)), (req.start * 1000).toLong())
             player.prepare(); player.playWhenReady = true
@@ -162,8 +162,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 ("start" to (if (req.start >= 1 && !cinema) req.start.toLong().toString() else null)))
             pb = p
             currentSub = sub
-            status = listOfNotNull(when (p.mode) { "direct" -> "Direkt"; "remux" -> "Remux"; else -> "Omkodning" },
-                if (p.tonemap == true) "HDR→SDR" else hdrLabel(it.hdr), if (p.remote == true) "utanför hemmet" else null).joinToString(" · ")
+            status = listOfNotNull(when (p.mode) { "direct" -> context.getString(R.string.player_direct); "remux" -> context.getString(R.string.player_remux); else -> context.getString(R.string.player_transcode) },
+                if (p.tonemap == true) "HDR→SDR" else hdrLabel(it.hdr), if (p.remote == true) context.getString(R.string.player_remote) else null).joinToString(" · ")
             // Alla textundertexter bifogas så att de kan bytas direkt; den valda markeras som standard
             val subs = p.subtitles.map { s ->
                 M3Item.SubtitleConfiguration.Builder(Uri.parse(Api.absolute(s.url)))
@@ -181,7 +181,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             // Trailers och förfilm först (egna adresser med token), sedan filmen
             val pre = p.preroll.map { e ->
                 M3Item.Builder().setUri(Api.absolute(e.url))
-                    .setMediaMetadata(MediaMetadata.Builder().setTitle(e.title ?: "Trailer").build()).build()
+                    .setMediaMetadata(MediaMetadata.Builder().setTitle(e.title ?: context.getString(R.string.player_trailer)).build()).build()
             }
             prerolls = p.preroll
             mainIndex = pre.size
@@ -200,27 +200,27 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             val t = player.currentPosition / 1000.0
             val p = pb
             val idx = player.currentMediaItemIndex
-            prerollLabel = if (idx < mainIndex) prerolls.getOrNull(idx)?.let { e -> if (e.kind == "preroll") "Förfilm" else "Trailer: ${e.title ?: ""}" } else null
+            prerollLabel = if (idx < mainIndex) prerolls.getOrNull(idx)?.let { e -> if (e.kind == "preroll") context.getString(R.string.player_preroll) else context.getString(R.string.player_trailer_title, e.title ?: "") } else null
             // Bild-i-bild får videons format
             val vs = player.videoSize
             if (pipOk) Pip.aspect = Pip.ratio((vs.width * vs.pixelWidthHeightRatio).toInt(), vs.height)
             skip = when {
-                idx < mainIndex -> "Hoppa över"
-                p?.recap != null && t >= p.recap.start && t < p.recap.end - 1 -> "Hoppa över sammanfattning"
-                p?.intro != null && t >= p.intro.start && t < p.intro.end - 1 -> "Hoppa över intro"
-                p?.credits != null && item?.nextId != null && t >= p.credits && t < p.credits + 60 -> "Nästa avsnitt"
+                idx < mainIndex -> "pre"
+                p?.recap != null && t >= p.recap.start && t < p.recap.end - 1 -> "recap"
+                p?.intro != null && t >= p.intro.start && t < p.intro.end - 1 -> "intro"
+                p?.credits != null && item?.nextId != null && t >= p.credits && t < p.credits + 60 -> "next"
                 else -> null
             }
             // Familjefiltret i läget "hoppa över scener": planen från /playback (servern tystar svordomarna själv)
             val f = p?.filter
             if (f != null && f.mode == "skip" && idx >= mainIndex && player.isPlaying) {
                 val sc = f.skip.firstOrNull { x -> t >= x.start && t < x.end - 0.3 }
-                if (sc != null) { player.seekTo((sc.end * 1000).toLong()); note = "Hoppade över: ${sc.label ?: "markerad scen"}" }
+                if (sc != null) { player.seekTo((sc.end * 1000).toLong()); note = context.getString(R.string.player_skipped_scene, sc.label ?: context.getString(R.string.player_marked_scene)) }
             }
             if (++n % 20 == 0 && player.isPlaying) report()
         }
     }
-    LaunchedEffect(note) { if (note != null && note?.startsWith("Synkar") != true) { delay(4000); note = null } }
+    LaunchedEffect(note) { if (note != null && !noteSticky) { delay(4000); note = null } }
 
     /**
      * Direktuppspelning (atrack=1): välj ljudspåret i spelaren i stället för att servern remuxar. Serverns spårlista
@@ -247,7 +247,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         val id = TvOutput.pickMode(a, fps, width, height, frameMode == "res") ?: return
         val resume = player.playWhenReady
         player.playWhenReady = false
-        modeNote = "Anpassar skärmen till %.3f bilder/s".format(fps).replace('.', ',')
+        modeNote = context.getString(R.string.player_frame_rate, fps)
         TvOutput.setMode(a, id)
         scope.launch {
             var n = 0
@@ -340,16 +340,16 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     /** Automatisk synk av undertextfilen mot ljudet (servern räknar); undertexten laddas om när den är klar */
     fun autoSync(s: SubtitleTrack) {
         val it = item ?: return
-        note = "Synkar undertexten…"
+        noteSticky = true; note = context.getString(R.string.player_syncing)
         scope.launch {
             val audio: Int? = localAudio ?: pb?.audioSelected?.toIntOrNull() ?: req.audio
-            val r = runCatching { Api.autoSyncSubtitle(it.id, s.id, audio) { pr: Double -> note = "Synkar undertexten… ${(pr * 100).toInt()} %" } }
+            val r = runCatching { Api.autoSyncSubtitle(it.id, s.id, audio) { pr: Double -> note = context.getString(R.string.player_syncing_progress, (pr * 100).toInt()) } }
             val job: SubSyncJob? = r.getOrNull()
-            note = when {
-                r.isFailure -> "Kunde inte synka: ${r.exceptionOrNull()?.message ?: ""}"
-                job?.state == "done" -> "Undertexten är synkad" + (job?.result?.offset?.let { o -> " (%+.1f s)".format(o).replace('.', ',') } ?: "")
-                job?.state == "unsure" -> "Ingen säker förskjutning hittades – undertexten är oförändrad"
-                else -> "Kunde inte synka: ${job?.error ?: "okänt fel"}"
+            noteSticky = false; note = when {
+                r.isFailure -> context.getString(R.string.player_sync_failed, r.exceptionOrNull()?.message ?: "")
+                job?.state == "done" -> job?.result?.offset?.let { o -> context.getString(R.string.player_synced_offset, o) } ?: context.getString(R.string.player_synced)
+                job?.state == "unsure" -> context.getString(R.string.player_sync_unsure)
+                else -> context.getString(R.string.player_sync_failed, job?.error ?: context.getString(R.string.player_unknown_error))
             }
             if (job?.state == "done") restart(sub = s)
         }
@@ -358,8 +358,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     // Statusraden: syntolkning (valt ljudspår) och familjefiltret
     val selAudio: Int? = localAudio ?: pb?.audioSelected?.toIntOrNull() ?: req.audio
     val audioDesc: Boolean = item?.audio?.let { list -> (list.firstOrNull { a -> a.index == selAudio } ?: list.firstOrNull { a -> selAudio == null && a.default == true })?.isAudioDesc } == true
-    val extraStatus: String? = listOfNotNull(if (audioDesc) "Syntolkning" else null,
-        pb?.filter?.let { f -> if (f.mode == "skip") "Familjefilter: hoppar över scener" else "Familjefilter" }).joinToString(" · ").takeIf { x -> x.isNotEmpty() }
+    val extraStatus: String? = listOfNotNull(if (audioDesc) tr(R.string.audio_description) else null,
+        pb?.filter?.let { f -> tr(if (f.mode == "skip") R.string.player_family_skip else R.string.player_family) }).joinToString(" · ").takeIf { x -> x.isNotEmpty() }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player; setShowSubtitleButton(true); keepScreenOn = true } },
@@ -368,7 +368,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         if (!inPip) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { report(final = true); onClose() }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                Icon(Icons.Filled.Close, "Stäng", tint = Color.White, modifier = Modifier.size(30.dp))
+                Icon(Icons.Filled.Close, tr(R.string.close), tint = Color.White, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.width(12.dp))
             Text(item?.let { if (it.isEpisode) "${it.showTitle} · ${it.sxe} · ${it.title}" else it.title } ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -376,36 +376,36 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             val p = pb
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { menu = "speed" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                Icon(Icons.Filled.Speed, "Uppspelningshastighet", tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(Icons.Filled.Speed, tr(R.string.player_speed), tint = Color.White, modifier = Modifier.size(28.dp))
             }
             if (pipOk) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { Pip.enter(activity) }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                    Icon(Icons.Filled.PictureInPictureAlt, "Bild-i-bild", tint = Color.White, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Filled.PictureInPictureAlt, tr(R.string.player_pip), tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
             if (p != null && (p.audio.size > 1 || p.subtitles.isNotEmpty() || (item?.subtitles?.isNotEmpty() == true) || !offline)) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { menu = "tracks" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                    Icon(Icons.Filled.Subtitles, "Ljud och undertexter", tint = Color.White, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Filled.Subtitles, tr(R.string.player_tracks), tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
             if (p != null && p.chapters.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { menu = "chapters" }, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                    Icon(Icons.Filled.List, "Kapitel", tint = Color.White, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Filled.List, tr(R.string.player_chapters), tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
         }
         if (menu != null) {
             val p = pb
-            AlertDialog(onDismissRequest = { menu = null }, confirmButton = { TextButton(onClick = { menu = null }) { Text("Stäng") } },
-                title = { Text(when (menu) { "chapters" -> "Kapitel"; "speed" -> "Hastighet"; else -> "Ljud och undertexter" }) },
+            AlertDialog(onDismissRequest = { menu = null }, confirmButton = { TextButton(onClick = { menu = null }) { Text(tr(R.string.close)) } },
+                title = { Text(tr(when (menu) { "chapters" -> R.string.player_chapters; "speed" -> R.string.player_speed_title; else -> R.string.player_tracks })) },
                 text = {
                     LazyColumn(Modifier.heightIn(max = 420.dp)) {
                         if (menu == "speed") {
-                            items(SPEEDS) { (v, label) ->
-                                OptionRow(label, v == speed) {
+                            items(SPEEDS) { v ->
+                                OptionRow(if (v == 1f) tr(R.string.player_speed_normal) else java.text.NumberFormat.getInstance().format(v.toDouble()) + "×", v == speed) {
                                     speed = v; player.setPlaybackSpeed(v); menu = null
                                 }
                             }
@@ -417,7 +417,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                             }
                         } else if (p != null) {
                             if (p.audio.size > 1) {
-                                this.item { Text("Ljud", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
+                                this.item { Text(tr(R.string.audio), fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
                                 val sel = localAudio ?: p.audioSelected?.toIntOrNull() ?: req.audio
                                 items(p.audio) { a ->
                                     // Syntolkning syns i titelsidans spårlista (vi), som har filens alla flaggor
@@ -428,47 +428,47 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                                     }
                                 }
                             }
-                            this.item { Text("Undertexter", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
-                            this.item { OptionRow("Inga", currentSub == null) { selectSubtitle(null); menu = null } }
+                            this.item { Text(tr(R.string.subtitles), fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
+                            this.item { OptionRow(tr(R.string.none), currentSub == null) { selectSubtitle(null); menu = null } }
                             items(item?.subtitles ?: emptyList()) { s -> OptionRow(s.label, s.id == currentSub?.id) { selectSubtitle(s); menu = null } }
                             // Undertextfiler kan synkas mot ljudet av servern (inbäddade spår kan inte)
                             val cs = currentSub
                             if (!offline && cs != null && p.subtitles.firstOrNull { x -> x.id == cs.id }?.syncable == true) {
-                                this.item { CheckRow("Synka automatiskt (mot ljudet)", false) { menu = null; autoSync(cs) } }
+                                this.item { CheckRow(tr(R.string.player_auto_sync), false) { menu = null; autoSync(cs) } }
                             }
                             // Nattläge/tydligare dialog: servern filtrerar ljudet, så strömmen startas om där man är
                             if (!offline) {
-                                this.item { Text("Ljudkomfort", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
-                                this.item { CheckRow("Nattläge (jämnare ljudnivå)", Api.nightMode) { Api.nightMode = !Api.nightMode; menu = null; restart() } }
-                                this.item { CheckRow("Tydligare dialog", Api.dialogBoost) { Api.dialogBoost = !Api.dialogBoost; menu = null; restart() } }
+                                this.item { Text(tr(R.string.player_comfort), fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 6.dp)) }
+                                this.item { CheckRow(tr(R.string.player_night), Api.nightMode) { Api.nightMode = !Api.nightMode; menu = null; restart() } }
+                                this.item { CheckRow(tr(R.string.dialog_on), Api.dialogBoost) { Api.dialogBoost = !Api.dialogBoost; menu = null; restart() } }
                             }
                         }
                     }
                 })
         }
-        skip?.let { label ->
+        skip?.let { kind ->
             Button(onClick = {
                 val p = pb
-                if (label == "Hoppa över") player.seekTo(mainIndex, 0L)
-                else if (label == "Hoppa över sammanfattning" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
-                else if (label == "Hoppa över intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
+                if (kind == "pre") player.seekTo(mainIndex, 0L)
+                else if (kind == "recap" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
+                else if (kind == "intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
                 else item?.nextId?.let { next -> report(final = true); player.stop(); onPlay(Screen.Play(next, 0.0, null, null)) }
             }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
                 .focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
-                Icon(Icons.Filled.SkipNext, null); Text(" $label", fontSize = 18.sp)
+                Icon(Icons.Filled.SkipNext, null); Text(" " + tr(when (kind) { "pre" -> R.string.player_skip; "recap" -> R.string.player_skip_recap; "intro" -> R.string.player_skip_intro; else -> R.string.player_next_episode }), fontSize = 18.sp)
             }
         }
         // Google TV: flytta fokus till knappen när den dyker upp så att den kan väljas direkt med fjärrkontrollen
         LaunchedEffect(skip) { if (tv && skip != null) runCatching { skipFocus.requestFocus() } }
-        val failure: Pair<String, String>? = stopped?.let { s -> "Uppspelningen stoppades" to s } ?: error?.let { e -> "Kunde inte spela" to e }
+        val failure: Pair<String, String>? = stopped?.let { s -> tr(R.string.player_stopped) to s } ?: error?.let { e -> tr(R.string.player_failed) to e }
         failure?.let { (head, text) ->
             Column(Modifier.align(Alignment.Center).widthIn(max = 560.dp).background(Surface2, RoundedCornerShape(14.dp)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(head, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(text, color = Color.LightGray, fontSize = 15.sp)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { report(final = true); onClose() }, modifier = Modifier.height(52.dp).focusRequester(closeFocus).focusRing(RoundedCornerShape(26.dp))) { Text("Stäng", fontSize = 17.sp) }
+                Button(onClick = { report(final = true); onClose() }, modifier = Modifier.height(52.dp).focusRequester(closeFocus).focusRing(RoundedCornerShape(26.dp))) { Text(tr(R.string.close), fontSize = 17.sp) }
             }
             // Fjärrkontrollen: fokus på Stäng, så att OK stänger (annars ligger fokus kvar i spelaren bakom)
             LaunchedEffect(head, text) { runCatching { closeFocus.requestFocus() } }
@@ -482,7 +482,7 @@ private fun hdrLabel(hdr: String?): String? = when (hdr) {
     "hdr10" -> "HDR10"; "hlg" -> "HLG"; "dovi" -> "Dolby Vision"; else -> hdr?.uppercase()
 }
 
-private val SPEEDS = listOf(0.75f to "0,75×", 1f to "Normal", 1.25f to "1,25×", 1.5f to "1,5×", 1.75f to "1,75×", 2f to "2×")
+private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
 @Composable
 private fun CheckRow(label: String, checked: Boolean, onClick: () -> Unit) {

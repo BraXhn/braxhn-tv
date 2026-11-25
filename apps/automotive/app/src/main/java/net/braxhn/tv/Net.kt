@@ -112,29 +112,29 @@ fun acceptLanguage(): String {
 
 /** Text för ett HTTP-fel utan förklaring från servern (t.ex. reläet eller en proxy svarade) */
 fun httpErrorText(code: Int): String = when (code) {
-    401 -> "Inloggningen gäller inte längre – logga in igen."
-    403 -> "Servern nekade (403)."
-    404 -> "Finns inte på servern (404). Servern kan vara äldre än appen."
-    409 -> "Upptaget just nu (409) – försök igen om en stund."
-    429 -> "För många försök – vänta en stund och försök igen."
-    502, 504 -> "Servern svarar inte ($code). Ansluter du via BraXhn Relay kan hemservern vara avstängd eller sakna nät."
-    503 -> "Servern är tillfälligt otillgänglig (503) – försök igen om en stund."
-    507 -> "Serverns disk är full (507) – säg till den som sköter servern."
-    else -> "Servern svarade $code"
+    401 -> str(R.string.err_http_401)
+    403 -> str(R.string.err_http_403)
+    404 -> str(R.string.err_http_404)
+    409 -> str(R.string.err_http_409)
+    429 -> str(R.string.err_http_429)
+    502, 504 -> str(R.string.err_http_502, code)
+    503 -> str(R.string.err_http_503)
+    507 -> str(R.string.err_http_507)
+    else -> str(R.string.err_http_other, code)
 }
 
 /** Ett nätverksfel (Javas engelska text) som ett svenskt meddelande */
 fun netError(e: IOException): ApiException {
     val msg = when (e) {
-        is UnknownHostException -> "Servern hittades inte – kontrollera adressen och att enheten har nät."
-        is NoRouteToHostException, is ConnectException -> "Kunde inte ansluta till servern. Är den igång och nås den från det här nätet? Utanför hemmet behövs en https-adress (t.ex. BraXhn Relay)."
-        is SocketTimeoutException -> "Servern svarade inte i tid – försök igen."
+        is UnknownHostException -> str(R.string.err_unknown_host)
+        is NoRouteToHostException, is ConnectException -> str(R.string.err_connect)
+        is SocketTimeoutException -> str(R.string.err_timeout)
         is SSLHandshakeException ->
             if (generateSequence<Throwable>(e) { it.cause }.any { it is CertificateException })
-                "Serverns certifikat godkänns inte (självsignerat, utgånget eller för en annan adress). Använd http:// i hemnätet, eller ett certifikat från Let's Encrypt eller BraXhn Relay."
-            else "Säker anslutning (https) misslyckades. Svarar servern bara på http? Skriv då http:// före adressen."
-        is SSLException -> "Säker anslutning (https) misslyckades. Svarar servern bara på http? Skriv då http:// före adressen."
-        else -> "Nätverksfel: ${e.message ?: e.javaClass.simpleName}"
+                str(R.string.err_certificate)
+            else str(R.string.err_ssl)
+        is SSLException -> str(R.string.err_ssl)
+        else -> str(R.string.err_network, e.message ?: e.javaClass.simpleName)
     }
     return ApiException(msg)
 }
@@ -155,14 +155,14 @@ fun playerErrorText(e: PlaybackException): String {
         }
     }
     return when (e.errorCode) {
-        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Servern svarade inte i tid. En omkodning kan ta en stund att starta – försök igen."
-        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> "Tappade anslutningen till servern."
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> str(R.string.err_player_timeout)
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> str(R.string.err_player_connection)
         PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED, PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ->
-            "Enheten kunde inte avkoda videon. Prova en lägre kvalitet under Inställningar."
+            str(R.string.err_player_decode)
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED, PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
-            "Strömmen från servern gick inte att läsa."
-        else -> "Uppspelningen misslyckades (${e.errorCodeName})"
+            str(R.string.err_player_parse)
+        else -> str(R.string.err_player_other, e.errorCodeName)
     }
 }
 

@@ -202,6 +202,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - 2026-11-25 (gren `team/expo-2026-11-25`): Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
+- 2026-11-25 (gren `team/android-2026-11-25`): Android-appen på engelska och svenska efter telefonens språk – texterna i
+  `res/values/strings.xml` (engelska, standard) och `res/values-sv/strings.xml`, ordval som webben;
+  `test/android-i18n.test.js` hindrar svensk text i Kotlin-koden. Bygget i GitHub Actions är inte kört än.
 - 2026-11-25 (i `:edge`): Femte granskningen av servern – sökvägar bara för administratörer, takt på originalfilen för
   profiler med skärmtid, tak för bildtoken, reläets spärr först, lokalt datum i inspelningar och exporter.
 - 2026-11-25: Musikkön och platsen sparas per profil på servern och finns kvar efter omladdning; Föregående och

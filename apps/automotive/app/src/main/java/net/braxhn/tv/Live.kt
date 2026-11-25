@@ -73,9 +73,9 @@ fun Modifier.focusRing(shape: RoundedCornerShape = RoundedCornerShape(10.dp)): M
     this.onFocusChanged { focused = it.isFocused }.border(BorderStroke(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent), shape)
 }
 
-private val hm = SimpleDateFormat("HH:mm", Locale("sv", "SE"))
+private val hm = SimpleDateFormat("HH:mm", Locale.getDefault())
 private fun t(s: Long) = hm.format(Date(s * 1000))
-private val recDay = SimpleDateFormat("EEE d MMM HH:mm", Locale("sv", "SE"))
+private val recDay = SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault())
 
 /** Enkel kanallista – används när servern saknar /api/iptv (äldre servrar) */
 @Composable
@@ -87,10 +87,10 @@ fun ChannelGrid(onPlay: (Screen.LivePlay) -> Unit, push: (Screen) -> Unit) {
     LaunchedEffect(d) { LiveNav.list = d.channels.map { c -> ChanRef(c.id, c.number, c.name) } }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Live-TV", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
-            OutlinedButton(onClick = { push(Screen.Recordings) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp))) { Text("Inspelningar") }
+            Text(tr(R.string.nav_live), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
+            OutlinedButton(onClick = { push(Screen.Recordings) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp))) { Text(tr(R.string.live_recordings)) }
         }
-        if (d.channels.isEmpty()) { ErrorText("Inga kanaler – lägg till en källa under Administration i webben."); return }
+        if (d.channels.isEmpty()) { ErrorText(tr(R.string.live_no_channels_admin)); return }
         // Läses en gång för hela rutnätet (inte per kanal)
         val tok = Api.imageToken.collectAsState().value
         LazyVerticalGrid(GridCells.Adaptive(300.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -137,15 +137,15 @@ fun RecordingsScreen(onPlay: (Screen.LivePlay) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Inspelningar", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp).weight(1f))
-                listOf("upcoming" to "Kommande (${upcoming.size})", "running" to "Pågår (${running.size})", "done" to "Inspelat (${done.size})").forEach { (k, n) ->
+                Text(tr(R.string.live_recordings), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp).weight(1f))
+                listOf("upcoming" to tr(R.string.rec_upcoming, upcoming.size), "running" to tr(R.string.rec_running, running.size), "done" to tr(R.string.rec_done, done.size)).forEach { (k, n) ->
                     FilterChip(selected = cur == k, onClick = { tab = k }, label = { Text(n, fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
                 }
             }
         }
         when (cur) {
             "running" -> {
-                if (running.isEmpty()) item { Text("Inget spelas in just nu.", color = Color.Gray) }
+                if (running.isEmpty()) item { Text(tr(R.string.rec_none_running), color = Color.Gray) }
                 items(running, key = { it.id }) { r ->
                     val canWatch = r.watchable != false
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().background(Surface2)
@@ -153,37 +153,37 @@ fun RecordingsScreen(onPlay: (Screen.LivePlay) -> Unit) {
                         Text("⏺ ", color = Color(0xFFFF5D6C))
                         Column(Modifier.weight(1f)) {
                             Text(listOfNotNull(r.title, r.subtitle).joinToString(" – "), fontWeight = FontWeight.SemiBold)
-                            Text(listOfNotNull(r.channel, "spelas in, klar ${t(r.stop)}").joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
+                            Text(listOfNotNull(r.channel, tr(R.string.rec_recording_until, t(r.stop))).joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
                         }
-                        if (canWatch) Text("Titta", color = Accent, fontWeight = FontWeight.SemiBold)
+                        if (canWatch) Text(tr(R.string.rec_watch), color = Accent, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
             "upcoming" -> {
-                if (upcoming.isEmpty()) item { Text("Inget bokat. Boka i TV-guiden (välj ett program → Spela in) eller i webben.", color = Color.Gray) }
+                if (upcoming.isEmpty()) item { Text(tr(R.string.rec_none_upcoming), color = Color.Gray) }
                 items(upcoming, key = { it.id }) { r ->
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Surface2).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(listOfNotNull(r.title, r.subtitle).joinToString(" – "), fontWeight = FontWeight.SemiBold)
                             Text(listOfNotNull(recDay.format(Date(r.start * 1000)), r.channel).joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
                             // Konflikt: tunrarna räcker inte (börjar sent, avbryts eller missas)
-                            if (r.plan != null && r.plan != "ok") Text(r.planText ?: "Krockar med andra inspelningar", color = Color(0xFFFFB454), fontSize = 13.sp)
+                            if (r.plan != null && r.plan != "ok") Text(r.planText ?: tr(R.string.rec_conflict), color = Color(0xFFFFB454), fontSize = 13.sp)
                         }
-                        TextButton(onClick = { remove(r) }) { Text("Avboka") }
+                        TextButton(onClick = { remove(r) }) { Text(tr(R.string.rec_cancel)) }
                     }
                 }
             }
             else -> {
-                if (done.isEmpty()) item { Text("Inget inspelat ännu.", color = Color.Gray) }
+                if (done.isEmpty()) item { Text(tr(R.string.rec_none_done), color = Color.Gray) }
                 items(done, key = { it.id }) { r ->
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().background(Surface2)
                         .clickable { onPlay(Screen.LivePlay(-r.id, r.title, r.commercials, autoSkip)) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(listOfNotNull(r.title, r.subtitle).joinToString(" – "), fontWeight = FontWeight.SemiBold)
-                            Text(listOfNotNull(r.channel, SimpleDateFormat("d MMM HH:mm", Locale("sv", "SE")).format(Date(r.start * 1000)),
-                                if (r.commercials.isNotEmpty()) "${r.commercials.size} reklamavbrott" else null).joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
+                            Text(listOfNotNull(r.channel, SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date(r.start * 1000)),
+                                if (r.commercials.isNotEmpty()) plural(R.plurals.commercials_n, r.commercials.size) else null).joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
                         }
-                        TextButton(onClick = { remove(r) }) { Text("Ta bort") }
+                        TextButton(onClick = { remove(r) }) { Text(tr(R.string.remove)) }
                     }
                 }
             }
@@ -260,7 +260,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
         digits = ""
         val wantN: Int? = want.toIntOrNull()
         val target = LiveNav.list.firstOrNull { c -> c.number == want } ?: LiveNav.list.firstOrNull { c -> wantN != null && c.number?.toIntOrNull() == wantN }
-        if (target != null) switchTo(target) else banner = "Kanal $want finns inte"
+        if (target != null) switchTo(target) else banner = context.getString(R.string.live_no_channel, want)
     }
     LaunchedEffect(banner) { if (banner != null) { delay(3000); banner = null } }
     // Reklamavbrott i inspelningen
@@ -272,7 +272,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
             val b = req.breaks.firstOrNull { m -> tPos >= m.start && tPos < m.end - 1 }
             if (b != null && req.autoSkip && b.start !in skipped) {
                 skipped.add(b.start); player.seekTo((b.end * 1000).toLong()); breakNow = null
-                banner = "Hoppade över reklam"
+                banner = context.getString(R.string.live_skipped_ad)
             } else breakNow = b
         }
     }
@@ -306,7 +306,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
 
     DisposableEffect(req) {
         val l = object : androidx.media3.common.Player.Listener {
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = if (e.message?.contains("409") == true) "Alla tuners används" else playerErrorText(e) }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = if (e.message?.contains("409") == true) context.getString(R.string.live_tuners_busy) else playerErrorText(e) }
         }
         player.addListener(l)
         onDispose { player.removeListener(l) }
@@ -323,7 +323,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
         AndroidView(factory = { c -> PlayerView(c).apply { this.player = player; keepScreenOn = true; viewRef[0] = this } }, modifier = Modifier.fillMaxSize())
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                Icon(Icons.Filled.Close, "Stäng", tint = Color.White)
+                Icon(Icons.Filled.Close, tr(R.string.close), tint = Color.White)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -333,7 +333,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
             val p = nowProg
             if (live && p != null && p.catchup == true) {
                 OutlinedButton(onClick = { onPlay(Screen.Stream("catchup", p.id, p.title)) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp)),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.5f), contentColor = Color.White)) { Text("Från början") }
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.5f), contentColor = Color.White)) { Text(tr(R.string.live_from_start)) }
             }
         }
         banner?.let { b ->
@@ -344,7 +344,7 @@ fun LivePlayerScreen(req: Screen.LivePlay, onClose: () -> Unit, onPlay: (Screen)
             Button(onClick = { skipped.add(b.start); player.seekTo((b.end * 1000).toLong()); breakNow = null },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp).focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
-                Text("Hoppa över reklam", fontSize = 18.sp)
+                Text(tr(R.string.live_skip_ad), fontSize = 18.sp)
             }
         }
         error?.let { Text(it, color = Color.White, modifier = Modifier.align(Alignment.Center).background(Surface2, RoundedCornerShape(12.dp)).padding(20.dp)) }

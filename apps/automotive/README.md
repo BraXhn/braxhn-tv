@@ -53,7 +53,7 @@ Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan
 
 **Stöd projektet:** längst ner i Inställningar finns raden *Stöd projektet* när servern anger en donationslänk (PayPal). Den öppnar länken i webbläsaren – inget annat, inga påminnelser, och den visas aldrig för barnprofiler. Saknar enheten webbläsare (bilen, vissa TV-apparater) visas adressen.
 
-Appen är på svenska. Serverns felmeddelanden är också bara på svenska, så appen följer inte enhetens språk än (den skickar enhetens språk i `Accept-Language` för framtida bruk).
+**Språk:** appen följer enhetens språk – svenska på en svensk telefon, TV eller bil, annars engelska. Texterna ligger i `app/src/main/res/values/strings.xml` (engelska, standard) och `app/src/main/res/values-sv/strings.xml` (svenska), med samma ordval som webben (`web/i18n/en.js`). Ny text läggs i båda filerna och hämtas med `tr(R.string.…)` i Compose eller `str(R.string.…)` utanför (se `Strings.kt`); `test/android-i18n.test.js` stoppar svensk text i Kotlin-koden och kontrollerar att filerna stämmer överens. Texter från servern (felmeddelanden, namn på egna samlingar, inspelningarnas krockbesked) visas som servern skickar dem, alltså på svenska än så länge. Appen skickar enhetens språk i `Accept-Language`.
 
 **Körning:** appen saknar avsiktligt markeringen *distraction optimized*. Bilen lägger därför en spärr över appen när den börjar rulla, och appen pausar uppspelningen direkt (krav från Google).
 

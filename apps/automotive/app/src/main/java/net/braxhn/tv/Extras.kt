@@ -95,17 +95,17 @@ import java.util.Locale
 /** Standardordningen (som servern) – används när servern inte skickar homeLayout */
 private val DEFAULT_ORDER = listOf("foryou", "continue", "listening", "watchlist", "upcoming", "because", "recommended", "custom",
     "recent", "short", "toprated", "onthisday", "genre", "gems")
-private val DEFAULT_NAMES = mapOf("foryou" to "Nytt för dig", "continue" to "Fortsätt titta", "listening" to "Fortsätt lyssna",
-    "watchlist" to "Min lista", "upcoming" to "Kommer snart", "recommended" to "Rekommenderat för dig", "short" to "Kort film ikväll",
-    "toprated" to "Topprankat i biblioteket", "onthisday" to "Den här dagen", "genre" to "Dagens genre", "gems" to "Glömda guldkorn")
+private val DEFAULT_NAMES = mapOf("foryou" to R.string.shelf_foryou, "continue" to R.string.shelf_continue, "listening" to R.string.shelf_listening,
+    "watchlist" to R.string.my_list, "upcoming" to R.string.shelf_upcoming, "recommended" to R.string.shelf_recommended, "short" to R.string.shelf_short,
+    "toprated" to R.string.shelf_toprated, "onthisday" to R.string.shelf_onthisday, "gems" to R.string.shelf_gems)
 
 /** Lägger startsidans hyllor i LazyColumn i den ordning användaren valt (dolda hyllor hoppas över). */
 fun LazyListScope.homeShelves(h: HomeResponse, x: HomeExtras?, push: (Screen) -> Unit, onListen: (ListenEntry) -> Unit) {
     val layout = x?.homeLayout
     val order = layout?.order?.takeIf { it.isNotEmpty() } ?: DEFAULT_ORDER
     val hidden = layout?.hidden?.toSet() ?: emptySet()
-    val names = DEFAULT_NAMES + (layout?.shelves?.associate { it.id to it.name } ?: emptyMap())
-    fun name(id: String) = names[id] ?: id
+    val names = layout?.shelves?.associate { it.id to it.name } ?: emptyMap() // serverns namn är svenska: bara för hyllor appen inte känner till
+    fun name(id: String) = DEFAULT_NAMES[id]?.let { str(it) } ?: names[id] ?: id
     for (id in order) {
         if (id in hidden) continue
         when (id) {
@@ -119,7 +119,7 @@ fun LazyListScope.homeShelves(h: HomeResponse, x: HomeExtras?, push: (Screen) ->
             "watchlist" -> if (x.watchlist.isNotEmpty()) item(key = "s:watchlist") { Shelf(name(id), x.watchlist, false, push) }
             "upcoming" -> if (x.upcoming.isNotEmpty()) item(key = "s:upcoming") { UpcomingShelf(name(id), x.upcoming, push) }
             "because" -> x.because.filter { it.items.isNotEmpty() }.forEachIndexed { i, b ->
-                item(key = "s:because:$i:${b.seed.id}") { Shelf("Eftersom du såg ${b.seed.title}", b.items, false, push) }
+                item(key = "s:because:$i:${b.seed.id}") { Shelf(tr(R.string.shelf_because, b.seed.title), b.items, false, push) }
             }
             "recommended" -> if (x.recommended.isNotEmpty()) item(key = "s:recommended") { Shelf(name(id), x.recommended, false, push) }
             "custom" -> x.customCollections.filter { it.items.isNotEmpty() }.forEach { c ->
@@ -129,7 +129,7 @@ fun LazyListScope.homeShelves(h: HomeResponse, x: HomeExtras?, push: (Screen) ->
             "toprated" -> if (x.topRated.isNotEmpty()) item(key = "s:toprated") { Shelf(name(id), x.topRated, false, push) }
             "gems" -> if (x.hiddenGems.isNotEmpty()) item(key = "s:gems") { Shelf(name(id), x.hiddenGems, false, push) }
             "onthisday" -> if (x.onThisDay.isNotEmpty()) item(key = "s:onthisday") { Shelf(name(id), x.onThisDay, false, push, note = { it.onThisDay?.note }) }
-            "genre" -> x.genreOfDay?.takeIf { it.items.isNotEmpty() }?.let { g -> item(key = "s:genre") { Shelf("${name(id)}: ${g.genre}", g.items, false, push) } }
+            "genre" -> x.genreOfDay?.takeIf { it.items.isNotEmpty() }?.let { g -> item(key = "s:genre") { Shelf(tr(R.string.shelf_genre, g.genre), g.items, false, push) } }
         }
     }
 }
@@ -167,7 +167,7 @@ private fun ListenShelf(title: String, list: List<ListenEntry>, onListen: (Liste
                         }
                     }
                     Text(label, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-                    Text((if (e.type == "book") e.author else e.podcastTitle) ?: (if (e.type == "book") "Ljudbok" else "Podd"),
+                    Text((if (e.type == "book") e.author else e.podcastTitle) ?: tr(if (e.type == "book") R.string.audiobook else R.string.podcast),
                         color = Color.Gray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -175,11 +175,11 @@ private fun ListenShelf(title: String, list: List<ListenEntry>, onListen: (Liste
     }
 }
 
-private val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale("sv", "SE"))
+private val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
 private fun dayLabel(ymd: String): String = runCatching {
     val d = LocalDate.parse(ymd)
     val today = LocalDate.now()
-    when (d) { today -> "Idag"; today.plusDays(1) -> "Imorgon"; else -> d.format(dayFmt) }
+    when (d) { today -> str(R.string.today); today.plusDays(1) -> str(R.string.tomorrow); else -> d.format(dayFmt) }
 }.getOrDefault(ymd)
 
 /** Kommer snart: kommande avsnitt av serier i biblioteket (seriens affisch) */
@@ -190,7 +190,7 @@ private fun UpcomingShelf(title: String, list: List<UpcomingEp>, push: (Screen) 
         ShelfTitle(title)
         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(list, key = { "${it.showId}:${it.season}:${it.episode}:${it.date}" }) { e ->
-                val show = e.show ?: "Serie"
+                val show = e.show ?: tr(R.string.show)
                 val sid = e.showId
                 val t = tok
                 val click = if (sid != null) Modifier.focusRing().clickable { push(Screen.Detail(sid)) } else Modifier
@@ -231,7 +231,7 @@ object AudioRemote {
     /** Spelar en post från Fortsätt lyssna och visar en kort bekräftelse (eller felet). */
     suspend fun play(ctx: Context, e: ListenEntry) {
         val msg = runCatching { play(ctx, if (e.type == "book") "b:${e.id}" else "pe:${e.id}") }
-            .fold({ "Spelas: ${e.title ?: ""}" }, { "Kunde inte spela: ${it.message ?: it}" })
+            .fold({ ctx.getString(R.string.listen_playing, e.title ?: "") }, { ctx.getString(R.string.listen_failed, it.message ?: it.toString()) })
         Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
     }
 }
@@ -270,7 +270,7 @@ fun ProfilesScreen() {
 
     val l = list ?: return if (error != null) ErrorText(error!!) else Loading()
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Text("Vem tittar?", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
+        Text(tr(R.string.profiles_title), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
         error?.let { Text(it, color = Color(0xFFFF5D6C), modifier = Modifier.padding(bottom = 8.dp)) }
         LazyVerticalGrid(GridCells.Adaptive(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -285,10 +285,10 @@ fun ProfilesScreen() {
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (p.hasPin) Icon(Icons.Filled.Lock, "PIN", Modifier.size(16.dp), tint = Color.Gray)
+                        if (p.hasPin) Icon(Icons.Filled.Lock, tr(R.string.profile_pin), Modifier.size(16.dp), tint = Color.Gray)
                         Text(p.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(when { current -> "Används nu"; p.kid -> p.maxAge?.let { "Barn · $it år" } ?: "Barn"; p.owner -> "Huvudkonto"; else -> "" },
+                    Text(when { current -> tr(R.string.profile_current); p.kid -> p.maxAge?.let { plural(R.plurals.kid_age, it) } ?: tr(R.string.profile_kid); p.owner -> tr(R.string.profile_owner); else -> "" },
                         color = Color.Gray, fontSize = 13.sp)
                 }
             }
@@ -296,11 +296,11 @@ fun ProfilesScreen() {
     }
     asking?.let { p ->
         AlertDialog(onDismissRequest = { if (!busy) asking = null },
-            title = { Text(if (askPassword) "Huvudkontots lösenord" else "PIN för ${p.name}") },
+            title = { Text(if (askPassword) tr(R.string.profile_owner_password) else tr(R.string.profile_pin_for, p.name)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (askPassword) Text("Profilen har högre åldersgräns än den du använder nu.", color = Color.Gray, fontSize = 14.sp)
-                    OutlinedTextField(secret, { secret = it }, singleLine = true, label = { Text(if (askPassword) "Lösenord" else "PIN") },
+                    if (askPassword) Text(tr(R.string.profile_higher_age), color = Color.Gray, fontSize = 14.sp)
+                    OutlinedTextField(secret, { secret = it }, singleLine = true, label = { Text(tr(if (askPassword) R.string.password else R.string.profile_pin)) },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = if (askPassword) KeyboardType.Password else KeyboardType.NumberPassword))
                     error?.let { Text(it, color = Color(0xFFFF5D6C), fontSize = 14.sp) }
@@ -309,9 +309,9 @@ fun ProfilesScreen() {
             confirmButton = {
                 TextButton(enabled = !busy && secret.isNotBlank(), onClick = {
                     if (askPassword) switchTo(p, null, secret) else switchTo(p, secret, null)
-                }) { Text("Byt profil") }
+                }) { Text(tr(R.string.switch_profile)) }
             },
-            dismissButton = { TextButton(enabled = !busy, onClick = { asking = null; error = null }) { Text("Avbryt") } })
+            dismissButton = { TextButton(enabled = !busy, onClick = { asking = null; error = null }) { Text(tr(R.string.cancel)) } })
     }
 }
 

@@ -136,17 +136,17 @@ fun AppRoot() {
             Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(40.dp))
             Spacer(Modifier.height(20.dp))
             NavigationRailItem(selected = stack.first() == Screen.Home && current !is Screen.Search && current !is Screen.Settings,
-                onClick = { stack.clear(); stack.add(Screen.Home) }, icon = { Icon(Icons.Filled.Home, null) }, label = { Text("Hem") })
+                onClick = { stack.clear(); stack.add(Screen.Home) }, icon = { Icon(Icons.Filled.Home, null) }, label = { Text(tr(R.string.nav_home)) })
             NavigationRailItem(selected = current == Screen.Search, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Search) },
-                icon = { Icon(Icons.Filled.Search, null) }, label = { Text("Sök") })
+                icon = { Icon(Icons.Filled.Search, null) }, label = { Text(tr(R.string.nav_search)) })
             if (hasLive) NavigationRailItem(selected = current == Screen.Live || current == Screen.Recordings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Live) },
-                icon = { Icon(Icons.Filled.LiveTv, null) }, label = { Text("Live-TV") })
+                icon = { Icon(Icons.Filled.LiveTv, null) }, label = { Text(tr(R.string.nav_live)) })
             NavigationRailItem(selected = current == Screen.Settings || current == Screen.Profiles, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
-                icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Inställningar") })
+                icon = { Icon(Icons.Filled.Settings, null) }, label = { Text(tr(R.string.nav_settings)) })
         }
         Column(Modifier.fillMaxSize()) {
             if (stack.size > 1) {
-                IconButton(onClick = pop, modifier = Modifier.padding(8.dp).size(56.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Tillbaka", Modifier.size(32.dp)) }
+                IconButton(onClick = pop, modifier = Modifier.padding(8.dp).size(56.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, tr(R.string.back), Modifier.size(32.dp)) }
             }
             when (current) {
                 is Screen.Home -> HomeScreen(push)
@@ -181,15 +181,15 @@ fun LoginScreen() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 520.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(72.dp))
-            Text("BraXhn TV", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-            Text("Serveradress, t.ex. 192.168.1.10:8420 hemma, eller tv.dindomän.se (https, även via BraXhn Relay) utanför hemmet", color = Color.Gray, fontSize = 14.sp)
-            OutlinedTextField(server, { server = it }, label = { Text("Server") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            Text(tr(R.string.app_name), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(tr(R.string.login_server_hint), color = Color.Gray, fontSize = 14.sp)
+            OutlinedTextField(server, { server = it }, label = { Text(tr(R.string.login_server)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-            OutlinedTextField(name, { name = it }, label = { Text("Användarnamn") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pass, { pass = it }, label = { Text("Lösenord") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            OutlinedTextField(name, { name = it }, label = { Text(tr(R.string.login_username)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(pass, { pass = it }, label = { Text(tr(R.string.password)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             if (needCode) {
-                OutlinedTextField(code, { code = it }, label = { Text("Kod från autentiseringsappen") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                OutlinedTextField(code, { code = it }, label = { Text(tr(R.string.login_code)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             }
             error?.let { Text(it, color = Color(0xFFFF5D6C)) }
@@ -202,11 +202,11 @@ fun LoginScreen() {
                     busy = false
                 }
             }, enabled = !busy && server.isNotBlank() && name.isNotBlank(), modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text("Logga in", fontSize = 18.sp)
+                if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text(tr(R.string.login_button), fontSize = 18.sp)
             }
             // På TV och i bilen: godkänn en kod från telefonen i stället för att skriva lösenord
             OutlinedButton(onClick = { error = null; withCode = true }, enabled = !busy && server.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Logga in med kod", fontSize = 18.sp) }
+                modifier = Modifier.fillMaxWidth().height(56.dp)) { Text(tr(R.string.login_with_code), fontSize = 18.sp) }
         }
     }
 }
@@ -224,7 +224,7 @@ fun PosterCard(item: MediaItem, landscape: Boolean = false, width: Int = if (lan
             Text(item.showTitle ?: item.title, Modifier.align(Alignment.Center).padding(8.dp), fontWeight = FontWeight.Bold)
             Api.imageUrl(item, landscape)?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
             if (item.watched == true) {
-                Icon(Icons.Filled.CheckCircle, "Sedd", tint = Color(0xFF4CC38A), modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
+                Icon(Icons.Filled.CheckCircle, tr(R.string.watched), tint = Color(0xFF4CC38A), modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
             } else if (item.isShow && (item.watchedEpisodes ?: 0) > 0 && (item.episodes ?: 0) - (item.watchedEpisodes ?: 0) > 0) {
                 Text("${(item.episodes ?: 0) - (item.watchedEpisodes ?: 0)}", Modifier.align(Alignment.TopEnd).padding(6.dp).background(Accent, CircleShape).padding(horizontal = 8.dp, vertical = 2.dp), color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
@@ -264,7 +264,7 @@ fun ErrorRetry(msg: String, onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 560.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(msg, color = Color.Gray)
-            Button(onClick = onRetry, modifier = Modifier.height(52.dp).focusRequester(fr).focusRing(RoundedCornerShape(26.dp))) { Text("Försök igen", fontSize = 17.sp) }
+            Button(onClick = onRetry, modifier = Modifier.height(52.dp).focusRequester(fr).focusRing(RoundedCornerShape(26.dp))) { Text(tr(R.string.retry), fontSize = 17.sp) }
         }
     }
     LaunchedEffect(msg) { if (tv) runCatching { fr.requestFocus() } }
@@ -340,7 +340,7 @@ fun LibraryScreen(lib: Library, push: (Screen) -> Unit) {
     Column {
         Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(lib.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            listOf("title" to "Titel", "added" to "Senaste", "year" to "År").forEach { (k, n) ->
+            listOf("title" to tr(R.string.sort_title), "added" to tr(R.string.sort_added), "year" to tr(R.string.sort_year)).forEach { (k, n) ->
                 FilterChip(selected = sort == k, onClick = { sort = k }, label = { Text(n) })
             }
         }
@@ -361,11 +361,11 @@ fun SearchScreen(push: (Screen) -> Unit) {
         res = runCatching { Api.get<List<MediaItem>>("/api/search", mapOf("q" to q)) }.getOrDefault(emptyList())
     }
     Column {
-        OutlinedTextField(q, { q = it }, label = { Text(if (lines) "Sök en replik" else "Sök filmer och serier") }, singleLine = true,
+        OutlinedTextField(q, { q = it }, label = { Text(tr(if (lines) R.string.search_lines_hint else R.string.search_hint)) }, singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp))
         Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilterChip(selected = !lines, onClick = { lines = false }, label = { Text("Titlar", fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
-            FilterChip(selected = lines, onClick = { lines = true }, label = { Text("Repliker", fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
+            FilterChip(selected = !lines, onClick = { lines = false }, label = { Text(tr(R.string.search_titles), fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
+            FilterChip(selected = lines, onClick = { lines = true }, label = { Text(tr(R.string.search_lines), fontSize = 16.sp) }, modifier = Modifier.height(44.dp))
         }
         if (lines) LinesResults(q, push) else ItemGrid(res, push = push)
     }
@@ -403,80 +403,80 @@ fun SettingsScreen(push: (Screen) -> Unit) {
         }
     }
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("Inställningar", fontSize = 26.sp, fontWeight = FontWeight.Bold) }
-        item { Text("Server: ${Api.server.value}", color = Color.Gray) }
+        item { Text(tr(R.string.nav_settings), fontSize = 26.sp, fontWeight = FontWeight.Bold) }
+        item { Text(tr(R.string.settings_server, Api.server.value), color = Color.Gray) }
         item {
             OutlinedButton(onClick = { push(Screen.Profiles) }, modifier = Modifier.height(52.dp)) {
-                Icon(Icons.Filled.People, null); Spacer(Modifier.width(8.dp)); Text("Byt profil", fontSize = 17.sp)
+                Icon(Icons.Filled.People, null); Spacer(Modifier.width(8.dp)); Text(tr(R.string.switch_profile), fontSize = 17.sp)
             }
         }
-        item { Text("Kvalitet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { Text(tr(R.string.settings_quality), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item {
-            FlowRowCompat(listOf("auto" to "Automatisk", "orig" to "Original", "1080" to "1080p", "720" to "720p", "480" to "480p", "360" to "360p"), quality) { quality = it; Api.quality = it }
+            FlowRowCompat(listOf("auto" to tr(R.string.quality_auto), "orig" to tr(R.string.quality_original), "1080" to "1080p", "720" to "720p", "480" to "480p", "360" to "360p"), quality) { quality = it; Api.quality = it }
         }
-        item { Text("Undertexter som standard", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { Text(tr(R.string.settings_default_subs), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
         item {
-            FlowRowCompat(listOf("" to "Inga", "sv" to "Svenska", "en" to "Engelska", "no" to "Norska", "da" to "Danska", "fi" to "Finska"), lang) { lang = it; Api.subtitleLang = it }
+            FlowRowCompat(listOf("" to tr(R.string.none), "sv" to tr(R.string.lang_sv), "en" to tr(R.string.lang_en), "no" to tr(R.string.lang_no), "da" to tr(R.string.lang_da), "fi" to tr(R.string.lang_fi)), lang) { lang = it; Api.subtitleLang = it }
         }
-        item { Text("Ljud i filmer och serier", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
-        item { FlowRowCompat(listOf("on" to "Nattläge (jämnare ljud)", "off" to "Nattläge av"), if (night) "on" else "off") { v -> night = v == "on"; Api.nightMode = night } }
-        item { FlowRowCompat(listOf("on" to "Tydligare dialog", "off" to "Originalljud"), if (dialog) "on" else "off") { v -> dialog = v == "on"; Api.dialogBoost = dialog } }
-        item { Text("Kan också slås på i spelaren. Ljudet bearbetas av servern, så filmen omkodas då. Bio-läge (trailers före filmen) ställer du in i webben.", color = Color.Gray, fontSize = 13.sp) }
+        item { Text(tr(R.string.settings_movie_audio), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { FlowRowCompat(listOf("on" to tr(R.string.night_on), "off" to tr(R.string.night_off)), if (night) "on" else "off") { v -> night = v == "on"; Api.nightMode = night } }
+        item { FlowRowCompat(listOf("on" to tr(R.string.dialog_on), "off" to tr(R.string.dialog_off)), if (dialog) "on" else "off") { v -> dialog = v == "on"; Api.dialogBoost = dialog } }
+        item { Text(tr(R.string.settings_audio_note), color = Color.Gray, fontSize = 13.sp) }
         if (tv) {
-            item { Text("Bild och ljud på TV:n", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
-            item { Text("Anpassa skärmen efter filmen (bildfrekvens)", color = Color.Gray) }
+            item { Text(tr(R.string.settings_tv), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+            item { Text(tr(R.string.settings_frame_rate), color = Color.Gray) }
             item {
-                FlowRowCompat(listOf("off" to "Av", "rate" to "Bara bildfrekvens", "res" to "Bildfrekvens och upplösning"), frameRate) { v ->
+                FlowRowCompat(listOf("off" to tr(R.string.frame_off), "rate" to tr(R.string.frame_rate_only), "res" to tr(R.string.frame_rate_res)), frameRate) { v ->
                     frameRate = v; TvOutput.setFrameRateMode(ctx, v)
                 }
             }
             item {
-                Text("TV:n byter till filmens bildfrekvens (t.ex. 23,976 Hz) så att panoreringar inte hackar, och tillbaka när du slutar titta. " +
-                    "Bytet ger några svarta sekunder. Med upplösning skalar TV:n upp bilden i stället för boxen.", color = Color.Gray, fontSize = 13.sp)
+                Text(tr(R.string.settings_frame_note),
+                    color = Color.Gray, fontSize = 13.sp)
             }
             output?.let { (screen, audio) ->
                 item { Text(screen, fontSize = 15.sp) }
                 item { Text(audio, fontSize = 15.sp) }
                 item {
-                    Text("HDR, Dolby Vision och ljud som förstärkaren tar emot (Dolby Digital, Atmos, DTS, TrueHD) spelas orört direkt från filen. " +
-                        "Annat konverterar servern. Ändrar du ljudutgång eller förstärkare – öppna sidan igen.", color = Color.Gray, fontSize = 13.sp)
+                    Text(tr(R.string.settings_output_note),
+                        color = Color.Gray, fontSize = 13.sp)
                 }
             }
         }
-        item { Text("Lyssning", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
-        item { Text("Hopp bakåt (ljudböcker och poddar)", color = Color.Gray) }
+        item { Text(tr(R.string.settings_listening), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)) }
+        item { Text(tr(R.string.settings_skip_back), color = Color.Gray) }
         item {
             FlowRowCompat(Api.skipBackChoices.map { it.toString() to "$it s" }, skipBack.toString()) { v ->
                 saveListen(kotlinx.serialization.json.buildJsonObject { put("skipBack", v.toInt()) })
             }
         }
-        item { Text("Hopp framåt", color = Color.Gray) }
+        item { Text(tr(R.string.settings_skip_forward), color = Color.Gray) }
         item {
             FlowRowCompat(Api.skipForwardChoices.map { it.toString() to "$it s" }, skipForward.toString()) { v ->
                 saveListen(kotlinx.serialization.json.buildJsonObject { put("skipForward", v.toInt()) })
             }
         }
         item {
-            FlowRowCompat(listOf("on" to "Hoppa över tystnad i poddar", "off" to "Spela tystnad"), if (skipSilence) "on" else "off") { v ->
+            FlowRowCompat(listOf("on" to tr(R.string.skip_silence_on), "off" to tr(R.string.skip_silence_off)), if (skipSilence) "on" else "off") { v ->
                 saveListen(kotlinx.serialization.json.buildJsonObject { put("skipSilence", v == "on") })
             }
         }
         item {
-            FlowRowCompat(listOf("on" to "Jämn ljudnivå i musik", "off" to "Originalnivå"), if (normalize) "on" else "off") { v ->
+            FlowRowCompat(listOf("on" to tr(R.string.normalize_on), "off" to tr(R.string.normalize_off)), if (normalize) "on" else "off") { v ->
                 saveListen(kotlinx.serialization.json.buildJsonObject { put("normalize", v == "on") })
             }
         }
         item {
-            Text(listenError ?: "Sovtimern finns som knapp (måne) i bilens mediaspelare och i aviseringen: 15/30/45/60 min eller när låten/avsnittet tar slut.",
+            Text(listenError ?: tr(R.string.settings_sleep_note),
                 color = if (listenError != null) Color(0xFFFF5D6C) else Color.Gray, fontSize = 13.sp)
         }
         item {
             Button(onClick = { scope.launch { Api.logout() } }, colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Color(0xFFFF5D6C)),
-                modifier = Modifier.padding(top = 24.dp).height(52.dp)) { Text("Logga ut") }
+                modifier = Modifier.padding(top = 24.dp).height(52.dp)) { Text(tr(R.string.logout)) }
         }
-        item { Text("Nedladdat för offline", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
+        item { Text(tr(R.string.settings_downloads), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
         item { DownloadsList(push) }
-        item { Text("Video kan bara spelas när bilen står parkerad.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
+        item { Text(tr(R.string.settings_parked), color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }
         // Stöd projektet: helt frivilligt, bara en rad här (aldrig för barnprofiler), och bara när servern skickar en PayPal-länk
         val link: String? = donate
         if (link != null && !kid) {
@@ -484,8 +484,8 @@ fun SettingsScreen(push: (Screen) -> Unit) {
                 TextButton(onClick = {
                     val ok = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
                     // Bilar och vissa TV-apparater saknar webbläsare: visa adressen i stället
-                    if (!ok) android.widget.Toast.makeText(ctx, "Ingen webbläsare – öppna $link på telefonen eller datorn", android.widget.Toast.LENGTH_LONG).show()
-                }, modifier = Modifier.padding(top = 8.dp).focusRing(RoundedCornerShape(20.dp))) { Text("Stöd projektet", color = Color.Gray, fontSize = 14.sp) }
+                    if (!ok) android.widget.Toast.makeText(ctx, ctx.getString(R.string.no_browser, link), android.widget.Toast.LENGTH_LONG).show()
+                }, modifier = Modifier.padding(top = 8.dp).focusRing(RoundedCornerShape(20.dp))) { Text(tr(R.string.support_project), color = Color.Gray, fontSize = 14.sp) }
             }
         }
     }
@@ -536,7 +536,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (it.isEpisode) Text("${it.showTitle ?: ""} · ${it.sxe}", color = Color.Gray)
                     Text(it.title, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                    Text(listOfNotNull(it.year?.toString(), if (!it.isShow) formatDuration(it.duration) else it.episodes?.let { n -> "$n avsnitt" },
+                    Text(listOfNotNull(it.year?.toString(), if (!it.isShow) formatDuration(it.duration) else it.episodes?.let { n -> plural(R.plurals.episodes_n, n) },
                         it.rating?.let { r -> "★ %.1f".format(r) }, it.hdr?.uppercase()).joinToString("  ·  "), color = Color.Gray)
                     it.overview?.let { o -> Text(o, color = Color(0xFFCFD3DD), maxLines = 6, overflow = TextOverflow.Ellipsis) }
                     // Rollista: regi/skapare och de första skådespelarna
@@ -547,27 +547,27 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
                             if (pos > 30) {
-                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" Fortsätt ${formatTime(pos)}", fontSize = 17.sp) }
-                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp)) { Text("Börja om") }
+                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.continue_at, formatTime(pos)), fontSize = 17.sp) }
+                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp)) { Text(tr(R.string.start_over)) }
                             } else {
-                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" Spela", fontSize = 17.sp) }
+                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.play), fontSize = 17.sp) }
                             }
                             OutlinedButton(onClick = { scope.launch { runCatching { Api.setWatched(it.id, it.watched != true) }; reload++ } }, Modifier.height(56.dp)) {
-                                Text(if (it.watched == true) "Markera osedd" else "Markera sedd")
+                                Text(tr(if (it.watched == true) R.string.mark_unwatched else R.string.mark_watched))
                             }
                             if (it.inWatchlist != null) MyListButton(inList, toggleList)
                         }
                         DownloadRow(it)
                         it.audio?.takeIf { a -> a.size > 1 }?.let { list ->
-                            Text("Ljud", fontWeight = FontWeight.SemiBold)
+                            Text(tr(R.string.audio), fontWeight = FontWeight.SemiBold)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(list, key = { a -> a.index }) { a -> FilterChip(selected = audio == a.index, onClick = { audio = a.index }, label = { Text(a.label) }) }
                             }
                         }
                         it.subtitles?.takeIf { s -> s.isNotEmpty() }?.let { list ->
-                            Text("Undertext", fontWeight = FontWeight.SemiBold)
+                            Text(tr(R.string.subtitle), fontWeight = FontWeight.SemiBold)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                item { FilterChip(selected = sub == null, onClick = { sub = null }, label = { Text("Inga") }) }
+                                item { FilterChip(selected = sub == null, onClick = { sub = null }, label = { Text(tr(R.string.none)) }) }
                                 items(list, key = { s -> s.id }) { s -> FilterChip(selected = sub?.id == s.id, onClick = { sub = s }, label = { Text(s.label) }) }
                             }
                         }
@@ -575,7 +575,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             it.next?.let { n ->
                                 Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) {
-                                    Icon(Icons.Filled.PlayArrow, null); Text(" ${if ((n.position ?: 0.0) > 0) "Fortsätt" else "Spela"} S${n.season}E${n.episode}", fontSize = 17.sp)
+                                    Icon(Icons.Filled.PlayArrow, null); Text(" ${tr(if ((n.position ?: 0.0) > 0) R.string.continue_word else R.string.play)} S${n.season}E${n.episode}", fontSize = 17.sp)
                                 }
                             }
                             if (it.inWatchlist != null) MyListButton(inList, toggleList)
@@ -590,7 +590,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
             val seasons = eps.mapNotNull { e -> e.season }.distinct().sorted()
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(seasons, key = { s -> s }) { s -> FilterChip(selected = s == season, onClick = { season = s }, label = { Text(if (s == 0) "Special" else "Säsong $s", fontSize = 16.sp) }, modifier = Modifier.height(44.dp)) }
+                    items(seasons, key = { s -> s }) { s -> FilterChip(selected = s == season, onClick = { season = s }, label = { Text(if (s == 0) tr(R.string.specials) else tr(R.string.season_n, s), fontSize = 16.sp) }, modifier = Modifier.height(44.dp)) }
                 }
             }
             items(eps.filter { e -> e.season == season }, key = { e -> e.id }) { e ->
@@ -599,7 +599,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     PosterCard(e, landscape = true, width = 240, onClick = null)
                     Column(Modifier.weight(1f)) {
                         Text("${e.episode}. ${e.title}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                        Text(formatDuration(e.duration) + if (e.watched == true) " · Sedd" else "", color = Color.Gray)
+                        Text(formatDuration(e.duration) + if (e.watched == true) " · " + tr(R.string.watched) else "", color = Color.Gray)
                         e.overview?.let { o -> Text(o, color = Color.Gray, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 14.sp) }
                     }
                 }
@@ -611,7 +611,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
 @Composable
 fun MyListButton(inList: Boolean, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = Modifier.height(56.dp)) {
-        Icon(if (inList) Icons.Filled.Check else Icons.Filled.Add, null); Text(if (inList) " I Min lista" else " Min lista")
+        Icon(if (inList) Icons.Filled.Check else Icons.Filled.Add, null); Text(" " + tr(if (inList) R.string.in_my_list else R.string.my_list))
     }
 }
 
@@ -626,10 +626,10 @@ fun DownloadRow(item: MediaItem) {
     val p = active[item.id]
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         when {
-            done -> OutlinedButton(onClick = { Downloads.remove(item.id) }) { Text("Ta bort nedladdning") }
-            p != null -> { LinearProgressIndicator(progress = { p }, modifier = Modifier.width(200.dp)); Text(if (p < 0.5f) "Förbereder…" else "Laddar ner…", color = Color.Gray) }
+            done -> OutlinedButton(onClick = { Downloads.remove(item.id) }) { Text(tr(R.string.download_remove)) }
+            p != null -> { LinearProgressIndicator(progress = { p }, modifier = Modifier.width(200.dp)); Text(tr(if (p < 0.5f) R.string.download_preparing else R.string.download_progress), color = Color.Gray) }
             !canDownload -> {} // kontot får inte ladda ner – servern skulle svara 403
-            else -> listOf("1080" to "Ladda ner HD", "480" to "Ladda ner (liten)").forEach { (q, label) ->
+            else -> listOf("1080" to tr(R.string.download_hd), "480" to tr(R.string.download_small)).forEach { (q, label) ->
                 // Körs i appens scope – avbryts inte när man lämnar sidan
                 OutlinedButton(onClick = { Downloads.start(item, q) }) { Text(label) }
             }
@@ -642,13 +642,13 @@ fun DownloadRow(item: MediaItem) {
 fun DownloadsList(push: (Screen) -> Unit) {
     val records by Downloads.records.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (records.isEmpty()) Text("Inget nedladdat.", color = Color.Gray)
+        if (records.isEmpty()) Text(tr(R.string.downloads_empty), color = Color.Gray)
         records.forEach { r ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(r.title, fontWeight = FontWeight.SemiBold); Text("${r.subtitle} · ${r.size / 1_000_000} MB", color = Color.Gray, fontSize = 13.sp) }
                 // Spelas direkt från filen – fungerar utan nät (titelsidan kräver servern)
-                TextButton(onClick = { push(Screen.Play(r.id, 0.0, null, null)) }) { Text("Spela") }
-                TextButton(onClick = { Downloads.remove(r.id) }) { Text("Ta bort") }
+                TextButton(onClick = { push(Screen.Play(r.id, 0.0, null, null)) }) { Text(tr(R.string.play)) }
+                TextButton(onClick = { Downloads.remove(r.id) }) { Text(tr(R.string.remove)) }
             }
         }
     }
@@ -673,7 +673,7 @@ fun QuickConnectScreen(serverInput: String, onCancel: () -> Unit) {
                 try {
                     when (Api.pollQuickConnect(start.secret)) {
                         "approved" -> break // token sparad – appen byter till startsidan
-                        "expired" -> { message = "Koden har gått ut."; break }
+                        "expired" -> { message = str(R.string.qc_code_expired); break }
                     }
                 } catch (e: ApiException) {
                     // Servern nekade (4xx) – sluta fråga. Nätverksfel och 5xx (t.ex. reläet tappade servern): försök igen
@@ -684,10 +684,10 @@ fun QuickConnectScreen(serverInput: String, onCancel: () -> Unit) {
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 640.dp).padding(32.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Logga in med kod", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text(tr(R.string.login_with_code), fontSize = 28.sp, fontWeight = FontWeight.Bold)
             val c = code
             if (c != null) {
-                Text("Öppna BraXhn TV på telefonen eller datorn, välj Godkänn inloggning på TV i menyn och ange koden:", color = Color.Gray, fontSize = 16.sp)
+                Text(tr(R.string.qc_help), color = Color.Gray, fontSize = 16.sp)
                 Text(if (c.length == 6) c.substring(0, 3) + " " + c.substring(3) else c, fontSize = 64.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)
                 Text(Api.server.value + "/#/quickconnect", color = Color.Gray, fontSize = 14.sp)
             }
@@ -695,8 +695,8 @@ fun QuickConnectScreen(serverInput: String, onCancel: () -> Unit) {
             if (m != null) Text(m, color = if (c != null) Color.Gray else Color(0xFFFF5D6C))
             else CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (m != null) Button(onClick = { attempt++ }, modifier = Modifier.height(56.dp)) { Text("Ny kod", fontSize = 18.sp) }
-                OutlinedButton(onClick = onCancel, modifier = Modifier.height(56.dp)) { Text("Avbryt", fontSize = 18.sp) }
+                if (m != null) Button(onClick = { attempt++ }, modifier = Modifier.height(56.dp)) { Text(tr(R.string.qc_new_code), fontSize = 18.sp) }
+                OutlinedButton(onClick = onCancel, modifier = Modifier.height(56.dp)) { Text(tr(R.string.cancel), fontSize = 18.sp) }
             }
         }
     }

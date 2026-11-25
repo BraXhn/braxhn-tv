@@ -8,6 +8,13 @@
 - **Expo-appen tar inte längre en ny bildtoken vid varje start.** Den sparas per server och profil i telefonens säkra
   lagring och förnyas först när det är mindre än ett dygn kvar, eller när servern svarar att den inte gäller. Förut
   skapade varje start en ny, vilket kunde knuffa ut de andra apparnas token ur serverns tak på 50.
+- **Android-appen på engelska.** Appen för telefon, Google TV och bilen följer nu enhetens språk: svenska på en svensk
+  enhet, engelska på alla andra. Alla texter ligger i `strings.xml` (engelska som standard, svenska i `values-sv`) med
+  samma ordval som webben – även notisen för nedladdning, bilens mediaspelare och Android Auto, sovtimern,
+  felmeddelandena och beskrivningarna för skärmläsare. Antal skrivs rätt (*1 avsnitt / 2 avsnitt*, *1 episode / 2
+  episodes*), och datum och decimaler följer språket. Startsidans hyllor heter som i appen även när servern skickar
+  svenska namn. Serverns egna felmeddelanden är fortfarande på svenska. `test/android-i18n.test.js` hindrar att svensk
+  text smyger tillbaka i Kotlin-koden.
 - **Säkerhet: femte granskningen av servern** (det som blev kvar efter den fjärde; varje punkt har ett test i
   `test/security-review5.test.js`, reläets i `test/relay.test.js`):
   - **Skärmtiden gick att kringgå genom att hämta hela originalfilen snabbt** och titta ur en egen kopia. För profiler

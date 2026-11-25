@@ -27,7 +27,7 @@ import java.net.URL
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        Api.init(this)
+        Strings.init(this); Api.init(this)
         Downloads.init(this)
     }
 }
@@ -44,7 +44,7 @@ class App : Application() {
     val index: Int, val codec: String? = null, val lang: String? = null, val title: String? = null,
     val channels: Int? = null, val default: Boolean? = null, val vi: Boolean? = null, val comment: Boolean? = null
 ) {
-    val label: String get() = listOfNotNull(lang?.uppercase() ?: "Ljud", title, codec?.uppercase(), channels?.let { "${it}ch" }, if (isAudioDesc && title?.contains("syntolk", true) != true) "Syntolkning" else null).joinToString(" · ")
+    val label: String get() = listOfNotNull(lang?.uppercase() ?: str(R.string.audio), title, codec?.uppercase(), channels?.let { "${it}ch" }, if (isAudioDesc && title?.contains("syntolk", true) != true) str(R.string.audio_description) else null).joinToString(" · ")
 }
 
 @Serializable data class SubtitleTrack(
@@ -59,8 +59,8 @@ fun castLine(cast: List<CastMember>?): String? {
     val lead = cast.filter { it.role != "cast" }.map { it.name }.distinct()
     val actors = cast.filter { it.role == "cast" }.take(8).map { it.name }
     val parts = mutableListOf<String>()
-    if (lead.isNotEmpty()) parts.add((if (cast.any { it.role == "creator" }) "Skapad av: " else "Regi: ") + lead.joinToString(", "))
-    if (actors.isNotEmpty()) parts.add("Medverkande: " + actors.joinToString(", "))
+    if (lead.isNotEmpty()) parts.add(str(if (cast.any { it.role == "creator" }) R.string.cast_created_by else R.string.cast_director, lead.joinToString(", ")))
+    if (actors.isNotEmpty()) parts.add(str(R.string.cast_actors, actors.joinToString(", ")))
     return if (parts.isEmpty()) null else parts.joinToString("  ·  ")
 }
 
@@ -84,7 +84,7 @@ fun castLine(cast: List<CastMember>?): String? {
     val progress: Float get() = if (position != null && duration != null && duration > 0) (position / duration).toFloat().coerceIn(0f, 1f) else 0f
     val subtitleLine: String get() = when {
         isEpisode -> listOfNotNull(showTitle, sxe).joinToString(" · ")
-        isShow -> listOfNotNull(year?.toString(), episodes?.let { "$it avsnitt" }).joinToString(" · ")
+        isShow -> listOfNotNull(year?.toString(), episodes?.let { plural(R.plurals.episodes_n, it) }).joinToString(" · ")
         else -> year?.toString() ?: ""
     }
 }
@@ -196,7 +196,7 @@ object Api {
                 }
                 val code = c.responseCode
                 val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-                if (code == 401 && token.value != null && path != "/api/login" && path != "/api/media-token" && path != "/api/profiles/switch") { clearLogin(); throw ApiException("Du har loggats ut") }
+                if (code == 401 && token.value != null && path != "/api/login" && path != "/api/media-token" && path != "/api/profiles/switch") { clearLogin(); throw ApiException(str(R.string.err_logged_out)) }
                 if (code !in 200..299) {
                     val obj = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
                     val msg = obj?.get("error")?.jsonPrimitive?.content
@@ -218,7 +218,7 @@ object Api {
     suspend fun login(serverInput: String, name: String, password: String, code: String? = null) {
         server.value = normalize(serverInput)
         val st: ServerStatus = get("/api/status")
-        if (st.needsSetup) throw ApiException("Servern är inte konfigurerad – öppna den i en webbläsare först.")
+        if (st.needsSetup) throw ApiException(str(R.string.err_not_setup))
         val r: LoginResponse = json.decodeFromString(request("/api/login", "POST", body = buildJsonObject {
             put("name", name); put("password", password); put("app", true)
             if (!code.isNullOrBlank()) put("code", code.trim())
@@ -285,10 +285,10 @@ object Api {
     suspend fun startQuickConnect(serverInput: String): QuickConnectStart {
         server.value = normalize(serverInput)
         val st: ServerStatus = get("/api/status")
-        if (st.needsSetup) throw ApiException("Servern är inte konfigurerad – öppna den i en webbläsare först.")
+        if (st.needsSetup) throw ApiException(str(R.string.err_not_setup))
         val pm = ctx.packageManager
         val kind = when {
-            pm.hasSystemFeature("android.hardware.type.automotive") -> "Bil"
+            pm.hasSystemFeature("android.hardware.type.automotive") -> str(R.string.device_car)
             pm.hasSystemFeature("android.software.leanback") -> "Google TV"
             else -> "Android"
         }

@@ -117,9 +117,9 @@ object TvOutput {
             if ("hlg" in hdr) "HLG" else null, if ("dovi" in hdr) "Dolby Vision" else null
         )
         val screen = when {
-            hdrNames.isEmpty() -> "Skärmen: SDR (HDR-filer tonmappas av servern)"
-            !tenBit -> "Skärmen: ${hdrNames.joinToString(", ")} – men enheten saknar avkodare för 10-bitars video"
-            else -> "Skärmen: ${hdrNames.joinToString(", ")}"
+            hdrNames.isEmpty() -> ctx.getString(R.string.tv_screen_sdr)
+            !tenBit -> ctx.getString(R.string.tv_screen_no_10bit, hdrNames.joinToString(", "))
+            else -> ctx.getString(R.string.tv_screen, hdrNames.joinToString(", "))
         }
         val bs = bitstream(ctx)
         val names = listOfNotNull(
@@ -127,8 +127,8 @@ object TvOutput {
             if ("eac3-joc" in bs) "Dolby Atmos (DD+)" else null, if ("truehd" in bs) "Dolby TrueHD" else null,
             if ("dts" in bs) "DTS" else null, if ("dts-hd" in bs) "DTS-HD" else null
         )
-        val audio = if (names.isEmpty()) "Förstärkaren: bara PCM – ljudet avkodas i enheten eller konverteras av servern"
-            else "Bitström till förstärkaren: ${names.joinToString(", ")}"
+        val audio = if (names.isEmpty()) ctx.getString(R.string.tv_amp_pcm)
+            else ctx.getString(R.string.tv_amp_bitstream, names.joinToString(", "))
         return screen to audio
     }
 

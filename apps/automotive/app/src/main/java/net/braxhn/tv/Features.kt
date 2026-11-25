@@ -62,7 +62,7 @@ import kotlinx.serialization.json.put
 // ---------- modeller (alla fält är nya och valfria – äldre servrar saknar dem) ----------
 
 /** Extramaterial på titelsidan (/api/items/:id extras): trailer, featurette, bakom kulisserna … */
-@Serializable data class ExtraFile(val id: Int, val type: String = "other", val group: String? = null, val name: String = "Extramaterial", val size: Long? = null)
+@Serializable data class ExtraFile(val id: Int, val type: String = "other", val group: String? = null, val name: String = "", val size: Long? = null)
 /** Temamusik (/api/items/:id theme): play = profilens val (standard på för serier, av för filmer) */
 @Serializable data class ThemeInfo(val play: Boolean = false)
 /** GET /api/trailers/:id/play – adress med en token som bara gäller filen */
@@ -133,39 +133,39 @@ fun RatingRow(item: MediaItem) {
         rating = v
         scope.launch {
             val r = runCatching { Api.setRating(item.id, v) }
-            if (r.isFailure) { rating = old; Toast.makeText(ctx, "Kunde inte spara betyget: ${r.exceptionOrNull()?.message ?: ""}", Toast.LENGTH_SHORT).show() }
+            if (r.isFailure) { rating = old; Toast.makeText(ctx, ctx.getString(R.string.rating_failed, r.exceptionOrNull()?.message ?: ""), Toast.LENGTH_SHORT).show() }
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Mitt betyg", color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
+        Text(tr(R.string.my_rating), color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
         for (k in 1..5) {
             val full = rating >= k
             val half = !full && rating >= k - 0.5
             IconButton(onClick = { choose(k) }, modifier = Modifier.size(48.dp).focusRing(RoundedCornerShape(24.dp))) {
                 Icon(if (full) Icons.Filled.Star else if (half) Icons.Filled.StarHalf else Icons.Filled.StarBorder,
-                    "$k stjärnor", tint = if (full || half) StarColor else Color.Gray, modifier = Modifier.size(30.dp))
+                    plural(R.plurals.stars_n, k), tint = if (full || half) StarColor else Color.Gray, modifier = Modifier.size(30.dp))
             }
         }
         if (rating > 0) Text(starsLabel(rating), color = Color.Gray, modifier = Modifier.padding(start = 6.dp))
     }
 }
 
-private fun starsLabel(v: Double): String = (if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v).replace('.', ',')) + " av 5"
+private fun starsLabel(v: Double): String = str(R.string.rating_of_5, if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v))
 
 /** Extramaterial som hylla på titelsidan; spelas i en enkel spelare (Screen.Stream "extra") */
 @Composable
 fun ExtrasShelf(list: List<ExtraFile>, push: (Screen) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Extramaterial", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(tr(R.string.extras), fontSize = 20.sp, fontWeight = FontWeight.Bold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(list, key = { e -> e.id }) { e ->
                 Row(Modifier.width(260.dp).clip(RoundedCornerShape(10.dp)).focusRing().background(Surface2)
-                    .clickable { push(Screen.Stream("extra", e.id, e.name)) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    .clickable { push(Screen.Stream("extra", e.id, e.name.ifEmpty { str(R.string.extras) })) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(36.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(e.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(e.group ?: "Extramaterial", color = Color.Gray, fontSize = 13.sp, maxLines = 1)
+                        Text(e.name.ifEmpty { tr(R.string.extras) }, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(e.group ?: tr(R.string.extras), color = Color.Gray, fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -241,17 +241,17 @@ fun LinesResults(q: String, push: (Screen) -> Unit) {
         if (q.length < 3) { res = null; return@LaunchedEffect }
         delay(350)
         try { res = Api.get<LinesResult>("/api/search/lines", mapOf("q" to q, "limit" to "40")) }
-        catch (e: Exception) { res = null; error = if ((e as? ApiException)?.code == 404 || e.message?.contains("404") == true) "Servern stöder inte repliksökning." else e.message }
+        catch (e: Exception) { res = null; error = if ((e as? ApiException)?.code == 404 || e.message?.contains("404") == true) str(R.string.lines_unsupported) else e.message }
     }
     val r = res
     when {
         error != null -> ErrorText(error ?: "")
-        q.length < 3 -> ErrorText("Skriv en replik, t.ex. \"jag är din far\".")
+        q.length < 3 -> ErrorText(tr(R.string.lines_prompt))
         r == null -> Loading()
         r.lines.isEmpty() -> ErrorText(when {
-            r.status?.enabled == false -> "Repliksökningen är avstängd på servern."
-            r.status?.busy == true -> "Undertexterna läses in – försök igen om en stund."
-            else -> "Ingen replik hittades."
+            r.status?.enabled == false -> tr(R.string.lines_disabled)
+            r.status?.busy == true -> tr(R.string.lines_indexing)
+            else -> tr(R.string.lines_none)
         })
         else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(r.lines) { l ->
@@ -377,7 +377,7 @@ fun StreamPlayerScreen(req: Screen.Stream, onClose: () -> Unit) {
         AndroidView(factory = { c -> PlayerView(c).apply { this.player = player; keepScreenOn = true } }, modifier = Modifier.fillMaxSize())
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose, modifier = Modifier.size(56.dp).focusRing(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(28.dp))) {
-                Icon(Icons.Filled.Close, "Stäng", tint = Color.White)
+                Icon(Icons.Filled.Close, tr(R.string.close), tint = Color.White)
             }
             Spacer(Modifier.width(12.dp))
             Text(req.title + if (req.kind == "catchup") "  · Catch-up" else "", color = Color.White, fontWeight = FontWeight.SemiBold)

@@ -75,8 +75,8 @@ object LiveNav {
     @Volatile var list: List<ChanRef> = emptyList()
 }
 
-private val hhmm = SimpleDateFormat("HH:mm", Locale("sv", "SE"))
-private val dayHm = SimpleDateFormat("EEE d MMM HH:mm", Locale("sv", "SE"))
+private val hhmm = SimpleDateFormat("HH:mm", Locale.getDefault())
+private val dayHm = SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault())
 private fun clock(s: Long): String = hhmm.format(Date(s * 1000))
 private fun nowSec(): Long = System.currentTimeMillis() / 1000
 
@@ -104,13 +104,13 @@ fun LiveScreen(onPlay: (Screen) -> Unit, push: (Screen) -> Unit) {
     LaunchedEffect(d) { LiveNav.list = d.channels.map { c -> ChanRef(c.id, c.number, c.name, c.catchup) } }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Live-TV", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
+            Text(tr(R.string.nav_live), fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 12.dp))
             Spacer(Modifier.weight(1f))
-            val tabs = listOf("guide" to "TV-guide") + (if (d.vod) listOf("movie" to "Filmer", "series" to "Serier") else emptyList())
+            val tabs = listOf("guide" to tr(R.string.live_tv_guide)) + (if (d.vod) listOf("movie" to tr(R.string.live_movies), "series" to tr(R.string.live_series)) else emptyList())
             tabs.forEach { (k, n) -> FilterChip(selected = tab == k, onClick = { tab = k }, label = { Text(n, fontSize = 16.sp) }, modifier = Modifier.height(44.dp)) }
-            OutlinedButton(onClick = { push(Screen.Recordings) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp))) { Text("Inspelningar") }
+            OutlinedButton(onClick = { push(Screen.Recordings) }, modifier = Modifier.focusRing(RoundedCornerShape(20.dp))) { Text(tr(R.string.live_recordings)) }
         }
-        if (d.channels.isEmpty() && tab == "guide") { ErrorText("Inga kanaler – lägg till en källa under Administration i webben."); return }
+        if (d.channels.isEmpty() && tab == "guide") { ErrorText(tr(R.string.live_no_channels_admin)); return }
         when (tab) {
             "movie" -> VodShelvesView("movie", push)
             "series" -> VodShelvesView("series", push)
@@ -154,19 +154,19 @@ fun TvGuide(data: IptvChannels, onPlay: (Screen) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         // Filter: alla, favoriter och kanalgrupperna
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-            item { FilterChip(selected = filter == "all", onClick = { filter = "all" }, label = { Text("Alla") }) }
-            item { FilterChip(selected = filter == "fav", onClick = { filter = "fav" }, label = { Text("Favoriter") }) }
+            item { FilterChip(selected = filter == "all", onClick = { filter = "all" }, label = { Text(tr(R.string.live_all)) }) }
+            item { FilterChip(selected = filter == "fav", onClick = { filter = "fav" }, label = { Text(tr(R.string.favorites)) }) }
             items(groups, key = { g -> "g:$g" }) { g -> FilterChip(selected = filter == "g:$g", onClick = { filter = "g:$g" }, label = { Text(g) }) }
         }
         // Tid: bläddra en timme i taget (bakåt så långt som catch-up räcker)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
             val minFrom: Long = halfHour(nowSec()) - BACK_DAYS * 86400L
-            TextButton(onClick = { from = (from - 3600).coerceAtLeast(minFrom) }, enabled = from > minFrom) { Text("◀ Tidigare") }
-            TextButton(onClick = { from = halfHour(nowSec()) }) { Text("Nu") }
-            TextButton(onClick = { from += 3600 }) { Text("Senare ▶") }
+            TextButton(onClick = { from = (from - 3600).coerceAtLeast(minFrom) }, enabled = from > minFrom) { Text(tr(R.string.live_earlier)) }
+            TextButton(onClick = { from = halfHour(nowSec()) }) { Text(tr(R.string.live_now)) }
+            TextButton(onClick = { from += 3600 }) { Text(tr(R.string.live_later)) }
             Text(dayHm.format(Date(from * 1000)) + " – " + clock(to), color = Color.Gray)
         }
-        if (shown.isEmpty()) { ErrorText(if (filter == "fav") "Inga favoriter än – välj en kanal och Lägg till i favoriter." else "Inga kanaler."); return }
+        if (shown.isEmpty()) { ErrorText(tr(if (filter == "fav") R.string.live_no_favorites else R.string.live_no_channels)); return }
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val chanW: Dp = if (maxWidth < 700.dp) 120.dp else 190.dp
             val gridW: Dp = maxWidth - chanW - 8.dp
@@ -207,14 +207,14 @@ fun TvGuide(data: IptvChannels, onPlay: (Screen) -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(listOfNotNull(ch.name, p?.let { x -> "${dayHm.format(Date(x.start * 1000))}–${clock(x.stop)}" }).joinToString(" · "), color = Color.Gray)
                     p?.subtitle?.let { s -> Text(s) }
-                    if (p == null || live) Button(onClick = { selected = null; onPlay(Screen.LivePlay(ch.id, ch.name)) }) { Icon(Icons.Filled.PlayArrow, null); Text(" Titta live") }
-                    if (p != null && live && (p.catchup == true || ch.catchup > 0)) OutlinedButton(onClick = { selected = null; onPlay(Screen.Stream("catchup", p.id, p.title)) }) { Text("Från början") }
-                    if (p != null && past && p.catchup == true) Button(onClick = { selected = null; onPlay(Screen.Stream("catchup", p.id, p.title)) }) { Icon(Icons.Filled.PlayArrow, null); Text(" Spela (catch-up)") }
-                    if (p != null && past && p.catchup != true) Text("Finns inte i kanalens arkiv.", color = Color.Gray, fontSize = 13.sp)
+                    if (p == null || live) Button(onClick = { selected = null; onPlay(Screen.LivePlay(ch.id, ch.name)) }) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.live_watch)) }
+                    if (p != null && live && (p.catchup == true || ch.catchup > 0)) OutlinedButton(onClick = { selected = null; onPlay(Screen.Stream("catchup", p.id, p.title)) }) { Text(tr(R.string.live_from_start)) }
+                    if (p != null && past && p.catchup == true) Button(onClick = { selected = null; onPlay(Screen.Stream("catchup", p.id, p.title)) }) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.live_play_catchup)) }
+                    if (p != null && past && p.catchup != true) Text(tr(R.string.live_not_archived), color = Color.Gray, fontSize = 13.sp)
                     if (p != null && !past) OutlinedButton(onClick = {
                         selected = null
-                        scope.launch { val r = runCatching { Api.post("/api/dvr/program", buildJsonObject { put("programId", p.id) }) }; android.widget.Toast.makeText(ctx, if (r.isSuccess) "Inspelningen är bokad" else "Kunde inte boka: ${r.exceptionOrNull()?.message ?: ""}", android.widget.Toast.LENGTH_LONG).show() }
-                    }) { Text("Spela in") }
+                        scope.launch { val r = runCatching { Api.post("/api/dvr/program", buildJsonObject { put("programId", p.id) }) }; android.widget.Toast.makeText(ctx, if (r.isSuccess) ctx.getString(R.string.live_booked) else ctx.getString(R.string.live_book_failed, r.exceptionOrNull()?.message ?: ""), android.widget.Toast.LENGTH_LONG).show() }
+                    }) { Text(tr(R.string.live_record)) }
                     OutlinedButton(onClick = {
                         val on = !fav
                         if (on) favs.add(ch.id) else favs.remove(ch.id)
@@ -222,10 +222,10 @@ fun TvGuide(data: IptvChannels, onPlay: (Screen) -> Unit) {
                             val ok = runCatching { Api.requestPublic("/api/iptv/favorites/${ch.id}", "PUT", emptyMap(), buildJsonObject { put("on", JsonPrimitive(on)) }) }.isSuccess
                             if (!ok) { if (on) favs.remove(ch.id) else favs.add(ch.id) }
                         }
-                    }) { Icon(Icons.Filled.Star, null, tint = if (fav) Color(0xFFFFC94A) else Color.Gray); Text(if (fav) " Ta bort från favoriter" else " Lägg till i favoriter") }
+                    }) { Icon(Icons.Filled.Star, null, tint = if (fav) Color(0xFFFFC94A) else Color.Gray); Text(" " + tr(if (fav) R.string.live_fav_remove else R.string.live_fav_add)) }
                 }
             },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("Stäng") } })
+            confirmButton = { TextButton(onClick = { selected = null }) { Text(tr(R.string.close)) } })
     }
 }
 
@@ -245,7 +245,7 @@ private fun GuideRow(ch: IptvChannel, fav: Boolean, progs: List<IptvProg>?, from
             }
             Spacer(Modifier.width(6.dp))
             Text(ch.name, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, modifier = Modifier.weight(1f))
-            if (fav) Icon(Icons.Filled.Star, "Favorit", tint = Color(0xFFFFC94A), modifier = Modifier.size(16.dp))
+            if (fav) Icon(Icons.Filled.Star, tr(R.string.favorite), tint = Color(0xFFFFC94A), modifier = Modifier.size(16.dp))
         }
         Spacer(Modifier.width(8.dp))
         Box(Modifier.width(gridW).fillMaxHeight()) {
@@ -253,7 +253,7 @@ private fun GuideRow(ch: IptvChannel, fav: Boolean, progs: List<IptvProg>?, from
             if (progs != null && vis.isEmpty()) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).focusRing(RoundedCornerShape(6.dp)).background(Surface2.copy(alpha = 0.5f))
                     .clickable { onProgram(null) }.padding(horizontal = 10.dp), contentAlignment = Alignment.CenterStart) {
-                    Text("Ingen tablå", color = Color.Gray, fontSize = 13.sp)
+                    Text(tr(R.string.live_no_schedule), color = Color.Gray, fontSize = 13.sp)
                 }
             }
             vis.forEachIndexed { i, p ->
@@ -317,7 +317,7 @@ fun VodShelvesView(kind: String, push: (Screen) -> Unit) {
         try { data = Api.get<VodShelves>("/api/iptv/vod", mapOf("kind" to kind, "shelves" to "1")) } catch (e: Exception) { error = e.message }
     }
     val d = data ?: run { if (error != null) ErrorText(error ?: "") else Loading(); return }
-    if (d.shelves.isEmpty()) { ErrorText(if (kind == "series") "Inga serier från IPTV-källan." else "Inga filmer från IPTV-källan."); return }
+    if (d.shelves.isEmpty()) { ErrorText(tr(if (kind == "series") R.string.vod_no_series else R.string.vod_no_movies)); return }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         items(d.shelves) { s ->
             Column(Modifier.padding(vertical = 8.dp)) {
@@ -351,30 +351,30 @@ fun VodDetailScreen(id: Int, push: (Screen) -> Unit) {
                     Text(listOfNotNull(v.year?.toString(), formatDuration(v.duration).takeIf { s -> s.isNotEmpty() }, v.rating?.let { r -> "★ %.1f".format(r) }, v.genre)
                         .joinToString("  ·  "), color = Color.Gray)
                     v.plot?.let { p -> Text(p, color = Color(0xFFCFD3DD), maxLines = 6, overflow = TextOverflow.Ellipsis) }
-                    listOfNotNull(v.director?.let { x -> "Regi: $x" }, v.cast?.let { x -> "Medverkande: $x" }).takeIf { l -> l.isNotEmpty() }?.let { l ->
+                    listOfNotNull(v.director?.let { x -> tr(R.string.cast_director, x) }, v.cast?.let { x -> tr(R.string.cast_actors, x) }).takeIf { l -> l.isNotEmpty() }?.let { l ->
                         Text(l.joinToString("  ·  "), color = Color.Gray, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                     if (v.kind == "movie") {
                         val pos: Double = v.progress?.takeIf { p -> !p.watched }?.position ?: 0.0
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = { push(Screen.Stream("vod", v.id, v.name, if (pos > 30) pos else 0.0)) }, Modifier.height(56.dp)) {
-                                Icon(Icons.Filled.PlayArrow, null); Text(if (pos > 30) " Fortsätt ${formatTime(pos)}" else " Spela", fontSize = 17.sp)
+                                Icon(Icons.Filled.PlayArrow, null); Text(" " + if (pos > 30) tr(R.string.continue_at, formatTime(pos)) else tr(R.string.play), fontSize = 17.sp)
                             }
-                            if (pos > 30) OutlinedButton(onClick = { push(Screen.Stream("vod", v.id, v.name, 0.0)) }, Modifier.height(56.dp)) { Text("Börja om") }
+                            if (pos > 30) OutlinedButton(onClick = { push(Screen.Stream("vod", v.id, v.name, 0.0)) }, Modifier.height(56.dp)) { Text(tr(R.string.start_over)) }
                         }
                     }
                 }
             }
         }
         if (v.kind == "series") {
-            if (v.episodes.isEmpty()) item { Text("Inga avsnitt hittades hos leverantören.", color = Color.Gray) }
+            if (v.episodes.isEmpty()) item { Text(tr(R.string.vod_no_episodes), color = Color.Gray) }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(seasons, key = { s -> s }) { s -> FilterChip(selected = s == season, onClick = { season = s }, label = { Text("Säsong $s", fontSize = 16.sp) }, modifier = Modifier.height(44.dp)) }
+                    items(seasons, key = { s -> s }) { s -> FilterChip(selected = s == season, onClick = { season = s }, label = { Text(tr(R.string.season_n, s), fontSize = 16.sp) }, modifier = Modifier.height(44.dp)) }
                 }
             }
             items(v.episodes.filter { e -> (e.season ?: 1) == season }, key = { e -> e.id }) { e ->
-                val title = listOfNotNull(e.episode?.let { n -> "$n." }, e.title ?: "Avsnitt").joinToString(" ")
+                val title = listOfNotNull(e.episode?.let { n -> "$n." }, e.title ?: tr(R.string.episode)).joinToString(" ")
                 val pos: Double = e.progress?.takeIf { p -> !p.watched }?.position ?: 0.0
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().background(Surface2)
                     .clickable { push(Screen.Stream("vodep", e.id, "${v.name} · $title", if (pos > 30) pos else 0.0)) }.padding(12.dp),
@@ -384,7 +384,7 @@ fun VodDetailScreen(id: Int, push: (Screen) -> Unit) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text(listOfNotNull(formatDuration(e.duration).takeIf { s -> s.isNotEmpty() }, if (e.progress?.watched == true) "Sedd" else if (pos > 30) "Fortsätt ${formatTime(pos)}" else null)
+                        Text(listOfNotNull(formatDuration(e.duration).takeIf { s -> s.isNotEmpty() }, if (e.progress?.watched == true) tr(R.string.watched) else if (pos > 30) tr(R.string.continue_at, formatTime(pos)) else null)
                             .joinToString(" · "), color = Color.Gray, fontSize = 13.sp)
                         e.plot?.let { p -> Text(p, color = Color.Gray, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) }
                     }

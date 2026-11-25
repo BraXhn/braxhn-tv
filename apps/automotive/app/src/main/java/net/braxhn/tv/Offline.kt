@@ -76,15 +76,15 @@ object Downloads {
         do {
             delay(3000)
             st = Api.get("/api/items/${item.id}/offline", mapOf("q" to quality))
-            if (st.status == "error") throw ApiException(st.error ?: "Servern kunde inte skapa filen")
+            if (st.status == "error") throw ApiException(st.error ?: str(R.string.dl_server_failed))
             val prep = (st.progress ?: 0) / 200f
             active.update { it + (item.id to prep) }
         } while (st.status != "ready")
-        val rel = st.url ?: throw ApiException("Servern skickade ingen nedladdningslänk")
+        val rel = st.url ?: throw ApiException(str(R.string.dl_no_link))
         val name = "${item.id}.mp4"
         val target = File(dir, name).also { it.delete() }
         val req = DownloadManager.Request(Uri.parse(Api.absolute(rel)))
-            .setTitle(item.title).setDescription("BraXhn TV")
+            .setTitle(item.title).setDescription(ctx.getString(R.string.app_name))
             .setDestinationUri(Uri.fromFile(target))
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
         val dlId = dm.enqueue(req)
@@ -102,7 +102,7 @@ object Downloads {
             while (true) {
                 delay(1500)
                 val done = dm.query(DownloadManager.Query().setFilterById(p.dlId)).use { c ->
-                    if (c == null || !c.moveToFirst()) throw ApiException("Nedladdningen avbröts")
+                    if (c == null || !c.moveToFirst()) throw ApiException(str(R.string.dl_cancelled))
                     val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
                     val got = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
                     val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
@@ -110,7 +110,7 @@ object Downloads {
                         val v = 0.5f + got.toFloat() / total / 2
                         active.update { it + (p.id to v) }
                     }
-                    if (status == DownloadManager.STATUS_FAILED) throw ApiException("Nedladdningen misslyckades")
+                    if (status == DownloadManager.STATUS_FAILED) throw ApiException(str(R.string.dl_failed))
                     status == DownloadManager.STATUS_SUCCESSFUL
                 }
                 if (done) {
