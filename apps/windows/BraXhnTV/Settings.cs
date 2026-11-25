@@ -22,6 +22,14 @@ public sealed class AppSettings
     public DateTime LastUpdateCheck { get; set; }
     /// <summary>Versionen som användaren valt att hoppa över</summary>
     public string? SkipVersion { get; set; }
+    /// <summary>Den inbyggda spelaren (mpv) spelar filmer som servern kan skicka orörda (på som standard)</summary>
+    public bool UseBuiltInPlayer { get; set; } = true;
+    /// <summary>Ljud orört till förstärkaren (bitström: AC3, E-AC3, DTS, TrueHD)</summary>
+    public bool Passthrough { get; set; }
+    /// <summary>Byt skärmens uppdateringsfrekvens efter filmen</summary>
+    public bool MatchRefresh { get; set; }
+    /// <summary>Den inbyggda spelarens volym (0–100)</summary>
+    public int Volume { get; set; } = 100;
 
     public static string Dir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BraXhnTV");
     static string FilePath => Path.Combine(Dir, "installningar.json");

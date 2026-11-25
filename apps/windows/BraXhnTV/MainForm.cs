@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
+using BraXhnTV.Spelare;
 
 namespace BraXhnTV;
 
@@ -228,10 +229,12 @@ sealed partial class MainForm : Form
         // Från alla sidor: uppspelning och tangenter
         switch (t)
         {
-            case "media": SetAwake(m?["s"]?.GetValue<string>() ?? "none"); return;
+            case "media": webAwake = m?["s"]?.GetValue<string>() ?? "none"; UpdateAwake(); return;
             case "f11": ToggleFullScreen(); return;
             case "esc": if (fullScreen && web?.CoreWebView2?.ContainsFullScreenElement != true) SetFullScreen(false); return;
         }
+        // Den inbyggda spelaren (från serverns sidor, se MainForm.Spelare.cs)
+        if (t.StartsWith("native-", StringComparison.Ordinal)) { if (!local) OnNativeMessage(t, m); return; }
         // Bara från appens egna sidor: serverlistan
         if (!local) return;
         switch (t)
@@ -379,6 +382,19 @@ sealed partial class MainForm : Form
         cfg.Maximized = fullScreen ? preFullState == FormWindowState.Maximized : WindowState == FormWindowState.Maximized;
         if (r.Width > 0 && r.Height > 0) cfg.Window = [r.X, r.Y, r.Width, r.Height];
         cfg.Save();
+        // Den inbyggda spelaren: webben får veta var filmen var (Fortsätt titta), mpv stängs och sedan fönstret
+        // (mpv ritar i fönstret – det får inte försvinna under den). Efter högst 3 s stängs det ändå.
+        if (player != null && !closingAfterPlayer)
+        {
+            closingAfterPlayer = true;
+            var p = player;
+            p.Gone += () => BeginInvoke(Close);
+            ClosePlayer();
+            _ = Task.Delay(3000).ContinueWith(_ => { try { BeginInvoke(Close); } catch { } });
+            e.Cancel = true;
+            return;
+        }
+        Display.Restore();
         SetAwake("none");
         base.OnFormClosing(e);
     }
@@ -395,12 +411,14 @@ sealed partial class MainForm : Form
         Native.AppendMenu(menu, Native.MF_STRING | (Autostart ? Native.MF_CHECKED : 0), MenuAutostart, L.T("Starta med Windows", "Start with Windows"));
         Native.AppendMenu(menu, Native.MF_STRING, MenuUpdates, L.T("Sök efter uppdateringar …", "Check for updates …"));
         Native.AppendMenu(menu, Native.MF_STRING, MenuAbout, L.T("Om BraXhn TV", "About BraXhn TV"));
+        AddPlayerMenu(menu);
     }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Native.WM_SYSCOMMAND)
         {
+            if (PlayerMenu((uint)(m.WParam.ToInt64() & 0xFFF0))) return;
             switch ((uint)(m.WParam.ToInt64() & 0xFFF0))
             {
                 case MenuServers: _ = ShowLocal(cfg.Servers.Count == 0 ? "add" : "pick"); return;

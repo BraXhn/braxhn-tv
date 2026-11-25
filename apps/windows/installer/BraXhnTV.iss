@@ -11,6 +11,10 @@
 #ifndef SourceDir
   #define SourceDir "..\ut\app"
 #endif
+#ifndef MpvDir
+  #define MpvDir "..\ut\mpv"
+#endif
+#define HasMpv FileExists(AddBackslash(MpvDir) + "libmpv-2.dll")
 #define HasSwedish FileExists(AddBackslash(CompilerPath) + "Languages\Swedish.isl")
 #define HasWebView2Setup FileExists(AddBackslash(SourcePath) + "MicrosoftEdgeWebview2Setup.exe")
 
@@ -74,6 +78,12 @@ Source: "{#SourceDir}\BraXhnTV.exe"; DestDir: "{app}"; Flags: ignoreversion
 #if HasWebView2Setup
 ; Microsofts lilla installerare för WebView2 – körs bara om WebView2 saknas
 Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
+#endif
+
+#if HasMpv
+; Den inbyggda spelaren: libmpv (LGPL) som egen fil, så att den kan bytas ut, och licenstexterna
+Source: "{#MpvDir}\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MpvDir}\*.txt"; DestDir: "{app}\mpv-licens"; Flags: ignoreversion
 #endif
 
 [Icons]

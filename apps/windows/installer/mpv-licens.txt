@@ -1,0 +1,21 @@
+Den inbyggda spelaren i BraXhn TV för Windows / The built-in player in BraXhn TV for Windows
+===========================================================================================
+
+libmpv-2.dll är mpv (https://mpv.io), byggd som LGPL-variant: mpv under GNU Lesser General Public License 2.1
+eller senare, med FFmpeg (https://ffmpeg.org) under LGPL 3 inbyggt. Licenstexterna ligger i den här mappen
+(lgpl-2.1.txt, lgpl-3.0.txt och gpl-3.0.txt, som LGPL 3 bygger på).
+
+BraXhn TV (MIT-licens) använder libmpv-2.dll som en separat fil som laddas när appen kör. Du får byta ut filen mot
+en egen byggnad av libmpv: lägg den i appens mapp (%LOCALAPPDATA%\Programs\BraXhn TV) eller i
+%LOCALAPPDATA%\BraXhnTV\mpv och starta om appen.
+
+Källkoden: mpv https://github.com/mpv-player/mpv och FFmpeg https://git.ffmpeg.org/ffmpeg.git, i de versioner som
+arkivets namn anger (git-hash), byggda med skripten som anges nedan. Hör av dig via
+https://github.com/BraXhn/braxhn-tv/issues om du vill ha källkoden för exakt den här filen.
+
+libmpv-2.dll is mpv (https://mpv.io) built as the LGPL variant: mpv under the GNU Lesser General Public License 2.1
+or later, with FFmpeg (https://ffmpeg.org) under LGPL 3 built in. The licence texts are in this folder. BraXhn TV
+(MIT licence) loads libmpv-2.dll as a separate file at run time; you may replace it with your own build of libmpv.
+Source code: see above, or ask via https://github.com/BraXhn/braxhn-tv/issues for the source of this exact file.
+
+Den här filen kom från / This file came from:

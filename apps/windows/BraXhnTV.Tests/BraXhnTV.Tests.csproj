@@ -5,9 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\BraXhnTV\Logik\*.cs" Link="Logik\%(Filename)%(Extension)" />
+    <!-- Spelaren (mpv) provas mot en riktig libmpv när den finns (Linux: paketet libmpv2, eller BRAXHN_LIBMPV) -->
+    <Compile Include="..\BraXhnTV\Spelare\Libmpv.cs;..\BraXhnTV\Spelare\MpvPlayer.cs;..\BraXhnTV\Settings.cs" Link="Spelare\%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
