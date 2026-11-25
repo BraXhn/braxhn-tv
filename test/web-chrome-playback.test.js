@@ -7,18 +7,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { startServer, PW } from './media/server.mjs';
+import { startServer } from './media/server.mjs';
 import { freePort } from './helpers/port.js';
+import { CHROME, chromium, launchChrome, loginPage, installProbes as helpers } from './helpers/chrome.js';
 
-const CHROME = [process.env.CHROME_BIN, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].filter(Boolean).find(p => fs.existsSync(p));
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
-let chromium = null;
-const require = createRequire(import.meta.url);
-for (const p of [process.env.PLAYWRIGHT, 'playwright', '/opt/node22/lib/node_modules/playwright/index.mjs'].filter(Boolean)) {
-  try { ({ chromium } = p.startsWith('/') ? await import(p) : require(p)); if (chromium) break; } catch {}
-}
 const skip = !CHROME ? 'Google Chrome saknas' : !chromium ? 'Playwright saknas' : !hasFfmpeg ? 'ffmpeg saknas' : false;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-chrome-'));
 const FPS = 24, SECS = 14;
@@ -45,18 +39,11 @@ before(async () => {
   await srv.setup();
   const items = (await srv.req('/api/libraries/1/items')).data.items;
   film = items.find(x => /Oppen/.test(x.title)); flat = items.find(x => /Pyramid/.test(x.title)); lang = items.find(x => /Spraak/.test(x.title));
-  browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
+  browser = await launchChrome();
 });
 after(async () => { await browser?.close(); await srv?.stop(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
-async function page(userAgent, opts = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(userAgent ? { userAgent } : {}), ...opts });
-  const p = await ctx.newPage();
-  await p.goto(srv.base + '/#/login');
-  await p.fill('input[autocomplete="username"], #u, input[name=name]', 'admin'); await p.fill('input[type=password]', PW); await p.keyboard.press('Enter');
-  await p.waitForFunction(() => !location.hash.includes('login'), null, { timeout: 30000 });
-  return { p, close: () => ctx.close() };
-}
+const page = (userAgent, opts) => loginPage(browser, srv.base, userAgent, opts);
 
 test('webbläsarens egen HLS-spelare väljs bara i Safari – i Chrome används hls.js', { skip }, async () => {
   const a = await page();
@@ -98,32 +85,7 @@ test('remux av en fil med öppen GOP spelas utan frysning i Chrome', { skip }, a
   await close();
 });
 
-// Hjälp i sidan: __frame(pred, max) väntar på första nya bild som uppfyller pred(mediatid) – följer med om
-// videoelementet byts – och ger { ms, at } eller { ms: null, läget }. __moves(ms) räknar bildrutor och speltid.
-async function helpers(p) {
-  await p.evaluate(async () => {
-    const lazy = await import('/m/js/lazy.js'); window.__V = await lazy.loadPlayer(); window.__L = lazy;
-    window.__errors = 0; window.__modes = [];
-    const seen = new WeakSet();
-    setInterval(() => {
-      const v = document.querySelector('#vid'); if (v && !seen.has(v)) { seen.add(v); v.addEventListener('error', () => window.__errors++); }
-      const m = window.__V.P?.pb?.mode; if (m && window.__modes.at(-1) !== m) window.__modes.push(m);
-    }, 10);
-    const state = () => { const v = document.querySelector('#vid'); if (!v) return 'ingen video';
-      const b = []; for (let i = 0; i < v.buffered.length; i++) b.push(v.buffered.start(i).toFixed(1) + '–' + v.buffered.end(i).toFixed(1));
-      return `tid ${v.currentTime.toFixed(1)}, ${v.paused ? 'pausad' : 'spelar'}, fel ${v.error?.code || 0} ${v.error?.message || ''}, buffert [${b}], läge ${window.__V.P?.pb?.mode}`; };
-    window.__frame = (pred, max = 20000) => new Promise((ok) => {
-      const t0 = performance.now(); let fin = false, cur = null;
-      const lim = setTimeout(() => { fin = true; ok({ ms: null, state: state() }); }, max);
-      const arm = () => { if (fin) return; const v = document.querySelector('#vid');
-        if (v && v !== cur) { cur = v; const cb = (now, m) => { if (fin || v !== cur) return; if (pred(m.mediaTime)) { fin = true; clearTimeout(lim); ok({ ms: Math.round(performance.now() - t0), at: m.mediaTime }); } else v.requestVideoFrameCallback(cb); }; v.requestVideoFrameCallback(cb); }
-        setTimeout(arm, 20); };
-      arm();
-    });
-    window.__moves = async (ms) => { const v = document.querySelector('#vid'); const q0 = v.getVideoPlaybackQuality().totalVideoFrames, c0 = v.currentTime; await new Promise(r => setTimeout(r, ms));
-      return { frames: v.getVideoPlaybackQuality().totalVideoFrames - q0, played: v.currentTime - c0, same: document.querySelector('#vid') === v, paused: v.paused }; };
-  });
-}
+// helpers(p): __frame, __moves, __errors och __modes i sidan – se test/helpers/chrome.js
 
 test('öppen GOP i Chrome: fortsätt mitt i filen och spolning i bufferten ger bild på rätt ställe (remux behålls)', { skip }, async () => {
   const { p, close } = await page();

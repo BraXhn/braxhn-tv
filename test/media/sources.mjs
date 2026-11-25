@@ -219,16 +219,17 @@ function inputFiles(dir) {
 /** Nyckel för cachen: argumenten, efterbearbetningen, extrafilernas innehåll och ffmpeg-versionen */
 function keyOf(src, files) {
   const h = crypto.createHash('sha256');
-  h.update(JSON.stringify({ v: GEN_VERSION, ff: ffmpegVersion(), args: src.args(files), post: String(src.post || ''), ext: src.ext }));
+  h.update(JSON.stringify({ v: GEN_VERSION, ff: ffmpegVersion(), args: src.args(files), post: String(src.post || ''), ext: src.ext, dur: src.dur }));
   for (const f of Object.values(files)) h.update(fs.readFileSync(f));
   return h.digest('hex').slice(0, 16);
 }
 
-/** Skapar källorna (eller tar dem ur cachen). Returnerar [{ ...källa, file }] – källor som inte går att skapa får skip. */
-export async function generate({ ids = null, full = false, concurrency = Math.max(2, os.cpus().length >> 1), log = () => {} } = {}) {
+/** Skapar källorna (eller tar dem ur cachen). Returnerar [{ ...källa, file }] – källor som inte går att skapa får skip.
+ *  sources: en egen lista i samma form som SOURCES (uppspelningsvakten, test/vakt.mjs); dur per källa (standard 30 s) */
+export async function generate({ ids = null, full = false, sources = SOURCES, concurrency = Math.max(2, os.cpus().length >> 1), log = () => {} } = {}) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   const files = inputFiles(CACHE_DIR);
-  const list = SOURCES.filter(s => ids ? ids.includes(s.id) : (full || s.fast));
+  const list = sources.filter(s => ids ? ids.includes(s.id) : (full || s.fast));
   const out = list.map(s => ({ ...s }));
   let next = 0;
   async function worker() {
@@ -241,7 +242,7 @@ export async function generate({ ids = null, full = false, concurrency = Math.ma
         const tmp = file.replace(s.ext, '.tmp' + s.ext);
         const t0 = Date.now();
         try {
-          await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...s.args(files), '-t', String(DUR), tmp], { maxBuffer: 16 << 20 });
+          await pexec('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', ...s.args(files), '-t', String(s.dur || DUR), tmp], { maxBuffer: 16 << 20 });
           if (s.post) s.post(tmp);
           fs.renameSync(tmp, file);
           log(`skapade ${s.id} på ${((Date.now() - t0) / 1000).toFixed(1)} s`);
