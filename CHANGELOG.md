@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.0 – 2026-11-25
 - **Serier som matchats fel rättar sig själva.** En serie som en gång fått fel träff hos TMDB (till exempel *The Big
   Bang Theory* som ett koreanskt BIGBANG-program, eller *Top Gear* som serien från 1978 eller den amerikanska) behöll
   den för alltid: vid nästa matchning användes den felaktiga seriens namn och år som ledtrådar, så den hittade sig
