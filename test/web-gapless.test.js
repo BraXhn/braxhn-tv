@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -101,6 +102,7 @@ function tapScript() {
   };
 }
 async function newPage(width = 1280) {
+  await clearMusicQueue(req); // ingen minispelare från förra testets kö
   const ctx = await browser.newContext({ viewport: { width, height: width < 500 ? 740 : 800 }, bypassCSP: true });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: B }]);
   const page = await ctx.newPage();

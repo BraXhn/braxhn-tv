@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -62,6 +63,7 @@ after(async () => { await browser?.close(); srv?.kill(); fs.rmSync(ROOT, { recur
 const t = (name, fn) => test(name, { skip }, fn);
 
 async function newPage(width = 1280) {
+  await clearMusicQueue(req); // ingen minispelare från förra testets kö
   const ctx = await browser.newContext({ viewport: { width, height: width < 500 ? 740 : 800 }, ...(width < 500 ? { hasTouch: true, isMobile: true } : {}) });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: B }]);
   const page = await ctx.newPage();

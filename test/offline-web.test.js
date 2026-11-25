@@ -11,6 +11,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -182,6 +183,7 @@ t('barnprofil: titlar över åldersgränsen kan inte sparas offline', async () =
 
 // ---------- webbklienten ----------
 async function newContext(width = 1280) {
+  await clearMusicQueue(req); // ingen minispelare från förra testets kö
   if (!browser) browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width, height: width < 500 ? 740 : 800 } });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: B }]);

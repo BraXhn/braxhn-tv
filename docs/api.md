@@ -4,7 +4,8 @@ iOS/tvOS-appen (`apps/apple`) och Android-appen (`apps/automotive`) använder sa
 apptoken i `Authorization: Bearer …` (inloggning med `"app": true`) och kortlivade medie- och bildtoken i
 `?t=` för strömmar och bilder. Bildtoken (`POST /api/media-token`, `{ token, ttl }`, gäller 7 dygn) kan inte
 återanvändas, så servern sparar högst 50 per användare och tar bort de äldsta – förnya en gång per dygn, som apparna
-gör, och inte vid varje bild. Webben levereras med servern, men **installerade appar uppdateras inte när servern
+gör, och inte vid varje bild. Medietoken (en per uppspelningsanrop, i strömlänkarna, gäller 24 timmar) har ett tak
+på 300 per användare; de äldsta tas bort. Webben levereras med servern, men **installerade appar uppdateras inte när servern
 uppdateras**. En app från i våras ska fungera mot nästa års server.
 
 ## Version
@@ -420,7 +421,9 @@ Administratören kan begränsa ett konto eller en profil (`server/perms.js`). In
 bara som att titlar saknas och att vissa anrop nekas:
 
 - **Bibliotek:** `/api/libraries` och alla listor visar bara tillåtna bibliotek. Serverns sökvägar (`path`, `paths`)
-  finns bara i svaret till administratörer – ingen app läser dem (apparna avkodar `id`, `name`, `type`, `count`). En titel, låt, bok, bild eller ström i ett
+  finns bara i svaret till administratörer – ingen app läser dem (apparna avkodar `id`, `name`, `type`, `count`).
+  Andra än administratörer får bara `id`, `name`, `type`, `count` och `home_video` för ett bibliotek, även i
+  `library` i `/api/libraries/:id/items`, `/api/home`, `/api/music/:lib/home` och `/api/audiobooks/:lib`. En titel, låt, bok, bild eller ström i ett
   otillåtet bibliotek ger **403** eller **404**, precis som en titel över barnprofilens åldersgräns.
   Fotobibliotek (typen `photo`, `/api/photos/*`) är bara för webben: de listas inte i `/api/libraries` för apptoken
   (apparna känner inte till typen), och `/api/home` har fältet `photoMemories` som alltid är tomt för appar.

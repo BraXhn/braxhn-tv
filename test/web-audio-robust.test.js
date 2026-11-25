@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -78,6 +79,7 @@ function tapScript() {
 }
 /** Sida med inspelning, nätstrypning (CDP) och bokföring av musikhämtningarna: { url, gl, done, canceled } */
 async function newPage() {
+  await clearMusicQueue(req); // ingen minispelare från förra testets kö
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: B }]);
   const page = await ctx.newPage();

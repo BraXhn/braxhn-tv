@@ -11,6 +11,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -388,7 +389,7 @@ tw('stängd spelare (✕): kön tas bort och kommer inte tillbaka', async () => 
 });
 
 tw('motorn tar över efter en omkodad låt som spolats: tiden och Föregående gäller nästa låt', async () => {
-  await req('/api/me/queue', { method: 'DELETE' });
+  await clearMusicQueue(req);
   const ctx = await newContext(), A = await newPage(ctx);
   // Elementets ström (och HEAD) kodas om (som för ett format webbläsaren inte spelar); motorn får inte första låten
   // (elementet tar den) men hämtar nästa som vanligt, så att den kan ta över vid övergången

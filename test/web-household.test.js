@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { startServer, PW } from './media/server.mjs';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -57,6 +58,7 @@ const settle = (page) => page.waitForFunction(() => document.querySelector('#mai
 const login = async (ctx) => {
   const r = await srv.req('/api/login', { method: 'POST', body: { name: 'Pappa', password: PW } });
   await ctx.addCookies([{ name: 'kt', value: /kt=([0-9a-f]+)/.exec(r.headers.get('set-cookie'))[1], url: srv.base }]);
+  await clearMusicQueue(srv.req); // srv.req är nu Pappa: ingen minispelare från förra testets kö
 };
 
 bt('installationsguiden: Nästa utan bibliotek erbjuder att lägga till förslagen, antal i singular', async () => {

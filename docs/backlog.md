@@ -112,17 +112,11 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
 - Öppen GOP: skicka `mse=1` bara när webbläsaren avkodar i mjukvara (`mediaCapabilities.decodingInfo().powerEfficient`
   i `web/js/player/video.js`), så att Chrome med grafikkortsavkodning slipper omkodningen.
-- Öppen GOP: efter ett byte till omkodning gäller `forceTc` resten av spelarsessionen, så ett senare val av *Original*
-  kodas också om (`web/js/player/video.js`).
 - Öppen GOP: åtta prov per fil missar ungefär var tionde fil med många felande nyckelbilder; ett ffmpeg-anrop med
   flera `-ss` skulle halvera provets kostnad (`server/opengop.js`). Chromecast (också MSE) är inte provad med öppen GOP.
-- Kvalitetsetiketterna går inte via `t()` (*1,5 Mbit/s* med decimalkomma även på engelska; `QUALITY_STEPS` i
-  `web/js/player/hlsconfig.js`).
 - Musik: Subsonic-appar kunde dela kön med webben via `savePlayQueue`/`getPlayQueue` (`server/subsonic.js`,
   `server/musicqueue.js`).
 - Musik: en bok eller podd återställs inte i minispelaren efter omladdning (`playSpoken` i `web/js/audio.js`).
-- Musik: `M.offset` och `M.transcoded` nollställs inte när motorn tar över efter ett omkodat element som spolats
-  (`HOOKS.advance` i `web/js/audio.js`) – tiden och Föregående blir fel för nästa låt.
 - Musik: spolning i elementet efter att nästa buffert startat tappas tyst (`web/js/audio.js`).
 - Musikfältets knappar är 34 px på telefon, under 44 px som rekommenderas för fingrar (`.mic` i `web/style.css`).
 - Expo-appen använder inte den sparade musikkön (`/api/me/queue`) – hör till musiken i punkt 4 (förslag på
@@ -135,10 +129,10 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   och fotots dag i Minnen (`dayOf` i `server/photos.js`, om det inte är avsiktligt).
 - `/api/libraries` skickar alla kolumner (`l.*`) till andra än administratörer; en vitlista vore säkrare
   (`server/routes/library.js`).
+- Expo-appen använder inte den sparade musikkön (`/api/me/queue`), och sparar bildtoken bara i minnet så att varje
+  appstart skapar en ny (`ensureImageToken` i `apps/expo/src/api.ts`).
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
   AirPlay) och inte genom startcachen (`server/pace.js`).
-- Webbtester som delar konto kan få en synlig minispelare från förra testets musikkö; en gemensam hjälpare som tömmer
-  kön vore säkrare.
 
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
@@ -164,11 +158,8 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Docker-imagen för arm64 byggs i GitHub Actions men är inte provad på en arm-maskin.
 
 **Säkerhet och integritet**
-- `GET /api/libraries` lämnar bibliotekens sökvägar på servern (`path`, `paths`) till alla inloggade, även
-  barnprofiler. Ta bort dem för andra än administratörer – kontrollera först att apparna inte läser fälten.
 - Skärmtiden kan fortfarande kringgås av den som hämtar hela originalfilen snabbt och tittar ur egen kopia. Överväg
   att begränsa hastigheten på `/direct` för profiler med skärmtid.
-- `POST /api/media-token` skapar en ny rad i `sessions` vid varje anrop utan tak per användare.
 - Reläets admin: spärren mot felaktiga token hindrar inte nya försök (rätt token släpps igenom även när spärren
   slagit till). Token är minst 16 tecken, så risken är liten.
 - Enkel inloggning (OIDC) saknar knapp i apparna.

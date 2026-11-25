@@ -14,6 +14,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { startServer, PW } from './media/server.mjs';
 import { auditPage, focusInfo } from './helpers/a11y-audit.js';
 import { epub, cbz, png, paragraphs } from './helpers/ebook-fixtures.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -103,6 +104,7 @@ const MODES = {
   tv: { viewport: { width: 1920, height: 1080 }, userAgent: 'Mozilla/5.0 (Linux; Android 12; BRAVIA 4K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36 SMART-TV' }
 };
 async function newPage(mode = 'desktop', { media, storage } = {}) {
+  await clearMusicQueue(srv.req); // ingen minispelare från förra testets kö
   const ctx = await browser.newContext({ ...MODES[mode], ...(media ? { reducedMotion: media.reducedMotion, forcedColors: media.forcedColors, colorScheme: 'dark' } : {}) });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: srv.base }]);
   if (storage) await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, storage);

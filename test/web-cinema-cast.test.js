@@ -12,6 +12,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { freePort } from './helpers/port.js';
+import { clearMusicQueue } from './helpers/musicqueue.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 let chromium = null;
@@ -138,6 +139,7 @@ function castStub() {
 }
 
 async function newPage({ cast = false, width = 1280 } = {}) {
+  await clearMusicQueue(req); // ingen minispelare från förra testets kö (täcker annars raderna)
   const ctx = await browser.newContext({ viewport: { width, height: width < 500 ? 740 : 800 } });
   await ctx.addCookies([{ name: 'kt', value: cookie, url: B }]);
   const page = await ctx.newPage();
@@ -351,8 +353,6 @@ t('Chromecast: avsnitt med kö, framsteg, panelens styrning och spårbyten', asy
 
 t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
   for (const width of [1280, 375]) {
-    // Kön från förra varvet visas annars i minispelaren när sidan öppnas (sparad på servern) och täcker raderna
-    await req('/api/me/queue', { method: 'DELETE' });
     const { page, errors, reqs, close } = await newPage({ cast: true, width });
     await page.goto(B + '/#/album/' + S.album);
     await page.click('tr[data-ti="0"]');

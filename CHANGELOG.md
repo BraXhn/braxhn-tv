@@ -30,6 +30,20 @@
   - **Datum i UTC i stället för svensk tid:** strax efter midnatt fick inspelningens metadata och exporterade filer
     (Min historik, statistiken, ordlistan, Mina uppgifter) gårdagens datum. Nu gäller serverns lokala tid (`TZ`).
   - Kontospärrens nyckel (kontonamnet) är kortad till 64 tecken och antalet nycklar har ett tak.
+  - **Medietoken hade inget tak:** varje uppspelningsanrop i apparna och Chromecast sparade en ny rad som gällde ett
+    dygn. Nu sparas högst 300 per användare och de äldsta tas bort. Flera flikar, appar och Chromecast samtidigt
+    fungerar som förut.
+  - **Biblioteken skickas med en vitlista:** andra än administratörer får bara namn, typ, antal och om det är
+    hemvideor – inga sökvägar eller inställningar. Titellistan för ett bibliotek visade förut serverns mappar även för
+    barnprofiler.
+  - **Inbjudans giltighetsdag i händelseloggen och diagnostikfilens namn** var i UTC strax efter midnatt. Nu gäller
+    serverns lokala tid. Fotots dag i *Minnen* var redan rätt (bildens egen klocka).
+- **Spelaren: Original i kvalitetsmenyn ger originalfilen igen** efter att spelaren bytt till omkodning (spolning i en
+  fil som inte kan börja mitt i). Förut kodades allt om resten av tiden spelaren var öppen.
+- **Kvalitetsmenyerna på engelska** visar *1.5 Mbit/s* med punkt (spelaren, Uppspelning under Mitt konto och
+  Administration).
+- **Musik: tiden och Föregående blev fel efter en omkodad låt som spolats** när nästa låt spelades glapplöst (tiden
+  visade förra låtens position). Rättat.
 - **Musik: kön och platsen finns kvar när sidan laddas om.** Laddar man om sidan, stänger fliken eller öppnar appen
   igen visar minispelaren samma låt, samma kö (i samma blandade ordning, med upprepning och låtradio) och samma
   position, pausad. Ett tryck på *Spela* fortsätter där man var. Kön sparas på servern för varje profil, så den följer
