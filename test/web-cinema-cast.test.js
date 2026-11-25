@@ -499,14 +499,18 @@ t('spelaren: byte av kvalitet fortsätter spela av sig själv, pausad film förb
     await page.waitForFunction(() => document.querySelector('#vid')?.currentTime > 1, null, { timeout: 60000, polling: 50 });
     const change = (q) => page.evaluate((q) => { const s = document.querySelector('#pq'); s.value = q; s.dispatchEvent(new Event('change')); }, q);
     // Spelande film: ny ström och den spelar vidare utan att man trycker på något
+    // Testfilmen är 160×90, så menyn har bara Auto och Original (inga steg över källans upplösning)
+    const streams = () => reqs.filter(r => r.url.includes(`/api/items/${S.main}/playback`)).length;
     const t0 = await page.evaluate(() => document.querySelector('#vid').currentTime);
-    await change('1080');
-    await until(() => reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('q=1080')), 'ny ström med 1080');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelector('#pq').options].map(o => o.value)), ['auto', 'orig']);
+    await change('orig');
+    await until(() => reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('q=orig')), 'ny ström med Original');
     await page.waitForFunction((t0) => { const v = document.querySelector('#vid'); return !v.paused && v.currentTime > t0 + 1.5; }, t0, { timeout: 30000, polling: 100 });
     // Pausad film: strömmen byts men filmen står kvar pausad
     await page.evaluate(() => document.querySelector('#vid').pause());
-    await change('720');
-    await until(() => reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('q=720')), 'ny ström med 720');
+    const n = streams();
+    await change('auto');
+    await until(() => streams() > n, 'ny ström med Auto');
     await page.waitForFunction(() => document.querySelector('#vid').readyState >= 2, null, { timeout: 30000 });
     await sleep(800);
     assert.equal(await page.evaluate(() => document.querySelector('#vid').paused), true);
