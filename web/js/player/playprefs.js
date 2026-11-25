@@ -2,14 +2,15 @@
 // SDH, automatisk överhoppning, nästa avsnitt och standardkvalitet. Servern väljer spåren (playprefs.js) och skickar
 // förvalen i /api/items/:id (defaultAudio/defaultSub) och /api/items/:id/playback (autoSkip/autoNext) – här finns
 // panelen under Mitt konto och flytten av de gamla webbläsarvalen (sublang, quality) till kontot.
-import { $, $$, act, api, esc, me, routeGen, status, store, toast, t } from '../core.js';
+import { $, $$, act, api, esc, locale, me, routeGen, status, store, toast, t } from '../core.js';
+import { QUALITY_STEPS, qualityLabel } from './hlsconfig.js';
 
 export const LANGS = [['sv', t('Svenska')], ['en', t('Engelska')], ['no', t('Norska')], ['da', t('Danska')], ['fi', t('Finska')], ['is', t('Isländska')],
   ['de', t('Tyska')], ['fr', t('Franska')], ['es', t('Spanska')], ['it', t('Italienska')], ['nl', t('Nederländska')], ['pl', t('Polska')],
   ['pt', t('Portugisiska')], ['ru', t('Ryska')], ['tr', t('Turkiska')], ['ar', t('Arabiska')], ['fa', t('Persiska')], ['hi', 'Hindi'],
   ['ja', t('Japanska')], ['ko', t('Koreanska')], ['zh', t('Kinesiska')], ['th', 'Thai']];
 const SUB_MODES = [['off', t('Av')], ['forced', t('Bara tvingade undertexter')], ['foreign', t('När ljudet är på ett annat språk än mina språk')], ['always', t('Alltid')]];
-const QUALS = [['orig', 'Original'], ['1080', '1080p (8 Mbit/s)'], ['720', '720p (4 Mbit/s)'], ['480', '480p (1,5 Mbit/s)'], ['360', '360p (0,8 Mbit/s)']];
+const QUALS = [['orig', 'Original'], ...QUALITY_STEPS.map(([q, mb]) => [q, qualityLabel(q, mb, locale)])];
 const QRANK = { orig: 99, '2160': 6, '1080': 5, '720': 4, '480': 3, '360': 2 };
 const COUNTDOWNS = [0, 5, 8, 10, 15, 20, 30];
 const N_AUDIO = 3, N_SUB = 3;

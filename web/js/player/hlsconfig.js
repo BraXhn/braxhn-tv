@@ -122,15 +122,19 @@ export function recoverPlan(prev, pos, now, max = 2) {
 }
 
 // ---------- kvalitetsmenyn (⚙ i spelaren) ----------
-export const QUALITY_STEPS = Object.freeze([['1080', '1080p (8 Mbit/s)'], ['720', '720p (4 Mbit/s)'], ['480', '480p (1,5 Mbit/s)'], ['360', '360p (0,8 Mbit/s)']]);
+/** Kvalitetsstegen: [höjd, Mbit/s] (som QUALITIES i server/stream.js) */
+export const QUALITY_STEPS = Object.freeze([['1080', 8], ['720', 4], ['480', 1.5], ['360', 0.8]]);
+/** Etiketten för ett steg med decimaltecknet efter språket (decimalkomma på svenska, punkt på engelska) */
+export const qualityLabel = (q, mbps, locale = 'sv-SE') => `${q}p (${Number(mbps).toLocaleString(locale || 'sv-SE')} Mbit/s)`;
 /**
- * Stegen som är värda att erbjuda för en källa (bredd × höjd): inget över källans upplösning – 1080p för en fil i
- * 180p ger samma bild som Original. Bredbild räknas efter bredden (1920×800 är en 1080p-fil, 1280×536 en 720p-fil),
- * och några procent marginal tar med filer som är beskurna en aning (1916×1076). Okänd storlek: alla steg.
+ * Stegen som är värda att erbjuda för en källa (bredd × höjd), som [höjd, etikett]: inget över källans upplösning –
+ * 1080p för en fil i 180p ger samma bild som Original. Bredbild räknas efter bredden (1920×800 är en 1080p-fil,
+ * 1280×536 en 720p-fil), och några procent marginal tar med filer som är beskurna en aning (1916×1076). Okänd storlek:
+ * alla steg. locale = språket för decimaltecknet (core.js locale).
  */
-export function qualitySteps(width, height) {
+export function qualitySteps(width, height, locale) {
   const cls = Math.max(Number(height) || 0, Math.round((Number(width) || 0) * 9 / 16));
-  return cls ? QUALITY_STEPS.filter(([q]) => +q <= cls * 1.04) : [...QUALITY_STEPS];
+  return (cls ? QUALITY_STEPS.filter(([q]) => +q <= cls * 1.04) : QUALITY_STEPS).map(([q, mb]) => [q, qualityLabel(q, mb, locale)]);
 }
 
 // ---------- uppkopplingens takt (hastighetsprovet i caps.js) ----------

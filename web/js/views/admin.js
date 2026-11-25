@@ -2,6 +2,7 @@
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, keyClick, later, main, me, toast, views, toastErr, t, locale } from '../core.js';
 import { boot, loadLibs, route } from '../router.js';
+import { QUALITY_STEPS, qualityLabel } from '../player/hlsconfig.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
 import { adminRelay } from './admin-relay.js';
@@ -335,7 +336,7 @@ views.admin = async (sec) => {
     ${S.cinemaPreroll ? `<p class="muted small" style="margin:4px 0 0">${S.cinemaPrerollFiles ? t('{cinemaPrerollFiles} {v} att välja bland.', { cinemaPrerollFiles: S.cinemaPrerollFiles, v: S.cinemaPrerollFiles === 1 ? 'fil' : t('filer') }) : t('<span class="err">Inga spelbara videofiler hittades.</span>')}</p>` : ''}
     <h3 style="margin:22px 0 0;font-size:.9375rem">${t('Utanför hemmet')}</h3>
     <div class="row"><div style="flex:1"><label for="rq">${t('Maxkvalitet utanför hemmet (automatisk)')}</label><select id="rq">
-      ${[['orig', t('Original (ingen gräns)')], ['1080', '1080p – 8 Mbit/s'], ['720', '720p – 4 Mbit/s'], ['480', '480p – 1,5 Mbit/s'], ['360', '360p – 0,8 Mbit/s']].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
+      ${[['orig', t('Original (ingen gräns)')], ...QUALITY_STEPS.map(([q, mb]) => [q, qualityLabel(q, mb, locale)])].map(([v, n]) => `<option value="${v}" ${S.remoteQuality === v ? 'selected' : ''}>${n}</option>`).join('')}
     </select></div><div style="flex:1"><label for="pu">${t('Publik adress (används för Chromecast och appar)')}</label><input id="pu" placeholder="${t('https://tv.dindomän.se')}" value="${esc(S.publicUrl || '')}"></div></div>
     <p class="muted" style="font-size:.8125rem;margin:8px 0 0">${t('Du är just nu ansluten {v} via {v2}{v3}. Se README → <i>Titta utanför hemmet</i>.', { v: S.youAreLocal ? t('<b>från hemnätverket</b>') : t('<b>utifrån</b>'), v2: S.https ? 'HTTPS ✓' : t('HTTP (okrypterat)'), v3: S.tlsBuiltin ? t(' · inbyggd HTTPS aktiv på port 8443') : '' })}</p>
     <h3 style="margin:22px 0 0;font-size:.9375rem">${t('Omkodning')}</h3>

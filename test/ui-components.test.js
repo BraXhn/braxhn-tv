@@ -3,6 +3,8 @@
 // de rena funktionerna som bygger HTML testas (interaktionen testas i webbläsaren, se docs/ui-komponenter.md).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // Ett "element" som tar emot allt (moduler som kopplar knappar när de laddas, t.ex. router.js)
 const fake = new Proxy(function () {}, {
@@ -229,6 +231,20 @@ test('ljudspårens namn: språkets namn i stället för koden, titeln en gång',
   assert.equal(audioLabel({ lang: 'und', codec: 'aac' }), 'Ljud · aac', '"und" = okänt språk');
   assert.equal(audioLabel({ lang: 'xx', codec: 'aac' }), 'xx · aac', 'okänd kod som den är');
   assert.equal(audioLabel({}), 'Ljud');
+});
+
+test('kvalitetsmenyn: etiketterna följer språket (1,5 Mbit/s på svenska, 1.5 Mbit/s på engelska)', async () => {
+  const { qualitySteps } = await import('../web/js/player/hlsconfig.js');
+  const label = (loc) => Object.fromEntries(qualitySteps(1920, 1080, loc));
+  assert.deepEqual(label('sv-SE'), { 1080: '1080p (8 Mbit/s)', 720: '720p (4 Mbit/s)', 480: '480p (1,5 Mbit/s)', 360: '360p (0,8 Mbit/s)' });
+  assert.deepEqual(label('en-US'), { 1080: '1080p (8 Mbit/s)', 720: '720p (4 Mbit/s)', 480: '480p (1.5 Mbit/s)', 360: '360p (0.8 Mbit/s)' });
+  assert.equal(label(undefined)[480], '480p (1,5 Mbit/s)', 'utan språk: svenska');
+  // Ingen menyn med kvalitet har kvar svenska decimaltal i koden (spelaren, Uppspelning under Mitt konto, Administration)
+  const WEBJS = path.join(import.meta.dirname, '..', 'web', 'js');
+  for (const f of ['player/video.js', 'player/playprefs.js', 'views/admin.js', 'player/hlsconfig.js']) {
+    assert.doesNotMatch(fs.readFileSync(path.join(WEBJS, f), 'utf8'), /\d,\d Mbit\/s/, f);
+  }
+  assert.match(fs.readFileSync(path.join(WEBJS, 'player/video.js'), 'utf8'), /qualitySteps\(it\.width, it\.height, locale\)/, 'spelaren skickar språket');
 });
 
 test('kvalitetsmenyn: inga steg över källans upplösning (bredbild räknas efter bredden)', async () => {
