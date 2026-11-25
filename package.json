@@ -8,5 +8,6 @@
   "engines": { "node": ">=22.13" },
   "scripts": { "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "verify": "node server/verify.js && node scripts/check-syntax.mjs",
-    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js" }
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js",
+    "vakt": "node --disable-warning=ExperimentalWarning test/vakt.mjs" }
 }

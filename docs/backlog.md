@@ -24,16 +24,17 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Näst på tur
 
-### 1. Uppspelningsvakt i riktig Chrome inför varje utgåva
+### 1. Öppen GOP: spolning inom bufferten ger avkodningsfel i Chrome
 
-- **Vad:** utöka `test/web-chrome-playback.test.js` så att det mäter tid från klick till första bildruta, tappade
-  bildrutor, spolning och *Fortsätt titta* på några riktiga filtyper (öppen GOP, HEVC, MKV med DTS), och kör det som
-  ett eget steg inför varje utgåva. Siffrorna skrivs i `docs/testat.md`.
-- **Varför:** frysningarna i Chrome nådde användarna och rättades först i 1.2.1. Det som familjen märker mest är om
-  filmen startar direkt och inte hackar. Plex och Infuse är bra just här.
-- **Filer:** `test/web-chrome-playback.test.js`, `test/media/*`, `.github/workflows/test.yml`, `docs/testat.md`.
-- **Klart när:** testet faller om starttiden eller antalet tappade bildrutor blir sämre än de uppmätta värdena, och
-  körs i GitHub Actions för varje utgåva.
+- **Vad:** uppspelningsvakten visar att spolning till en redan buffrad GOP i en fil med öppen GOP ger `PIPELINE_ERROR_DECODE`
+  (bilden före nyckelbilden hänvisar till GOP:en innan). Med B-pyramid återhämtar sig spelaren på 0,2–0,5 s och tömmer
+  bufferten; utan B-pyramid byter den till omkodning för resten av filmen. Kontrollera först om spelaren kan spola
+  till nyckelbilden *efter* de bilderna (eller hämta segmentet igen med `ra=`) i stället för att vänta på felet.
+- **Varför:** att spola några sekunder är det vanligaste man gör. I vakten gav spolning 8 s framåt i bufferten felet i
+  alla körningar (bakåt 5 s inte), och filer utan B-pyramid kodas sedan om i onödan.
+- **Filer:** `web/js/player/video.js` (spolningen i bufferten), `web/js/player/hlsconfig.js`, `test/vakt.mjs` (`KANDA`),
+  `test/web-chrome-playback.test.js` (räkna fel även vid spolning i bufferten).
+- **Klart när:** `npm run vakt` går igenom med raden i `KANDA` borttagen.
 
 ### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
@@ -174,6 +175,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   uppspelning + 60 s paus = 20 s räknat, nu 7 s; `streamMeter`), och en paus under 45 s helt när filmen startade igen
   (rapport vid start, `heartbeat`). Pilarna i dialoger från spelaren fungerar (`router.js`). Inte gjort: Safari och
   apparna (se *Näst på tur* 6).
+- 2026-11-25: Uppspelningsvakt i riktig Chrome (`npm run vakt`, `test/vakt.mjs`) – sex filer × elva fall (start, Fortsätt
+  titta, paus, spolning inom och utanför bufferten, kvalitet, ljud, undertext) med tid till bild, avkodningsfel och
+  tappade bildrutor; körs före varje stabil utgåva och stoppar den vid fel. Siffrorna i `docs/testat.md`.
 - 2026-11-25: Feedback – notis till administratören när något väntar (utan text och namn, högst en i timmen),
   *Öppna igen* för avslutade ärenden, gallring efter 180 dagar; API-nycklar går att ändra.
 - 2026-11-25: Engelska i serverns texter – felmeddelanden, skärmtid,

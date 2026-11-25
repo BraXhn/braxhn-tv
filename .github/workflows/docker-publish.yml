@@ -51,6 +51,15 @@ jobs:
         with: { node-version: '24' }   # samma som imagen
       - name: Tester
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && npm run verify && npm test
+      # Stabil utgåva: uppspelningsvakten spelar testfilerna i riktig Google Chrome (finns på ubuntu-latest, med H.264
+      # men utan HEVC) – faller den byggs ingen :latest. Playwright installeras bara för vakten, utanför repot.
+      - name: Uppspelningsvakt i Chrome (bara stabil utgåva)
+        if: github.event_name == 'workflow_dispatch' && steps.ch.outputs.channel == 'latest'
+        env:
+          PLAYWRIGHT: ${{ runner.temp }}/pw/node_modules/playwright/index.mjs
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && (cd "$RUNNER_TEMP/pw" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund --no-save playwright@1.63.0)
+          npm run vakt -- --ut="$RUNNER_TEMP/vakt-resultat.json" || { echo "::error::Uppspelningsvakten föll eller kunde inte köras – ingen utgåva. Se loggen ovan (FEL:) och kör npm run vakt lokalt."; exit 1; }
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0

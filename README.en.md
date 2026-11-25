@@ -418,7 +418,7 @@ cosign verify ghcr.io/braxhn/braxhn-tv:latest \
 
 ## Tested and untested
 
-The whole test suite (`npm test`, about 30 minutes) runs before every Docker image is published, against real media files generated with ffmpeg, and the web UI is tested in Chromium at phone, desktop and TV sizes. It also runs as a regular user without write access to `/config`. Not tested here, among other things: GPU transcoding and tone mapping on real graphics cards, the arm64 image, Chromecast and AirPlay for real, Let's Encrypt with a public domain, real IPTV providers, HDHomeRun, Sonarr/Radarr and other services (simulated in the tests), real screen readers, the apps on real devices and the relay on a real VPS. The full list, with what each feature was tested with, is in [docs/testat.md](docs/testat.md) (Swedish).
+The whole test suite (`npm test`, about 30 minutes) runs before every Docker image is published, against real media files generated with ffmpeg, and the web UI is tested in Chromium at phone, desktop and TV sizes. It also runs as a regular user without write access to `/config`. Before every stable release the playback guard (`npm run vakt`, about 4 minutes) plays test files in real Google Chrome: start, resume, seeking, quality, audio and subtitle changes. Not tested here, among other things: GPU transcoding and tone mapping on real graphics cards, the arm64 image, Chromecast and AirPlay for real, Let's Encrypt with a public domain, real IPTV providers, HDHomeRun, Sonarr/Radarr and other services (simulated in the tests), real screen readers, the apps on real devices and the relay on a real VPS. The full list, with what each feature was tested with, is in [docs/testat.md](docs/testat.md) (Swedish).
 
 ## Support the project
 

@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- **Uppspelningsvakt före varje stabil utgåva.** `npm run vakt` spelar sex testfiler (stängd och öppen GOP, HEVC, en
+  fil som måste kodas om, två ljudspråk och undertexter) i riktig Google Chrome och provar start, *Fortsätt titta*,
+  paus, spolning inom och utanför bufferten, byte av kvalitet, ljudspår och undertext. Fastnar något, står bilden
+  still eller kommer avkodningsfel stoppas utgåvan till `:latest`; långsamma starter och tappade bildrutor visas som
+  varningar med siffror. Tiderna sparas som JSON och kan jämföras mellan utgåvor (`--jamfor=`). Vakten hittade ett
+  fel som är kvar: spolning inom bufferten i filer med öppen GOP ger ett kort hack i Chrome (se `docs/backlog.md`).
 
 ## 1.4.0 – 2026-11-25
 - **Serier som matchats fel rättar sig själva.** En serie som en gång fått fel träff hos TMDB (till exempel *The Big

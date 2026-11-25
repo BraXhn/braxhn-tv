@@ -16,6 +16,10 @@ npm run verify && npm test
 Testerna kräver `ffmpeg`/`ffprobe` (de startar riktiga mediafiler). Allt ska vara grönt innan push. Hela sviten tar
 runt 30 minuter; kör en enskild fil medan du arbetar (`node --test test/x.test.js`).
 
+Ändrar du uppspelningen (spelaren, `server/stream.js`, öppen GOP): kör också `npm run vakt` (runt 4 minuter, kräver
+Google Chrome och Playwright). Den spelar testfiler i riktig Chrome och körs före varje stabil utgåva – se
+[testat.md](testat.md). `--filer=oppen,oppen-tc` kör bara några filer, `--jamfor=förra.json` jämför tiderna.
+
 ## Grundregler
 
 - **Inga npm-beroenden.** Servern använder bara Nodes inbyggda moduler (Node 22+, imagen kör Node 24 LTS) (`node:sqlite`, `http`, `crypto` …) plus ffmpeg. Lös det med standardbiblioteket. Undantaget är Expo-appen i `apps/expo`, som är ett eget projekt med egen `package.json` (Expo och React Native kräver det) – inget därifrån används av servern eller webben, och mappen följer inte med i Docker-imagen.

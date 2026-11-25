@@ -573,7 +573,9 @@ cosign verify ghcr.io/braxhn/braxhn-tv:latest \
 
 Hela testsviten (`npm test`, runt 30 minuter) körs före varje Docker-image, mot riktiga mediafiler som skapas med
 ffmpeg, och webbgränssnittet testas i Chromium vid telefon-, dator- och TV-storlek. Sviten går även som vanlig
-användare utan skrivrätt till `/config`. Vad varje funktion testades med står i [docs/testat.md](docs/testat.md).
+användare utan skrivrätt till `/config`. Före varje stabil utgåva spelar uppspelningsvakten (`npm run vakt`, runt 4
+minuter) testfiler i riktig Google Chrome: start, *Fortsätt titta*, spolning, byte av kvalitet, ljud och undertext.
+Vad varje funktion testades med står i [docs/testat.md](docs/testat.md).
 
 Det jag inte har kunnat prova här:
 
