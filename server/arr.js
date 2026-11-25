@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { db, get, all, run, now, getSetting, setSetting } from './db.js';
 import { notify } from './notify.js';
+import { msg } from './i18n.js';
 import { librariesWithRoots } from './libpaths.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS requests(id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, user_name TEXT,
@@ -173,7 +174,7 @@ export function markAvailable() {
     const hit = get('SELECT id FROM items WHERE tmdb_id=? AND kind=?', r.tmdb_id, r.kind);
     if (hit) {
       setStatus(r.id, 'available');
-      notify('request', 'Finns nu att titta på', `${r.title}${r.year ? ` (${r.year})` : ''} som ${r.user_name || 'någon'} önskade finns nu i biblioteket.`);
+      notify('request', msg('Finns nu att titta på'), msg('{title} som {name} önskade finns nu i biblioteket.', { title: `${r.title}${r.year ? ` (${r.year})` : ''}`, name: r.user_name || msg('någon') }));
     }
   }
 }

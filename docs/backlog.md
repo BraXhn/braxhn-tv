@@ -95,21 +95,19 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
   `test/security-review4.test.js`, `test/web-family.test.js`.
 - **Klart när:** tio minuters paus ger högst en halv minuts räknad tid i båda webbläsarna, och varningen syns.
 
-### 8. Engelska i notiser, serverns felmeddelanden och offlinesidan
-
-- **Vad:** notiser, felmeddelanden från servern och offlinesidan finns bara på svenska. Låt dem följa profilens
-  språk (`users.lang`).
-- **Varför:** en engelskspråkig användare får i dag svenska fel mitt i ett engelskt gränssnitt.
-- **Filer:** `server/notify.js`, `server/util.js` (`fail`), `server/http/router.js`, `web/i18n/en.js`,
-  `web/offline.html`.
-- **Klart när:** de vanligaste felen (inloggning, skärmtid, åldersgräns, nedladdning) och notiserna visas på
-  profilens språk, med test.
-
 ## Idéer
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
+- Engelska i servern, det som är kvar: fel med variabler som saknar nyckel i `web/i18n/en.js` (t.ex. bibliotekets
+  mappfel i `server/routes/library.js`, Sonarr/Radarr i `server/routes/health.js`), administratörens tekniska fel
+  (ffmpeg, nätet, IPTV) och diskens namn i disklarmet (`server/diskmon.js`, *Konfiguration*). Fältet `weekday` i
+  skärmtidens status är kvar på svenska (ingen klient läser det).
+- Katalogen har en nyckel per svensk text: *Samlingar* betyder både filmsamlingar (startsidans hylla) och
+  samlingsalbum (musiken) men översätts alltid *Compilations* – hyllan heter fel på engelska i webben och i
+  `/api/me/home-layout`. Kräver en egen nyckel för hyllan (`web/js/views/home.js`, `server/homeshelves.js`).
+- Notislarmens språk följer huvudadministratören; en inställning för larmens språk saknas (`server/notify.js` `adminLang`).
 - Öppen GOP: skicka `mse=1` bara när webbläsaren avkodar i mjukvara (`mediaCapabilities.decodingInfo().powerEfficient`
   i `web/js/player/video.js`), så att Chrome med grafikkortsavkodning slipper omkodningen.
 - Öppen GOP: åtta prov per fil missar ungefär var tionde fil med många felande nyckelbilder; ett ffmpeg-anrop med
@@ -172,6 +170,10 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25 (gren `team/engelska-2026-11-25`): Engelska i serverns texter – felmeddelanden, skärmtid,
+  åldersgräns, nedladdning, startsidans hyllnamn, *Avsnitt N*, spårens och versionernas namn, notiserna och
+  offlinesidan följer profilens språk (annars kakan/`Accept-Language`) med webbens katalog (`server/i18n.js`,
+  `test/server-i18n.test.js`).
 - 2026-11-25: Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.

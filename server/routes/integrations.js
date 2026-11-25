@@ -4,6 +4,7 @@ import { fail, send, readJson, clientIp } from '../util.js';
 import { audit, auditHooks } from '../auth.js';
 import { hasTmdb, scan, tmdbSearch, tvdbOf } from '../scanner.js';
 import * as notifier from '../notify.js';
+import { msg } from '../i18n.js';
 import * as webhooks from '../webhooks.js';
 import * as arr from '../arr.js';
 import * as trakt from '../trakt.js';
@@ -95,7 +96,7 @@ route('POST', '/api/requests', user, async (c) => {
   audit('request_created', { ...ctx(c), detail: `${title} (${kind})` });
   webhooks.emit('request.new', { user: { id: c.user.id, name: c.user.name }, request: { id: row.id, kind, title, year: +year || null, tmdbId: +tmdbId, status: row.status || 'pending' } }, { userId: c.user.id });
   if (c.user.is_admin || getSetting('requests_auto', '0') === '1') { try { await sendRequest(row); } catch (e) { return fail(c.res, 502, e.message); } }
-  else notifier.notify('request', 'Ny önskan', `${c.user.name} önskar ${kind === 'movie' ? 'filmen' : 'serien'} ${title}${year ? ` (${year})` : ''}.`);
+  else notifier.notify('request', msg('Ny önskan'), msg(kind === 'movie' ? '{name} önskar filmen {title}.' : '{name} önskar serien {title}.', { name: c.user.name, title: `${title}${year ? ` (${year})` : ''}` }));
   send(c.res, 200, reqShape(get('SELECT * FROM requests WHERE id=?', row.id)));
 });
 route('POST', '/api/requests/:rid/approve', admin, async (c) => {
@@ -201,6 +202,6 @@ route('PUT', '/api/notify', admin, async (c) => {
   send(c.res, 200, { ok: true });
 });
 route('POST', '/api/notify/test', admin, async (c) => {
-  try { await notifier.notify('test', 'Testnotis', 'Det fungerar! Så här ser larm från BraXhn TV ut.', { force: true }); send(c.res, 200, { ok: true }); }
+  try { await notifier.notify('test', msg('Testnotis'), msg('Det fungerar! Så här ser larm från BraXhn TV ut.'), { force: true }); send(c.res, 200, { ok: true }); }
   catch (e) { fail(c.res, 502, 'Kunde inte skicka: ' + e.message); }
 });

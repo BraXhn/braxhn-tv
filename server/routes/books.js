@@ -11,6 +11,7 @@ import * as booktools from '../booktools.js';
 import * as feeds from '../bookfeeds.js';
 import * as pods from '../podcasts.js';
 import * as screen from '../screentime.js';
+import { reqLang } from '../i18n.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, admin, feed, remoteDenied } from '../http/router.js';
 import { screenBlock, ctx, libOk, canDownload } from '../http/context.js';
@@ -49,7 +50,7 @@ route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
   const r = books.saveProgress(c.user.id, +c.p.bid, position, speed, at); if (!r) return fail(c.res, 404, 'Finns inte');
   if (r.stale || (at && Number.isFinite(+at))) return send(c.res, 200, r); // offline-synk: ingen skärmtid
   const sc = screen.heartbeat(c.user.id, 'b:' + (+c.p.bid), +position, { audio: true });
-  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: sc } : r);
+  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: screen.inLang(sc, reqLang(c.req)) } : r);
 });
 route('POST', '/api/audiobooks/book/:bid/bookmarks', user, async (c) => {
   const { position, note } = await readJson(c.req);
@@ -221,7 +222,7 @@ route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   const { position, played } = await readJson(c.req);
   const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); if (!r) return fail(c.res, 404, 'Finns inte');
   const sc = played ? null : screen.heartbeat(c.user.id, 'p:' + (+c.p.eid), +position, { audio: true });
-  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: sc } : r);
+  send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: screen.inLang(sc, reqLang(c.req)) } : r);
 });
 route('POST', '/api/podcasts/episodes/:eid/download', user, (c) => { if (c.user.max_age != null) return fail(c.res, 403, 'Inte tillgängligt i barnprofiler'); pods.download(+c.p.eid); send(c.res, 200, { ok: true }); });
 route('GET', '/api/podcasts/episodes/:eid', user, (c) => {

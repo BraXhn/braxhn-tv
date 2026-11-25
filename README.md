@@ -317,7 +317,7 @@ Ungefär som Plex fjärråtkomst, men med ett relä som du kör själv: BraXhn T
 - **Läsappar (OPDS):** under **Mitt konto → Läsappar**.
 - **Chromecast** (kräver HTTPS, sätt 2–4 ovan) och **AirPlay** (Safari och Apple-apparna, fungerar hemma utan HTTPS). **Spela på…** styr en annan öppen BraXhn TV-webbläsare i hemmet från telefonen. **DLNA** för smart-TV utan app är avstängt som standard. Detaljer om alla tre och om live-TV: [docs/guide.md](docs/guide.md).
 
-iOS/tvOS-appen och Android-appen finns på svenska och engelska (efter enhetens språk; andra språk får engelska). Notiserna, serverns logg, serverns felmeddelanden och offlinesidan är fortfarande bara på svenska – serverns fel visas därför på svenska även i en engelsk app.
+iOS/tvOS-appen och Android-appen finns på svenska och engelska (efter enhetens språk; andra språk får engelska). Serverns vanligaste felmeddelanden (inloggning, skärmtid, åldersgräns, uppspelning, nedladdning), startsidans hyllnamn, avsnitt utan namn, spårens namn, notiserna och offlinesidan följer profilens språk – eller, utan inloggning, appens eller webbläsarens språk. Serverns logg och en del tekniska fel i administrationen är fortfarande bara på svenska.
 
 ### Installera som app på telefonen
 

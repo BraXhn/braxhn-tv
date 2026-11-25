@@ -17,6 +17,7 @@ import * as comskip from './comskip.js';
 import * as growing from './dvrlive.js';
 import { simulate, inWindow, episodeKey, outcomeText, worse } from './dvrplan.js';
 import { notify } from './notify.js';
+import { msg } from './i18n.js';
 import * as webhooks from './webhooks.js';
 import { fail, streamFile, localDate } from './util.js';
 import * as jobs from './jobs.js';
@@ -439,7 +440,7 @@ function startRecording(rec) {
         if (size < 100e3) {
           const why = spawnErr ? 'ffmpeg kunde inte startas: ' + spawnErr.message : lastLine(err, `ffmpeg avslutades (${code})`);
           run("UPDATE recordings SET status='failed', error=? WHERE id=?", why.slice(0, 300), rec.id);
-          notify('dvr', 'Inspelning misslyckades', `${rec.title}: ${spawnErr ? why : lastLine(err, 'tom fil')}`, { priority: 4 });
+          notify('dvr', msg('Inspelning misslyckades'), `${rec.title}: ${spawnErr ? why : lastLine(err, 'tom fil')}`, { priority: 4 });
           return;
         }
         run("UPDATE recordings SET status='processing', size=? WHERE id=?", size, rec.id);
@@ -565,7 +566,7 @@ async function doPost(id, ts) {
       try { if (vis !== ts) fs.renameSync(ts, vis); } catch { }
       const file = fs.existsSync(vis) ? vis : ts;
       run("UPDATE recordings SET status='done', file=?, size=?, error=? WHERE id=?", file, fs.existsSync(file) ? fs.statSync(file).size : null, `Kunde inte göra ${fmt.toUpperCase()}: ${error}`.slice(0, 300), id);
-      notify('dvr', 'Inspelning sparad som TS', `${rec.title}: ${error}`, { priority: 3 });
+      notify('dvr', msg('Inspelning sparad som TS'), `${rec.title}: ${error}`, { priority: 3 });
       return;
     }
     if (getSetting('dvr_keep_ts', '0') === '1') { const vis = base + '.ts'; try { if (vis !== ts) fs.renameSync(ts, vis); } catch {} }
@@ -575,7 +576,7 @@ async function doPost(id, ts) {
   writeNfo(rec, out);
   const st = fs.statSync(out);
   run("UPDATE recordings SET status='done', file=?, size=?, error=? WHERE id=?", out, st.size, error ? error.slice(0, 300) : (rec.error && /Avbröts/.test(rec.error) ? rec.error : null), id);
-  notify('dvr', 'Inspelning klar', `${rec.title}${rec.subtitle ? ' – ' + rec.subtitle : ''} (${rec.channel_name}) finns att titta på.`, { priority: 2 });
+  notify('dvr', msg('Inspelning klar'), msg('{title} ({channel}) finns att titta på.', { title: `${rec.title}${rec.subtitle ? ' – ' + rec.subtitle : ''}`, channel: rec.channel_name }), { priority: 2 });
   webhooks.emit('recording.done', { recording: { id: rec.id, title: rec.title, subtitle: rec.subtitle || null, channel: rec.channel_name || null, start: rec.start, stop: rec.stop, size: st.size } });
   comskip.enqueue(id); // reklamavbrott letas i bakgrunden
   enforceKeep(rec.rule_id);
@@ -637,7 +638,7 @@ function tick() {
         if (rec.stop <= now()) {
           const noTuner = rec.error === WAIT_TUNER;
           run("UPDATE recordings SET status='failed', error=? WHERE id=?", noTuner ? 'Ingen ledig tuner' : 'Missades (servern var avstängd)', rec.id);
-          if (noTuner) notify('dvr', 'Inspelning misslyckades', `${rec.title}: ingen ledig tuner.`, { priority: 4 });
+          if (noTuner) notify('dvr', msg('Inspelning misslyckades'), msg('{title}: ingen ledig tuner.', { title: rec.title }), { priority: 4 });
           continue;
         }
         if (!active.has(rec.id)) startRecording(rec);
@@ -656,7 +657,7 @@ setInterval(() => {
     for (const c of conflictList({ withAlternatives: false })) {
       if (c.outcome === 'ok' || warned.has(c.recording.id) || c.recording.start > now() + 86400) continue;
       warned.add(c.recording.id);
-      notify('dvr', 'Tunerkrock', `${c.recording.title} (${c.recording.channel_name || ''}) ${c.text}.`, { priority: 3, key: 'dvr-conflict:' + c.recording.id, minInterval: 86400 });
+      notify('dvr', msg('Tunerkrock'), msg('{title} ({channel}) {what}.', { title: c.recording.title, channel: c.recording.channel_name || '', what: msg(c.text) }), { priority: 3, key: 'dvr-conflict:' + c.recording.id, minInterval: 86400 });
     }
   } catch {}
 }, 600e3).unref();

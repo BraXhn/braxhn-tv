@@ -25,6 +25,7 @@ import * as homes from '../homeshelves.js';
 import * as playprefs from '../playprefs.js';
 import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
+import { reqLang, subsIn } from '../i18n.js';
 import { startedSql } from '../resume.js';
 import * as photos from '../photos.js';
 import * as ebooks from '../ebooks.js';
@@ -158,7 +159,8 @@ route('GET', '/api/home', user, (c) => {
     sonarrList: calendar.sonarrCached(), limit: 30 });
   // Tematiska hyllor, Utvalt och användarens ordning (nya fält – apparna läser dem inte). Dolda hyllor räknas inte.
   // Rekommenderat för dig räknas och cachas tillsammans med dem (themed).
-  const homeLayout = homes.getLayout(uid);
+  const lang = reqLang(c.req);
+  const homeLayout = homes.getLayout(uid, lang);
   const off = new Set(homeLayout.hidden);
   const th = homes.themed(uid, { hidden: homeLayout.hero === 'off' ? [...homeLayout.hidden, 'hero'] : homeLayout.hidden });
   const recommended = th.recommended;
@@ -169,7 +171,8 @@ route('GET', '/api/home', user, (c) => {
   // Fortsätt läsa: påbörjade e-böcker och serietidningar (nytt fält – bara webben)
   const reading = off.has('reading') || c.user.kind === 'app' ? [] : ebooks.continueReading(uid, 12);
   const out = { continue: cont, rows, watchlist, recommended, forYou, customCollections, upcoming,
-    featured, because: th.because, topRated: th.topRated, hiddenGems: th.hiddenGems, shortTonight: th.shortTonight, onThisDay: th.onThisDay,
+    featured, because: th.because, topRated: th.topRated, hiddenGems: th.hiddenGems, shortTonight: th.shortTonight,
+    onThisDay: lang === 'sv' ? th.onThisDay : th.onThisDay.map(i => ({ ...i, onThisDay: homes.dayNote(i.onThisDay, lang) })),
     genreOfDay: th.genreOfDay, listening, photoMemories, reading, homeLayout };
   // ?web=1 (webbens startsida, nya fält): samlingarna i samma svar som /api/collections och /api/custom-collections –
   // två förfrågningar färre vid start (HTTP/1.1 har bara sex anslutningar och varje rundtur syns)
@@ -180,9 +183,9 @@ route('GET', '/api/home', user, (c) => {
   send(c.res, 200, out);
 });
 // Startsidans ordning, dolda hyllor och Utvalt per användare (följer med mellan enheter)
-route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayout(c.user.id)));
+route('GET', '/api/me/home-layout', user, (c) => send(c.res, 200, homes.getLayout(c.user.id, reqLang(c.req))));
 route('PUT', '/api/me/home-layout', user, async (c) => {
-  try { send(c.res, 200, homes.setLayout(c.user.id, await readJson(c.req))); } catch (e) { fail(c.res, 400, e.message); }
+  try { send(c.res, 200, homes.setLayout(c.user.id, await readJson(c.req), reqLang(c.req))); } catch (e) { fail(c.res, 400, e.message); }
 });
 /** ?folder= för hemvideor: relativ mapp utan inledande/avslutande snedstreck; '..' och styrtecken godtas inte */
 function folderParam(v) {
@@ -272,7 +275,7 @@ route('GET', '/api/items/:id', user, (c) => {
   const versions = it.kind === 'movie' || it.kind === 'episode' ? ver.versionsOf(it) : [it];
   const wanted = row.version_of ? row.id : +c.q.get('version') || it.id;
   const file = versions.find(v => v.id === wanted) || it;
-  if (versions.length > 1) { out.versions = ver.versionList(versions); out.version = file.id; }
+  if (versions.length > 1) { out.versions = ver.versionList(versions, reqLang(c.req)); out.version = file.id; }
   // Snabbstart: titelsidan öppnas – väck filmens/avsnittets disk i förväg (serier: nästa avsnitt, nedan)
   if (it.kind !== 'show') prestart.wake(file, uid);
   // Nya fält (bara när de finns): tagline, logotyp (/api/image/:id/logo, PNG) och originaltitel
@@ -299,7 +302,7 @@ route('GET', '/api/items/:id', user, (c) => {
     Object.assign(out, {
       file: path.basename(file.path), size: file.size, container: file.container, vcodec: file.vcodec, acodec: file.acodec,
       width: file.width, height: file.height, hdr: file.hdr || null, chapters: chaptersOf(file),
-      audio: st.streamsOf(file).filter(s => s.type === 'audio'), subtitles: st.subtitlesOf(file).map(({ file, ...s }) => s)
+      audio: st.streamsOf(file).filter(s => s.type === 'audio'), subtitles: subsIn(reqLang(c.req), st.subtitlesOf(file).map(({ file, ...s }) => s))
     });
     // Förvalda spår enligt kontots uppspelningsval (webbspelaren; PGS ritas av webbspelaren utan inbränning)
     const prefs = playprefs.getPrefs(uid), a = playprefs.pickAudio(out.audio, prefs);
@@ -344,7 +347,7 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
   if (at) return send(c.res, 200, { watched: !!watched, stop: false });
   act.touch(c.user.id, it.id, rawPos);
   const sc = screen.heartbeat(c.user.id, 'i:' + it.id, rawPos);
-  send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) || (!!sc && !sc.allowed), ...(sc ? { screenTime: sc } : {}) });
+  send(c.res, 200, { watched: !!watched, stop: act.isStopped(c.user.id, it.id) || (!!sc && !sc.allowed), ...(sc ? { screenTime: screen.inLang(sc, reqLang(c.req)) } : {}) });
 });
 route('POST', '/api/items/:id/watched', user, async (c) => {
   const { watched } = await readJson(c.req);

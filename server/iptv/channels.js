@@ -4,6 +4,7 @@
 // titlar (inställningen allow_unrated). Vuxenprofiler ser allt som inte är dolt.
 import { all, get, run, now, getSetting } from '../db.js';
 import { catchupWindow, DEFAULT_DAYS } from './catchup.js';
+import { msg } from '../i18n.js';
 
 const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
 export const AGE_SQL = `COALESCE(e.age, CASE WHEN g.auto=0 THEN g.age END, CASE WHEN e.adult=1 THEN 18 END, g.age)`;
@@ -127,14 +128,15 @@ export function reminders(u, { due = false } = {}) {
   ...(due ? [u.id, T + 120, T - 600] : [u.id, T]));
   return rows.filter(r => channelAllowed(u, r.channel_id)).map(r => ({ channelId: r.channel_id, programId: r.pid, start: r.start, stop: r.stop, title: r.title, channel: r.channel, number: r.number }));
 }
-/** Påminnelser som ska skickas som personlig notis (en gång). send(uid, title, message) */
+/** Påminnelser som ska skickas som personlig notis (en gång). send(uid, title, message) – title/message är msg() (server/i18n.js) */
 export async function sendDue(send) {
   const T = now();
   const due = all('SELECT r.user_id, r.channel_id, r.start, r.title, c.name AS channel FROM iptv_reminders r JOIN channels c ON c.id=r.channel_id WHERE r.notified=0 AND r.start <= ? AND r.start > ?', T + 120, T - 600);
   for (const r of due) {
     run('UPDATE iptv_reminders SET notified=1 WHERE user_id=? AND channel_id=? AND start=?', r.user_id, r.channel_id, r.start);
     const mins = Math.max(0, Math.round((r.start - T) / 60));
-    try { await send(r.user_id, `${r.title} börjar ${mins ? `om ${mins} min` : 'nu'}`, `${r.channel} · ${new Date(r.start * 1000).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`); } catch {}
+    const at = new Date(r.start * 1000).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    try { await send(r.user_id, mins ? msg('{title} börjar om {n} min', { title: r.title, n: mins }) : msg('{title} börjar nu', { title: r.title }), `${r.channel} · ${at}`); } catch {}
   }
   run('DELETE FROM iptv_reminders WHERE COALESCE(stop, start) < ?', T - 86400);
   return due.length;

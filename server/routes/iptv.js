@@ -18,7 +18,7 @@ import { catchupUrl, catchupWindow } from '../iptv/catchup.js';
 import { cleanHeaders } from '../iptv/net.js';
 import { screenBlock, ctx, allowUnrated } from '../http/context.js';
 import { route, user, img, admin } from '../http/router.js';
-import { sendPersonal, PERSONAL_KINDS } from '../notify.js';
+import { sendPersonal, PERSONAL_KINDS, userLang } from '../notify.js';
 
 const json = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 // Barnprofiler: bara om någon kanal finns inom åldersgränsen (kanalens/gruppens) – annars som förut
@@ -84,7 +84,7 @@ route('DELETE', '/api/iptv/programs/:pid/reminder', user, (c) => { CH.removeRemi
 const personalOf = (uid) => { const x = json(get('SELECT notify_personal FROM users WHERE id=?', uid)?.notify_personal, null); return x && PERSONAL_KINDS.includes(x.kind) && x.url ? x : null; };
 const poster = async (url, body, headers) => { const r = await pods.safePost(url, body, { headers }); if (!r.ok) throw new Error(`${r.status}`); };
 setInterval(() => {
-  CH.sendDue(async (uid, title, msg) => { const p = personalOf(uid); if (p) await sendPersonal(p, title, msg, poster); }).catch(() => {});
+  CH.sendDue(async (uid, title, msg) => { const p = personalOf(uid); if (p) await sendPersonal(p, title, msg, poster, userLang(uid)); }).catch(() => {});
 }, 30000).unref();
 
 // ---------- catch-up ----------

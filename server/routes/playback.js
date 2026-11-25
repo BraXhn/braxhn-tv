@@ -24,6 +24,7 @@ import * as subsync from '../subsync.js';
 import * as prestart from '../prestart.js';
 import * as pace from '../pace.js';
 import * as screen from '../screentime.js';
+import { reqLang, subsIn } from '../i18n.js';
 import * as family from '../familyfilter.js';
 import * as sublines from '../sublines.js';
 import crypto from 'node:crypto';
@@ -54,7 +55,7 @@ route('GET', '/api/items/:id/offline', user, (c) => {
     st.url = `/api/stream/${it.id}/offline-file?q=${encodeURIComponent(q)}&t=${t}`;
     // Tillägg (webbappen, subs=1): textundertexterna som WebVTT med samma kortlivade token (titelns scope).
     // Bildundertexter och kommentarsspår följer inte med.
-    if (c.q.get('subs') === '1') st.subs = stSubs(it, t);
+    if (c.q.get('subs') === '1') st.subs = subsIn(reqLang(c.req), stSubs(it, t));
   }
   send(c.res, 200, st);
 });
@@ -252,6 +253,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   if (!info) act.startPlay({ user: c.user, item: main, mode: d.mode, quality: d.q, ip: clientIp(c.req), remote, ua: c.req.headers['user-agent'], reasons: d.reasons,
     start: Math.max(0, +c.q.get('start') || 0), kbps });
   const allSubs = st.subtitlesOf(it);
+  const lang = reqLang(c.req);
   // Förvalda spår enligt användarens val (nya fält): ljudet ovan, undertexten bland textundertexterna (subtitles)
   const selAudio = audios.find(a => String(a.index) === String(d.audio)) || prefAudio;
   const defSub = pp.pickSub(allSubs, selAudio, prefs);
@@ -272,7 +274,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     ...(d.gop ? { gop: d.gop } : {}),
     // Videons codec i strömmen (tillägg): vid omkodning h264, hevc eller av1 (tc=), annars källans
     vcodec: d.vcodec,
-    duration: it.duration, subtitles: subs, imageSubs, token, remote, quality: d.q,
+    duration: it.duration, subtitles: subsIn(lang, subs), imageSubs: subsIn(lang, imageSubs), token, remote, quality: d.q,
     intro: it.intro_end ? { start: it.intro_start || 0, end: it.intro_end } : null, credits: it.credits_start || null,
     recap: it.recap_end ? { start: it.recap_start || 0, end: it.recap_end } : null,
     chapters: chaptersOf(it), audio: st.streamsOf(it).filter(s => s.type === 'audio').map(a => ({ index: a.index, lang: a.lang, title: a.title, codec: a.codec, channels: a.channels, default: a.default })),
@@ -284,7 +286,7 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     // Familjefiltret (tillägg, bara när det är på): mute = [[start, slut]] att tysta, skip = scener att hoppa över,
     // server = strömmen är redan tystad av servern
     ...(fmode !== 'off' ? { filter: family.planFor(it, c.user.id, { mute: fmute, serverMute: !!d.ff }) } : {}),
-    ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions) } : {}),
+    ...(versions.length > 1 ? { version: it.id, versions: ver.versionList(versions, lang) } : {}),
     mime: d.mode === 'direct' ? (MIME[path.extname(it.path).toLowerCase()] || 'video/mp4') : 'application/vnd.apple.mpegurl'
   });
 });

@@ -1,7 +1,8 @@
 // Larm till mobilen: ntfy, Pushover, Gotify, Discord, Telegram eller valfri webhook.
 // Händelser grupperas och begränsas så att en attack inte ger hundratals notiser.
-import { getSetting } from './db.js';
+import { getSetting, get } from './db.js';
 import { isPrivate } from './util.js';
+import { msg, resolve } from './i18n.js';
 
 export const KINDS = ['none', 'ntfy', 'pushover', 'gotify', 'discord', 'telegram', 'webhook'];
 export const EVENTS = { security: 'Säkerhet (spärrade konton, attacker, ändrad 2FA)', newlogin: 'Inloggning utifrån', cert: 'HTTPS-certifikat', backup: 'Säkerhetskopior', update: 'Ny version', dvr: 'Inspelningar', request: 'Önskningar av filmer/serier', disk: 'Lågt diskutrymme' };
@@ -27,7 +28,14 @@ function pruneLast() {
 }
 export const sent = []; // senaste notiser (för test och visning)
 
-/** Skicka en notis. key + minIntervalSec begränsar upprepningar. */
+// Språk (server/i18n.js): larmen går till administratören – huvudadministratörens val (users.lang), annars svenska.
+// Personliga notiser följer mottagarens profil (userLang).
+export const userLang = (uid) => { try { return get('SELECT lang FROM users WHERE id=?', uid)?.lang === 'en' ? 'en' : 'sv'; } catch { return 'sv'; } };
+export function adminLang() {
+  try { return get('SELECT lang FROM users WHERE is_admin=1 AND parent_id IS NULL ORDER BY id LIMIT 1')?.lang === 'en' ? 'en' : 'sv'; } catch { return 'sv'; }
+}
+
+/** Skicka en notis. title/message: svensk text eller msg() (server/i18n.js). key + minIntervalSec begränsar upprepningar. */
 export async function notify(event, title, message, { priority = 3, key = null, minInterval = 0, force = false } = {}) {
   const c = cfg();
   if (!force && (c.kind === 'none' || !c.events.has(event))) return false;
@@ -37,7 +45,9 @@ export async function notify(event, title, message, { priority = 3, key = null, 
     last.set(key, Date.now() + minInterval * 1000);
     pruneLast();
   }
-  const t = `BraXhn TV: ${title}`;
+  const lang = adminLang();
+  const t = `BraXhn TV: ${resolve(lang, title)}`;
+  message = resolve(lang, message);
   sent.push({ event, title: t, message, at: Date.now() }); if (sent.length > 50) sent.shift();
   try {
     await deliver(c, t, message, priority);
@@ -49,11 +59,12 @@ const fetchPost = async (url, body, headers = {}) => {
   const r = await fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
 };
-/** Personlig notis till en användares egen ntfy-adress/webhook. post ska vara en SSRF-skyddad POST (se podcasts.safePost). */
+/** Personlig notis till en användares egen ntfy-adress/webhook. post ska vara en SSRF-skyddad POST (se podcasts.safePost).
+ *  lang: mottagarens språk (userLang) när title/message är msg() */
 export const PERSONAL_KINDS = ['ntfy', 'webhook'];
-export async function sendPersonal(c, title, message, post) {
+export async function sendPersonal(c, title, message, post, lang = 'sv') {
   if (!PERSONAL_KINDS.includes(c?.kind) || !c.url) return false;
-  await deliver(c, `BraXhn TV: ${title}`, message, 3, post);
+  await deliver(c, `BraXhn TV: ${resolve(lang, title)}`, resolve(lang, message), 3, post);
   return true;
 }
 
@@ -88,13 +99,13 @@ export function onAudit(event, { user, ip, detail }) {
     // Samla misslyckade försök utifrån: notis när ≥5 inom 15 min, max en gång per 15 min
     if (Date.now() - failWindow.start > 900e3) failWindow = { start: Date.now(), n: 0, ips: new Set() };
     failWindow.n++; failWindow.ips.add(ip);
-    if (failWindow.n >= 5) notify('security', 'Misslyckade inloggningar', `${failWindow.n} misslyckade inloggningar utifrån de senaste 15 minuterna från ${failWindow.ips.size} adress(er), senast ${ip}.`, { priority: 4, key: 'fails', minInterval: 900 });
+    if (failWindow.n >= 5) notify('security', msg('Misslyckade inloggningar'), msg('{n} misslyckade inloggningar utifrån de senaste 15 minuterna från {ips} adress(er), senast {ip}.', { n: failWindow.n, ips: failWindow.ips.size, ip }), { priority: 4, key: 'fails', minInterval: 900 });
   }
-  else if (event === 'login_locked') notify('security', 'Konto spärrat', `Kontot${who} spärrades tillfälligt efter upprepade felaktiga inloggningar från ${ip}.`, { priority: 4, key: 'locked:' + (user?.name || ''), minInterval: 3600 });
-  else if (event === 'admin_denied') notify('security', 'Admin nekad', `Försök att nå administrationen utifrån${who} från ${ip}: ${detail || ''}`, { priority: 4, key: 'admin:' + ip, minInterval: 3600 });
+  else if (event === 'login_locked') notify('security', msg('Konto spärrat'), msg('Kontot{who} spärrades tillfälligt efter upprepade felaktiga inloggningar från {ip}.', { who, ip }), { priority: 4, key: 'locked:' + (user?.name || ''), minInterval: 3600 });
+  else if (event === 'admin_denied') notify('security', msg('Admin nekad'), msg('Försök att nå administrationen utifrån{who} från {ip}: {detail}', { who, ip, detail: detail || '' }), { priority: 4, key: 'admin:' + ip, minInterval: 3600 });
   else if (['2fa_disabled', 'passkey_added', 'password_changed', '2fa_recovery_used'].includes(event)) {
-    const what = { '2fa_disabled': 'Tvåstegsverifiering avstängd', passkey_added: 'Ny passkey tillagd', password_changed: 'Lösenord bytt', '2fa_recovery_used': 'Reservkod använd' }[event];
-    notify('security', what, `${what}${who} från ${ip || 'okänd adress'}. Var det inte du? Logga in och byt lösenord.`, { priority: 4 });
+    const what = msg({ '2fa_disabled': 'Tvåstegsverifiering avstängd', passkey_added: 'Ny passkey tillagd', password_changed: 'Lösenord bytt', '2fa_recovery_used': 'Reservkod använd' }[event]);
+    notify('security', what, msg('{what}{who} från {ip}. Var det inte du? Logga in och byt lösenord.', { what, who, ip: ip || msg('okänd adress') }), { priority: 4 });
   }
-  else if (event === 'login_ok' && remote) notify('newlogin', 'Inloggning utifrån', `${user?.name || '?'} loggade in från ${ip} (${detail || ''}).`, { key: 'in:' + (user?.id || '') + ip, minInterval: 6 * 3600 });
+  else if (event === 'login_ok' && remote) notify('newlogin', msg('Inloggning utifrån'), msg('{name} loggade in från {ip} ({detail}).', { name: user?.name || '?', ip, detail: detail || '' }), { key: 'in:' + (user?.id || '') + ip, minInterval: 6 * 3600 });
 }

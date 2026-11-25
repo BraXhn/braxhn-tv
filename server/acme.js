@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { CONFIG, getSetting, setSetting } from './db.js';
 import { notify } from './notify.js';
+import { msg } from './i18n.js';
 
 const TLS = path.join(CONFIG, 'tls');
 const DIRS = { prod: 'https://acme-v02.api.letsencrypt.org/directory', staging: 'https://acme-staging-v02.api.letsencrypt.org/directory' };
@@ -126,12 +127,12 @@ export async function obtain(onDone) {
     state.last = Date.now();
     setSetting('acme_last', String(Math.floor(Date.now() / 1000)));
     log(`Klart! Certifikatet gäller till ${new crypto.X509Certificate(cert.split(/(?=-----BEGIN CERTIFICATE-----)/)[0]).validTo}`);
-    notify('cert', 'Certifikat förnyat', `HTTPS-certifikatet för ${domain} är förnyat.`, { priority: 2 });
+    notify('cert', msg('Certifikat förnyat'), msg('HTTPS-certifikatet för {domain} är förnyat.', { domain }), { priority: 2 });
     onDone?.();
   } catch (e) {
     state.error = e.message; log('Fel: ' + e.message);
     const ci = certInfo();
-    notify('cert', 'Certifikatet kunde inte hämtas', `${domain}: ${e.message}${ci ? ` – nuvarande certifikat gäller ${ci.daysLeft} dagar till.` : ''}`, { priority: 4, key: 'acmefail', minInterval: 86400 });
+    notify('cert', msg('Certifikatet kunde inte hämtas'), msg('{domain}: {error}{left}', { domain, error: e.message, left: ci ? msg(' – nuvarande certifikat gäller {n} dagar till.', { n: ci.daysLeft }) : '' }), { priority: 4, key: 'acmefail', minInterval: 86400 });
     throw e;
   } finally { state.running = false; challenges.clear(); }
 }

@@ -3,6 +3,7 @@
 // (väggklocka), inte per ström – två samtidiga strömmar ger alltså inte dubbel tid. Pausad uppspelning
 // (positionen står still) räknas inte. Dagen och klockslagen följer serverns lokala tid (TZ).
 import { db, get, run } from './db.js';
+import { tr } from './i18n.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   day TEXT NOT NULL, seconds REAL NOT NULL DEFAULT 0, extra INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));`);
@@ -11,6 +12,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERE
  *  Klienterna rapporterar var 10:e sekund; längre glapp betyder paus, stopp eller avbrott. */
 export const CAP = 45;
 const DAYS = ['söndag', 'måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag'];
+// "På måndagar går det att titta …" – nycklar i web/i18n/en.js (server/i18n.js)
+const DAYS_PL = ['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'];
 
 export const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '')); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
@@ -146,15 +149,23 @@ export function status(uid, d = new Date()) {
   const out = { limited: true, day: localDay(d), weekday: DAYS[d.getDay()], daily: t.daily, used: Math.round(u.seconds), extra: u.extra,
     remaining, from: t.from, until: until != null ? hhmm(until) : null, audio: t.audio, allowed: true, reason: null, message: null, left: null };
   out.left = remaining == null ? windowLeft : windowLeft == null ? remaining : Math.min(remaining, windowLeft);
-  if (remaining != null && remaining <= 0) {
-    Object.assign(out, { allowed: false, reason: 'limit', left: 0,
-      message: `Tiden är slut för idag – du har tittat ${Math.round(u.seconds / 60)} av ${t.daily + u.extra} minuter. Fråga en vuxen om du behöver mer tid.` });
-  } else if (!inWindow) {
-    const win = from != null && until != null ? `mellan ${hhmm(from)} och ${hhmm(until)}` : from != null ? `från ${hhmm(from)}` : `fram till ${hhmm(until)}`;
-    Object.assign(out, { allowed: false, reason: 'window', left: 0, message: `Det går inte att titta just nu. På ${DAYS[d.getDay()]}ar går det att titta ${win}.` });
-  }
+  if (remaining != null && remaining <= 0) Object.assign(out, { allowed: false, reason: 'limit', left: 0 });
+  else if (!inWindow) Object.assign(out, { allowed: false, reason: 'window', left: 0 });
+  out.message = messageOf(out, 'sv');
   return out;
 }
+/** Beskedet när det inte går att titta, på språket ('sv' | 'en') – byggt ur statusens fält */
+function messageOf(s, lang) {
+  if (s.reason === 'limit') return tr(lang, 'Tiden är slut för idag – du har tittat {used} av {total} minuter. Fråga en vuxen om du behöver mer tid.',
+    { used: Math.round(s.used / 60), total: (s.daily ?? 0) + s.extra });
+  if (s.reason !== 'window') return null;
+  const win = s.from && s.until ? tr(lang, 'mellan {from} och {until}', { from: s.from, until: s.until })
+    : s.from ? tr(lang, 'från {from}', { from: s.from }) : tr(lang, 'fram till {until}', { until: s.until });
+  const [y, m, d] = s.day.split('-').map(Number);
+  return tr(lang, 'Det går inte att titta just nu. På {days} går det att titta {win}.', { days: tr(lang, DAYS_PL[new Date(y, m - 1, d).getDay()]), win });
+}
+/** Statusen med beskedet på språket (server/i18n.js reqLang) – null/inget besked lämnas som det är */
+export const inLang = (s, lang) => s && s.message && lang && lang !== 'sv' ? { ...s, message: messageOf(s, lang) } : s;
 
 /** Får användaren starta/fortsätta uppspelning? Returnerar null (ja) eller status med förklaring (nej). */
 export function check(uid, { audio = false, d = new Date() } = {}) {

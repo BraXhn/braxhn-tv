@@ -7,6 +7,7 @@ import { clientIp, fail, send, isLocalReq } from '../util.js';
 import * as act from '../activity.js';
 import * as ver from '../versions.js';
 import * as screen from '../screentime.js';
+import { reqLang } from '../i18n.js';
 import * as st from '../stream.js';
 import { permsOf, libsOf, libOk, libFilter, canDownload, remoteMax } from '../perms.js';
 import { resumeAt, startedSql } from '../resume.js';
@@ -292,7 +293,7 @@ function countStream(c, id) {
 }
 /** Neka med skärmtidens förklaring. Returnerar true om förfrågan nekades. audio: ljud (musik/böcker/poddar) */
 export function screenBlock(c, opts) {
-  const s = screen.check(c.user.id, opts);
+  const s = screen.inLang(screen.check(c.user.id, opts), reqLang(c.req));
   if (s) send(c.res, 403, { error: s.message, code: 'screen_time', screenTime: s });
   return !!s;
 }

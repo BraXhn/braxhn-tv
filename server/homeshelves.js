@@ -7,6 +7,7 @@ import { all, get, run } from './db.js';
 import { ageFilter, itemsByIds, listItems, MAIN_ONLY, recommend } from './http/context.js';
 import { startedSql } from './resume.js';
 import * as books from './audiobooks.js';
+import { tr } from './i18n.js';
 
 // ---------- hyllorna och användarens layout ----------
 /** Alla hyllor i standardordning (id:n är stabila – de sparas i users.home_layout) */
@@ -42,17 +43,26 @@ function fullOrder(saved) {
   }
   return order;
 }
+/** Hyllornas namn på språket ('sv' | 'en', server/i18n.js) – id:n är desamma */
+const shelvesIn = (lang) => lang === 'en' ? SHELVES.map(s => ({ id: s.id, name: tr(lang, s.name) })) : SHELVES;
 /** Användarens startsida: { order, hidden, hero, custom, shelves } – custom = false när inget är sparat */
-export function getLayout(uid) {
+export function getLayout(uid, lang = 'sv') {
   const o = parse(get('SELECT home_layout FROM users WHERE id=?', uid)?.home_layout);
   return {
     order: fullOrder(o?.order), hidden: (Array.isArray(o?.hidden) ? o.hidden : []).filter(x => KNOWN.has(x)),
-    hero: HERO.includes(o?.hero) ? o.hero : 'auto', custom: !!o, shelves: SHELVES
+    hero: HERO.includes(o?.hero) ? o.hero : 'auto', custom: !!o, shelves: shelvesIn(lang)
   };
 }
+/** Anteckningen på hyllan Den här dagen ({ kind, years }) på språket */
+export function dayNote(n, lang = 'sv') {
+  if (!n) return n;
+  const note = n.kind === 'premiere' ? tr(lang, 'Premiär för {y} år sedan', { y: n.years })
+    : n.years === 1 ? tr(lang, 'Du såg den för ett år sedan') : tr(lang, 'Du såg den för {n} år sedan', { n: n.years });
+  return { ...n, note };
+}
 /** Sparar layouten ({ reset: true } återställer). Kastar Error med svensk text vid ogiltiga värden. */
-export function setLayout(uid, b = {}) {
-  if (b.reset) { run('UPDATE users SET home_layout=NULL WHERE id=?', uid); forget(uid); return getLayout(uid); }
+export function setLayout(uid, b = {}, lang = 'sv') {
+  if (b.reset) { run('UPDATE users SET home_layout=NULL WHERE id=?', uid); forget(uid); return getLayout(uid, lang); }
   const cur = getLayout(uid);
   const list = (v, what) => {
     if (!Array.isArray(v) || v.length > 50 || v.some(x => typeof x !== 'string')) throw new Error(`Ogiltig ${what}`);
@@ -66,7 +76,7 @@ export function setLayout(uid, b = {}) {
   if (b.hero !== undefined) { if (!HERO.includes(b.hero)) throw new Error('Ogiltigt val för Utvalt'); next.hero = b.hero; }
   run('UPDATE users SET home_layout=? WHERE id=?', JSON.stringify(next), uid);
   forget(uid);
-  return getLayout(uid);
+  return getLayout(uid, lang);
 }
 
 // ---------- kandidaterna (alla filmer och serier, lätta kolumner) ----------
@@ -234,11 +244,11 @@ export function themed(uid, { hidden = [], now = new Date() } = {}) {
     const year = now.getFullYear();
     for (const r of C.byDay.get(ymd(now).slice(5)) || []) {
       const y = year - +r.rel.slice(0, 4);
-      if (y > 0) notes.set(r.id, { kind: 'premiere', years: y, note: `Premiär för ${y} år sedan` });
+      if (y > 0) notes.set(r.id, dayNote({ kind: 'premiere', years: y }));
     }
     for (const [id, n] of hits) {
       if (!C.byId.has(id) || notes.get(id)?.kind === 'watched') continue;
-      notes.set(id, { kind: 'watched', years: n, note: n === 1 ? 'Du såg den för ett år sedan' : `Du såg den för ${n} år sedan` });
+      notes.set(id, dayNote({ kind: 'watched', years: n }));
     }
     // Sedda minnen först, sedan premiärer (jubileer – jämna år – före övriga)
     ids.onThisDay = [...notes.entries()].sort((a, b) => (a[1].kind === 'watched' ? 0 : 1) - (b[1].kind === 'watched' ? 0 : 1)

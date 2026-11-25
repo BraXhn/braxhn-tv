@@ -18,6 +18,7 @@ import { mfaTrusted } from '../sso.js';
 import * as metrics from '../metrics.js';
 import * as dlna from '../dlna.js';
 import { serveStatic } from './static.js';
+import { acceptLang, langOf, LANG } from '../i18n.js';
 
 // ---------- webbklientens språk ----------
 // index.html finns på svenska (standard) och engelska (med översättningskatalogen web/i18n/en.js). Inloggad: profilens
@@ -25,15 +26,7 @@ import { serveStatic } from './static.js';
 // (språkvalet på inloggningssidan), annars webbläsarens språk (Accept-Language; nordiska språk → svenska, engelska och
 // alla andra språk → engelska, ingen header → svenska). Vid första inloggningen sparar webben sidans språk på profilen
 // (web/js/router.js syncLang).
-export function acceptLang(h) {
-  const list = String(h || '').split(',').map((p, i) => { const [tag, ...o] = p.trim().toLowerCase().split(';'); const q = o.map(x => /^\s*q=([\d.]+)/.exec(x)?.[1]).find(Boolean); return { tag, q: q ? +q : 1, i }; })
-    .filter(x => x.tag).sort((a, b) => b.q - a.q || a.i - b.i);
-  for (const { tag } of list) {
-    if (/^(sv|nb|nn|no|da)\b/.test(tag)) return 'sv';
-    if (/^en\b/.test(tag)) return 'en';
-  }
-  return list.some(x => x.tag !== '*') ? 'en' : 'sv';
-}
+export { acceptLang } from '../i18n.js';
 export function pageLang(req) {
   try {
     const u = userFromReq(req, new URLSearchParams(), false);
@@ -196,6 +189,8 @@ export async function handle(req, res) {
     // Glidande 30 dagar för "Håll mig inloggad": kakan förnyas (högst var 10:e minut, se userFromReq)
     if (c.user?.renewCookie && !res.headersSent) res.setHeader('Set-Cookie', cookieHeader(c.user.token, isHttps(req), true));
     const u = c.user;
+    // Språket för svarets texter (server/i18n.js): profilens val, annars kakan/Accept-Language
+    req[LANG] = langOf(req, u);
     if (u) {
       // Kortlivade token gäller bara där de är avsedda:
       // mediatoken bara på media-/bildroutes och, när den är knuten till en titel, bara för den titeln
@@ -231,5 +226,7 @@ export async function handle(req, res) {
       return fail(res, e.status || 500, e.status ? e.message : 'Internt fel');
     }
   }
+  // Ingen route: språket för felet ur inloggningen (om någon) – annars kaka/Accept-Language
+  try { req[LANG] = langOf(req, userFromReq(req, url.searchParams, false)); } catch {}
   fail(res, 404, 'Okänd endpoint');
 }

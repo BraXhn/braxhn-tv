@@ -172,7 +172,7 @@ views.dvr = async (tab) => {
     P.innerHTML = conflicts.length ? `<p class="muted small">${t('Så här räcker tunrarna med nuvarande bokningar. Flytta till en annan sändning eller ändra prioritet.')}</p><div class="reclist">${conflicts.map(c => {
       const r = c.recording;
       return `<div class="rec"><div><b>${esc(r.title)}</b>${r.subtitle ? ' – ' + esc(r.subtitle) : ''}<div class="muted small">${esc(r.channel_name || '')} · ${when(r)}</div>
-        <div class="small"><span class="warn-badge">${PLAN[c.outcome]}</span> ${c.outcome === 'late' && c.from ? t('från {from}', { from: hhmm(c.from) }) : c.outcome === 'cut' && c.to ? `vid ${hhmm(c.to)}` : ''}
+        <div class="small"><span class="warn-badge">${PLAN[c.outcome]}</span> ${c.outcome === 'late' && c.from ? t('från {from}', { from: hhmm(c.from) }) : c.outcome === 'cut' && c.to ? t('vid {time}', { time: hhmm(c.to) }) : ''}
           ${c.with.length ? ` ${t('– krockar med {v}', { v: c.with.map(w => `<b>${esc(w.title)}</b> (${esc(w.channel_name || '')} ${hhmm(w.start)})`).join(', ') })}` : ''}</div>
         ${c.alternatives.length ? `<div class="row" style="margin-top:6px;flex-wrap:wrap"><span class="small">${t('Annan sändning:')}</span>${c.alternatives.map(a => `<button class="ghost small" data-swap="${r.id}" data-pid="${a.programId}">${dayName(a.start)} ${hhmm(a.start)} · ${esc(a.channel)}</button>`).join('')}</div>` : ''}</div>
         <div class="row">${r.status === 'scheduled' ? `<button class="ghost small" data-rprio="${r.id}" data-to="${Math.min(10, Math.max(0, ...c.with.map(w => w.priority || 0)) + 1)}">${t('Prioritera')}</button><button class="ghost small" data-rdel="${r.id}">${t('Avboka')}</button>` : ''}</div></div>`;

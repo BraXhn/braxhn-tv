@@ -11,6 +11,7 @@ import * as updates from '../updates.js';
 import { VERSION } from '../updates.js';
 import { donateUrlFor } from '../project.js';
 import * as screen from '../screentime.js';
+import { reqLang } from '../i18n.js';
 import { revokeHousehold as revokeSubsonicHousehold } from '../subsonic.js';
 import * as invites from '../invites.js';
 import { kidsHaveChannels } from '../iptv/channels.js';
@@ -57,7 +58,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     // Installationsguiden är inte klar: startsidan visar "Slutför installationen" (bara för administratörer som får administrera här)
     setupPending: !!c.user.is_admin && (adminAnywhere() || isTrusted(c.req)) && setupPending(),
     update: c.user.is_admin && updates.info().available ? updates.state.latest : null,
-    streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.status(c.user.id),
+    streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.inLang(screen.status(c.user.id), reqLang(c.req)),
     liveTv: c.user.max_age == null ? !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') : kidsHaveChannels(c.user),
     iptvVod: !!get("SELECT 1 FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id WHERE t.enabled=1 LIMIT 1") && vodAllowed(c.user) } : null
 }));

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getSetting, setSetting } from './db.js';
 import { notify } from './notify.js';
+import { msg } from './i18n.js';
 import * as webhooks from './webhooks.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,7 +82,7 @@ async function fetchLatest() {
     state.notes = cmpVer(v, VERSION) > 0 ? String(rel.body || '').slice(0, 4000) : '';
     setSetting('update_latest', v); setSetting('update_notes', state.notes); setSetting('update_url', state.url || '');
     if (cmpVer(v, VERSION) > 0) {
-      notify('update', `Version ${v} finns`, `Du kör ${VERSION}. Uppdatera containern i Unraid (Check for updates → Apply update).`, { key: 'upd:' + v, minInterval: 7 * 86400 });
+      notify('update', msg('Version {v} finns', { v }), msg('Du kör {v}. Uppdatera containern i Unraid (Check for updates → Apply update).', { v: VERSION }), { key: 'upd:' + v, minInterval: 7 * 86400 });
       webhooks.updateAvailable({ current: VERSION, latest: v, notes: state.notes });
     }
   } catch (e) { state.error = e.name === 'TimeoutError' ? 'GitHub svarade inte' : e.message; }

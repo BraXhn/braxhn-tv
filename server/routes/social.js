@@ -6,6 +6,7 @@ import * as st from '../stream.js';
 import * as act from '../activity.js';
 import * as party from '../party.js';
 import * as screen from '../screentime.js';
+import { reqLang } from '../i18n.js';
 import * as follows from '../follows.js';
 import { route, user, adminAnywhere, isTrusted } from '../http/router.js';
 import { allowedFor, ctx, householdRoot, canManage, listItems, itemsByIds, canDownload } from '../http/context.js';
@@ -60,16 +61,16 @@ function screenTarget(c) {
   if (c.user.is_admin && !t.is_admin && (adminAnywhere() || isTrusted(c.req))) return t;
   fail(c.res, 403, 'Bara huvudkontot eller en administratör kan ändra skärmtiden'); return null;
 }
-route('GET', '/api/screentime', user, (c) => send(c.res, 200, screen.status(c.user.id) || { limited: false }));
+route('GET', '/api/screentime', user, (c) => send(c.res, 200, screen.inLang(screen.status(c.user.id), reqLang(c.req)) || { limited: false }));
 route('GET', '/api/screentime/:uid', user, (c) => {
   const t = screenTarget(c); if (!t) return;
-  send(c.res, 200, { id: t.id, name: t.name, rules: screen.rulesFor(t.id), status: screen.status(t.id) });
+  send(c.res, 200, { id: t.id, name: t.name, rules: screen.rulesFor(t.id), status: screen.inLang(screen.status(t.id), reqLang(c.req)) });
 });
 route('PUT', '/api/screentime/:uid', user, async (c) => {
   const t = screenTarget(c); if (!t) return;
   const rules = screen.setRules(t.id, await readJson(c.req));
   audit('screentime_changed', { ...ctx(c), detail: `${t.name}: ${rules ? JSON.stringify(rules) : 'ingen gräns'}` });
-  send(c.res, 200, { rules, status: screen.status(t.id) });
+  send(c.res, 200, { rules, status: screen.inLang(screen.status(t.id), reqLang(c.req)) });
 });
 route('POST', '/api/screentime/:uid/extra', user, async (c) => {
   const t = screenTarget(c); if (!t) return;
@@ -78,14 +79,14 @@ route('POST', '/api/screentime/:uid/extra', user, async (c) => {
   const m = Math.max(-240, Math.min(240, parseInt(minutes) || 0));
   if (m) screen.addExtra(t.id, m);
   audit('screentime_extra', { ...ctx(c), detail: `${t.name}: ${reset ? 'nollställd, ' : ''}${m >= 0 ? '+' : ''}${m} min` });
-  send(c.res, 200, { status: screen.status(t.id) });
+  send(c.res, 200, { status: screen.inLang(screen.status(t.id), reqLang(c.req)) });
 });
 // Tittande som inte annars rapporteras (t.ex. inspelningar i webben)
 route('POST', '/api/screentime/ping', user, async (c) => {
   const { key, position } = await readJson(c.req);
   const k = /^[a-z]:\d{1,12}$/.test(String(key || '')) ? String(key) : 'x:0';
   const s = screen.heartbeat(c.user.id, k, position == null ? null : +position);
-  send(c.res, 200, s ? { stop: !s.allowed, screenTime: s } : { stop: false });
+  send(c.res, 200, s ? { stop: !s.allowed, screenTime: screen.inLang(s, reqLang(c.req)) } : { stop: false });
 });
 
 // Följda serier och "Nytt för dig"

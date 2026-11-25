@@ -4,7 +4,8 @@
 // Beteende: man följer en serie med Följ-knappen. En serie följs också automatiskt när man lägger den
 // i Min lista eller ser klart ett avsnitt. Avföljer man en serie följs den inte automatiskt igen.
 import { db, get, all, run, tx, now } from './db.js';
-import { sendPersonal, PERSONAL_KINDS } from './notify.js';
+import { sendPersonal, PERSONAL_KINDS, userLang } from './notify.js';
+import { tr, msg } from './i18n.js';
 import { safePost } from './podcasts.js';
 import { startedSql } from './resume.js';
 
@@ -107,17 +108,18 @@ function queue(uid, list) {
 export async function flushAll() { for (const uid of [...pending.keys()]) await flush(uid); }
 
 const sxe = (e) => `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')}`;
-export function compose(eps) {
+/** Notisens rubrik och text (lang: mottagarens språk, server/i18n.js) */
+export function compose(eps, lang = 'sv') {
   const byShow = new Map();
   for (const e of eps) { if (!byShow.has(e.show)) byShow.set(e.show, []); byShow.get(e.show).push(e); }
   const shows = [...byShow.keys()];
-  const title = eps.length === 1 ? `Nytt avsnitt av ${shows[0]}` : shows.length === 1 ? `${eps.length} nya avsnitt av ${shows[0]}` : `${eps.length} nya avsnitt`;
+  const title = eps.length === 1 ? tr(lang, 'Nytt avsnitt av {show}', { show: shows[0] }) : shows.length === 1 ? tr(lang, '{n} nya avsnitt av {show}', { n: eps.length, show: shows[0] }) : tr(lang, '{n} nya avsnitt', { n: eps.length });
   const lines = [...byShow].slice(0, 8).map(([show, l]) => {
     l.sort((a, b) => a.season - b.season || a.episode - b.episode);
     const parts = l.slice(0, 6).map(e => `${sxe(e)}${e.title && !/^Avsnitt \d+$/.test(e.title) ? ' ' + e.title : ''}`);
-    return `${show}: ${parts.join(', ')}${l.length > 6 ? ` och ${l.length - 6} till` : ''}`;
+    return `${show}: ${parts.join(', ')}${l.length > 6 ? tr(lang, ' och {n} till', { n: l.length - 6 }) : ''}`;
   });
-  if (byShow.size > 8) lines.push(`… och ${byShow.size - 8} serier till`);
+  if (byShow.size > 8) lines.push(tr(lang, '… och {n} serier till', { n: byShow.size - 8 }));
   return { title, message: lines.join('\n') };
 }
 
@@ -135,7 +137,7 @@ async function flush(uid) {
   const eps = p.eps.filter(e => get('SELECT 1 FROM items WHERE id=?', e.id) && !get('SELECT 1 FROM progress WHERE user_id=? AND item_id=? AND watched=1', uid, e.id));
   const c = personalOf(uid);
   if (!eps.length || !c) return;
-  const { title, message } = compose(eps);
+  const { title, message } = compose(eps, userLang(uid));
   try { await sendPersonal(c, title, message, poster); outbox.push({ uid, title, message, at: Date.now() }); if (outbox.length > 50) outbox.shift(); }
   catch (e) { console.warn(`[notis] kunde inte skicka till användare ${uid}:`, e.message); }
 }
@@ -167,7 +169,7 @@ export function setPersonal(uid, { kind, url, token }) {
 export async function testPersonal(uid) {
   const c = personalOf(uid);
   if (!c) throw Object.assign(new Error('Ingen notisadress angiven'), { status: 400 });
-  await sendPersonal(c, 'Testnotis', 'Så här ser notiser om nya avsnitt ut.', poster);
+  await sendPersonal(c, msg('Testnotis'), msg('Så här ser notiser om nya avsnitt ut.'), poster, userLang(uid));
 }
 
 // ---------- automatisk offline-synk ----------

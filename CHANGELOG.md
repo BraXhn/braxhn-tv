@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Servern svarar på engelska till den som valt engelska.** Felmeddelandena (inloggning, tvåstegsverifiering,
+  skärmtid, åldersgräns, uppspelning, nedladdning), skärmtidens besked, startsidans hyllnamn, *Den här dagen*, avsnitt
+  utan namn (*Episode 2* i stället för *Avsnitt 2*), undertextspårens och versionernas namn, krockarna i Live-TV och
+  notiserna följer profilens språk. Utan inloggning, och för profiler utan eget val, gäller appens eller webbläsarens
+  språk (`Accept-Language`); annars svenska som förut. Notislarmen följer huvudadministratörens språk, notiser om nya
+  avsnitt och påminnelser mottagarens. Sidan *Servern svarar inte* visas på engelska när webben är på engelska.
+  Texterna kommer från webbens engelska katalog, så webben och servern säger samma sak. Felkoder och fält som apparna
+  läser är oförändrade, och inget i databasen skrivs om. Serverns logg och en del tekniska fel i administrationen är
+  kvar på svenska.
 - **Expo-appen: profilbyte.** Har kontot flera profiler visar appen *Vem tittar?* efter inloggningen, med en ruta per
   profil som i webbappen. Profiler med PIN frågar efter den, och från en barnprofil till en profil med högre
   åldersgräns krävs huvudkontots lösenord. Under *Konto* finns *Byt profil*. Barnprofiler ser bara det de får se,

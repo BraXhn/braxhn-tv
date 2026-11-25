@@ -208,7 +208,7 @@ Three ways, which can be combined:
 - **DLNA** for smart TVs without an app: off by default, **Administration → DLNA** (or `DLNA=1`). Needs host networking (or br0) for multicast, answers only on the home network and shows its own selection of libraries **without sign-in** – set an age limit if the kids have their own devices.
 - **Other systems (wall display, Home Assistant, Homepage …):** under *Administration → API keys* you hand out a key that can only read *Now playing* and/or the library (`/api/v1/now-playing`, `/api/v1/library`). The *Support* permission is for the developer team: it can read bug reports that you have approved and reply to them, nothing else. The key is sent in the `X-Api-Key` header, is shown once and by default only works from the home network. See [docs/api.md](docs/api.md#api-nycklar-apiv1) (Swedish).
 
-The iOS/tvOS app and the Android app are in English and Swedish (following the device language; other languages get English). Notifications, the server log, the server's error messages and the offline page are still in Swedish, so the server's error messages also show up in Swedish in the English apps.
+The iOS/tvOS app and the Android app are in English and Swedish (following the device language; other languages get English). The server's common error messages (sign-in, screen time, age limits, playback, downloads), the home screen's shelf names, untitled episodes, track names, notifications and the offline page follow the profile's language – or, when nobody is signed in, the app's or browser's language. The server log and some technical errors in the administration are still Swedish only.
 
 ## Security
 

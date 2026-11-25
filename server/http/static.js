@@ -65,12 +65,25 @@ const DEPS = JSON.stringify(LAZY_DEPS).replace(/</g, '\\u003c');
 export const isLazy = (src) => /^\/\/ @lazy\b/m.test(String(src).slice(0, 600));
 const START_JS = `self.__preload=${JSON.stringify(PRELOAD_URLS)};\n${fs.readFileSync(path.join(WEB, 'start.js'), 'utf8')}`.replace(/<\//g, '<\\/');
 const START_CSP = cspHash(START_JS);
+// Sidan om att servern inte svarar (web/offline.html) visas ur service workerns cache när servern inte nås – språket kan
+// inte komma från servern då. Skriptet väljer det som webben (web/js/core.js): kakan bxlang, annars webbläsarens språk
+// (nordiska → svenska, övriga → engelska), och byter till texterna i data-en.
+const OFFLINE_JS = `(() => {
+  const ck = /(?:^|;\\s*)bxlang=(sv|en)(?:;|$)/.exec(document.cookie)?.[1];
+  const list = (navigator.languages || [navigator.language || '']).filter(Boolean);
+  const nordic = (x) => /^(sv|nb|nn|no|da)\\b/i.test(x);
+  const en = ck ? ck === 'en' : list.length > 0 && !nordic(list.find(x => nordic(x) || /^en\\b/i.test(x)) || list[0]);
+  if (!en) return;
+  document.documentElement.lang = 'en';
+  for (const el of document.querySelectorAll('[data-en]')) el.textContent = el.dataset.en;
+})();`;
+const OFFLINE_CSP = cspHash(OFFLINE_JS);
 // Service workerns skal: filerna med hash (sw.js läser listan)
 const SW_HASHES = JSON.stringify(Object.fromEntries([...FILEHASH].filter(([r]) => /^(js\/.*\.js|app\.js|style\.css|vendor\/hls\.min\.js|i18n\/en\.js)$/.test(r))));
 
 // Content Security Policy: bara egna skript (plus Googles Cast-SDK). Bilder bara från servern – TMDB:s bilder går via
 // /api/tmdbimg (routes/privacy.js), så att webbläsaren aldrig kontaktar TMDB.
-const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} ${START_CSP} https://www.gstatic.com`,
+const CSP = ["default-src 'self'", `script-src 'self' ${IMPORTMAP_CSP} ${START_CSP} ${OFFLINE_CSP} https://www.gstatic.com`,
   "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "media-src 'self' blob:", "connect-src 'self'",
   "font-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "frame-src https://www.gstatic.com"].join('; ');
 
@@ -93,7 +106,7 @@ function load(f, st, lang = 'sv') {
   if (name === 'index.html' || name === 'sw.js' || name === 'offline.html') {
     raw = Buffer.from(String(raw).replace(/\/v\/\{\{b\}\}\/([\w./-]+)/g, (_, r) => FILEHASH.has(r) ? hashedUrl(r) : `${PREFIX}/${r}`)
       .replaceAll('{{b}}', BUILD).replaceAll('{{importmap}}', `<script type="importmap">${IMPORTMAP}</script>`)
-      .replaceAll('{{start}}', () => `<script>${START_JS}</script>`).replaceAll('{{hashes}}', SW_HASHES).replaceAll('{{deps}}', DEPS));
+      .replaceAll('{{start}}', () => `<script>${START_JS}</script>`).replaceAll('{{offline}}', () => `<script>${OFFLINE_JS}</script>`).replaceAll('{{hashes}}', SW_HASHES).replaceAll('{{deps}}', DEPS));
   }
   const e = { raw, type: MIME[path.extname(f)] || 'application/octet-stream', mtime: st.mtimeMs, size: st.size,
     etag: `"${crypto.createHash('sha1').update(raw).digest('base64url').slice(0, 22)}"` };

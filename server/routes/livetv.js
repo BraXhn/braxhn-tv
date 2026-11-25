@@ -11,6 +11,7 @@ import * as dvr from '../dvr.js';
 import * as comskip from '../comskip.js';
 import * as timeshift from '../timeshift.js';
 import * as screen from '../screentime.js';
+import { reqLang, tr } from '../i18n.js';
 import { channelAllowed, kidsHaveChannels } from '../iptv/channels.js';
 import { allowUnrated, screenBlock, ctx } from '../http/context.js';
 import { route, user, img, admin } from '../http/router.js';
@@ -101,7 +102,8 @@ route('GET', '/api/dvr/conflicts', user, (c) => {
   if (!liveOk(c)) return;
   const list = dvr.conflictList();
   const ok = (id) => recOk(c, get('SELECT channel_id FROM recordings WHERE id=?', id));
-  send(c.res, 200, { conflicts: kidRec(c) ? list.filter(x => ok(x.recording.id)).map(x => ({ ...x, with: x.with.filter(w => ok(w.id)) })) : list });
+  const lang = reqLang(c.req), out = kidRec(c) ? list.filter(x => ok(x.recording.id)).map(x => ({ ...x, with: x.with.filter(w => ok(w.id)) })) : list;
+  send(c.res, 200, { conflicts: lang === 'sv' ? out : out.map(x => ({ ...x, text: tr(lang, x.text) })) });
 });
 route('POST', '/api/dvr/program', user, async (c) => {
   if (!liveOk(c)) return;

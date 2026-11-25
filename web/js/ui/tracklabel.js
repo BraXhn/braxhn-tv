@@ -17,7 +17,8 @@ export function langName(code, loc = lang) {
 }
 // Tillägg i externa filers namn (Film.sv.forced.srt) – övriga visas som de är
 const FLAGS = { forced: () => t('tvingad'), sdh: () => 'SDH', hi: () => 'SDH', cc: () => 'CC' };
-const SUFFIX = { fil: () => t('(fil)'), bild: () => t('(bild)'), nedladdad: () => t('(nedladdad)') };
+// Servern skriver etiketten på profilens språk (server/i18n.js subLabel) – båda formerna känns igen
+const SUFFIX = { fil: () => t('(fil)'), bild: () => t('(bild)'), nedladdad: () => t('(nedladdad)'), file: () => t('(fil)'), image: () => t('(bild)'), downloaded: () => t('(nedladdad)') };
 
 /**
  * Ljudspårets namn för visning: "Svenska · Kommentar · opus · 2ch" i stället för "swe · Kommentar · opus · 2ch".
@@ -36,10 +37,10 @@ export function audioLabel(a, { title = true, loc = lang } = {}) {
  * @param {{ label?: string, lang?: string|null, source?: string }} s  spåret som servern skickar det (item.subtitles)
  */
 export function subLabel(s, loc = lang) {
-  const m = /^(.*?)(?: \((fil|bild|nedladdad)\))?$/.exec(String(s?.label ?? ''));
+  const m = /^(.*?)(?: \((fil|bild|nedladdad|file|image|downloaded)\))?$/.exec(String(s?.label ?? ''));
   let body = m[1];
   const suffix = m[2] ? ' ' + SUFFIX[m[2]]() : '';
-  const track = /^Spår (\d+)$/.exec(body);
+  const track = /^(?:Spår|Track) (\d+)$/.exec(body);
   if (track) body = t('Spår {n}', { n: track[1] });
   else if (s.source === 'external' || s.source === 'downloaded') {
     // Filnamnets tillägg: första delen är språket (rättat språk i s.lang går före), resten t.ex. forced/sdh
@@ -47,7 +48,7 @@ export function subLabel(s, loc = lang) {
     const parts = body.split(/[._-]+/).filter(Boolean);
     const flag = (x) => FLAGS[x.toLowerCase()]?.() || x;
     const first = parts[0] || '';
-    const name = first === 'Extern' && !s.lang ? t('Extern') : ['forced', 'sdh', 'cc'].includes(first.toLowerCase()) ? flag(first) : langName(s.lang || first, loc);
+    const name = (first === 'Extern' || first === 'External') && !s.lang ? t('Extern') : ['forced', 'sdh', 'cc'].includes(first.toLowerCase()) ? flag(first) : langName(s.lang || first, loc);
     body = [name, ...parts.slice(1).map(flag)].join(' · ');
   } else {
     // Inbäddat spår: "titel · språkkod" eller bara en av dem. Titeln behålls, koden blir språkets namn – och står

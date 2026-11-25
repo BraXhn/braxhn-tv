@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { get, all, run, tx, IMAGES } from './db.js';
 import * as colors from './imgcolor.js';
+import { tr } from './i18n.js';
 
 // Kolumner som beskriver filmen (inte filen) – flyttas till en ny huvudrad när huvudfilen försvinner
 const META_COLS = 'title, sort_title, year, overview, rating, tmdb_id, meta_done, poster, backdrop, genres, cert, age, collection_id, match_locked, added, credits_done, trailer_yt, tagline, locked, img_locked, logo';
@@ -130,22 +131,22 @@ export function versionsOf(main) {
 }
 
 const HDR_NAME = { hdr10: 'HDR10', dovi: 'Dolby Vision', hlg: 'HLG' };
-export function resolutionLabel(r) {
+export function resolutionLabel(r, lang = 'sv') {
   const w = r.width || 0, h = r.height || 0;
-  const res = w >= 3200 || h >= 1800 ? '4K' : w >= 1700 || h >= 1000 ? '1080p' : w >= 1100 || h >= 700 ? '720p' : h ? `${h}p` : 'Okänd upplösning';
+  const res = w >= 3200 || h >= 1800 ? '4K' : w >= 1700 || h >= 1000 ? '1080p' : w >= 1100 || h >= 700 ? '720p' : h ? `${h}p` : tr(lang, 'Okänd upplösning');
   return res + (r.hdr ? ' ' + (HDR_NAME[r.hdr] || String(r.hdr).toUpperCase()) : '');
 }
 /** Versionsetikett: filnamnets suffix efter "Titel (År)", t.ex. "Director's Cut"; annars upplösningen */
-export function versionLabel(r) {
+export function versionLabel(r, lang = 'sv') {
   const base = path.basename(r.path || '', path.extname(r.path || ''));
   const m = base.match(/^(.*)[\s._(\[-]((?:19|20)\d\d)[)\]]?(.*)$/);
   const suf = (m ? m[3] : '').replace(/[._]+/g, ' ').replace(/^[\s\-–)\]]+/, '').replace(/[\s\-–\[(]+$/, '').replace(/\s+/g, ' ').trim();
-  if (!suf || /^(2160p|1080p|720p|576p|480p|4k|uhd)\b/i.test(suf)) return resolutionLabel(r);
+  if (!suf || /^(2160p|1080p|720p|576p|480p|4k|uhd)\b/i.test(suf)) return resolutionLabel(r, lang);
   return suf.slice(0, 40);
 }
-/** Lista för klienter: [{ id, label, width, height, hdr, size, vcodec }] med unika etiketter */
-export function versionList(rows) {
-  const out = rows.map(r => ({ id: r.id, label: versionLabel(r), width: r.width, height: r.height, hdr: r.hdr || null, size: r.size, vcodec: r.vcodec }));
+/** Lista för klienter: [{ id, label, width, height, hdr, size, vcodec }] med unika etiketter (lang: server/i18n.js) */
+export function versionList(rows, lang = 'sv') {
+  const out = rows.map(r => ({ id: r.id, label: versionLabel(r, lang), width: r.width, height: r.height, hdr: r.hdr || null, size: r.size, vcodec: r.vcodec }));
   const seen = new Map();
   for (const v of out) seen.set(v.label, (seen.get(v.label) || 0) + 1);
   const n = new Map();

@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream';
 import net from 'node:net';
 import os from 'node:os';
 import { spawn as spawnProc } from 'node:child_process';
+import { reqLang, trMessage, localizeJson } from './i18n.js';
 // Text som lönar sig att komprimera (bibliotekslistor i JSON är ~15 ggr mindre med gzip)
 const COMPRESSIBLE = /^(application\/(json|javascript|manifest\+json|vnd\.apple\.mpegurl)|text\/|image\/svg)/;
 // Svar över ASYNC_MIN komprimeras utanför händelseloopen (zlib i trådpoolen): ett bibliotek med tusentals titlar
@@ -17,11 +18,14 @@ const BR_OPTS = { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4, [zlib.cons
 /** Skickar ett svar. headers.ETag === 'auto' räknar fram en ETag ur innehållet; If-None-Match ger då 304. */
 export function send(res, code, body, headers = {}) {
   if (res.headersSent || res[PENDING]) return;
+  const req = res.req;
   if (typeof body === 'object' && !Buffer.isBuffer(body) && body !== null) {
-    body = JSON.stringify(body);
+    // Språk (server/i18n.js): felets text och "Avsnitt N" på profilens språk – felkoder och övriga fält är som de är
+    const lang = reqLang(req);
+    if (lang !== 'sv' && code >= 400 && typeof body.error === 'string') body = { ...body, error: trMessage(lang, body.error) };
+    body = localizeJson(lang, JSON.stringify(body));
     headers['Content-Type'] = 'application/json; charset=utf-8';
   }
-  const req = res.req;
   if (code === 200 && headers.ETag) {
     if (headers.ETag === 'auto') headers.ETag = `"${crypto.createHash('sha1').update(body ?? '').digest('base64url').slice(0, 22)}"`;
     if (req?.headers['if-none-match'] === headers.ETag) {
