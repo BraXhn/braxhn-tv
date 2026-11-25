@@ -75,18 +75,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 6. Android-appen på engelska
-
-- **Vad:** flytta texterna till `res/values/strings.xml` med svenska i `values-sv` (appen har i dag ingen
-  `strings.xml` och ett hundratal texter direkt i Kotlin-koden) och översätt dem.
-- **Varför:** webben och iOS-appen finns på engelska. Android-appen är den enda delen som en engelskspråkig
-  användare inte kan använda.
-- **Filer:** `apps/automotive/app/src/main/java/**`, `apps/automotive/app/src/main/res/values*/strings.xml`,
-  `apps/automotive/README.md`, `README.md`, `README.en.md`.
-- **Klart när:** appen följer telefonens språk, inga svenska texter syns på en engelsk telefon, och bygget i GitHub
-  Actions går igenom.
-
-### 7. Sömntimer i videospelaren
+### 6. Sömntimer i videospelaren
 
 - **Vad:** samma val som i ljudspelaren (15, 30, 60 minuter eller "efter det här avsnittet") i videospelarens meny.
 - **Varför:** den som somnar till en serie vaknar annars tre avsnitt senare, och *Fortsätt titta* pekar fel. Finns
@@ -95,7 +84,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
   behövs.
 - **Klart när:** uppspelningen stannar vid vald tid, positionen sparas där, och valet finns på engelska.
 
-### 8. Skärmtid: mät räkningen vid paus och visa tiden som är kvar
+### 7. Skärmtid: mät räkningen vid paus och visa tiden som är kvar
 
 - **Vad:** servern räknar nu tiden även från själva strömmen. Mät i riktig Chrome och Safari att paus inte räknas
   (direktuppspelning av en stor fil och HLS), och visa "X minuter kvar" i spelaren i webben och apparna när det är
@@ -106,7 +95,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
   `test/security-review4.test.js`, `test/web-family.test.js`.
 - **Klart när:** tio minuters paus ger högst en halv minuts räknad tid i båda webbläsarna, och varningen syns.
 
-### 9. Engelska i notiser, serverns felmeddelanden och offlinesidan
+### 8. Engelska i notiser, serverns felmeddelanden och offlinesidan
 
 - **Vad:** notiser, felmeddelanden från servern och offlinesidan finns bara på svenska. Låt dem följa profilens
   språk (`users.lang`).
@@ -202,9 +191,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - 2026-11-25 (gren `team/expo-2026-11-25`): Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
-- 2026-11-25 (gren `team/android-2026-11-25`): Android-appen på engelska och svenska efter telefonens språk – texterna i
+- 2026-11-25: Android-appen på engelska och svenska efter telefonens språk – texterna i
   `res/values/strings.xml` (engelska, standard) och `res/values-sv/strings.xml`, ordval som webben;
-  `test/android-i18n.test.js` hindrar svensk text i Kotlin-koden. Bygget i GitHub Actions är inte kört än.
+  `test/android-i18n.test.js` hindrar svensk text i Kotlin-koden. Bygget i GitHub Actions går igenom; inte provad på riktig telefon, TV eller bil.
 - 2026-11-25 (i `:edge`): Femte granskningen av servern – sökvägar bara för administratörer, takt på originalfilen för
   profiler med skärmtid, tak för bildtoken, reläets spärr först, lokalt datum i inspelningar och exporter.
 - 2026-11-25: Musikkön och platsen sparas per profil på servern och finns kvar efter omladdning; Föregående och
