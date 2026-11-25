@@ -9,6 +9,8 @@
   finns både i Storbritannien och USA) visas serien under *Administration → Osäkra matchningar* med förslag. Serier
   som valts med *Fel titel?* eller godkänts rörs aldrig – inte heller om valet gjordes medan en skanning pågick, vilket
   tidigare kunde skriva över det.
+- **"Fel titel?" söker på mappens namn.** Sökrutan fylls nu i med mappens eller filens titel och år (utan "(UK)"
+  och liknande) i stället för titelns nuvarande, kanske felaktiga, namn – så rätt serie syns direkt i listan.
 - **Ihopskrivna seriernamn hittas.** En mapp som heter *bigbang theory* matchas nu till *The Big Bang Theory*
   (tidigare ingen träff).
 - **Ljudböcker matchas igen.** Google Books svarar numera "för många anrop" på alla sökningar utan egen nyckel, och

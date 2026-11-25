@@ -118,3 +118,24 @@ test('låst matchning ändras aldrig; omatchade i Administration och nytt förs�
   while (scanner.status.running) await new Promise(r => setTimeout(r, 100));
   assert.equal(D.get('SELECT tmdb_id FROM items WHERE id=?', lk.id).tmdb_id, 420818);
 });
+
+test('"Fel titel?" söker som standard på mappens titel och år, inte på det felaktiga TMDB-namnet', async () => {
+  touch('Barnserier', 'The Big Bang Theory (2007)', 'Season 1', 'The.Big.Bang.Theory.S01E01.mkv');
+  touch('Barnserier', 'Top Gear (UK)', 'Series 10', 'Top.Gear.UK.S10E01.mkv');
+  await scanner.scan(ids.shows);
+  const bbt = show('The Big Bang Theory (2007)'), tg = show('Top Gear (UK)');
+  // Som efter en äldre felmatchning: TMDB:s namn och år på fel serie
+  D.run(`UPDATE items SET tmdb_id=287649, title='BIGBANG: The Beginning', year=2006 WHERE id=?`, bbt.id);
+  D.run(`UPDATE items SET tmdb_id=43176, title='Top Gear Korea', year=2011 WHERE id=?`, tg.id);
+  let r = await req(`/api/items/${bbt.id}/match`);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.query, { q: 'The Big Bang Theory', year: 2007 });
+  assert.equal(r.data.results[0]?.id, 1418);
+  r = await req(`/api/items/${tg.id}/match`);
+  assert.equal(r.data.query.q, 'Top Gear', '"(UK)" är en ledtråd, inte en del av sökningen');
+  assert.ok(r.data.results.some(x => x.id === 45));
+  // Eget sökord gäller som förut
+  r = await req(`/api/items/${tg.id}/match?q=${encodeURIComponent('Top Gear Australia')}&year=`);
+  assert.deepEqual(r.data.query, { q: 'Top Gear Australia', year: null });
+  assert.equal(r.data.results[0]?.id, 7636);
+});

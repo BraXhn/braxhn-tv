@@ -6,6 +6,7 @@ import { all, run, get, now, tx, getSetting, IMAGES } from '../db.js';
 import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
 import { audit, createSession } from '../auth.js';
 import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie, matchQuery } from '../scanner.js';
+import { titleHints } from '../match.js';
 import { rootsOf, setRoots, nested, MAX_ROOTS, relOf, libraryView } from '../libpaths.js';
 import { imageFile, seasonPosters, hasLocal } from '../localmeta.js';
 import * as itemmeta from '../itemmeta.js';
@@ -380,8 +381,16 @@ route('GET', '/api/items/:id/match', curate, async (c) => {
   const it = get('SELECT * FROM items WHERE id=?', c.p.id);
   if (!it || it.kind === 'episode') return fail(c.res, 404, 'Finns inte');
   if (!(getSetting('tmdb_key') || process.env.TMDB_API_KEY)) return fail(c.res, 400, 'Ange en TMDB-nyckel under Administration först');
-  const q = String(c.q.get('q') || it.title).slice(0, 200), year = parseInt(c.q.get('year')) || null;
-  try { send(c.res, 200, { current: it.tmdb_id, locked: !!it.match_locked, results: await tmdbSearch(it.kind, q, year) }); }
+  // Utan sökord: mappens/filens titel och år (som den automatiska matchningen), inte radens titel – den kommer från TMDB
+  // och är fel just när någon behöver "Fel titel?". "(US)"/"- tecknad" tas bort ur sökningen (titleHints).
+  let hint = null;
+  if (!c.q.get('q')) {
+    const mq = matchQuery({ ...it, match_locked: 0 });
+    const t = mq.titles.map(x => x && titleHints(x).title).find(Boolean);
+    hint = { q: String(t || it.title).slice(0, 200), year: mq.year || null };
+  }
+  const q = hint ? hint.q : String(c.q.get('q')).slice(0, 200), year = hint ? hint.year : parseInt(c.q.get('year')) || null;
+  try { send(c.res, 200, { current: it.tmdb_id, locked: !!it.match_locked, query: { q, year }, results: await tmdbSearch(it.kind, q, year) }); }
   catch (e) { fail(c.res, 502, 'TMDB: ' + e.message); }
 });
 route('POST', '/api/items/:id/match', curate, async (c) => {

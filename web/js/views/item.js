@@ -256,10 +256,13 @@ export function matchItem(it) {
     } }, { label: t('Stäng') }] });
   const d = h.el, close = () => h.close();
   $('#munlock', d).hidden = true;
-  const search = async () => {
+  // Första sökningen utan sökord: servern söker på mappens/filens titel och år (inte på det kanske felaktiga namnet)
+  // och fyller i fälten med det
+  const search = async (first = false) => {
     $('#mres', d).innerHTML = loadingState({ kind: 'inline', label: t('Söker…') });
     try {
-      const r = await api(`/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`, { bg: true });
+      const r = await api(first ? `/items/${it.id}/match` : `/items/${it.id}/match?q=${encodeURIComponent($('#mq', d).value)}&year=${encodeURIComponent($('#my', d).value)}`, { bg: true });
+      if (first && d.isConnected) { $('#mq', d).value = r.query?.q || it.title; $('#my', d).value = r.query?.year || ''; }
       $('#mlock', d).textContent = r.locked ? t('Matchningen är låst och ändras inte vid omskanning.') : '';
       $('#munlock', d).hidden = !r.locked;
       $('#mres', d).innerHTML = r.results.map(x => `<button class="mcard${x.id === r.current ? ' on' : ''}" data-tid="${x.id}">
@@ -274,7 +277,7 @@ export function matchItem(it) {
     } catch (e) { if (d.isConnected) $('#mres', d).innerHTML = errorState(e, { compact: true }); }
   };
   $('#mf', d).onsubmit = (e) => { e.preventDefault(); search(); };
-  search();
+  search(true);
 }
 /** Dialogen "Redigera" (fält med lås, bilder, avancerat) – views/itemedit.js laddas först när den behövs (@lazy) */
 export async function editItem(it, tab = 'general') {
