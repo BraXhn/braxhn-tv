@@ -124,13 +124,8 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - iOS- och Android-apparna sparar bildtoken bara i minnet och tar en ny vid varje start (`restore()` i
   `apps/apple/Shared/AppModel.swift`, `refreshImageToken` i `apps/automotive/.../Api.kt`) – samma knuff mot taket på
   50 som Expo-appen hade. Spara den som Expo-appen gör nu.
-- Medietoken skapas vid varje uppspelningsanrop utan tak per användare (`server/routes/playback.js`, `routes/books.js`).
-- Datum i UTC: audit-texten för inbjudan och diagnostikfilens namn (`server/routes/admin.js`, `server/diagnostics.js`),
-  och fotots dag i Minnen (`dayOf` i `server/photos.js`, om det inte är avsiktligt).
-- `/api/libraries` skickar alla kolumner (`l.*`) till andra än administratörer; en vitlista vore säkrare
-  (`server/routes/library.js`).
-- Expo-appen använder inte den sparade musikkön (`/api/me/queue`), och sparar bildtoken bara i minnet så att varje
-  appstart skapar en ny (`ensureImageToken` i `apps/expo/src/api.ts`).
+- Album för offline skapar en medietoken per spår vid varje anrop (`/api/music/albums/:aid/offline` i
+  `server/routes/music.js`); ett album över 300 spår tappar de första spårens token. En token per album vore lättare.
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
   AirPlay) och inte genom startcachen (`server/pace.js`).
 
@@ -182,6 +177,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - 2026-11-25 (gren `team/expo-2026-11-25`): Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
+- 2026-11-25: Småfel – tak för medietoken, vitlista för biblioteksvar (inga sökvägar till andra än administratörer),
+  lokal dag i inbjudan och diagnostik, kvalitetsetiketter efter språket, Original går att välja igen efter ett byte
+  till omkodning, musikens tid efter en omkodad låt som spolats, testerna tömmer musikkön.
 - 2026-11-25: Android-appen på engelska och svenska efter telefonens språk – texterna i
   `res/values/strings.xml` (engelska, standard) och `res/values-sv/strings.xml`, ordval som webben;
   `test/android-i18n.test.js` hindrar svensk text i Kotlin-koden. Bygget i GitHub Actions går igenom; inte provad på riktig telefon, TV eller bil.
