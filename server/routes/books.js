@@ -14,6 +14,7 @@ import * as screen from '../screentime.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, admin, feed, remoteDenied } from '../http/router.js';
 import { screenBlock, ctx, libOk, canDownload } from '../http/context.js';
+import { libraryView } from '../libpaths.js';
 
 // ---------- Ljudböcker ----------
 // Bibliotek, böcker och filer kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
@@ -35,7 +36,7 @@ route('DELETE', '/api/audiobooks/feeds/:fid', user, (c) => {
   if (!feeds.revokeFeed(c.user.id, +c.p.fid)) return fail(c.res, 404, 'Finns inte');
   audit('book_feed_revoked', ctx(c)); send(c.res, 200, { ok: true });
 });
-route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: l, continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
+route('GET', '/api/audiobooks/:lib', user, (c) => { const l = bookLib(c); if (l) send(c.res, 200, { library: libraryView(l, c.user.is_admin), continue: books.continueBooks(c.user.id).filter(b => b.library === l.id), books: books.listBooks(l.id, c.user.id, c.q.get('sort') || 'title') }); });
 route('GET', '/api/audiobooks/book/:bid', user, (c) => {
   const b = books.book(+c.p.bid, c.user.id); if (!b) return fail(c.res, 404, 'Finns inte');
   b.feedsAllowed = !feeds.feedDenied(c.user.id);

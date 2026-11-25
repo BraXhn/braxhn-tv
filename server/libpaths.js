@@ -15,6 +15,18 @@ export function rootsOf(lib) {
   const r = all('SELECT path FROM library_paths WHERE library_id=? ORDER BY pos', lib.id).map(x => x.path);
   return r.length ? r : [lib.path];
 }
+/**
+ * Biblioteket som det skickas i API-svar. Administratören får allt (sökvägar och inställningar, med paths); övriga
+ * en vitlista med det klienterna läser – apparna id, name, type, count (test/contracts/apps.json), webben home_video.
+ * Serverns sökvägar lämnas aldrig ut till andra än administratörer.
+ */
+export function libraryView(lib, isAdmin) {
+  if (!lib) return lib;
+  if (isAdmin) return { ...lib, paths: rootsOf(lib) };
+  const v = { id: lib.id, name: lib.name, type: lib.type, home_video: lib.home_video };
+  if (lib.count !== undefined) v.count = lib.count;
+  return v;
+}
 /** Alla bibliotek med sina mappar: [{ id, name, type, path, roots }] */
 export const librariesWithRoots = (where = '', ...params) =>
   all(`SELECT * FROM libraries${where ? ' WHERE ' + where : ''} ORDER BY id`, ...params).map(l => ({ ...l, roots: rootsOf(l) }));

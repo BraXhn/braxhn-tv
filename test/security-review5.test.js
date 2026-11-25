@@ -106,6 +106,26 @@ test('GET /api/libraries: andra än administratörer får bara fälten klientern
   } finally { D.run('UPDATE libraries SET anime=0, nfo=1, kids=0 WHERE id=?', S.F); }
 });
 
+test('biblioteksvar: inga sökvägar på servern till andra än administratörer (titellistan, startsidan, musik, ljudböcker)', async () => {
+  const MUS = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('Musik','music',?)", path.join(MEDIA, 'hemlig-mapp-musik')).lastInsertRowid);
+  const BOK = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('Böcker','audiobook',?)", path.join(MEDIA, 'hemlig-mapp-bocker')).lastInsertRowid);
+  try {
+    const admItems = await req(`/api/libraries/${S.F}/items`);
+    assert.ok(admItems.data.library.paths?.[0]?.includes('hemlig-mapp'), 'administratören ser mapparna i titellistan');
+    for (const tok of [bo, kid]) {
+      for (const p of [`/api/libraries/${S.F}/items`, '/api/home', `/api/music/${MUS}/home`, `/api/audiobooks/${BOK}`]) {
+        const r = await req(p, { tok });
+        if (r.status === 404) continue; // barnprofilen eller bo får inte se biblioteket
+        assert.equal(r.status, 200, p);
+        assert.ok(!JSON.stringify(r.data).includes('hemlig-mapp'), `${p}: sökväg i svaret ${JSON.stringify(r.data).slice(0, 300)}`);
+      }
+      const it = (await req(`/api/libraries/${S.F}/items`, { tok })).data.library;
+      assert.deepEqual(Object.keys(it).sort(), ['count', 'home_video', 'id', 'name', 'type'].filter(k => k in it).sort(), 'samma vitlista som /api/libraries');
+      assert.equal(it.name, 'Filmer'); assert.equal(it.type, 'movie');
+    }
+  } finally { D.run('DELETE FROM libraries WHERE id IN (?,?)', MUS, BOK); }
+});
+
 // ---------- 2. /direct i takt för profiler med skärmtid ----------
 /** Läser /direct så fort det går i ms millisekunder (eller tills svaret är slut). Flera parallella med n > 1. */
 function readFast(tok, ms, { range, id = S.stor } = {}) {

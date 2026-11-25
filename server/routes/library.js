@@ -6,7 +6,7 @@ import { all, run, get, now, tx, getSetting, IMAGES } from '../db.js';
 import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
 import { audit, createSession } from '../auth.js';
 import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie, matchQuery } from '../scanner.js';
-import { rootsOf, setRoots, nested, MAX_ROOTS, relOf } from '../libpaths.js';
+import { rootsOf, setRoots, nested, MAX_ROOTS, relOf, libraryView } from '../libpaths.js';
 import { imageFile, seasonPosters, hasLocal } from '../localmeta.js';
 import * as itemmeta from '../itemmeta.js';
 import * as st from '../stream.js';
@@ -45,10 +45,8 @@ route('GET', '/api/libraries', user, (c) => send(c.res, 200, all(`SELECT l.*,
   WHEN l.type='ebook' THEN (SELECT COUNT(*) FROM ebooks e WHERE e.library_id=l.id)
   ELSE (SELECT COUNT(*) FROM items i WHERE i.library_id=l.id AND i.kind IN('movie','show') AND i.version_of IS NULL) END AS count FROM libraries l ORDER BY l.type IN ('music','audiobook','photo','ebook'), l.type, l.name`)
   .filter(l => l.type === 'photo' ? c.user.kind !== 'app' && photos.canSeeLib(c.user.id, l) : l.type === 'ebook' ? c.user.kind !== 'app' && ebooks.canSeeLib(c.user.id, l) : libOk(c.user.id, l.id)).map(l => {
-    // Allt (sökvägar och inställningar) bara för administratörer – admin-sidan och första start visar dem.
-    // Övriga får en vitlista: apparna läser id, name, type, count (test/contracts/apps.json), webben även home_video
-    if (c.user.is_admin) return { ...l, paths: rootsOf(l) };
-    return { id: l.id, name: l.name, type: l.type, count: l.count, home_video: l.home_video };
+    // Allt (sökvägar och inställningar) bara för administratörer – admin-sidan och första start visar dem
+    return libraryView(l, c.user.is_admin);
   })));
 /** Kontrollera bibliotekets mappar: finns, ligger under MEDIA_ROOT (realpath), inga dubbletter och ingen i en annan */
 function checkPaths(list) {
@@ -143,7 +141,7 @@ route('GET', '/api/home', user, (c) => {
   cont.length = Math.min(cont.length, CONTINUE_MAX);
   // Musik och ljudböcker har egna startsidor (och inga titlar i items)
   const rows = all("SELECT * FROM libraries WHERE type NOT IN ('music','audiobook','photo','ebook') ORDER BY name").filter(l => libOk(uid, l.id)).map(l => {
-    const row = { library: l, title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
+    const row = { library: libraryView(l, c.user.is_admin), title: `Nytt i ${l.name}`, items: listItems(uid, `i.library_id=? AND i.kind=?`, [l.id, l.type], 'i.added DESC', 24) };
     // Serier: nya avsnitt grupperade per säsong (nytt fält – items är oförändrat för apparna)
     if (l.type === 'show') row.seasons = groupNewEpisodes(listItems(uid, `i.library_id=? AND i.kind='episode'`, [l.id],
       'i.added DESC, i.season DESC, i.episode DESC', 400, 0, { slim: true }), 24);
@@ -231,7 +229,7 @@ route('GET', '/api/libraries/:id/items', user, (c) => {
     where.push(`COALESCE(i.folder, '')=?`); params.push(folder);
   }
   const uid = c.user.id, paged = c.q.has('limit') || c.q.has('offset');
-  const out = { library: { ...lib, paths: rootsOf(lib) }, items: [], query: libfilter.toQuery(f) };
+  const out = { library: libraryView(lib, c.user.is_admin), items: [], query: libfilter.toQuery(f) };
   if (lib.type === 'movie' && c.q.get('collections') === '1') {
     // ?collections=1: filmer i samma samling (minst två synliga i hela filtreringen) visas som ett samlingskort på den
     // första filmens plats. Planen räknas på lätta rader för hela listan, så att sidindelningen (limit/offset räknar

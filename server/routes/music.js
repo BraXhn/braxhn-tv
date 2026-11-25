@@ -17,13 +17,14 @@ import { serveRemux } from '../trailers.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio, admin, pub } from '../http/router.js';
 import { screenBlock, libOk, ctx, canDownload } from '../http/context.js';
+import { libraryView } from '../libpaths.js';
 
 // ---------- Musik ----------
 // Bibliotek, album, artister och spår kontrolleras mot användarens rättigheter (perms.js): otillåtet = finns inte
 const musicLib = (c) => { const l = get("SELECT * FROM libraries WHERE id=? AND type='music'", +c.p.lib); if (!l || !libOk(c.user.id, l.id)) { fail(c.res, 404, 'Inget musikbibliotek'); return null; } return l; };
 /** Spår som användaren får se (för spellistor) */
 const trackOk = (uid, id) => { const t = get('SELECT library_id FROM tracks WHERE id=?', +id); return !!t && libOk(uid, t.library_id); };
-route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: l, ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id), sonic: sonic.libraryStats(l.id) }); });
+route('GET', '/api/music/:lib/home', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, { library: libraryView(l, c.user.is_admin), ...music.musicHome(l.id, c.user.id), playlists: music.playlists(c.user.id), smart: listen.smartLists(l.id, c.user.id), sonic: sonic.libraryStats(l.id) }); });
 route('GET', '/api/music/:lib/albums', user, (c) => { const l = musicLib(c); if (l) send(c.res, 200, music.albums(l.id, c.q.get('sort') || 'title')); });
 route('GET', '/api/music/:lib/artists', user, (c) => {
   const l = musicLib(c); if (!l) return;
