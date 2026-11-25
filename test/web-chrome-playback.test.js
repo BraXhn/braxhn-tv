@@ -305,6 +305,9 @@ test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren hete
   }
   assert.deepEqual(r.cast.tracks, [sub], 'Chromecasts undertextspår');
   // Titelsidan: ljudet med språkets namn
+  // Ny sidladdning: med spelaren öppen ändrar en ren hash-navigering sidan, och när spelaren stängs går den ett steg
+  // bakåt i historiken – då hamnade testet på startsidan
+  await p.goto('about:blank');
   await p.goto(`${srv.base}/#/item/${lang.id}`);
   // Titelsidan kan vara långsam när hela sviten körs. Faller det: visa vad sidan visade, så att orsaken syns i loggen
   try { await p.waitForSelector(`text=${sv} · ac3`, { timeout: 60000 }); } catch (e) {
