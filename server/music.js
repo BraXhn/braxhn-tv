@@ -10,6 +10,7 @@ import { send, fail, deletionBlocked, streamFile } from './util.js';
 import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.js';
 import { parseReplayGain, scheduleLoudness, refreshAlbumGains } from './listening.js';
 import * as gapless from './gapless.js';
+import * as moovfirst from './moovfirst.js';
 import * as sonic from './sonic.js';
 import { libOk, libFilter } from './perms.js';
 import * as mvideo from './musicvideos.js';
@@ -272,7 +273,10 @@ export function streamTrack(req, res, t, query, uid = 0) {
   const maxKbps = parseInt(query.get('br')) || 0; // t.ex. 192 i bilen på mobilnät
   if (direct && !(maxKbps && t.bitrate && t.bitrate / 1000 > maxKbps * 1.5)) {
     let st; try { st = fs.statSync(t.path); } catch { return fail(res, 404, 'Filen saknas'); }
-    return streamFile(req, res, t.path, st.size, { 'Content-Type': EXT_MIME[ext], 'Cache-Control': 'private, max-age=3600' });
+    const headers = { 'Content-Type': EXT_MIME[ext], 'Cache-Control': 'private, max-age=3600' };
+    // M4A/M4B med moov sist (eller ett stort omslag i taggarna): moov skickas först så att spelaren kan börja direkt (moovfirst.js)
+    if (moovfirst.EXTS.has(ext)) return void moovfirst.planFor(t.path, st).then(plan => plan ? moovfirst.servePlan(req, res, t.path, plan, headers) : streamFile(req, res, t.path, st.size, headers));
+    return streamFile(req, res, t.path, st.size, headers);
   }
   const ss = Math.max(0, parseFloat(query.get('ss')) || 0);
   const kbps = Math.min(320, maxKbps || 256);
