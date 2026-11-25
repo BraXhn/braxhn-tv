@@ -178,7 +178,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
-- 2026-11-25 (gren `team/engelska-2026-11-25`): Engelska i serverns texter – felmeddelanden, skärmtid,
+- 2026-11-25: Feedback – notis till administratören när något väntar (utan text och namn, högst en i timmen),
+  *Öppna igen* för avslutade ärenden, gallring efter 180 dagar; API-nycklar går att ändra.
+- 2026-11-25: Engelska i serverns texter – felmeddelanden, skärmtid,
   åldersgräns, nedladdning, startsidans hyllnamn, *Avsnitt N*, spårens och versionernas namn, notiserna och
   offlinesidan följer profilens språk (annars kakan/`Accept-Language`) med webbens katalog (`server/i18n.js`,
   `test/server-i18n.test.js`).
