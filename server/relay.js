@@ -18,6 +18,7 @@ import os from 'node:os';
 import { Duplex } from 'node:stream';
 import { getSetting, setSetting } from './db.js';
 import { RELAY, isPrivate } from './util.js';
+import { TunnelQueue, SLICE } from './tunnelq.js';
 
 const K = { url: 'relay_url', id: 'relay_server', secret: 'relay_secret', pub: 'relay_public_url', name: 'relay_name' };
 const WIN = 4 << 20, CONN_WIN = 32 << 20;
@@ -64,10 +65,11 @@ function call(url, method, p, body) {
 // HTTP/1.1 över en HTTP/2-ström. Strömmen ges inte direkt till http-modulen: den skriver rubrikerna som en sträng i
 // writev, och sådana strängar kunde skrivas över innan de skickats på en Http2Stream (rubrikraden kom fram som skräp).
 // Här blir allt Buffer (decodeStrings) och mottrycket följer strömmen åt båda hållen (pause/drain).
+// Svaren går genom tunnelns kö (tunnelq.js): små svar direkt, stora strömmar i bitar när kön i tunneln är kort.
 class Tunnelled extends Duplex {
-  constructor(st) {
+  constructor(st, q) {
     super();
-    this.st = st;
+    this.st = st; this.q = q; this.qs = q?.stream(); this.toks = new Set();
     st.on('data', (d) => { if (!this.push(d)) st.pause(); });
     st.on('end', () => this.push(null));
     st.on('error', () => {});
@@ -77,14 +79,34 @@ class Tunnelled extends Duplex {
   }
   _read() { this.st.resume(); }
   _write(chunk, enc, cb) {
+    const q = this.q;
+    if (!q) return this.send(chunk, cb);
+    let off = 0;
+    const step = () => {
+      if (this.st.destroyed) return cb(new Error('Strömmen är stängd'));
+      if (off >= chunk.length) return cb();
+      const n = Math.min(SLICE, chunk.length - off);
+      const go = () => { const part = chunk.subarray(off, off += n); this.send(part, step, q.begin(this.qs, n)); };
+      if (q.free(this.qs, n)) go(); else q.wait(this.qs, go);
+    };
+    step();
+  }
+  send(part, next, tok) {
     const st = this.st;
-    if (st.destroyed) return cb(new Error('Strömmen är stängd'));
-    if (st.write(chunk)) return cb();
-    const go = () => { st.off('drain', go); st.off('close', go); cb(); };
+    if (st.destroyed) { if (tok) this.q.drop(tok); return next(new Error('Strömmen är stängd')); }
+    let ok;
+    if (tok) { this.toks.add(tok); ok = st.write(part, () => { this.toks.delete(tok); this.q.done(tok); }); } else ok = st.write(part);
+    if (ok) return next();
+    const go = () => { st.off('drain', go); st.off('close', go); next(); };
     st.on('drain', go); st.on('close', go);
   }
   _final(cb) { this.st.end(); cb(); }
-  _destroy(err, cb) { if (!this.st.destroyed) this.st.destroy(); cb(err); }
+  _destroy(err, cb) {
+    if (this.q) { for (const tok of this.toks) this.q.drop(tok); this.q.cancel(this.qs); }
+    this.toks.clear();
+    if (!this.st.destroyed) this.st.destroy();
+    cb(err);
+  }
   setTimeout(ms, cb) { this.st.setTimeout(ms); if (cb) this.once('timeout', cb); return this; }
   setNoDelay() { return this; }
   setKeepAlive() { return this; }
@@ -92,6 +114,7 @@ class Tunnelled extends Duplex {
 
 // ---------- strömmarna från reläet ----------
 let inner = null, h2 = null;
+const QUEUE = Symbol('tunnelkö');
 const UNTRUSTED = /^(x-forwarded-|forwarded$|x-real-ip$)/;
 function servers() {
   if (h2) return h2;
@@ -103,14 +126,19 @@ function servers() {
     Promise.resolve().then(() => handler(req, res)).catch((e) => { console.error(e); try { if (!res.headersSent) res.writeHead(500); res.end(); } catch {} });
   });
   Object.assign(inner, { headersTimeout: 20000, requestTimeout: 60000, keepAliveTimeout: 5000, timeout: 180000, maxHeadersCount: 100 });
-  h2 = http2.createServer({ maxSessionMemory: 64, settings: { initialWindowSize: WIN, maxConcurrentStreams: 256, enablePush: false } });
-  h2.on('session', (s) => { try { s.setLocalWindowSize(CONN_WIN); } catch {} });
+  h2 = http2.createServer({ maxSessionMemory: 64, maxOutstandingPings: 20, settings: { initialWindowSize: WIN, maxConcurrentStreams: 256, enablePush: false } });
+  h2.on('session', (s) => {
+    try { s.setLocalWindowSize(CONN_WIN); } catch {}
+    // Tunnelns kö (tunnelq.js): mäter med HTTP/2-PING, som alla relän svarar på – inget nytt i protokollet
+    const q = s[QUEUE] = new TunnelQueue({ ping: (cb) => !s.destroyed && s.ping((err) => cb(err)) });
+    s.once('close', () => q.close());
+  });
   h2.on('stream', (st, hd) => {
     st.on('error', () => {});
     if (hd[':method'] !== 'POST' || hd[':path'] !== '/_tunnel') return st.close(http2.constants.NGHTTP2_REFUSED_STREAM);
     const ip = String(hd['bx-client-ip'] || '').replace(/^::ffff:/, '');
     st.respond({ ':status': 200 });
-    const sockLike = new Tunnelled(st);
+    const sockLike = new Tunnelled(st, st.session?.[QUEUE]);
     sockLike[RELAY] = { ip: net.isIP(ip) ? ip : '0.0.0.0', https: hd['bx-proto'] === 'https' };
     // Egen adress saknas: aldrig privat, aldrig en betrodd proxy (isPrivate(req.socket.remoteAddress) i routerna)
     sockLike.remoteAddress = '';

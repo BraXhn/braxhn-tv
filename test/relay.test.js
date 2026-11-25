@@ -269,6 +269,76 @@ test('stor fil genom reläet: mottrycket håller minnet nere (reläet och hemser
   assert.ok(s.bytesOut > BIG, 'trafiken räknas');
 });
 
+// Strypt uppladdning mellan hemservern och reläet (som hemmets uppladdning): mbit Mbit/s med en liten egen kö
+function throttle(target, mbit) {
+  const BPS = mbit * 125000, TICK = 10, socks = new Set();
+  const srv = net.createServer((c) => {
+    const t = net.connect(target, '127.0.0.1');
+    socks.add(c); socks.add(t);
+    t.pipe(c);
+    const q = []; let qb = 0, budget = 0;
+    c.on('data', (d) => { q.push(d); qb += d.length; if (qb > 64 * 1024) c.pause(); });
+    const iv = setInterval(() => {
+      budget = Math.min(budget + BPS * TICK / 1000, BPS * TICK / 500);
+      while (q.length && budget > 0) {
+        let d = q[0];
+        if (d.length > budget) { const n = Math.floor(budget); q[0] = d.subarray(n); d = d.subarray(0, n); } else q.shift();
+        budget -= d.length; qb -= d.length; t.write(d);
+      }
+      if (qb <= 64 * 1024 && c.isPaused()) c.resume();
+    }, TICK);
+    const end = () => { clearInterval(iv); c.destroy(); t.destroy(); socks.delete(c); socks.delete(t); };
+    c.on('close', end); t.on('close', end); c.on('error', end); t.on('error', end);
+  });
+  return new Promise(r => srv.listen(0, '127.0.0.1', () => r({ port: srv.address().port, close: () => { for (const x of socks) x.destroy(); srv.close(); } })));
+}
+
+test('tunnelns kö: små svar väntar inte bakom en stor ström, och ett avbrutet hastighetsprov fyller inte tunneln', { timeout: 120000 }, async (t) => {
+  // Ärende #2: tunneln är en enda TCP-anslutning med 4 MB fönster per ström. Utan kön låg upp till 4 MB av filmen
+  // före varje litet svar (2–6 s på 10 Mbit/s), och hastighetsprovet lade hela sitt svar i tunneln fast webben
+  // avbröt det efter 1 s. Mäts i byte, inte tid: hur mycket av filmen som kom fram medan ett omslag väntade.
+  const th = await throttle(RELAY_PORT, 8);
+  const url0 = D.getSetting('relay_url');
+  D.setSetting('relay_url', `http://127.0.0.1:${th.port}`);
+  relay.reconnect();
+  try {
+    await waitFor(() => relay.status().connected, 15000, 'tunneln via strypningen');
+    let big = 0;
+    const r = http.get(`${R}/api/stream/${STOR_ID}/direct`, { headers: { cookie } }, (res) => res.on('data', (d) => { big += d.length; }));
+    r.on('error', () => {});
+    await waitFor(() => big > 4 * 1048576, 30000, 'filmen');
+    const ahead = [];
+    for (let i = 0; i < 3; i++) {
+      const b0 = big;
+      const p = await req(R, `/api/image/${FILM_ID}/poster`, { raw: true });
+      assert.ok(p.data.equals(POSTER));
+      ahead.push(big - b0);
+      await sleep(300);
+    }
+    r.destroy();
+    const med = [...ahead].sort((a, b) => a - b)[1];
+    t.diagnostic(`filmen före omslaget: ${ahead.map(x => (x / 1048576).toFixed(2)).join(', ')} MB`);
+    assert.ok(med < 1048576, `${(med / 1048576).toFixed(2)} MB av filmen kom före omslaget (utan kön: ~4 MB)`);
+    // Hastighetsprovet (4 MB) avbryts när 256 kB kommit fram: hur mycket hann hemservern lägga i tunneln?
+    await sleep(2000);
+    const out0 = relay.status().bytesOut;
+    await new Promise((ok) => {
+      let got = 0;
+      const sp = http.get(`${R}/api/speedtest?kb=4096`, { headers: { cookie } }, (res) => res.on('data', (d) => { got += d.length; if (got >= 262144) { sp.destroy(); ok(); } }));
+      sp.on('error', ok);
+    });
+    await sleep(3000);
+    const wrote = relay.status().bytesOut - out0;
+    t.diagnostic(`hastighetsprovet: ${(wrote / 1048576).toFixed(2)} MB skrivet i tunneln`);
+    assert.ok(wrote < 1.5 * 1048576, `${(wrote / 1048576).toFixed(2)} MB av provet skrevs i tunneln (utan kön: hela provet, 4 MB)`);
+  } finally {
+    D.setSetting('relay_url', url0);
+    relay.reconnect();
+    await waitFor(() => relay.status().connected, 15000, 'tunneln utan strypning');
+    th.close();
+  }
+});
+
 // ---------------- säkerhet ----------------
 test('via reläet är man alltid utanför hemmet: admin nekas, curate kräver 2FA bara om ägaren valt det, hemmakonton nekas, X-Forwarded-For ignoreras', async () => {
   const A = { authorization: 'Bearer ' + annaTok };

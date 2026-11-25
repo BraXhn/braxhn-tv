@@ -1,6 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+- **Sidorna laddar fort via reläet även när något spelas.** Reläets tunnel är en enda anslutning, och allt
+  hemservern skickat låg i en och samma kö: med en film, en ljudbok eller hastighetsprovet i gång låg upp till 4 MB
+  före varje sida, omslag och knapp – 2–6 sekunder på 10 Mbit/s uppladdning. Nu håller hemservern själv kön i
+  tunneln kort (ungefär 0,2 s): små svar skickas direkt och stora strömmar skickas i den takt uppkopplingen hinner.
+  Mätt via reläet med 10 Mbit/s uppladdning: en sida som öppnas medan en film spelar tar 0,3 s i stället för 3,0 s,
+  och sidor de första sekunderna efter start (då webben mäter hastigheten) högst 0,3 s i stället för 3,5–4,0 s.
+  Filmens takt och hastighetsmätningen är desamma (10, 50 och 100 Mbit/s). **Reläet behöver inte byggas om** – det räcker att uppdatera
+  BraXhn TV hemma (kön använder vanliga HTTP/2-PING som alla relän svarar på).
 - **Uppspelningsvakt före varje stabil utgåva.** `npm run vakt` spelar sex testfiler (stängd och öppen GOP, HEVC, en
   fil som måste kodas om, två ljudspråk och undertexter) i riktig Google Chrome och provar start, *Fortsätt titta*,
   paus, spolning inom och utanför bufferten, byte av kvalitet, ljudspår och undertext. Fastnar något, står bilden

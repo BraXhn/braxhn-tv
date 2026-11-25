@@ -65,6 +65,8 @@ Ny kod: `docker restart braxhn-relay` eller `docker kill -s HUP braxhn-relay` (k
 
 All video går **två gånger** genom reläservern (in från hemmet, ut till tittaren), så både din uppladdning hemma och VPS:ens trafikkvot räknas. En film i 1080p är 3–8 Mbit/s – två timmar ≈ 3–7 GB per tittare. Välj maxkvalitet utanför hemmet efter den långsammaste länken (*Administration → Inställningar → Utanför hemmet*), och kontrollera VPS:ens trafikgräns. Tunneln lägger till fördröjningen hem–relä, men flödeskontrollen är anpassad för långa avstånd (4 MB per ström).
 
+Hela tunneln är en enda anslutning, så allt som hemservern skickat ligger i samma kö. I versionen efter 1.4.0 håller hemservern själv den kön kort (ungefär 0,2 s, `server/tunnelq.js`): sidor, omslag och knappar går före en film eller ljudbok som spelas, och hastighetsprovet fyller inte tunneln. Det är en ändring i BraXhn TV, inte i reläet – **reläet behöver inte byggas om**, och ett äldre relä fungerar med en ny server och tvärtom (kön använder bara vanliga HTTP/2-PING).
+
 ### Reläets miljövariabler
 
 | Variabel | Standard | Beskrivning |
