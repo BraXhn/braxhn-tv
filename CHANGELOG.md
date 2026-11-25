@@ -19,6 +19,13 @@
   en gång per dygn, inget installeras utan klick). Installationsfilen byggs av GitHub Actions (*Actions →
   Windows-app → Run workflow*) och läggs i varje utgåva. Den är inte kodsignerad: Windows varnar första gången
   (*Mer info* → *Kör ändå*). Inte provad på en riktig Windows-dator än. Se `apps/windows/README.md`.
+- **Windows-appen kan spela i mpv.** Som Jellyfin Media Player: filmer och avsnitt som servern kan skicka orörda
+  spelas i mpv i appens fönster (4K HDR, Dolby Vision, DTS och TrueHD, bildundertexter) med mpv:s reglage, *Tillbaka*
+  och *Nästa avsnitt*. Webbappen sköter fortfarande *Fortsätt titta*, historik, skärmtid och nästa avsnitt. Familjefilter,
+  för låg bandbredd utanför hemmet, vald lägre kvalitet, trailers och *Titta tillsammans* spelas i webbspelaren, och
+  går något fel i mpv tar webbspelaren över där filmen var. Val i fönstermenyn: *Använd den inbyggda spelaren* (på),
+  ljud orört till förstärkaren och byte av skärmens uppdateringsfrekvens. mpv följer inte med i installationsfilen än
+  (licensen, se `apps/windows/README.md`) – lägg `libmpv-2.dll` i `%LOCALAPPDATA%\BraXhnTV\mpv`.
 - **Sidorna laddar fort via reläet även när något spelas.** Reläets tunnel är en enda anslutning, och allt
   hemservern skickat låg i en och samma kö: med en film, en ljudbok eller hastighetsprovet i gång låg upp till 4 MB
   före varje sida, omslag och knapp – 2–6 sekunder på 10 Mbit/s uppladdning. Nu håller hemservern själv kön i
