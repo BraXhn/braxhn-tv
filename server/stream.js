@@ -13,6 +13,7 @@ import { SubReader, vttParser } from './subreader.js';
 import { ffcaps, ffReady, vulkanDevice } from './ffcaps.js';
 import { autoMaxTranscodes } from './envcheck.js';
 import { dropLeading } from './tslead.js';
+import * as opengop from './opengop.js';
 
 const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
@@ -647,6 +648,8 @@ export function computeKeyframes(it, { priority = false } = {}) {
       for (const f of fs.readdirSync(path.join(CACHE, 'keyframes'))) if (f.startsWith(it.id + '-')) fs.rmSync(path.join(CACHE, 'keyframes', f), { force: true });
       writeAtomic(kfFile(it), JSON.stringify(kf)); // en halv fil skulle räknas som indexerad men aldrig gå att läsa
       kfRemember(it.id, it.mtime, kf);
+      // Öppen GOP: provas i en egen kö efteråt – den som väntar på Spela väntar inte på proven
+      probeGop(it).catch(() => {});
       return kf;
     } catch (e) { console.warn('[keyframes]', it.path, e.message); return null; }
     finally { kfRunning.delete(it.id); kfRelease(); }
@@ -654,6 +657,65 @@ export function computeKeyframes(it, { priority = false } = {}) {
   kfRunning.set(it.id, p);
   return p;
 }
+// ---------------- öppen GOP (TS-remux i webbläsare med hls.js) ----------------
+// opengop.js provar några nyckelbilder en gång per fil (efter indexeringen, eller när en webbspelare rapporterat ett
+// avkodningsfel). Svaret sparas bredvid nyckelbilderna (<id>-<mtime>.gop) och tas bort med dem när filen ändras.
+// decide() omkodar 'tc' direkt för klienter med mse=1 (webbspelaren med hls.js) – apparna och Safari påverkas inte.
+const gopFile = (it) => path.join(CACHE, 'keyframes', `${it.id}-${it.mtime}.gop`);
+const gopMem = new Map();
+const gopRemember = (it, v) => { if (gopMem.size > 5000) gopMem.clear(); gopMem.set(it.id, { mtime: it.mtime, v }); };
+/** 'closed' | 'ra' | 'tc' | null (inte provad än) */
+export function gopOf(it) {
+  const m = gopMem.get(it.id);
+  if (m && m.mtime === it.mtime) return m.v;
+  let v = null;
+  try { v = fs.readFileSync(gopFile(it), 'utf8').trim(); } catch {}
+  if (!opengop.GOP_KINDS.includes(v)) v = null;
+  gopRemember(it, v);
+  return v;
+}
+// En prövning i taget (korta ffmpeg-körningar med lägsta prioritet); samma fil köas bara en gång
+const gopQueue = [], gopQueued = new Map();
+let gopBusy = false;
+/**
+ * Prova filens GOP (bara H.264 i 8 bitar – det som TS-remuxas). at = positionen där en webbspelare inte kunde avkoda:
+ * då provas bara nyckelbilderna runt den, och bara 'tc' sparas (en rapport kan inte friskförklara en fil).
+ * → svaret, eller null om inget provades.
+ */
+export function probeGop(it, { at = null } = {}) {
+  // Bakgrundsanalysen skickar bara id, sökväg, mtime, vcodec och längd (ingen spårlista)
+  const v = it.streams ? videoOf(it) : null;
+  if ((v?.codec || it.vcodec) !== 'h264' || is10bit(v)) return Promise.resolve(null);
+  if (at == null && gopOf(it) != null) return Promise.resolve(gopOf(it));
+  if (at != null && gopOf(it) === 'tc') return Promise.resolve('tc');
+  const key = at == null ? `${it.id}` : `${it.id}@${Math.round(at)}`;
+  if (gopQueued.has(key)) return gopQueued.get(key);
+  if (gopQueue.length >= 200) return Promise.resolve(null); // en kö som växer utan gräns (rapporter i mängd) – nästa uppspelning provar igen
+  const p = new Promise((ok) => gopQueue.push({ it, at, ok }));
+  gopQueued.set(key, p);
+  p.finally(() => gopQueued.delete(key));
+  gopNext();
+  return p;
+}
+async function gopNext() {
+  if (gopBusy || !gopQueue.length) return;
+  gopBusy = true;
+  const { it, at, ok } = gopQueue.shift();
+  let r = null;
+  try {
+    const kf = keyframesReady(it);
+    if (kf && (at != null || gopOf(it) == null)) {
+      r = await opengop.classify(it.path, kf, it.duration, { at });
+      if (r && (at == null || r === 'tc') && keyframesReady(it)) {
+        writeAtomic(gopFile(it), r);
+        gopRemember(it, r);
+        if (r === 'tc') console.log(`[uppspelning] ${path.basename(it.path)}: öppen GOP som webbläsare inte kan börja mitt i – omkodas för webbspelaren${at != null ? ` (rapporterat vid ${Math.round(at)} s)` : ''}`);
+      }
+    }
+  } catch (e) { console.warn('[öppen GOP]', it.path, e.message); }
+  finally { gopBusy = false; ok(r); gopNext(); }
+}
+
 // Segmentgränser: första nyckelbild ≥ föregående gräns + SEG
 // ts (H.264): egna gränser ≈ SEG s via segment-muxern. fmp4 (HEVC): ett segment per GOP – ffmpegs
 // HLS-muxer med mycket kort hls_time delar på varje nyckelbild, vilket blir deterministiskt vid omstart.
@@ -688,6 +750,9 @@ export function parseCaps(q, ua = '') {
     hdr: q.get('hdr') === '1', dv: q.get('dv') === '1', q: isQuality(q.get('q')) ? q.get('q') : 'orig',
     audio: /^\d{1,3}$/.test(q.get('audio') || '') ? String(parseInt(q.get('audio'))) : '', sub: String(q.get('sub') || '').slice(0, 10),
     hlsSubs: q.get('hlssubs') === '1', force: q.get('force') || '',
+    // Webbspelaren med hls.js och Media Source (Chrome, Edge, Firefox): filer med öppen GOP som inte går att börja
+    // avkoda mitt i omkodas direkt (gopOf). Apparna, Safari och Chromecast skickar det inte.
+    mse: q.get('mse') === '1',
     // Spelaren använder webbläsarens egen HLS (Safari på iPhone/iPad/Mac) i stället för hls.js
     nativeHls: q.get('nhls') === '1',
     // Tittarkomfort: nattläge (jämnare ljudnivå) och tydligare dialog – ljudet omkodas med filter
@@ -739,8 +804,11 @@ export function decide(it, o) {
   // Familjefilter (o.mute = tysta intervall ur familyfilter.js): servern tystar ljudet med ett volymfilter – också omkodat ljud
   const fam = !!(aSel && o.mute?.length);
   if (comfort || fam) am = 'aac';
+  // Öppen GOP som webbläsarens avkodare inte kan börja mitt i (opengop.js): remux skulle ge fel vid spolning och
+  // Fortsätt titta – bilden kodas om från början i stället
+  const gopTc = !!(o.mse && !o.nativeHls && v?.codec === 'h264' && gopOf(it) === 'tc');
   if (!comfort && !fam && !burn && !scale && !tonemap && vOk && aOk && audioDefault && ext && o.containers.has(ext) && o.force !== 'hls' && o.force !== 'transcode') mode = 'direct';
-  else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
+  else if (!burn && !scale && !tonemap && !gopTc && o.force !== 'transcode' && v?.codec === 'h264' && !is10bit(v) && (o.assumeKf || remuxBounds(it, 'ts'))) mode = 'remux';
   else if (!burn && !scale && !tonemap && o.force !== 'transcode' && v?.codec === 'hevc' && vOk && (o.assumeKf || remuxBounds(it, 'fmp4'))) {
     mode = 'remux'; fmt = 'fmp4'; tag = dv5 ? 'dvh1' : 'hvc1';
   } else mode = 'transcode';
@@ -758,12 +826,15 @@ export function decide(it, o) {
   if (mode === 'remux') reasons.push((fmt === 'fmp4' ? `${it.hdr ? it.hdr.toUpperCase() + '-' : ''}HEVC kopieras utan omkodning` : 'bilden kopieras utan omkodning') +
     (am === 'aac' ? ', ljudet konverteras till AAC' : am === 'eac3' ? ', surroundljud konverteras till Dolby Digital Plus 5.1' : ''));
   if (mode !== 'direct' && am === 'copy' && aSel && ['ac3', 'eac3'].includes(aSel.codec)) reasons.push(`${aSel.codec === 'eac3' ? 'Dolby Digital Plus/Atmos' : 'Dolby Digital'} skickas orört`);
+  if (mode === 'transcode' && gopTc && o.force !== 'transcode' && !burn && !scale && !tonemap) reasons.push('öppen GOP – webbläsaren kan inte börja spela mitt i filen utan omkodning');
   if (mode === 'transcode' && !reasons.length) {
     if (!vOk) reasons.push(v?.codec === 'h264' && is10bit(v) ? 'H.264 i 10 bitar stöds inte av enheten' : `videoformatet ${v?.codec || '?'} stöds inte av enheten`);
     else if (['h264', 'hevc'].includes(v?.codec) && !keyframesReady(it)) reasons.push('nyckelbilder ej indexerade än');
     else reasons.push('formatet stöds inte direkt');
   }
   if ((mode === 'remux' || mode === 'transcode') && !o.assumeKf) computeKeyframes(it).catch(() => {});
+  // Indexerad före öppen GOP-provet (äldre installation): prova nu, så att nästa uppspelning väljer rätt
+  if (o.mse && mode === 'remux' && fmt === 'ts' && !o.assumeKf && gopOf(it) == null && keyframesReady(it)) probeGop(it).catch(() => {});
   if (comfort) reasons.push(o.night && o.dialog ? 'nattläge och tydligare dialog' : o.night ? 'nattläge' : 'tydligare dialog');
   if (fam) reasons.push('familjefiltret tystar svordomar');
   // Utanför hemmet vid omkodning: ljudet blir AAC stereo 128 kbit/s (surround och Dolby tar 0,4–0,6 Mbit/s

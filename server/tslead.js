@@ -7,6 +7,7 @@
 // ingenting förloras på att ta bort dem i just det segment som spelaren börjar på (seg-N.ts?ra=<sekunder in i
 // segmentet>, se stream.js).
 // Importerar inget utöver Buffer – testas för sig i test/open-gop-seek.test.js.
+// keyIsIdr (längst ner): börjar segmentet på en IDR-bild – första steget när servern känner igen öppen GOP (opengop.js).
 
 const PKT = 188, WRAP = 2 ** 33;
 
@@ -74,4 +75,35 @@ export function dropLeading(buf, upTo = 0) {
     }
   }
   return out ? out.subarray(0, o) : buf;
+}
+
+/**
+ * Börjar TS-segmentet på en IDR-bild? Läser första bildens NAL-enheter (första PES-paketet i bildströmmen).
+ * true = IDR (stängd GOP: ingen bild efter den hänvisar bakåt), false = en annan bild (I-bild i öppen GOP),
+ * null = inte ett TS-segment med H.264 i Annex B. Används av servern/opengop.js.
+ */
+export function keyIsIdr(buf) {
+  if (!buf || buf.length < PKT || buf.length % PKT) return null;
+  const parts = []; let vid = -1, started = false;
+  for (let p = 0; p < buf.length; p += PKT) {
+    if (buf[p] !== 0x47) return null;
+    const end = p + PKT, pid = ((buf[p + 1] & 0x1f) << 8) | buf[p + 2], pusi = buf[p + 1] & 0x40, afc = (buf[p + 3] >> 4) & 3;
+    if (!(afc & 1)) continue;
+    const pay = p + 4 + (afc & 2 ? 1 + buf[p + 4] : 0);
+    if (pay + 9 > end) continue;
+    // Bildströmmen: första PES-paketet med stream_id 0xE0–0xEF
+    if (vid < 0) { if (pusi && buf[pay] === 0 && buf[pay + 1] === 0 && buf[pay + 2] === 1 && (buf[pay + 3] & 0xf0) === 0xe0) vid = pid; else continue; }
+    if (pid !== vid) continue;
+    if (pusi) { if (started) break; started = true; parts.push(buf.subarray(Math.min(end, pay + 9 + buf[pay + 8]), end)); }
+    else parts.push(buf.subarray(pay, end));
+  }
+  const es = Buffer.concat(parts);
+  let slice = false;
+  for (let i = 0; i + 3 < es.length; i++) {
+    if (es[i] !== 0 || es[i + 1] !== 0 || es[i + 2] !== 1) continue;
+    const type = es[i + 3] & 0x1f;
+    if (type === 5) return true;
+    if (type === 1) slice = true;
+  }
+  return slice ? false : null;
 }

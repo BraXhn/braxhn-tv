@@ -22,7 +22,7 @@ for (const p of [process.env.PLAYWRIGHT, 'playwright', '/opt/node22/lib/node_mod
 const skip = !CHROME ? 'Google Chrome saknas' : !chromium ? 'Playwright saknas' : !hasFfmpeg ? 'ffmpeg saknas' : false;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-chrome-'));
 const FPS = 24, SECS = 14;
-let srv, browser, film, flat;
+let srv, browser, film, flat, lang;
 
 before(async () => {
   if (skip) return;
@@ -36,16 +36,21 @@ before(async () => {
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=${FPS}`, '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '70',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '2', '-x264-params', 'keyint=48:min-keyint=4:open-gop=1:b-pyramid=none:scenecut=0:b-adapt=0', '-pix_fmt', 'yuv420p',
     '-c:a', 'ac3', path.join(dir, 'Utan Pyramid (2021).mkv')]);
+  // Två ljudspår med språk, en undertextfil bredvid och liten upplösning (180p): spårens namn och kvalitetsmenyn
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=size=320x180:rate=${FPS}`, '-f', 'lavfi', '-i', 'sine=frequency=300', '-f', 'lavfi', '-i', 'sine=frequency=500', '-t', '12',
+    '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'ac3', '-ac', '2',
+    '-metadata:s:a:0', 'language=swe', '-metadata:s:a:1', 'language=eng', path.join(dir, 'Spraak (2022).mkv')]);
+  fs.writeFileSync(path.join(dir, 'Spraak (2022).sv.srt'), '1\n00:00:01,000 --> 00:00:05,000\nHej\n');
   srv = await startServer({ root: ROOT, media: path.join(ROOT, 'media'), port: await freePort(), env: { NODE_ENV: 'test', TMDB_API_KEY: '', WATCH_FILES: '0' } });
   await srv.setup();
   const items = (await srv.req('/api/libraries/1/items')).data.items;
-  film = items.find(x => /Oppen/.test(x.title)); flat = items.find(x => /Pyramid/.test(x.title));
+  film = items.find(x => /Oppen/.test(x.title)); flat = items.find(x => /Pyramid/.test(x.title)); lang = items.find(x => /Spraak/.test(x.title));
   browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
 });
 after(async () => { await browser?.close(); await srv?.stop(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
-async function page(userAgent) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(userAgent ? { userAgent } : {}) });
+async function page(userAgent, opts = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(userAgent ? { userAgent } : {}), ...opts });
   const p = await ctx.newPage();
   await p.goto(srv.base + '/#/login');
   await p.fill('input[autocomplete="username"], #u, input[name=name]', 'admin'); await p.fill('input[type=password]', PW); await p.keyboard.press('Enter');
@@ -149,9 +154,20 @@ test('öppen GOP i Chrome: fortsätt mitt i filen och spolning i bufferten ger b
   await close();
 });
 
+// Vilket läge servern väljer för webbspelaren (mse=1, som hls.js i Chrome) – väntar tills öppen GOP-provet efter
+// indexeringen (server/opengop.js) har gett svaret want
+async function webMode(id, want, max = 30000) {
+  const t0 = Date.now(); let m;
+  while (Date.now() - t0 < max) { m = (await srv.req(`/api/items/${id}/playback?info=1&mse=1&start=31`)).data.mode; if (m === want) break; await new Promise(r => setTimeout(r, 250)); }
+  return m;
+}
+
 test('öppen GOP som Chrome inte kan börja avkoda mitt i: bilden omkodas i stället, på samma ställe', { skip }, async () => {
   const { p, close } = await page();
   await helpers(p);
+  // Som en server som inte provat filen än (eller en fil där provet missade): utan mse=1 väljer servern remux,
+  // och spelaren får klara felet själv
+  await p.route(/\/api\/items\/\d+\/playback\?/, (r) => { const u = new URL(r.request().url()); u.searchParams.delete('mse'); r.continue({ url: String(u) }); });
   const r = await p.evaluate(async (id) => { window.__L.play(id, 31); const f = await window.__frame(t => t >= 30 && t < 40, 30000); return { f, mv: f.ms == null ? null : await window.__moves(2000), modes: window.__modes, label: document.querySelector('#pmode')?.textContent }; }, flat.id);
   assert.ok(r.f.ms != null, `fortsättning vid 31 s gav ingen bild: ${r.f.state}`);
   assert.deepEqual(r.modes, ['remux', 'transcode'], 'först remux, sedan omkodning när avkodningen inte gick');
@@ -166,5 +182,60 @@ test('öppen GOP som Chrome inte kan börja avkoda mitt i: bilden omkodas i stä
   assert.ok(s.a.ms != null, `spolning till 12 s: ${s.a.state}`);
   assert.ok(s.b.ms != null, `ny start vid 50 s: ${s.b.state}`);
   assert.deepEqual(s.modes, ['transcode'], 'andra gången omkodas titeln från början');
+  await close();
+});
+
+test('öppen GOP som Chrome inte kan börja avkoda mitt i: servern vet det och omkodar direkt, utan fel först', { skip }, async () => {
+  assert.equal(await webMode(flat.id, 'transcode'), 'transcode', 'servern har provat filen');
+  assert.equal(await webMode(film.id, 'remux', 1000), 'remux', 'öppen GOP där ra räcker remuxas');
+  // Ny sida (inget minne från förra besöket i webbläsaren): fortsätt vid 31 s och spola
+  const { p, close } = await page();
+  await helpers(p);
+  const r = await p.evaluate(async (id) => {
+    const t0 = performance.now(); window.__L.play(id, 31); const f = await window.__frame(t => t >= 30 && t < 40, 30000);
+    const v = document.querySelector('#vid'); v.currentTime = 12; const g = await window.__frame(t => t >= 11.5 && t < 18);
+    return { f, g, ms: Math.round(performance.now() - t0), modes: window.__modes, errors: window.__errors, label: document.querySelector('#pmode')?.textContent, why: window.__V.P?.pb?.reasons };
+  }, flat.id);
+  assert.ok(r.f.ms != null, `fortsättning vid 31 s gav ingen bild: ${r.f.state}`);
+  assert.ok(r.g.ms != null, `spolning till 12 s gav ingen bild: ${r.g.state}`);
+  assert.deepEqual(r.modes, ['transcode'], 'omkodning från början – ingen remux som faller först');
+  assert.equal(r.errors, 0, 'inget avkodningsfel');
+  assert.match(r.why.join(', '), /öppen GOP/);
+  await close();
+});
+
+test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {
+  const { p, close } = await page();
+  const r = await p.evaluate(async ([small, mid]) => {
+    const lazy = await import('/m/js/lazy.js'); const vm = await lazy.loadPlayer();
+    const opts = (s) => [...document.querySelectorAll(s + ' option')].map(o => [o.value, o.textContent]);
+    await lazy.play(small, 0); const q180 = opts('#pq').map(o => o[0]), pa = opts('#pa').map(o => o[1]), ps = opts('#ps').map(o => o[1]);
+    // Fjärrstyrningens läge och Chromecasts MediaInfo (Cast-SDK:t finns inte här – bara de delar videoMedia använder)
+    const remote = (await import('/m/js/player/remote.js')).snapshot();
+    const K = class { constructor(...a) { this.a = a; } };
+    window.chrome = { ...window.chrome, cast: { Image: K, media: { MediaInfo: K, GenericMediaMetadata: K, Track: K, StreamType: {}, HlsSegmentFormat: {}, HlsVideoSegmentFormat: {}, TrackType: {}, TextTrackType: {} } } };
+    const cast = await (await import('/m/js/player/cast.js')).videoMedia(vm.P.it, { audio: '' });
+    lazy.closeAllPlayers(); await new Promise(r => setTimeout(r, 500));
+    await lazy.play(mid, 0); const q360 = opts('#pq').map(o => o[0]);
+    lazy.closeAllPlayers();
+    return { ui: document.documentElement.lang, q180, q360, pa, ps, remote: { a: remote.audios.map(x => x.label), s: remote.subs.map(x => x.label) }, cast: { a: cast.info.customData.audios.map(x => x.l), s: cast.info.customData.subs.map(x => x.l), tracks: cast.info.tracks.map(x => x.name) } };
+  }, [lang.id, film.id]);
+  // 180p: bara Auto och Original. 360p: även 360p – men inte 480p, 720p eller 1080p
+  assert.deepEqual(r.q180, ['auto', 'orig']);
+  assert.deepEqual(r.q360, ['auto', 'orig', '360']);
+  // Ljudspåren: språkets namn i stället för koden (swe/eng), på gränssnittets språk (profilens val – svenska eller engelska)
+  const [sv, en, sub] = r.ui === 'en' ? ['Swedish', 'English', 'Swedish (file)'] : ['Svenska', 'Engelska', 'Svenska (fil)'];
+  assert.equal(r.pa[0], `${sv} · ac3 · 2ch`);
+  assert.ok(r.pa[1].startsWith(en + ' · '), r.pa[1]);
+  assert.ok(r.ps.includes(sub), r.ps.join(' | '));
+  for (const [where, x] of [['fjärrstyrningen', r.remote], ['Chromecast', r.cast]]) {
+    assert.deepEqual(x.a.map(l => l.split(' · ')[0]), [sv, en], `${where}: ljud ${x.a.join(' | ')}`);
+    assert.deepEqual(x.s, [sub], `${where}: undertexter`);
+  }
+  assert.deepEqual(r.cast.tracks, [sub], 'Chromecasts undertextspår');
+  // Titelsidan: ljudet med språkets namn
+  await p.goto(`${srv.base}/#/item/${lang.id}`);
+  await p.waitForSelector(`text=${sv} · ac3`, { timeout: 15000 });
+  assert.doesNotMatch(await p.textContent('main'), /\bswe\b/);
   await close();
 });

@@ -25,13 +25,20 @@ const FILM = path.join(MEDIA, 'Filmer', 'Oppen Gop (2020).mkv');
 // Öppen GOP med B-pyramid och nyckelbild varannan sekund: tre GOP:ar per vanligt segment (6 s). AC-3 → ljudet konverteras.
 if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '60',
   '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '2', '-x264-params', 'keyint=48:min-keyint=4:open-gop=1:b-pyramid=normal:scenecut=0:b-adapt=0', '-pix_fmt', 'yuv420p', '-c:a', 'ac3', FILM]);
+// Öppen GOP utan B-pyramid: bilderna EFTER nyckelbilden hänvisar till GOP:en före – ra räcker inte (omkodas i webben).
+// Stängd GOP: varje nyckelbild är en IDR-bild.
+const FLAT = path.join(MEDIA, 'Filmer', 'Utan Pyramid (2021).mkv'), CLOSED = path.join(MEDIA, 'Filmer', 'Stangd Gop (2022).mkv');
+for (const [file, x264] of [[FLAT, 'keyint=48:min-keyint=4:open-gop=1:b-pyramid=none:scenecut=0:b-adapt=0'], [CLOSED, 'keyint=48:min-keyint=4:scenecut=0']])
+  if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '40',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '2', '-x264-params', x264, '-pix_fmt', 'yuv420p', '-c:a', 'ac3', file]);
 
 const D = await import('../server/db.js');
 const sc = await import('../server/scanner.js');
 const auth = await import('../server/auth.js');
 const app = await import('../server/app.js');
 const st = await import('../server/stream.js');
-const { dropLeading, SLACK } = await import('../server/tslead.js');
+const { dropLeading, SLACK, keyIsIdr } = await import('../server/tslead.js');
+const og = await import('../server/opengop.js');
 const H = await import('../web/js/player/hlsconfig.js');
 const srv = http.createServer(app.handle);
 await new Promise(r => srv.listen(0, '127.0.0.1', r));
@@ -173,4 +180,63 @@ t('fortsätt mitt i (start=): segmentet där uppspelningen börjar går att avko
   const f = await fetchSeg({ url: u });
   assert.deepEqual(strict(f), { ok: true, err: '' });
   assert.equal(leading(packets(f, 'v:0')), 0);
+});
+
+// ---------- servern känner igen öppen GOP (server/opengop.js) ----------
+const rowOf = (file) => D.get('SELECT * FROM items WHERE path=?', file);
+const info = async (row, q) => (await fetch(`${B}/api/items/${row.id}/playback?info=1&${q}`, { headers: A() })).json();
+
+t('keyIsIdr: segmentet börjar på en IDR-bild (stängd GOP) eller på en vanlig I-bild (öppen GOP)', async () => {
+  const at = (file, ss) => execFileSync('ffmpeg', ['-v', 'error', '-ss', String(ss), '-noaccurate_seek', '-i', file, '-map', '0:v:0', '-c', 'copy', '-bsf:v', 'h264_mp4toannexb,dump_extra=freq=keyframe', '-t', '0.5', '-f', 'mpegts', 'pipe:1']);
+  assert.equal(keyIsIdr(at(CLOSED, 10.2)), true);
+  assert.equal(keyIsIdr(at(FLAT, 10.2)), false);
+  assert.equal(keyIsIdr(at(FLAT, 0)), true, 'första bilden i filen är alltid IDR');
+  assert.equal(keyIsIdr(Buffer.alloc(188 * 3)), null);
+  assert.equal(keyIsIdr(Buffer.from('hej')), null);
+});
+
+t('öppen GOP-provet: stängd GOP, öppen GOP där ra räcker, och öppen GOP som måste omkodas', async () => {
+  for (const f of [FLAT, CLOSED]) assert.ok(rowOf(f), path.basename(f));
+  const got = {};
+  for (const [name, file] of [['closed', CLOSED], ['ra', FILM], ['tc', FLAT]]) {
+    const row = rowOf(file);
+    await st.computeKeyframes(row);
+    got[name] = await st.probeGop(row); // samma prov som indexeringen startade (köas en gång)
+    assert.equal(st.gopOf(row), got[name], 'svaret sparas');
+    assert.equal(fs.readFileSync(path.join(D.CACHE, 'keyframes', `${row.id}-${row.mtime}.gop`), 'utf8'), got[name], 'sparas bredvid nyckelbilderna');
+  }
+  assert.deepEqual(got, { closed: 'closed', ra: 'ra', tc: 'tc' });
+  // Ett prov per nyckelbild, i den ordning de görs: stängd GOP avgörs på två prov, 'tc' slutar vid första fel
+  const kf = st.keyframesReady(rowOf(CLOSED)), calls = [];
+  assert.equal(await og.classify(CLOSED, kf, 40, { sampleFn: async (f, t, n) => { calls.push(t); return og.sample(f, t, n); } }), 'closed');
+  assert.equal(calls.length, 2);
+  // Urvalet: jämnt fördelat, aldrig nyckelbilden vid 0, och runt en rapporterad position bara grannarna
+  const list = Array.from({ length: 100 }, (_, i) => i * 2);
+  const p = og.picks(list, 200);
+  assert.equal(p.length, og.SAMPLES);
+  assert.ok(p.every(([t, n]) => t >= 1 && t < 198.5 && n === t + 2));
+  assert.deepEqual(og.picks(list, 200, { at: 31 }), [[30, 32], [32, 34]]);
+  // Rapport vid en position: bara 'tc' kan komma ut, aldrig en friskförklaring
+  assert.equal(await og.classify(FLAT, st.keyframesReady(rowOf(FLAT)), 40, { at: 21 }), 'tc');
+  assert.equal(await og.classify(FILM, st.keyframesReady(rowOf(FILM)), 60, { at: 21 }), null);
+});
+
+t('webbspelaren (mse=1) får omkodning direkt för öppen GOP som inte går att börja mitt i – inte apparna eller Safari', async () => {
+  const flat = rowOf(FLAT), open = rowOf(FILM), closed = rowOf(CLOSED);
+  assert.equal(await st.probeGop(flat), 'tc');
+  const web = await info(flat, 'mse=1&start=21');
+  assert.equal(web.mode, 'transcode', 'webbspelaren: omkodning från början, utan fel först');
+  assert.match(web.reasons.join(', '), /öppen GOP/);
+  // Apparna (ingen mse), Safari (nhls=1) och Chromecast: remux som förut – deras avkodare har inte felet
+  assert.equal((await info(flat, 'start=21')).mode, 'remux');
+  assert.equal((await info(flat, 'mse=1&nhls=1')).mode, 'remux');
+  // Öppen GOP där ra räcker och stängd GOP: remux även i webben
+  assert.equal((await info(open, 'mse=1&start=21')).mode, 'remux');
+  assert.equal((await info(closed, 'mse=1')).mode, 'remux');
+  // Rapport från webbspelaren om en fil som går att avkoda: servern provar själv och ändrar inget
+  const r = await fetch(`${B}/api/stream/${open.id}/opengop`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ position: 21 }) });
+  assert.equal(r.status, 202);
+  assert.equal(await st.probeGop(open, { at: 21 }), null);
+  assert.equal(st.gopOf(open), 'ra');
+  assert.equal((await info(open, 'mse=1')).mode, 'remux');
 });

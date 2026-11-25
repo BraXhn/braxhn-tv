@@ -11,6 +11,7 @@ import { promptDialog } from '../ui/dialog.js';
 import { iconButton, setIconButton } from '../ui/buttons.js';
 import { ICON } from '../ui/icons.js';
 import { openMenu } from '../ui/menu.js';
+import { audioLabel, subLabel } from '../ui/tracklabel.js';
 import { provide } from '../lazy.js';
 import * as self from './remote.js';
 provide('remote', self); // fasaderna i lazy.js når modulen härifrån
@@ -72,14 +73,13 @@ export function stopRemote() {
 window.addEventListener('focus', () => { if (R.replaced && me) { R.replaced = false; R.uid = null; startRemote(); } });
 
 // ---------- mottagare: läget ----------
-const trackLabel = (a) => [a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ');
-function snapshot() {
+export function snapshot() { // exporteras för test/web-chrome-playback.test.js
   if (P) {
     const v = $('#vid', P.el); if (!v) return null;
     const it = P.it;
     return { media: 'video', itemId: it.id, position: v.currentTime || 0, duration: it.duration || (isFinite(v.duration) ? v.duration : 0), paused: v.paused,
       blocked: !!R.tap, volume: v.volume, muted: v.muted, audio: P.audio || '', sub: P.sub || '', hasNext: !!it.nextId,
-      audios: (it.audio || []).map(a => ({ id: String(a.index), label: trackLabel(a) })), subs: (it.subtitles || []).map(s => ({ id: s.id, label: s.label })) };
+      audios: (it.audio || []).map(a => ({ id: String(a.index), label: audioLabel(a) })), subs: (it.subtitles || []).map(s => ({ id: s.id, label: subLabel(s) })) };
   }
   const a = M.audio, bar = $('#mbar');
   if (a && M.cur && bar && !bar.hidden) {

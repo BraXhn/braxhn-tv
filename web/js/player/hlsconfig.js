@@ -121,6 +121,18 @@ export function recoverPlan(prev, pos, now, max = 2) {
   return n > max ? null : { at: now, pos, n };
 }
 
+// ---------- kvalitetsmenyn (⚙ i spelaren) ----------
+export const QUALITY_STEPS = Object.freeze([['1080', '1080p (8 Mbit/s)'], ['720', '720p (4 Mbit/s)'], ['480', '480p (1,5 Mbit/s)'], ['360', '360p (0,8 Mbit/s)']]);
+/**
+ * Stegen som är värda att erbjuda för en källa (bredd × höjd): inget över källans upplösning – 1080p för en fil i
+ * 180p ger samma bild som Original. Bredbild räknas efter bredden (1920×800 är en 1080p-fil, 1280×536 en 720p-fil),
+ * och några procent marginal tar med filer som är beskurna en aning (1916×1076). Okänd storlek: alla steg.
+ */
+export function qualitySteps(width, height) {
+  const cls = Math.max(Number(height) || 0, Math.round((Number(width) || 0) * 9 / 16));
+  return cls ? QUALITY_STEPS.filter(([q]) => +q <= cls * 1.04) : [...QUALITY_STEPS];
+}
+
 // ---------- uppkopplingens takt (hastighetsprovet i caps.js) ----------
 /** Takt (kbit/s) ur tidsmärken [ms, byte hittills] – räknar på det som kom efter den första tredjedelen */
 export function rateOf(marks) {

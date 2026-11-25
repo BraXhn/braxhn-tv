@@ -3,7 +3,7 @@ import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } 
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
-import { abrClass, hlsConfig, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
+import { abrClass, hlsConfig, qualitySteps, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
@@ -21,6 +21,7 @@ import { route } from '../router.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { ICON } from '../ui/icons.js';
 import { need, provide } from '../lazy.js';
+import { audioLabel } from '../ui/tracklabel.js';
 import * as self from './video.js';
 provide('video', self); // fasaderna i lazy.js når modulen härifrån
 
@@ -95,8 +96,8 @@ export async function play(id, start = 0, opts = {}) {
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="${t('Skriv ett meddelande…')}" maxlength="300"></div>
     <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">${t('Avbryt')}</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
-      <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option><option value="1080">1080p (8 Mbit/s)</option><option value="720">720p (4 Mbit/s)</option><option value="480">480p (1,5 Mbit/s)</option><option value="360">360p (0,8 Mbit/s)</option></select></label>
-      ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc([a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>` : ''}
+      <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option>${qualitySteps(it.width, it.height).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+      ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc(audioLabel(a))}</option>`).join('')}</select></label>` : ''}
       <label>${t('Undertexter')}<select id="ps"><option value="">${t('Inga undertexter')}</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
       ${textSubs.length > 1 ? `<label>${t('Andra undertext')}<select id="ps2"><option value="">${t('Ingen')}</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
       ${textSubs.length ? `<label class="chk"><input type="checkbox" id="plearn"> ${t('Språkinlärning')} <span class="muted">${t('klickbara ord, översättning och paus efter repliken')}</span></label>` : ''}
@@ -142,7 +143,9 @@ export async function play(id, start = 0, opts = {}) {
   if (it.kind === 'episode' && !(start > 0) && !partyId) need('player/recap.js').then(m => { if (P === cur) m.offerRecap(cur, v); }).catch(() => {});
   const sb = q('#pstatsbtn');
   sb.onclick = () => sb.setAttribute('aria-pressed', String(toggleStats(cur, v, q('#pstats'))));
-  q('#pq').value = cur.q; if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
+  // Ett steg som valts för en tidigare titel och ligger över den här källan ger samma bild som Original
+  q('#pq').value = cur.q; if (q('#pq').selectedIndex < 0) q('#pq').value = 'orig';
+  if (q('#pa')) q('#pa').value = cur.audio; q('#ps').value = cur.sub; if (q('#ps2')) q('#ps2').value = cur.sub2;
   q('#prate').value = String(rate);
   q('#prate').onchange = (e) => { rate = +e.target.value; v.defaultPlaybackRate = v.playbackRate = rate; };
   v.addEventListener('loadedmetadata', () => { v.defaultPlaybackRate = v.playbackRate = rate; });
@@ -344,6 +347,9 @@ function playbackBase({ q, version, forceHls, forceTc, h264, cinema, start }, v 
   extra.ffc = '1'; // familjefiltret: spelaren tystar själv (player/familyfilter.js) – direktuppspelningen behålls
   if (canAirPlay()) extra.cast = '1'; // AirPlay-mottagaren hämtar strömmen själv och behöver token i URL:en
   if (nativeHls(v)) extra.nhls = '1'; // Safaris egen HLS-spelare (iPhone) – se servern
+  // hls.js med Media Source: servern omkodar då direkt filer med öppen GOP som avkodaren inte kan börja mitt i
+  // (server/opengop.js) – i stället för remux, fel och omkodning (remuxFallback)
+  else if (window.MediaSource || window.ManagedMediaSource) extra.mse = '1';
   // Servern förbereder rätt segment direkt. Safaris egen HLS (iPhone) får startpositionen i spellistan
   // (EXT-X-START), så att den börjar där i stället för att hämta segment 0 först och sedan spola
   if (start > 0) extra.start = String(Math.floor(start));
@@ -534,6 +540,10 @@ function remuxFallback(cur) {
   if (P !== cur || cur.forceTc || cur.pb?.mode !== 'remux') return false;
   cur.forceTc = true;
   noRemux.add(cur.it.id);
+  // Servern provar själv samma ställe och minns filen om felet går att återskapa – då omkodas den direkt även
+  // nästa besök och i andra webbläsare (filens id står i strömmens adress: versionen som faktiskt spelades)
+  const v = $('#vid', cur.el), file = /\/api\/stream\/(\d+)\//.exec(cur.pb?.url || '')?.[1];
+  if (file) fetch(`/api/stream/${file}/opengop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position: v?.currentTime || 0 }) }).catch(() => {});
   reload(!!cur.wantPlay);
   return true;
 }

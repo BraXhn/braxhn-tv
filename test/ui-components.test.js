@@ -217,3 +217,30 @@ test('undertextspårens namn: språkkoden blir språkets namn, tilläggen behål
   assert.equal(langName('<b>'), '<b>');
   assert.equal(langName(''), '');
 });
+
+test('ljudspårens namn: språkets namn i stället för koden, titeln en gång', async () => {
+  const { audioLabel } = await import('../web/js/ui/tracklabel.js');
+  assert.equal(audioLabel({ lang: 'swe', codec: 'opus', channels: 2 }), 'Svenska · opus · 2ch');
+  assert.equal(audioLabel({ lang: 'eng', codec: 'ac3', channels: 6 }, { loc: 'en' }), 'English · ac3 · 6ch');
+  assert.equal(audioLabel({ lang: 'eng', title: 'Kommentar', codec: 'aac', channels: 2 }), 'Engelska · Kommentar · aac · 2ch');
+  assert.equal(audioLabel({ lang: 'eng', title: 'Kommentar', codec: 'aac' }, { title: false }), 'Engelska · aac', 'titelsidans korta rad');
+  assert.equal(audioLabel({ lang: 'swe', title: 'Svenska', codec: 'aac' }), 'Svenska · aac', 'språket står redan i titeln');
+  assert.equal(audioLabel({ lang: null, codec: 'aac', channels: 2 }), 'Ljud · aac · 2ch');
+  assert.equal(audioLabel({ lang: 'und', codec: 'aac' }), 'Ljud · aac', '"und" = okänt språk');
+  assert.equal(audioLabel({ lang: 'xx', codec: 'aac' }), 'xx · aac', 'okänd kod som den är');
+  assert.equal(audioLabel({}), 'Ljud');
+});
+
+test('kvalitetsmenyn: inga steg över källans upplösning (bredbild räknas efter bredden)', async () => {
+  const { qualitySteps } = await import('../web/js/player/hlsconfig.js');
+  const q = (w, h) => qualitySteps(w, h).map(x => x[0]);
+  assert.deepEqual(q(320, 180), []);
+  assert.deepEqual(q(640, 360), ['360']);
+  assert.deepEqual(q(1280, 720), ['720', '480', '360']);
+  assert.deepEqual(q(1280, 536), ['720', '480', '360'], '720p i bredbild');
+  assert.deepEqual(q(1920, 800), ['1080', '720', '480', '360'], '1080p i bredbild');
+  assert.deepEqual(q(1916, 1076), ['1080', '720', '480', '360'], 'en aning beskuren');
+  assert.deepEqual(q(720, 576), ['480', '360'], 'PAL-DVD');
+  assert.deepEqual(q(3840, 2160), ['1080', '720', '480', '360']);
+  assert.deepEqual(q(null, null), ['1080', '720', '480', '360'], 'okänd storlek: alla steg');
+});

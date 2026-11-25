@@ -11,7 +11,7 @@ import { openDialog } from '../ui/dialog.js';
 import { bindStars, keyValue, saveRating, starsHtml } from '../ui/rating.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
 import { bindTabs, tabsHtml } from '../ui/tabs.js';
-import { subLabel } from '../ui/tracklabel.js';
+import { audioLabel, subLabel } from '../ui/tracklabel.js';
 import { playTheme } from '../ui/thememusic.js';
 import { missingBox } from './calendar.js';
 import { downloadEpisodes, downloadItem, stateOf, supported as offlineOk } from '../offline.js';
@@ -73,7 +73,7 @@ views.item = async (id, season) => {
   main.innerHTML = heroHtml(it, back + actions + ratingHtml(it) + versions) + `<div class="tech">
     <span>${t('Fil')}</span><b>${esc(it.file)}</b><span>${t('Storlek')}</span><b>${fmtSize(it.size)}</b>
     <span>Video</span><b>${esc(it.vcodec || '–')} ${it.width ? it.width + '×' + it.height : ''}</b>
-    <span>${t('Ljud')}</span><b>${it.audio.map(a => esc([a.lang, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' '))).join(', ') || '–'}</b>
+    <span>${t('Ljud')}</span><b>${it.audio.map(a => esc(audioLabel(a, { title: false }))).join(', ') || '–'}</b>
     <span>${t('Undertexter')}</span><b>${it.subtitles.map(s => esc(subLabel(s))).join(', ') || '–'}</b>
     ${it.hdr ? `<span>HDR</span>${t('<b>{v} – tonmappas automatiskt på skärmar utan HDR</b>', { v: esc(it.hdr.toUpperCase()) })}` : ''}
     ${it.recap ? `<span>${t('Sammanfattning')}</span><b>${fmtTime(it.recap.start)}–${fmtTime(it.recap.end)}</b>` : ''}

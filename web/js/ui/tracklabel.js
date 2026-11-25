@@ -20,6 +20,18 @@ const FLAGS = { forced: () => t('tvingad'), sdh: () => 'SDH', hi: () => 'SDH', c
 const SUFFIX = { fil: () => t('(fil)'), bild: () => t('(bild)'), nedladdad: () => t('(nedladdad)') };
 
 /**
+ * Ljudspårets namn för visning: "Svenska · Kommentar · opus · 2ch" i stället för "swe · Kommentar · opus · 2ch".
+ * Utan språk (eller "und") heter spåret Ljud. Står språket redan i spårets titel visas det en gång.
+ * @param {{ lang?: string|null, title?: string|null, codec?: string|null, channels?: number|null }} a  spåret som servern skickar det (item.audio)
+ * @param {{ title?: boolean, loc?: string }} [o]  title: false = utan spårets titel (titelsidans korta rad)
+ */
+export function audioLabel(a, { title = true, loc = lang } = {}) {
+  const name = a?.lang && a.lang !== 'und' ? langName(a.lang, loc) : t('Ljud');
+  const tt = title && a?.title && !String(a.title).toLowerCase().includes(name.toLowerCase()) ? a.title : '';
+  return [name, tt, a?.codec, a?.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ');
+}
+
+/**
  * Undertextspårets namn för visning.
  * @param {{ label?: string, lang?: string|null, source?: string }} s  spåret som servern skickar det (item.subtitles)
  */

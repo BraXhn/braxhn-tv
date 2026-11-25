@@ -35,6 +35,20 @@
   föregående och nästa – och hoppen bakåt/framåt med antal sekunder för ljudböcker och poddar). Alla knappar har ett
   namn för skärmläsare (*Låttext* saknade det), och på en telefon ryms hela raden: på 390 px bredd klipptes låtradion
   förut av.
+- **Filer med öppen GOP startar direkt i rätt läge i webben:** servern provar nu själv, en gång per fil efter
+  nyckelbildsindexeringen, om filen går att börja spela mitt i (`server/opengop.js`). Går den inte det omkodas den
+  direkt för webbspelaren i Chrome, Edge och Firefox – förut kom ett avkodningsfel och 1–2 s väntan vid första
+  spolningen eller *Fortsätt titta*, vid varje nytt besök. Filer där det räcker att ta bort bilderna före
+  nyckelbilden (`ra=`) kopieras som förut. Apparna, Safari och Chromecast påverkas inte.
+  - Proven körs i en egen kö med lägsta prioritet: två korta ffmpeg-körningar för en vanlig fil (stängd GOP), upp till
+    åtta för en fil med öppen GOP. Skanningen och den som trycker på Spela väntar inte på dem.
+  - Missar proven en fil och spelaren ändå måste byta till omkodning, säger den till servern var. Servern provar
+    själv samma ställe och minns filen om felet går att återskapa.
+- **Kvalitetsmenyn i spelaren erbjuder inget över källans upplösning:** en film i 180p visar bara *Auto* och
+  *Original*, inte 1080p och 720p. Bredbild räknas efter bredden (1920×800 är en 1080p-film).
+- **Ljudspår och undertexter heter som språket överallt:** *Svenska · opus · 2ch* i stället för *swe · opus · 2ch* på
+  titelsidan och i spelarens ljudmeny, och Chromecast och fjärrstyrningen (*Spela på…*) visar *Svenska (fil)* i stället
+  för *sv (fil)*.
 
 ## 1.3.0 – 2026-11-24
 - **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som

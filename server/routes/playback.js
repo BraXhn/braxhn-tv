@@ -415,6 +415,17 @@ route('POST', '/api/stream/:id/stall', user, async (c) => {
   send(c.res, 200, { ok: true, ...r });
 });
 
+// Webbspelaren kunde inte avkoda remuxen från en punkt och bytte till omkodning (öppen GOP, remuxFallback i
+// web/js/player/video.js). Servern litar inte på rapporten: den provar själv nyckelbilderna runt positionen
+// (opengop.js) och minns filen bara om felet går att återskapa – då omkodas den direkt för webbspelare med hls.js.
+route('POST', '/api/stream/:id/opengop', user, async (c) => {
+  const it = mediaItem(c); if (!it) return;
+  const b = (await readJson(c.req).catch(() => null)) || {};
+  const pos = Number.isFinite(+b.position) ? Math.max(0, Math.min(+b.position, it.duration || 0)) : 0;
+  st.probeGop(it, { at: pos }).catch(() => {});
+  send(c.res, 202, { ok: true });
+});
+
 // Undertexter från OpenSubtitles
 route('GET', '/api/items/:id/subsearch', user, async (c) => {
   const it = mediaItem(c); if (!it) return;

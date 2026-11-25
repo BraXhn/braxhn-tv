@@ -9,6 +9,7 @@ import { $, api, esc, fmtTime, status, sxe, toast, toastErr, t } from '../core.j
 import { P, closePlayer } from './video.js';
 import { serverFxParams } from './comfort.js';
 import { M, spokenPos, stopAudio } from '../audio.js';
+import { audioLabel, subLabel } from '../ui/tracklabel.js';
 
 export let castReady = false;
 const C = { ctx: null, player: null, ctrl: null, cur: null, lastPos: 0, lastSent: 0, queued: new Set(), skipPlayed: null };
@@ -102,9 +103,10 @@ async function session() {
   return s;
 }
 const promise = (fn) => new Promise((ok, no) => fn(ok, no));
-/** MediaInfo för en film/ett avsnitt (en egen mediatoken per titel). queue: köas för senare (ingen förstart på servern). */
+/** MediaInfo för en film/ett avsnitt (en egen mediatoken per titel). queue: köas för senare (ingen förstart på servern).
+ *  Exporteras för test/web-chrome-playback.test.js (spårnamnen). */
 // sub: undertextens id, '' = inga, utelämnad = kontots förval (defaultSub från servern)
-async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
+export async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
   const p = await api(`/items/${it.id}/playback?` + new URLSearchParams({ c: 'mp4,webm', v: 'h264,vp8,vp9', a: 'aac,mp3,opus,flac', hdr: '0', cast: '1', audio: audio || '',
     q: P?.q && P.q !== 'auto' ? P.q : '', ...(it.version ? { version: it.version } : {}), ...(queue ? { queue: '1' } : {}), ...serverFxParams(true) }), { bg: true }); // nattläge/dialog: servern filtrerar
   const o = origin();
@@ -118,15 +120,15 @@ async function videoMedia(it, { audio = '', sub, queue = false } = {}) {
   mi.tracks = p.subtitles.map((s, i) => {
     const t = new chrome.cast.media.Track(i + 1, chrome.cast.media.TrackType.TEXT);
     t.trackContentId = o + s.url; t.trackContentType = 'text/vtt'; t.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
-    t.name = s.label; t.language = s.lang || 'und'; return t;
+    t.name = subLabel(s); t.language = s.lang || 'und'; return t;
   });
   const want = sub ?? p.defaultSub ?? '';
   const si = want ? p.subtitles.findIndex(s => s.id === want) : -1;
   const active = si >= 0 ? [si + 1] : [];
   mi.customData = { bx: 1, kind: 'video', id: it.id, version: it.version || null, title, sub: it.kind !== 'episode' && it.year ? String(it.year) : '',
     duration: p.duration || it.duration || 0, nextId: it.nextId || null, audio: p.audioSelected != null ? String(p.audioSelected) : String(audio || ''),
-    audios: (p.audio || []).map(a => ({ i: a.index, l: [a.lang || t('Ljud'), a.title, a.codec, a.channels ? a.channels + 'ch' : ''].filter(Boolean).join(' · ') })),
-    subs: p.subtitles.map((s, i) => ({ t: i + 1, l: s.label })),
+    audios: (p.audio || []).map(a => ({ i: a.index, l: audioLabel(a) })),
+    subs: p.subtitles.map((s, i) => ({ t: i + 1, l: subLabel(s) })),
     // Familjefiltret: scener att hoppa över ([start, slut]) – ljudet tystas av servern (ingen ffc=1)
     ...(p.filter?.skip?.length ? { skip: p.filter.skip.slice(0, 100).map(k => [k.start, k.end]) } : {}) };
   return { info: mi, active };
