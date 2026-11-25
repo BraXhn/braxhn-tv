@@ -223,6 +223,58 @@ test('öppen GOP: efter bytet till omkodning ger ett uttryckligt val av Original
   await close();
 });
 
+// Vad servern svarar webbspelaren om filens GOP (mse=1, start från början) – väntar på öppen GOP-provet
+async function webGop(id, want, max = 30000) {
+  const t0 = Date.now(); let g;
+  while (Date.now() - t0 < max) { g = (await srv.req(`/api/items/${id}/playback?info=1&mse=1`)).data.gop; if (g === want) break; await new Promise(r => setTimeout(r, 250)); }
+  return g;
+}
+
+// Spolning några sekunder inom bufferten: Chrome börjar avkoda om på nyckelbilden före målet, och i en fil med öppen
+// GOP har den bilder som hänvisar till GOP:en innan (de tas bara bort i segment hämtade med ra=). Förut kom
+// PIPELINE_ERROR_DECODE vid nästan varje sådan spolning – spelaren återhämtade sig (ra) eller bytte till omkodning
+// efter felet (tc). Testen ovan räknade inte felen. Se guardSeeks i web/js/player/video.js.
+test('öppen GOP: spolning inom bufferten ger inget avkodningsfel (ra hämtar om segmentet, tc kodar om direkt)', { skip }, async () => {
+  assert.equal(await webGop(film.id, 'ra'), 'ra', 'servern har provat filen: öppen GOP där ra räcker');
+  assert.equal(await webGop(flat.id, 'tc'), 'tc', 'servern har provat filen: öppen GOP som måste omkodas mitt i');
+  const run = async (id, steps) => {
+    const { p, close } = await page();
+    await helpers(p);
+    const r = await p.evaluate(async ([id, steps]) => {
+      window.__L.play(id, 0); const f0 = await window.__frame(t => t >= 0, 30000);
+      if (f0.ms == null) return { error: 'ingen bild vid start: ' + f0.state };
+      const v = document.querySelector('#vid'), sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      const inBuf = (t) => { for (let i = 0; i < v.buffered.length; i++) if (t >= v.buffered.start(i) && t < v.buffered.end(i) - 0.5) return true; return false; };
+      const out = [];
+      for (const rel of steps) {
+        const w = performance.now();
+        while (!(v.currentTime > 2 && inBuf(v.currentTime + Math.max(rel, 0) + 2)) && performance.now() - w < 20000) await sleep(50);
+        const to = v.currentTime + rel, buffered = inBuf(to), e0 = window.__errors, t0 = performance.now();
+        v.currentTime = to;
+        const f = await window.__frame(t => t >= to - 0.6 && t < to + 6);
+        out.push({ to: +to.toFixed(1), buffered, ms: f.ms == null ? null : Math.round(performance.now() - t0), state: f.state, errors: window.__errors - e0 });
+      }
+      const mv = await window.__moves(1500);
+      return { out, mv, errors: window.__errors, errlog: window.__errlog, modes: window.__modes };
+    }, [id, steps]);
+    await close();
+    assert.ok(!r.error, r.error);
+    for (const s of r.out) {
+      assert.ok(s.ms != null, `spolning till ${s.to} s gav ingen bild där: ${s.state}`);
+      assert.ok(s.buffered, `förutsättning: ${s.to} s låg i bufferten`);
+    }
+    assert.equal(r.errors, 0, `avkodningsfel vid spolning inom bufferten: ${r.errlog.join('; ')} (${r.out.map(s => `${s.to} s: ${s.errors}`).join(', ')})`);
+    assert.ok(r.mv.frames >= 1.5 * FPS * 0.8 && !r.mv.paused, `bilden rör sig efteråt (${r.mv.frames} bildrutor)`);
+    return r;
+  };
+  // ra: framåt två gånger, bakåt och framåt igen – bilden kopieras hela tiden
+  const a = await run(film.id, [8, 8, -5, 8]);
+  assert.deepEqual(a.modes, ['remux'], 'ingen omkodning behövdes');
+  // tc: spolning förbi filens första GOP byter till omkodning innan Chrome hinner avkoda något
+  const b = await run(flat.id, [8]);
+  assert.deepEqual(b.modes, ['remux', 'transcode'], 'omkodning vid spolningen');
+});
+
 test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {
   const { p, close } = await page();
   const r = await p.evaluate(async ([small, mid]) => {

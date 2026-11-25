@@ -143,11 +143,7 @@ const RESUME_AT = 61;
 
 // Kända fel: syns som varningar ("känt fel") i stället för att fälla vakten, tills de är rättade. Syns felet inte
 // längre säger vakten till – ta då bort raden. Bara fel vars text matchar fel räknas som kända.
-export const KANDA = [
-  { filer: ['oppen', 'oppen-tc'], fall: ['spola framåt i bufferten', 'spola bakåt i bufferten'], fel: /avkodningsfel/,
-    varfor: 'öppen GOP: vid spolning inom bufferten börjar Chrome avkoda på en nyckelbild vars bilder före den hänvisar till ' +
-      'GOP:en innan (PIPELINE_ERROR_DECODE). Spelaren återhämtar sig (oppen) eller byter till omkodning (oppen-tc). docs/backlog.md' }
-];
+export const KANDA = [];
 
 /** Fel (vakten faller) och varningar för ett fall. exp: väntat läge vid start ({ start, mitt, fmt }) */
 function judge(name, c, r, exp) {

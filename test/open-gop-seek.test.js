@@ -69,6 +69,27 @@ test('spelaren: vilka segment avkodningen börjar i (ra)', () => {
   assert.equal(H.randomAccessUrl('/a/seg-1.ts'), '/a/seg-1.ts?ra=0');
 });
 
+test('spelaren: spolning inom bufferten i öppen GOP förbereds innan webbläsaren spolar', () => {
+  const buf = [[0.02, 40]];
+  // Utanför bufferten: som vanligt (segmentet hämtas med ra=)
+  assert.equal(H.openGopSeek(buf, 60, { gop: 'ra' }), 'seek');
+  assert.equal(H.openGopSeek(buf, 60, { gop: 'tc' }), 'seek', 'tc utanför bufferten: seeking-händelsen byter (load)');
+  // Inom bufferten på en nyckelbild som inte är rensad: töm och hämta om (ra), eller koda om (tc)
+  assert.equal(H.openGopSeek(buf, 12, { gop: 'ra', idr: 2 }), 'flush');
+  assert.equal(H.openGopSeek(buf, 12, { gop: 'tc', idr: 2 }), 'transcode');
+  // Filens första GOP börjar på en IDR-bild: inget att göra
+  assert.equal(H.openGopSeek(buf, 1.5, { gop: 'ra', idr: 2 }), 'seek');
+  assert.equal(H.openGopSeek(buf, 1.5, { gop: 'tc', idr: 2 }), 'seek');
+  assert.equal(H.openGopSeek(buf, 1.95, { gop: 'tc', idr: 2 }), 'transcode', 'tidslinjen kan ligga någon tiondel fel');
+  // Segment hämtat med ra=: GOP:arna fram till ra + 0,5 s är rensade (tslead.js)
+  const clean = [H.cleanRange(12, 3)];
+  assert.deepEqual(clean[0], [12.25, 15.4]);
+  assert.equal(H.openGopSeek(buf, 14, { gop: 'ra', clean }), 'seek');
+  assert.equal(H.openGopSeek(buf, 16, { gop: 'ra', clean }), 'flush', 'GOP:arna efter är inte rensade');
+  assert.equal(H.openGopSeek(buf, 12.1, { gop: 'ra', clean }), 'flush', 'alldeles i början kan nyckelbilden höra till förra segmentet');
+  assert.equal(H.openGopSeek(buf, 14, { gop: 'tc', clean, idr: 2 }), 'transcode', 'tc: ra räcker inte');
+});
+
 test('spelaren: återhämtning efter avkodningsfel – ett nytt försök per ställe, sedan ge upp', () => {
   const a = H.recoverPlan(null, 64, 1000);
   assert.deepEqual(a, { at: 1000, pos: 64, n: 1 });
@@ -231,6 +252,7 @@ t('webbspelaren (mse=1): öppen GOP som inte går att börja mitt i remuxas frå
     const a = await info(flat, q);
     assert.equal(a.mode, 'remux', q);
     assert.equal(a.gop, 'tc', `${q}: spelaren får veta att spolning kräver omkodning`);
+    assert.equal(a.gopIdr, k1, `${q}: spolning före andra nyckelbilden börjar på IDR-bilden`);
   }
   // Fall 2: mitt i filen (Fortsätt titta) – omkodning direkt, utan fel först
   const web = await info(flat, 'mse=1&start=21');
@@ -244,9 +266,14 @@ t('webbspelaren (mse=1): öppen GOP som inte går att börja mitt i remuxas frå
   assert.equal((await info(flat, 'start=21')).mode, 'remux');
   assert.equal((await info(flat, 'start=0')).gop, undefined, 'apparna får inget gop-fält');
   assert.equal((await info(flat, 'mse=1&nhls=1')).mode, 'remux');
-  // Öppen GOP där ra räcker och stängd GOP: remux även i webben
-  assert.equal((await info(open, 'mse=1&start=21')).mode, 'remux');
+  // Öppen GOP där ra räcker och stängd GOP: remux även i webben. Spelaren får veta 'ra' (tömmer bufferten före en
+  // spolning inom den, guardSeeks i video.js) – stängd GOP och apparna får inget gop-fält
+  const ra = await info(open, 'mse=1&start=21');
+  assert.equal(ra.mode, 'remux');
+  assert.equal(ra.gop, 'ra');
+  assert.equal((await info(open, 'start=21')).gop, undefined);
   assert.equal((await info(closed, 'mse=1')).mode, 'remux');
+  assert.equal((await info(closed, 'mse=1')).gop, undefined);
   // Rapport från webbspelaren om en fil som går att avkoda: servern provar själv och ändrar inget
   const r = await fetch(`${B}/api/stream/${open.id}/opengop`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ position: 21 }) });
   assert.equal(r.status, 202);

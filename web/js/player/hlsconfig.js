@@ -105,6 +105,27 @@ export function randomAccess(buffered, fragStart, pos, hole = 0.5) {
   if (joined && !(pos >= fragStart - 0.1)) return null;
   return Math.max(0, (Number(pos) || 0) - fragStart);
 }
+/**
+ * Spolning i en remux med öppen GOP (pb.gop 'ra' eller 'tc'): vad måste spelaren göra INNAN webbläsaren får spola
+ * till t? Spolar Chrome inom bufferten börjar avkodningen om på nyckelbilden före t – och har den nyckelbilden kvar
+ * bilderna som hänvisar till GOP:en innan (de tas bara bort i segment som hämtats med ra=) avbryter avkodaren med
+ * PIPELINE_ERROR_DECODE. Felet kommer innan spolningens seeking-händelse hinner göra något, därför avgörs det här.
+ * buffered = [[start, slut], …], clean = [[från, till], …] där nyckelbilderna redan är rensade (segment hämtade med
+ * ra=), idr = andra nyckelbilden i filen (före den börjar avkodningen på filens första nyckelbild, som är IDR).
+ * → 'seek' (spola som vanligt: utanför bufferten hämtar spelaren segmentet med ra=, eller punkten är ren),
+ *   'flush' (töm bufferten från segmentet och spola sedan – segmentet hämtas om med ra=),
+ *   'transcode' (gop 'tc': ra räcker inte, bilden måste kodas om från t).
+ */
+export function openGopSeek(buffered, t, { gop, clean = [], idr = 0 } = {}) {
+  if (!buffered.some(([a, b]) => t >= a && t < b)) return 'seek';
+  if (t < idr - 0.1) return 'seek';
+  if (gop === 'tc') return 'transcode';
+  return clean.some(([a, b]) => t >= a && t <= b) ? 'seek' : 'flush';
+}
+/** Där segmentet n är rensat när det hämtas med ra=at och börjar på start (sekunder): dropLeading i server/tslead.js
+ *  rensar GOP:arna till at + 0,5 s in i segmentet. Marginalen i början täcker att nyckelbilden kan ligga en bit efter
+ *  segmentets tid i spellistan (då hör en punkt alldeles i början till förra segmentets sista GOP). */
+export const cleanRange = (start, at) => [start + 0.25, start + at + 0.4];
 /** Segmentets nummer ur adressen till ett TS-segment (seg-12.ts?…), annars null */
 export function segNo(url) { const m = /\/seg-(\d+)\.ts(?:\?|$)/.exec(String(url || '')); return m ? +m[1] : null; }
 /** Adressen med ra=<sekunder in i segmentet> */

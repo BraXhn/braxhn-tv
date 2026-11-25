@@ -24,19 +24,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Näst på tur
 
-### 1. Öppen GOP: spolning inom bufferten ger avkodningsfel i Chrome
-
-- **Vad:** uppspelningsvakten visar att spolning till en redan buffrad GOP i en fil med öppen GOP ger `PIPELINE_ERROR_DECODE`
-  (bilden före nyckelbilden hänvisar till GOP:en innan). Med B-pyramid återhämtar sig spelaren på 0,2–0,5 s och tömmer
-  bufferten; utan B-pyramid byter den till omkodning för resten av filmen. Kontrollera först om spelaren kan spola
-  till nyckelbilden *efter* de bilderna (eller hämta segmentet igen med `ra=`) i stället för att vänta på felet.
-- **Varför:** att spola några sekunder är det vanligaste man gör. I vakten gav spolning 8 s framåt i bufferten felet i
-  alla körningar (bakåt 5 s inte), och filer utan B-pyramid kodas sedan om i onödan.
-- **Filer:** `web/js/player/video.js` (spolningen i bufferten), `web/js/player/hlsconfig.js`, `test/vakt.mjs` (`KANDA`),
-  `test/web-chrome-playback.test.js` (räkna fel även vid spolning i bufferten).
-- **Klart när:** `npm run vakt` går igenom med raden i `KANDA` borttagen.
-
-### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -47,7 +35,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först, och Anton har bekräftat på en riktig iPhone (se *Bara Anton kan göra*).
 
-### 3. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
+### 2. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
 
 - **Vad:** `POST /api/setup/hw-test` finns och används i installationsguiden. Gör resultatet synligt även under
   Administration, med uppmätt hastighet (bildrutor per sekund) för H.264 och HEVC och med ffmpegs felrad när det inte
@@ -60,7 +48,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
   har kört provet med NVENC (se *Bara Anton kan göra*).
 
-### 4. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
+### 3. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
 
 - **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
   bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
@@ -73,7 +61,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
   hörlurarna byter låt.
 
-### 5. Expo-appen: nedladdning för offline
+### 4. Expo-appen: nedladdning för offline
 
 - **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
   ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
@@ -81,7 +69,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 6. Skärmtid i Safari och apparna: paus och tiden kvar
+### 5. Skärmtid i Safari och apparna: paus och tiden kvar
 
 - **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
   (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
@@ -169,12 +157,17 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25: Öppen GOP – spolning inom bufferten utan avkodningsfel i Chrome. Orsaken: Chrome avkodar om från
+  nyckelbilden före målet, och bilderna som hänvisar till GOP:en innan var bara borttagna i segment hämtade med `ra=`.
+  Spelaren tömmer nu bufferten från segmentet innan webbläsaren spolar (`guardSeeks` i `video.js`), och filer som måste
+  omkodas mitt i (`tc`) byter direkt. Vakten: 0 fel (förut fel vid varje spolning 8 s framåt), raden i `KANDA` borttagen.
+  Inte provat: Chrome med grafikkortsavkodning, Firefox.
 - 2026-11-25: Sovtimer i videospelaren (15/30/45/60 min eller *När avsnittet tar slut*, nedtoning, paus som sparar
   positionen, följer med till nästa avsnitt, fjärrkontroll) och skärmtiden i webbspelaren (*X min kvar idag*, varning de
   sista fem minuterna). Paus räknades som skärmtid: vid direktuppspelning upp till 20 s per paus (Chrome: 6 s
   uppspelning + 60 s paus = 20 s räknat, nu 7 s; `streamMeter`), och en paus under 45 s helt när filmen startade igen
   (rapport vid start, `heartbeat`). Pilarna i dialoger från spelaren fungerar (`router.js`). Inte gjort: Safari och
-  apparna (se *Näst på tur* 6).
+  apparna (se *Näst på tur* 5).
 - 2026-11-25: Uppspelningsvakt i riktig Chrome (`npm run vakt`, `test/vakt.mjs`) – sex filer × elva fall (start, Fortsätt
   titta, paus, spolning inom och utanför bufferten, kvalitet, ljud, undertext) med tid till bild, avkodningsfel och
   tappade bildrutor; körs före varje stabil utgåva och stoppar den vid fel. Siffrorna i `docs/testat.md`.

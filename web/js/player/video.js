@@ -3,7 +3,7 @@ import { $, $$, api, esc, fmtTime, locale, me, status, store, sxe, toast, toastE
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
-import { abrClass, hlsConfig, qualitySteps, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
+import { abrClass, cleanRange, hlsConfig, openGopSeek, qualitySteps, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
@@ -399,6 +399,7 @@ async function load(start, { play = true } = {}) {
   // Varje anrop får en egen token – ett senare load() (kvalitets-/ljudbyte) eller stängning gör detta inaktuellt
   const tok = cur.tok = Symbol();
   const live = () => P === cur && cur.tok === tok && v.isConnected;
+  cur.unguard?.(); cur.unguard = null;
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
   cur.recover = null; cur.wantPlay = play;
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
@@ -449,8 +450,9 @@ async function load(start, { play = true } = {}) {
     // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner. Buffertar, glapp, väntetider
     // och bandbreddsmätningen (från första byte – serverns omkodning är inte nätet): se hlsconfig.js
     const est = lastBandwidth() ? lastBandwidth() * 1000 * 0.8 : 6e6;
-    // Remux i TS: segment som avkodningen börjar i hämtas med ra=<sekunder in> – se hlsconfig.js (randomAccess)
-    const ra = pb.mode === 'remux' ? new Map() : null;
+    // Remux i TS: segment som avkodningen börjar i hämtas med ra=<sekunder in> – se hlsconfig.js (randomAccess).
+    // clean: segmentnummer → [från, till] där nyckelbilderna är rensade (för spolning i bufferten, guardSeeks)
+    const ra = pb.mode === 'remux' ? new Map() : null, clean = new Map();
     const hls = cur.hls = new Hls(hlsConfig({ start, est, Abr: abrClass(Hls), xhrSetup: (x, url) => {
       const at = ra?.get(segNo(url));
       if (at != null) x.open('GET', randomAccessUrl(url, at), true);
@@ -461,8 +463,10 @@ async function load(start, { play = true } = {}) {
       const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
       // Innan videon har data (start, återhämtning) står currentTime på 0 – då gäller positionen hls.js laddar för
       const at = randomAccess(b, d.frag.start, v.readyState ? v.currentTime : d.targetBufferTime ?? hls.config.startPosition);
-      if (at == null) ra.delete(n); else ra.set(n, at);
+      if (at == null) { ra.delete(n); clean.delete(n); } else { ra.set(n, at); clean.set(n, cleanRange(d.frag.start, at)); }
     });
+    // Öppen GOP (pb.gop från servern, server/opengop.js): spolning inom bufferten förbereds innan webbläsaren spolar
+    if (ra && (pb.gop === 'ra' || pb.gop === 'tc')) cur.unguard = guardSeeks(cur, v, hls, Hls, { gop: pb.gop, idr: pb.gopIdr || 0, clean, live });
     hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
       const l = hls.levels?.[d.level];
       if (hls.levels?.length > 1 && l?.height && cur.hls === hls && live()) pm.textContent = t('{label}{vcl} · {height}p (anpassas){v}', { label, vcl, height: l.height, v: pb.remote ? t(' · utanför hemmet') : '' });
@@ -507,8 +511,9 @@ async function load(start, { play = true } = {}) {
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
   // Remux av en fil som webbläsaren inte kan börja avkoda mitt i (pb.gop = 'tc', server/opengop.js): en spolning
-  // utanför bufferten skulle ge ett avkodningsfel – byt till omkodning direkt, från spolningens mål. Inom bufferten
-  // fortsätter avkodningen och inget byte behövs. Nästa start från början remuxas igen (snabbast).
+  // utanför bufferten skulle ge ett avkodningsfel – byt till omkodning direkt, från spolningens mål. Spolning inom
+  // bufferten avgörs innan den sker (guardSeeks): Chrome börjar då också avkoda om på en nyckelbild mitt i filen, och
+  // det ger samma fel – bara i filens första GOP (IDR) går det bra. Nästa start från början remuxas igen (snabbast).
   if (pb.gop === 'tc' && pb.mode === 'remux') {
     const onSeek = () => {
       if (!live()) return v.removeEventListener('seeking', onSeek);
@@ -578,6 +583,43 @@ function remuxFallback(cur) {
   if (file) fetch(`/api/stream/${file}/opengop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position: v?.currentTime || 0 }) }).catch(() => {});
   reload(!!cur.wantPlay);
   return true;
+}
+/**
+ * Spolning inom bufferten i en remux med öppen GOP. Chrome börjar då avkoda om på nyckelbilden före målet, och är
+ * bilderna efter den (i avkodningsordning) inte rensade – de visas före nyckelbilden och hänvisar till GOP:en innan,
+ * se server/tslead.js – avbryter avkodaren med PIPELINE_ERROR_DECODE. Det händer innan seeking-händelsen hinner köras,
+ * så videons currentTime fångas här (alla vägar: reglagen, tangenterna, kapitel, fjärrstyrning, hls.js egna hopp):
+ * - 'flush': bufferten töms från segmentet med målet, och först sedan spolar webbläsaren – segmentet hämtas om med
+ *   ra= (målet ligger nu utanför bufferten, randomAccess) och servern tar bort bilderna. Mätt: 0,1–0,3 s till bild.
+ * - 'transcode' (pb.gop = 'tc'): ra räcker inte – bilden kodas om från målet direkt, utan fel först.
+ * Medan bufferten töms (några ms) ger currentTime målet. Tas bort av nästa load(). Ger funktionen som tar bort den.
+ */
+function guardSeeks(cur, v, hls, Hls, { gop, idr, clean, live }) {
+  const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+  if (!d?.get || !d?.set) return null;
+  let pending = null, timer = 0;
+  const own = () => live() && cur.hls === hls;
+  const frags = () => (hls.levels?.[hls.currentLevel] || hls.levels?.[hls.loadLevel] || hls.levels?.[0])?.details?.fragments || [];
+  const seek = (t, again = true) => {
+    if (!own() || !Number.isFinite(t)) return d.set.call(v, t);
+    const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
+    const plan = openGopSeek(b, t, { gop, clean: [...clean.values()], idr });
+    if (plan === 'transcode' && !cur.forceTc) { cur.forceTc = true; load(t, { play: !!cur.wantPlay }); return; }
+    // Nära en segmentgräns kan nyckelbilden före målet ligga i förra segmentet: töm från det
+    const f = plan === 'flush' && again && frags().find(x => t - 0.25 >= x.start && t - 0.25 < x.start + x.duration);
+    if (!f) return d.set.call(v, t);
+    pending = t;
+    hls.on(Hls.Events.BUFFER_FLUSHED, flushed);
+    timer = setTimeout(done, 1000); // tömningen ska ta några ms – fastnar den spolas det ändå
+    hls.trigger(Hls.Events.BUFFER_FLUSHING, { startOffset: f.start, endOffset: Number.POSITIVE_INFINITY, type: null });
+  };
+  // Klart när bildens buffert är tömd. Målet kan ha ändrats under tiden (flera tryck på →): prova det igen, men töm inte en gång till
+  const done = () => { hls.off(Hls.Events.BUFFER_FLUSHED, flushed); clearTimeout(timer); const t = pending; pending = null; if (t != null) seek(t, false); };
+  const flushed = (_, e) => { if (!e?.type || /video/.test(e.type)) done(); };
+  Object.defineProperty(v, 'currentTime', { configurable: true, enumerable: true,
+    get() { return pending ?? d.get.call(v); },
+    set(t) { if (pending != null) pending = +t; else seek(+t); } });
+  return () => { hls.off(Hls.Events.BUFFER_FLUSHED, flushed); clearTimeout(timer); pending = null; delete v.currentTime; };
 }
 function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
 

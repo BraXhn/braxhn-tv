@@ -5,8 +5,11 @@
   fil som måste kodas om, två ljudspråk och undertexter) i riktig Google Chrome och provar start, *Fortsätt titta*,
   paus, spolning inom och utanför bufferten, byte av kvalitet, ljudspår och undertext. Fastnar något, står bilden
   still eller kommer avkodningsfel stoppas utgåvan till `:latest`; långsamma starter och tappade bildrutor visas som
-  varningar med siffror. Tiderna sparas som JSON och kan jämföras mellan utgåvor (`--jamfor=`). Vakten hittade ett
-  fel som är kvar: spolning inom bufferten i filer med öppen GOP ger ett kort hack i Chrome (se `docs/backlog.md`).
+  varningar med siffror. Tiderna sparas som JSON och kan jämföras mellan utgåvor (`--jamfor=`).
+- **Spolning några sekunder framåt eller bakåt hackar inte längre i Chrome.** I filer med öppen GOP (vanligt i riktiga
+  filer) gav en spolning till en del som redan var hämtad ett avkodningsfel: bilden hackade en kort stund, och i
+  vissa filer bytte spelaren till omkodning efter felet. Nu förbereder spelaren spolningen innan den sker – den delen
+  hämtas om (någon tiondels sekund), och filer som ändå måste kodas om byter direkt, utan fel först.
 
 ## 1.4.0 – 2026-11-25
 - **Serier som matchats fel rättar sig själva.** En serie som en gång fått fel träff hos TMDB (till exempel *The Big
