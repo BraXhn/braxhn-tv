@@ -231,6 +231,36 @@ test('öppen GOP som Chrome inte kan börja avkoda mitt i: start från början r
   await close();
 });
 
+test('öppen GOP: efter bytet till omkodning ger ett uttryckligt val av Original remux igen (servern avgör)', { skip }, async () => {
+  assert.equal(await webMode(flat.id, 'transcode'), 'transcode', 'servern har provat filen');
+  const { p, close } = await page();
+  await helpers(p);
+  const asks = [];
+  p.on('request', (q) => { if (/\/api\/items\/\d+\/playback\?/.test(q.url()) && !/warm=1/.test(q.url())) asks.push(q.url()); });
+  const r = await p.evaluate(async (id) => {
+    window.__L.play(id, 0); const f = await window.__frame(t => t >= 0, 30000);
+    const v = () => document.querySelector('#vid');
+    while (!(v().buffered.length && v().buffered.end(0) > 3)) await new Promise(r => setTimeout(r, 20));
+    // Spolning utanför bufferten: omkodning (forceTc)
+    v().currentTime = 64; const b = await window.__frame(t => t >= 63.4 && t < 69, 30000); const mB = [...window.__modes];
+    // Tillbaka till början i den omkodade strömmen och välj Original i kvalitetsmenyn
+    v().currentTime = 0.2; const c = await window.__frame(t => t < 5, 30000);
+    const pq = document.querySelector('#pq'); pq.value = 'orig'; pq.dispatchEvent(new Event('change'));
+    const t0 = performance.now();
+    while (window.__V.P?.pb?.mode !== 'remux' && performance.now() - t0 < 30000) await new Promise(r => setTimeout(r, 50));
+    const d = await window.__frame(t => t < 8, 30000);
+    return { f, b, mB, c, d, modes: window.__modes, label: document.querySelector('#pmode')?.textContent };
+  }, flat.id);
+  assert.ok(r.f.ms != null && r.b.ms != null && r.c.ms != null, `förutsättning: start, spolning och återgång gav bild (${r.f.state || ''} ${r.b.state || ''} ${r.c.state || ''})`);
+  assert.deepEqual(r.mB, ['remux', 'transcode'], 'förutsättning: spolningen bytte till omkodning');
+  const last = asks.at(-1) || '';
+  assert.match(last, /[?&]q=orig/, 'valet av Original skickas: ' + last);
+  assert.doesNotMatch(last, /force=transcode/, 'Original efter omkodningen tvingar inte omkodning: ' + last);
+  assert.deepEqual(r.modes, ['remux', 'transcode', 'remux'], `Original från början av filen remuxas igen (${r.label})`);
+  assert.ok(r.d.ms != null, `bild efter valet av Original: ${r.d.state}`);
+  await close();
+});
+
 test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {
   const { p, close } = await page();
   const r = await p.evaluate(async ([small, mid]) => {

@@ -1,5 +1,5 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, me, status, store, sxe, toast, toastErr, t } from '../core.js';
+import { $, $$, api, esc, fmtTime, locale, me, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
@@ -96,7 +96,7 @@ export async function play(id, start = 0, opts = {}) {
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="${t('Skriv ett meddelande…')}" maxlength="300"></div>
     <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">${t('Avbryt')}</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
-      <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option>${qualitySteps(it.width, it.height).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+      <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option>${qualitySteps(it.width, it.height, locale).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
       ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc(audioLabel(a))}</option>`).join('')}</select></label>` : ''}
       <label>${t('Undertexter')}<select id="ps"><option value="">${t('Inga undertexter')}</option>${it.subtitles.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
       ${textSubs.length > 1 ? `<label>${t('Andra undertext')}<select id="ps2"><option value="">${t('Ingen')}</option>${textSubs.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>` : ''}
@@ -161,7 +161,13 @@ export async function play(id, start = 0, opts = {}) {
   const onResize = () => { if (P === cur) measureCtl(el); else window.removeEventListener('resize', onResize); };
   window.addEventListener('resize', onResize);
   q('#pclose').onclick = () => setMini(true); // fortsätt spela i litet fönster; ⏹ stoppar
-  q('#pq').onchange = (e) => { cur.q = quality = e.target.value; reload(); };
+  q('#pq').onchange = (e) => {
+    cur.q = quality = e.target.value;
+    // Uttryckligt val av Original: remux igen i stället för omkodningen från ett tidigare byte (spolning eller
+    // remuxFallback). Servern vet om filen inte kan börja mitt i (pb.gop = 'tc') och omkodar då själv vid start mitt i.
+    if (cur.q === 'orig') { cur.forceTc = false; noRemux.delete(it.id); }
+    reload();
+  };
   if (q('#pa')) q('#pa').onchange = (e) => { cur.audio = e.target.value; reload(); };
   q('#ps').onchange = (e) => {
     const prev = it.subtitles.find(x => x.id === cur.sub), s = it.subtitles.find(x => x.id === e.target.value);
