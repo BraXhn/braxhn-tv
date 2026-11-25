@@ -124,7 +124,8 @@ test('Nu spelas: film, avsnitt (med serien), musik, ljudbok och podd – med bil
   const H = { 'x-api-key': k };
   act.startPlay({ user: { id: BO, name: 'Bo' }, item: { id: FILM }, mode: 'remux', start: 600, ua: 'Mozilla/5.0 Chrome/120', ip: '192.168.1.20' });
   act.startPlay({ user: { id: ADMIN, name: 'ägaren' }, item: { id: EP }, mode: 'direct', start: 0, ua: 'BraXhnTV-Android', ip: '192.168.1.21' });
-  D.run('INSERT INTO track_plays(user_id,track_id,ts) VALUES(?,?,?)', BO, TR, T - 30);
+  // Låten startade för 30 s sedan räknat från nu (T sattes när filen laddades – under belastning kan det vara flera sekunder sedan)
+  D.run('INSERT INTO track_plays(user_id,track_id,ts) VALUES(?,?,?)', BO, TR, Math.floor(Date.now() / 1000) - 30);
   const r = await req('/api/v1/now-playing', { headers: H });
   assert.equal(r.status, 200, r.text);
   assert.equal(r.headers.get('cache-control'), 'no-store');
