@@ -5,8 +5,8 @@ import { isPrivate } from './util.js';
 import { msg, resolve } from './i18n.js';
 
 export const KINDS = ['none', 'ntfy', 'pushover', 'gotify', 'discord', 'telegram', 'webhook'];
-export const EVENTS = { security: 'Säkerhet (spärrade konton, attacker, ändrad 2FA)', newlogin: 'Inloggning utifrån', cert: 'HTTPS-certifikat', backup: 'Säkerhetskopior', update: 'Ny version', dvr: 'Inspelningar', request: 'Önskningar av filmer/serier', disk: 'Lågt diskutrymme' };
-export const DEFAULT_EVENTS = 'security,cert,backup,update,dvr,request,disk';
+export const EVENTS = { security: 'Säkerhet (spärrade konton, attacker, ändrad 2FA)', newlogin: 'Inloggning utifrån', cert: 'HTTPS-certifikat', backup: 'Säkerhetskopior', update: 'Ny version', dvr: 'Inspelningar', request: 'Önskningar av filmer/serier', disk: 'Lågt diskutrymme', support: 'Feedback att granska' };
+export const DEFAULT_EVENTS = 'security,cert,backup,update,dvr,request,disk,support';
 
 const cfg = () => ({
   kind: getSetting('notify_kind', process.env.NOTIFY_KIND || 'none'),

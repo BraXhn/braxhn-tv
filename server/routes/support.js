@@ -10,6 +10,7 @@
 //   POST /api/admin/support/:id/approve | reject – godkänn (skickas till teamet) eller avslå ({ note? })
 //   POST /api/admin/support/:id/reply  – administratören svarar på teamets fråga ({ text })
 //   POST /api/admin/support/:id/reply/approve | reject – granska en användares svar
+//   POST /api/admin/support/:id/reopen – öppna ett åtgärdat/avslaget ärende igen ({ to: 'approved'|'pending', note? })
 //   DELETE /api/admin/support/:id      – ta bort ärendet
 //   GET  /api/v1/support               – teamet (API-nyckel med behörigheten support): godkända, öppna ärenden utan namn
 //   POST /api/v1/support/:id           – teamet sätter status och svar – det enda en API-nyckel får skriva
@@ -64,6 +65,7 @@ route('POST', '/api/admin/support/:id/reject', admin, adminAct('support_rejected
 route('POST', '/api/admin/support/:id/reply', admin, adminAct('support_reply', (id, b, c) => { const r = S.ticket(id); return r && S.reply(r, c.user, b); }));
 route('POST', '/api/admin/support/:id/reply/approve', admin, adminAct('support_reply_approved', (id, b) => S.reviewReply(id, true, b)));
 route('POST', '/api/admin/support/:id/reply/reject', admin, adminAct('support_reply_rejected', (id) => S.reviewReply(id, false)));
+route('POST', '/api/admin/support/:id/reopen', admin, adminAct('support_reopened', (id, b) => S.reopen(id, b)));
 route('DELETE', '/api/admin/support/:id', admin, (c) => {
   if (!S.remove(c.p.id)) return fail(c.res, 404, 'Finns inte');
   audit('support_removed', { ...ctx(c), detail: `#${+c.p.id}` });

@@ -1,7 +1,7 @@
 // Administration – Support: ärenden från Feedback-knappen. Det som väntar på granskning står först. Administratören
 // öppnar ett ärende, ser exakt det som skulle lämna servern, kan ändra texten och välja bort den tekniska
 // informationen, och godkänner (då kan teamet hämta det med en API-nyckel), avslår eller tar bort. Svar från
-// användare på teamets frågor granskas på samma sätt. Servern: server/support.js, server/routes/support.js.
+// användare på teamets frågor granskas på samma sätt. Ett åtgärdat eller avslaget ärende kan öppnas igen (reopen). Servern: server/support.js, server/routes/support.js.
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, toast, t } from '../core.js';
 import { refreshFeedback } from '../feedback.js';
@@ -11,6 +11,25 @@ import { AREA, KIND, contextHtml, statusBadge, threadHtml } from './support.js';
 const refresh = () => { refreshFeedback().catch(() => {}); adminSupport().catch(() => {}); };
 const WHO = () => ({ team: t('Teamet'), admin: t('Administratören'), user: t('Användaren') });
 const first = (s) => { const l = String(s).split('\n')[0]; return l.length > 90 ? l.slice(0, 90) + '…' : l; };
+
+/** Öppna ett avslutat ärende igen: till teamet direkt eller tillbaka till granskning */
+function reopenDialog(k, parent) {
+  const opt = (v, title, sub) => `<label class="fbopt"><input type="radio" name="asto" value="${v}"${(k.status === 'fixed') === (v === 'approved') ? ' checked' : ''}><span><b>${title}</b><small>${sub}</small></span></label>`;
+  openDialog({
+    title: t('Öppna ärende #{id} igen', { id: k.id }), form: true, className: 'fbdlg',
+    body: `<p class="muted small">${t('T.ex. när felet kom tillbaka eller när avslaget var fel. Den som skickade ärendet ser den nya statusen under Mina ärenden.')}</p>
+      <fieldset class="fbkind"><legend class="sr-only">${t('Vart ska ärendet?')}</legend>
+        ${opt('approved', t('Skicka till teamet igen'), t('Ärendet syns för teamet direkt, med förklaringen nedan.'))}
+        ${opt('pending', t('Tillbaka till granskning'), t('Teamet ser inget förrän du har godkänt ärendet igen. Förklaringen stannar på servern.'))}</fieldset>
+      <div class="field"><label for="asnote">${t('Förklaring (valfri)')}</label><textarea id="asnote" rows="3" maxlength="4000" placeholder="${t('T.ex. Felet kom tillbaka i version 1.3.2.')}"></textarea></div>`,
+    actions: [{ label: t('Avbryt'), kind: 'ghost' }, { label: t('Öppna igen'), kind: 'primary', submit: true, onClick: async (d) => {
+      const to = d.$('[name=asto]:checked')?.value || 'pending';
+      await api(`/admin/support/${k.id}/reopen`, { method: 'POST', bg: true, body: { to, note: d.$('#asnote').value } });
+      toast(to === 'approved' ? t('Ärendet är öppnat igen och syns för teamet') : t('Ärendet är öppnat igen och väntar på granskning'));
+      parent.close(); refresh();
+    } }]
+  });
+}
 
 function openTicket(k) {
   const pending = k.status === 'pending';
@@ -37,6 +56,7 @@ function openTicket(k) {
       if (!await confirmDialog(t('Ta bort ärende #{id}? Det försvinner även för den som skickade det.', { id: k.id }), { okLabel: t('Ta bort'), danger: true })) return false;
       await api('/admin/support/' + k.id, { method: 'DELETE', bg: true }); toast(t('Ärendet är borttaget')); refresh();
     } }];
+  if (k.status === 'fixed' || k.status === 'rejected') actions.push({ label: t('Öppna igen'), kind: 'primary', onClick: (d) => { reopenDialog(k, d); return false; } });
   if (pending) actions.push(
     { label: t('Avslå'), kind: 'ghost', onClick: async () => {
       const note = await promptDialog(t('Förklaring till användaren (valfri)'), { title: t('Avslå ärendet'), text: t('Ärendet skickas inte till teamet. Förklaringen syns bara för den som skickade ärendet.'), type: 'textarea', maxlength: 4000, okLabel: t('Avslå') });

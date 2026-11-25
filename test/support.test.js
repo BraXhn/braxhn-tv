@@ -1,7 +1,8 @@
 // Feedback och felrapporter (server/support.js, routes/support.js): en vanlig användares ärende väntar på granskning
 // och syns aldrig för teamet (/api/v1/support) förrän en administratör godkänt det; administratörens eget syns direkt;
 // avslagna syns aldrig; nyckeln behöver behörigheten support och kan bara svara på godkända ärenden; man ser bara sina
-// egna ärenden; storleks- och antalsgränser; export och radering av kontot tar med ärendena.
+// egna ärenden; storleks- och antalsgränser; export och radering av kontot tar med ärendena; notisen till
+// administratören (utan text och namn, högst en per timme); öppna ett avslutat ärende igen; gallring av avslutade ärenden.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -49,6 +50,18 @@ const KEY = { 'x-api-key': keys.create({ name: 'Teamet', scopes: ['support'] }, 
 const OTHER = { 'x-api-key': keys.create({ name: 'Väggskärmen', scopes: ['nowplaying', 'library'] }, ADMIN).key };
 const team = async () => (await req('/api/v1/support', { headers: KEY })).data.tickets;
 const inTeam = async (id) => (await team()).some(t => t.id === id);
+
+// ---------- notis till administratören, öppna igen och gallring ----------
+const notify = await import('../server/notify.js');
+// En notistjänst "utanför servern" (webhook): allt som tas emot sparas här
+const hooks = [];
+const hookSrv = http.createServer((q, s) => { let b = ''; q.on('data', d => b += d); q.on('end', () => { hooks.push(b); s.end('ok'); }); });
+await new Promise(r => hookSrv.listen(0, '127.0.0.1', r));
+after(() => hookSrv.close());
+const waitHooks = async (n) => { for (let i = 0; i < 100 && hooks.length < n; i++) await new Promise(r => setTimeout(r, 20)); return hooks.length; };
+const quiet = () => new Promise(r => setTimeout(r, 150));
+// Gränsen per timme gäller vanliga användare – testerna nedan skapar många ärenden
+const hourPassed = () => D.run('UPDATE support_tickets SET created=created-3700 WHERE by_admin=0');
 
 // En film som alla får se och en som barnprofilen inte får se (åldersgräns)
 const LIB = Number(D.run("INSERT INTO libraries(name,type,path) VALUES('Filmer','movie',?)", path.join(ROOT, 'media')).lastInsertRowid);
@@ -258,4 +271,124 @@ test('GDPR: exporten tar med ärendena och raderat konto lämnar inga ärenden k
   assert.equal(D.get('SELECT COUNT(*) AS n FROM support_tickets WHERE user_id=?', GONE).n, 0);
   assert.equal(await inTeam(id), false);
   assert.ok(!JSON.stringify(D.all('SELECT * FROM support_tickets')).includes('Mitt sista ärende'));
+});
+
+test('notis: ärenden och svar att granska ger en notis utan text och namn, högst en per timme, och kan slås av', async () => {
+  assert.ok(notify.EVENTS.support, 'händelsen finns bland notiserna'); assert.ok(notify.DEFAULT_EVENTS.split(',').includes('support'), 'på från början');
+  assert.ok('support' in (await req('/api/notify', { headers: H.admin })).data.allEvents, 'administratören kan välja den');
+  D.setSetting('notify_kind', 'webhook'); D.setSetting('notify_url', `http://127.0.0.1:${hookSrv.address().port}/hook`);
+  D.setSetting('notify_events', 'security,support'); D.setSetting('public_url', 'https://tv.example.org');
+  S._notice.last = 0; hourPassed();
+  // Administratörens eget ärende godkänns direkt – inget att granska, ingen notis
+  await post('/api/support', H.admin, { text: 'Inget att granska' });
+  await quiet(); assert.equal(hooks.length, 0);
+  // En användares ärende: notis direkt
+  const id = (await post('/api/support', H.eva, { title: 'Grannens wifi', text: 'Hemlig text om grannens wifi-lösenord', context: CTX })).data.id;
+  assert.equal(await waitHooks(1), 1, 'notisen gick ut');
+  const n1 = JSON.parse(hooks[0]);
+  assert.equal(n1.title, 'BraXhn TV: Feedback att granska');
+  assert.match(n1.message, /väntar på granskning/); assert.match(n1.message, /Administration → Support/);
+  assert.match(n1.message, /https:\/\/tv\.example\.org\/#\/admin\/support/, 'länk till Administration → Support');
+  for (const s of ['Hemlig', 'wifi', 'Grannens', 'Eva', 'Annansdotter', 'Barnfilmen', String(id)]) assert.ok(!hooks[0].includes(s), `notisen innehåller inte ${s}: ${hooks[0]}`);
+  // Fler ärenden inom timmen: ingen ny notis direkt, men en samlad när timmen gått
+  for (let i = 0; i < 6; i++) assert.equal((await post('/api/support', i % 2 ? H.bo : H.barn, { text: 'Storm ' + i })).status, 200);
+  await quiet(); assert.equal(hooks.length, 1, 'ingen notisstorm');
+  assert.equal(S.noticeWaiting(), true, 'en samlad notis väntar');
+  S._noticeFlush();
+  assert.equal(await waitHooks(2), 2);
+  assert.match(JSON.parse(hooks[1]).message, /^\d+ ärenden väntar på granskning/);
+  assert.ok(!hooks[1].includes('Storm'));
+  // Ett svar från en användare på teamets fråga ger också en notis
+  await post(`/api/admin/support/${id}/approve`, H.admin);
+  await post('/api/v1/support/' + id, KEY, { status: 'needinfo', reply: 'Vilken router?' });
+  S._notice.last = 0;
+  await post(`/api/support/${id}/reply`, H.eva, { text: 'Hemlig router-modell' });
+  assert.equal(await waitHooks(3), 3);
+  assert.match(JSON.parse(hooks[2]).message, /1 svar/); assert.ok(!hooks[2].includes('router'));
+  // Utan adress utifrån: ingen länk, bara var man hittar det
+  assert.equal(S.noticeText({ tickets: 1, replies: 0 }, ''), 'Ett ärende väntar på granskning. Inget skickas till teamet förrän du har godkänt det. Öppna Administration → Support.');
+  // Avslaget i notisinställningarna: ingenting går ut
+  await req('/api/notify', { method: 'PUT', headers: H.admin, body: { events: ['security'] } });
+  S._notice.last = 0;
+  hourPassed();
+  await post('/api/support', H.bo, { text: 'Tyst' });
+  await quiet(); assert.equal(hooks.length, 3, 'avslaget – ingen notis');
+  // Inget kvar att granska när timmen gått: ingen notis
+  for (const k of S.adminList().filter(r => r.status === 'pending')) S.reject(k.id);
+  S.reviewReply(id, true);
+  D.setSetting('notify_events', 'support'); S._notice.last = Date.now();
+  const e2 = (await post('/api/support', H.bo, { text: 'Snart granskad' })).data.id;
+  S.reject(e2); S._noticeFlush();
+  await quiet(); assert.equal(hooks.length, 3, 'allt granskat innan timmen gått – ingen notis');
+  D.setSetting('notify_kind', 'none'); D.setSetting('public_url', '');
+});
+
+test('öppna igen: åtgärdat eller avslaget ärende går tillbaka till godkänt eller väntar – väntar syns inte för teamet', async () => {
+  hourPassed();
+  const id = (await post('/api/support', H.bo, { text: 'Undertexterna hamnar fel.' })).data.id;
+  assert.equal((await post(`/api/admin/support/${id}/reopen`, H.admin, { to: 'approved' })).status, 409, 'ett öppet ärende kan inte öppnas igen');
+  await post(`/api/admin/support/${id}/approve`, H.admin);
+  assert.equal((await post(`/api/admin/support/${id}/reopen`, H.admin, { to: 'approved' })).status, 409);
+  await post('/api/v1/support/' + id, KEY, { status: 'fixed', reply: 'Rättat.', version: '1.3.1' });
+  assert.equal((await post(`/api/admin/support/${id}/reopen`, H.bo, { to: 'approved' })).status, 403, 'bara administratörer');
+  assert.equal((await post(`/api/admin/support/${id}/reopen`, H.admin, { to: 'working' })).status, 400);
+  assert.equal((await post('/api/admin/support/999999/reopen', H.admin, { to: 'approved' })).status, 404);
+  // Till väntar: borta för teamet, nyckeln kan inte svara, administratören granskar på nytt (och kan ändra texten)
+  const p = await post(`/api/admin/support/${id}/reopen`, H.admin, { to: 'pending', note: 'Intern anteckning: kolla med Bo först' });
+  assert.equal(p.status, 200, p.text); assert.equal(p.data.status, 'pending'); assert.equal(p.data.version, null);
+  assert.equal(await inTeam(id), false, 'återöppnat som väntar syns inte i teamets API');
+  assert.equal((await post('/api/v1/support/' + id, KEY, { status: 'working' })).status, 404);
+  assert.equal((await req('/api/support/' + id, { headers: H.bo })).data.status, 'pending', 'användaren ser statusen');
+  assert.ok((await req('/api/admin/support', { headers: H.admin })).data.tickets.find(k => k.id === id).status === 'pending');
+  assert.equal((await req(`/api/admin/support/${id}`, { method: 'PUT', headers: H.admin, body: { text: 'Undertexterna hamnar fel igen i 1.3.1.' } })).status, 200);
+  await post(`/api/admin/support/${id}/approve`, H.admin);
+  let t = (await team()).find(x => x.id === id);
+  assert.equal(t.text, 'Undertexterna hamnar fel igen i 1.3.1.');
+  assert.ok(!JSON.stringify(t).includes('Intern anteckning'), 'anteckningen vid återöppning till väntar stannar på servern');
+  // Till godkänt: syns för teamet direkt, med förklaringen och markeringen reopened
+  await post('/api/v1/support/' + id, KEY, { status: 'fixed', version: '1.3.2' });
+  const a = await post(`/api/admin/support/${id}/reopen`, H.admin, { to: 'approved', note: 'Felet kom tillbaka i 1.3.2.' });
+  assert.equal(a.status, 200, a.text); assert.equal(a.data.status, 'approved');
+  t = (await team()).find(x => x.id === id);
+  assert.ok(t, 'syns för teamet igen'); assert.equal(t.version, null);
+  assert.deepEqual([t.thread.at(-1).from, t.thread.at(-1).status, t.thread.at(-1).text], ['admin', 'reopened', 'Felet kom tillbaka i 1.3.2.']);
+  assert.ok(!/Hemligsson|"user"/.test(JSON.stringify(t)));
+  assert.equal((await req('/api/support/' + id, { headers: H.bo })).data.status, 'approved');
+  assert.ok(D.get("SELECT 1 FROM audit WHERE event='support_reopened'"));
+  // Ett avslaget ärende kan öppnas igen för granskning – den lokala förklaringen följer inte med till teamet
+  const r = (await post('/api/support', H.eva, { text: 'Avslaget av misstag.' })).data.id;
+  await post(`/api/admin/support/${r}/reject`, H.admin, { note: 'Fel i webbläsaren.' });
+  assert.equal((await post(`/api/admin/support/${r}/reopen`, H.admin, {})).data.status, 'pending', 'standard: tillbaka till granskning');
+  assert.equal(await inTeam(r), false);
+  await post(`/api/admin/support/${r}/approve`, H.admin);
+  t = (await team()).find(x => x.id === r);
+  assert.ok(t); assert.ok(!JSON.stringify(t).includes('Fel i webbläsaren'));
+});
+
+test('gallring: åtgärdade och avslagna ärenden äldre än gränsen tas bort, öppna och väntande ärenden rörs aldrig', async () => {
+  assert.equal(privacy.supportDays(), 180);
+  const old = D.now() - 181 * 86400;
+  const mk = async (who, status) => {
+    const id = (await post('/api/support', who, { text: 'Gammalt ' + status })).data.id;
+    D.run('UPDATE support_tickets SET status=?, updated=?, created=? WHERE id=?', status, old, old, id);
+    return id;
+  };
+  const ids = {};
+  for (const s of ['fixed', 'rejected', 'pending', 'approved', 'working', 'needinfo']) ids[s] = await mk(H.admin, s);
+  const fresh = await mk(H.admin, 'fixed'); D.run('UPDATE support_tickets SET updated=? WHERE id=?', D.now() - 10 * 86400, fresh);
+  const r = privacy.prune();
+  assert.ok(r.support >= 2, JSON.stringify(r));
+  const left = (id) => !!D.get('SELECT 1 FROM support_tickets WHERE id=?', id);
+  assert.equal(left(ids.fixed), false); assert.equal(left(ids.rejected), false);
+  for (const s of ['pending', 'approved', 'working', 'needinfo']) assert.equal(left(ids[s]), true, `${s} ligger kvar`);
+  assert.equal(left(fresh), true, 'nyligen avslutat ligger kvar');
+  assert.equal((await req('/api/privacy', { headers: H.bo })).data.retention.supportDays, 180, 'sidan Integritet visar tiden');
+  // Miljövariabeln gäller när inget är sparat; inställningen (Administration → Integritet) har golv och tak
+  process.env.SUPPORT_DAYS = '400'; assert.equal(privacy.supportDays(), 400);
+  process.env.SUPPORT_DAYS = '1'; assert.equal(privacy.supportDays(), 30); delete process.env.SUPPORT_DAYS;
+  assert.equal((await req('/api/settings', { method: 'PUT', headers: H.admin, body: { supportDays: 5 } })).status, 200);
+  assert.equal(privacy.supportDays(), 30);
+  assert.equal((await req('/api/settings', { headers: H.admin })).data.supportDays, 30);
+  await req('/api/settings', { method: 'PUT', headers: H.admin, body: { supportDays: 180 } });
+  for (const s of ['pending', 'approved', 'working', 'needinfo']) D.run('DELETE FROM support_tickets WHERE id=?', ids[s]);
 });

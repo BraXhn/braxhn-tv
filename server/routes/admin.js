@@ -189,8 +189,8 @@ route('GET', '/api/settings', admin, (c) => {
     cinemaPreroll: cinema.prerollSetting(), cinemaPrerollFiles: cinema.prerollFiles(insideMedia).length,
     // Länken "Stöd projektet" (null = ingen giltig länk) och om den visas (standard på)
     donateUrl: configuredDonateUrl(), showDonate: donateShown(),
-    // Integritet: kontaktuppgift som visas för användarna och hur länge säkerhetsloggen sparas
-    privacyContact: privacy.contact(), auditDays: privacy.auditDays()
+    // Integritet: kontaktuppgift som visas för användarna, hur länge säkerhetsloggen och avslutade feedbackärenden sparas
+    privacyContact: privacy.contact(), auditDays: privacy.auditDays(), supportDays: privacy.supportDays()
   });
 });
 route('PUT', '/api/settings', admin, async (c) => {
@@ -252,6 +252,7 @@ route('PUT', '/api/settings', admin, async (c) => {
   if (b.showDonate != null) setSetting('show_donate', b.showDonate ? '1' : '0');
   if (typeof b.privacyContact === 'string') setSetting('privacy_contact', b.privacyContact.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200));
   if (b.auditDays != null && Number.isFinite(parseInt(b.auditDays))) setSetting('audit_days', String(Math.max(30, Math.min(3650, parseInt(b.auditDays)))));
+  if (b.supportDays != null && Number.isFinite(parseInt(b.supportDays))) setSetting('support_days', String(Math.max(30, Math.min(3650, parseInt(b.supportDays)))));
   if (b.bookMeta != null) setSetting('book_meta', b.bookMeta ? '1' : '0');
   if (typeof b.bookMetaRegion === 'string' && bookmeta.AUDIBLE_REGIONS[b.bookMetaRegion]) setSetting('book_meta_region', b.bookMetaRegion);
   if (b.subAuto != null) setSetting('sub_auto', b.subAuto ? '1' : '0');

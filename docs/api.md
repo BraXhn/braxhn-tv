@@ -137,6 +137,8 @@ hämtar själv, och ser bara det en administratör har godkänt under *Administr
 - `version`: `null` tills ärendet är åtgärdat.
 - `created` och `updated` (unix-sekunder).
 - `thread`: tidigare svar, `[{ from: "team" | "admin" | "användare", text, created, status?, version? }]`.
+  `status: "reopened"` (från `admin`) betyder att administratören öppnat ett åtgärdat ärende igen; `text` är då
+  förklaringen (kan vara tom).
 - `context`: teknisk information, eller `null` om användaren eller administratören valde bort den:
   `version` (serverns), `page` (hash-rutten utan frågedel), `browser` (user agent), `screen`, `lang`, `installed`,
   `title: { id, kind, name, year, format }` om man stod på en titel, `lastPlayback: { item, name, format, mode,
@@ -150,7 +152,10 @@ hämtar själv, och ser bara det en administratör har godkänt under *Administr
 - Förfrågan får vara högst 16 kB (413).
 
 Bara godkända, öppna ärenden kan ändras. Allt annat ger 404: väntande, avslagna, åtgärdade och okända ärenden.
-Efter `fixed` är ärendet avslutat och lämnar listan.
+Efter `fixed` är ärendet avslutat och lämnar listan. Administratören kan öppna ett åtgärdat eller avslaget ärende
+igen: antingen som `approved` (det kommer tillbaka i listan, `version` blir `null` och `thread` får ett inlägg med
+`status: "reopened"`) eller som väntande (det syns inte förrän administratören godkänt det igen). Avslutade ärenden
+tas bort från servern 180 dagar efter senaste ändringen (inställbart).
 
 Med `needinfo` kan den som rapporterade (eller en administratör) svara under *Mina ärenden*. Administratörens svar
 syns direkt i `thread` och ärendet blir `approved` igen. Svaret från en vanlig användare syns först när en
@@ -169,7 +174,13 @@ tech, context }`, högst 5 per timme för andra än administratörer), `POST /ap
 det som bifogas), `GET /api/support` (mina ärenden), `GET /api/support/count`, `GET /api/support/:id` och
 `POST /api/support/:id/reply`. Man når bara sina egna ärenden; någon annans ger 404. Administratören (hemnätet):
 `GET /api/admin/support`, `PUT /api/admin/support/:id`, `POST …/approve`, `…/reject`, `…/reply`,
-`…/reply/approve`, `…/reply/reject` och `DELETE /api/admin/support/:id`.
+`…/reply/approve`, `…/reply/reject`, `…/reopen` (`{ to: "approved" | "pending", note? }`, bara åtgärdade och
+avslagna ärenden – annars 409; standard `pending`, där `note` stannar på servern) och `DELETE /api/admin/support/:id`.
+
+Administratören får en notis (händelsen `support` under *Notiser*, på från början) när ett ärende eller ett svar
+väntar på granskning: högst en per timme, och det som kommer under tiden samlas i nästa. Notisen säger bara hur
+mycket som väntar och länkar till `#/admin/support` (med serverns adress utifrån om den är inställd) – aldrig
+ärendets text, rubrik, nummer eller namn, eftersom notistjänsten oftast ligger utanför servern.
 
 IP-adresser lämnas aldrig ut.
 
@@ -179,7 +190,7 @@ Nya vägar, alla kräver inloggning. Apparna behöver inte använda dem, efterso
 
 - **`GET /api/privacy`** svarar med:
   - `contact`: sträng eller `null`;
-  - `retention: { historyDays, auditDays, ipDays }`;
+  - `retention: { historyDays, auditDays, ipDays, supportDays }` (`supportDays`: hur länge avslutade feedbackärenden sparas);
   - `services`: flaggor för de externa tjänster som är på;
   - `canDeleteSelf` och `hasPassword`.
 - **`GET /api/me/export`** ger en JSON-bilaga `braxhn-tv-mina-uppgifter-ÅÅÅÅ-MM-DD.json` (`format:
@@ -196,9 +207,10 @@ Nya vägar, alla kräver inloggning. Apparna behöver inte använda dem, efterso
 - **`GET /api/tmdbimg/:size/:file`** ger en TMDB-bild via servern (bara TMDB:s storlekar och filnamn, annars 404).
   - Webben använder den för TMDB-adresser i svaren.
   - Svaren har kvar TMDB:s adresser, så apparna kan använda dem som förut.
-- **`/api/settings`** (admin) har två nya fält:
+- **`/api/settings`** (admin) har tre nya fält:
   - `privacyContact`: sträng, högst 200 tecken;
-  - `auditDays`: 30–3650.
+  - `auditDays`: 30–3650;
+  - `supportDays`: 30–3650, hur länge åtgärdade och avslagna feedbackärenden sparas efter senaste ändringen.
 
 ## Enkel inloggning: `/api/sso/*` och `/api/me/sso`
 

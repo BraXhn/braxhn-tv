@@ -111,7 +111,7 @@ test('sidan Integritet: lagringstider, kontakt och vem som får radera sig själ
   D.setSetting('privacy_contact', 'Ägaren, ägaren@example.com');
   const P = (await req('/api/privacy', tok.zeb)).data;
   assert.equal(P.contact, 'Ägaren, ägaren@example.com');
-  assert.deepEqual(P.retention, { historyDays: 365, auditDays: 180, ipDays: 90 });
+  assert.deepEqual(P.retention, { historyDays: 365, auditDays: 180, ipDays: 90, supportDays: 180 });
   assert.equal(P.canDeleteSelf, true); assert.equal(P.hasPassword, true);
   assert.equal(P.services.scrobble, true); assert.equal(P.services.relay, false);
   assert.equal((await req('/api/privacy', tok.owner)).data.canDeleteSelf, false, 'administratören');

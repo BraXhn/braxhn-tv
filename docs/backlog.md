@@ -130,8 +130,7 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
-- Feedback: notis till administratören när ett ärende väntar; öppna ett avslutat ärende igen; gallra gamla ärenden;
-  Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
+- Feedback: Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
 - M4A med `moov` sist kan inte snabbstartas (1,6 s på 20 Mbit/s); servern kan skicka `moov` först.

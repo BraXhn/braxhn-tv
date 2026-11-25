@@ -37,7 +37,8 @@ views.privacy = async () => {
       <li>${t('<b>Tittande och lyssnande:</b> var du är i filmer, avsnitt, böcker och musik, betyg, listor och favoriter – så att du kan fortsätta där du var.')}</li>
       <li>${t('<b>Historik:</b> vad som spelats, när och på vilken enhet. Sparas {d}. IP-adressen i historiken tas bort efter {ip}.', { d: days(R.historyDays), ip: days(R.ipDays) })}</li>
       <li>${t('<b>Inloggade enheter:</b> enhetstyp och IP-adress för varje inloggning, tills du loggar ut eller inloggningen går ut.')}</li>
-      <li>${t('<b>Feedback och felrapporter:</b> det du skickar med knappen Feedback sparas på servern tills kontot eller ärendet tas bort. En administratör läser ärendet först. Bara om administratören godkänner det kan utvecklarna av BraXhn TV hämta det – utan ditt namn och utan IP-adress. Du ser dina ärenden under <a href="#/support">Mina ärenden</a>.')}</li>
+      <li>${t('<b>Feedback och felrapporter:</b> det du skickar med knappen Feedback sparas på servern tills kontot eller ärendet tas bort. En administratör läser ärendet först. Bara om administratören godkänner det kan utvecklarna av BraXhn TV hämta det – utan ditt namn och utan IP-adress. Du ser dina ärenden under <a href="#/support">Mina ärenden</a>.')}
+        ${t('Åtgärdade och avslagna ärenden tas bort {d} efter den senaste ändringen.', { d: days(R.supportDays) })}</li>
       <li>${t('<b>Säkerhetsloggen:</b> inloggningar, misslyckade försök och ändringar, med IP-adress. Sparas {d} för att upptäcka intrång.', { d: days(R.auditDays) })}</li>
     </ul>
     <p class="muted small">${t('Inget säljs, ingen reklam och ingen spårning. Webbläsaren sparar bara det som behövs för inloggningen och dina val (t.ex. språk och volym) – inga kakor från tredje part.')}</p></div>

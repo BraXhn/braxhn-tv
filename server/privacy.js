@@ -4,6 +4,7 @@
 import { all, get, run, getSetting, now } from './db.js';
 import { keepDays } from './playstats.js';
 import { hasTmdb } from './scanner.js';
+import { pruneClosed } from './support.js';
 
 /** Kolumner som pekar på en användare utan att vara en främmande nyckel */
 const REF_COLS = ['user_id', 'owner_id', 'created_by', 'used_by'];
@@ -13,6 +14,9 @@ const SECRET = /^(pass|pin|token|token_hash|secret|enc|key_hash|totp_secret|totp
 /** Säkerhetsloggen sparas så här många dagar (standard 180, minst 30) */
 export const AUDIT_DAYS_DEFAULT = 180;
 export const auditDays = () => { const n = parseInt(getSetting('audit_days', process.env.AUDIT_DAYS || String(AUDIT_DAYS_DEFAULT))); return Number.isFinite(n) ? Math.max(30, Math.min(3650, n)) : AUDIT_DAYS_DEFAULT; };
+/** Avslutade (åtgärdade och avslagna) feedbackärenden tas bort så här många dagar efter senaste ändringen (standard 180, minst 30) */
+export const SUPPORT_DAYS_DEFAULT = 180;
+export const supportDays = () => { const n = parseInt(getSetting('support_days', process.env.SUPPORT_DAYS || String(SUPPORT_DAYS_DEFAULT))); return Number.isFinite(n) ? Math.max(30, Math.min(3650, n)) : SUPPORT_DAYS_DEFAULT; };
 /** IP-adresser i tittarhistoriken tas bort efter så här många dagar (resten av raden finns kvar för statistiken) */
 export const IP_DAYS = 90;
 /** Kontaktuppgift till den som ansvarar för servern (visas på sidan Integritet) */
@@ -90,14 +94,14 @@ export function eraseTraces(ids) {
   for (const n of names) run('UPDATE audit SET detail=NULL WHERE detail=?', n);
 }
 
-/** Gallring: säkerhetsloggen efter auditDays(), IP-adresser i historiken efter IP_DAYS och utgångna sessioner */
+/** Gallring: säkerhetsloggen efter auditDays(), IP-adresser i historiken efter IP_DAYS och avslutade feedbackärenden efter supportDays() */
 export function prune(at = now()) {
   const a = Number(run('DELETE FROM audit WHERE ts < ?', at - auditDays() * 86400).changes);
   const i = Number(run('UPDATE plays SET ip=NULL WHERE ip IS NOT NULL AND ts < ?', at - IP_DAYS * 86400).changes);
-  return { audit: a, ips: i };
+  return { audit: a, ips: i, support: pruneClosed(supportDays(), at) };
 }
 setTimeout(() => { try { prune(); } catch {} }, 90e3).unref();
-setInterval(() => { try { const r = prune(); if (r.audit || r.ips) console.log(`[integritet] gallrade ${r.audit} loggrader och ${r.ips} IP-adresser`); } catch (e) { console.warn('[integritet]', e.message); } }, 86400e3).unref();
+setInterval(() => { try { const r = prune(); if (r.audit || r.ips || r.support) console.log(`[integritet] gallrade ${r.audit} loggrader, ${r.ips} IP-adresser och ${r.support} avslutade ärenden`); } catch (e) { console.warn('[integritet]', e.message); } }, 86400e3).unref();
 
 /** Vad sidan Integritet visar: hur länge saker sparas, vem som ansvarar och vilka externa tjänster som är på */
 export function summary(viewer) {
@@ -105,7 +109,7 @@ export function summary(viewer) {
   const notify = getSetting('notify_kind', process.env.NOTIFY_KIND || 'none');
   return {
     contact: contact() || null,
-    retention: { historyDays: keepDays(), auditDays: auditDays(), ipDays: IP_DAYS },
+    retention: { historyDays: keepDays(), auditDays: auditDays(), ipDays: IP_DAYS, supportDays: supportDays() },
     services: {
       tmdb: hasTmdb(),
       fanart: !!getSetting('fanart_api_key', ''),

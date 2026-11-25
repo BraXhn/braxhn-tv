@@ -10,6 +10,16 @@
   Texterna kommer från webbens engelska katalog, så webben och servern säger samma sak. Felkoder och fält som apparna
   läser är oförändrade, och inget i databasen skrivs om. Serverns logg och en del tekniska fel i administrationen är
   kvar på svenska.
+- **Feedback: notis, öppna igen och gallring.**
+  - Administratören får en notis när ett ärende eller ett svar på teamets fråga väntar på granskning (*Feedback att
+    granska* under *Notiser*, på från början). Notisen säger bara hur mycket som väntar och länkar till
+    *Administration → Support* – aldrig ärendets text eller vem som skrev. Högst en notis i timmen; det som kommer
+    under tiden samlas i nästa.
+  - Ett åtgärdat eller avslaget ärende kan öppnas igen under *Administration → Support*, till exempel när felet kom
+    tillbaka. Administratören väljer om det går direkt till teamet igen eller tillbaka till granskning (då ser
+    teamet inget förrän det godkänts). Den som skickade ärendet ser den nya statusen under *Mina ärenden*.
+  - Åtgärdade och avslagna ärenden tas bort 180 dagar efter den senaste ändringen (*Administration → Integritet*
+    eller `SUPPORT_DAYS`, 30–3650). Öppna ärenden och sådana som väntar på granskning rörs aldrig.
 - **Expo-appen: profilbyte.** Har kontot flera profiler visar appen *Vem tittar?* efter inloggningen, med en ruta per
   profil som i webbappen. Profiler med PIN frågar efter den, och från en barnprofil till en profil med högre
   åldersgräns krävs huvudkontots lösenord. Under *Konto* finns *Byt profil*. Barnprofiler ser bara det de får se,

@@ -226,6 +226,8 @@ views.admin = async (sec) => {
     <p class="muted small">${t('Du som kör servern ansvarar för uppgifterna om dem du bjuder in. Användarna ser vad som sparas, hur länge och vilka tjänster som är på under <a href="#/privacy">Integritet</a>, där de också kan ladda ner sina uppgifter.')}</p>
     <form id="privform"><label for="pcontact">${t('Kontakt för frågor om personuppgifter (visas för användarna)')}</label><input id="pcontact" maxlength="200" value="${esc(S.privacyContact || '')}" placeholder="${t('t.ex. namn och e-post')}">
     <label for="paudit">${t('Spara säkerhetsloggen (dagar, 30–3650)')}</label><input id="paudit" type="number" min="30" max="3650" value="${S.auditDays}">
+    <label for="psupport">${t('Spara avslutade ärenden från Feedback (dagar, 30–3650)')}</label><input id="psupport" type="number" min="30" max="3650" value="${S.supportDays}" aria-describedby="psupporth">
+    <p class="muted small" id="psupporth">${t('Åtgärdade och avslagna ärenden tas bort så här många dagar efter den senaste ändringen. Öppna ärenden och ärenden som väntar på granskning tas aldrig bort.')}</p>
     <p class="muted small">${t('Tittarhistoriken gallras enligt inställningen under Tittarstatistik. IP-adresser i historiken tas alltid bort efter 90 dagar. När en användare tas bort försvinner också historiken och namnet i loggen.')}</p>
     <div class="row" style="margin-top:12px"><button class="primary">${t('Spara')}</button></div></form>
   </div>
@@ -404,7 +406,7 @@ views.admin = async (sec) => {
   };
   $('#privform').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/settings', { method: 'PUT', body: { privacyContact: $('#pcontact').value, auditDays: $('#paudit').value } }); toast(t('Sparat')); } catch (er) { toastErr(er); }
+    try { await api('/settings', { method: 'PUT', body: { privacyContact: $('#pcontact').value, auditDays: $('#paudit').value, supportDays: $('#psupport').value } }); toast(t('Sparat')); } catch (er) { toastErr(er); }
   };
   if ($('#sdon')) $('#sdon').onchange = act(async () => { await api('/settings', { method: 'PUT', body: { showDonate: $('#sdon').checked } }); $('#donate').hidden = !$('#sdon').checked; toast(t('Sparat')); });
   $('#upen').onchange = act(async () => { await api('/updates', { method: 'PUT', body: { enabled: $('#upen').checked } }); toast(t('Sparat')); });

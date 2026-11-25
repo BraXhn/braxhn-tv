@@ -357,6 +357,7 @@ Many of these can also be changed in the web UI. Set them in the Unraid template
 | `ALLOW_DOWNGRADE` | 0 | 1 = start even against a database from a newer version (downgrade, at your own risk) |
 | `HISTORY_DAYS` | 365 | How many days viewing history is kept (0 = forever; can also be set under Viewing statistics) |
 | `AUDIT_DAYS` | 180 | How many days the security log is kept (30–3650; can also be set under Administration → Privacy) |
+| `SUPPORT_DAYS` | 180 | How many days fixed and rejected Feedback reports are kept after the last change (30–3650; can also be set under Administration → Privacy) |
 | `PRIVACY_CONTACT` | – | Contact for questions about personal data, shown to users under Privacy (can also be set in Administration) |
 | `WEBHOOK_INTERVAL` | 10 | Seconds between runs of the webhook queue (0 = off) |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (can also be set in the web UI) |

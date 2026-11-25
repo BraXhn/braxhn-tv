@@ -6,13 +6,17 @@
 // Flödet: pending → (administratören) approved | rejected → (teamet) working | needinfo | fixed.
 // needinfo: den som rapporterade (eller en administratör) svarar i ärendet. Svaret från en vanlig användare är
 // pending tills administratören godkänt det – först då syns det i API:t och ärendet går tillbaka till approved.
+// fixed | rejected → (administratören öppnar igen) approved (syns för teamet igen) eller pending (granskas på nytt).
+// Det som väntar på granskning ger administratören en notis (händelsen support i notify.js) – utan text och namn.
+// Avslutade ärenden gallras efter supportDays() i privacy.js.
 //
 // Tabellen support_tickets skapas i db.js. Rutterna: server/routes/support.js. Webben: web/js/feedback.js (knappen),
 // web/js/views/support.js (dialogen och Mina ärenden) och web/js/views/admin-support.js (granskningen).
-import { all, get, run, now } from './db.js';
+import { all, get, run, now, getSetting } from './db.js';
 import { clean } from './util.js';
 import { maskSupport } from './supportpack.js';
 import { VERSION } from './updates.js';
+import { notify, enabled as notifyOn } from './notify.js';
 
 /** Typ av ärende */
 export const KINDS = ['bug', 'idea']; // fel eller förslag/synpunkt
@@ -169,6 +173,7 @@ export function create(user, b, allowed) {
   const t = now();
   const id = Number(run(`INSERT INTO support_tickets(user_id,by_admin,kind,area,title,text,context,status,created,updated,reviewed) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     user.id, admin ? 1 : 0, kind, area, title, text, context, admin ? 'approved' : 'pending', t, t, admin ? t : null).lastInsertRowid);
+  if (!admin) noticeReview();
   return row(id);
 }
 
@@ -184,8 +189,45 @@ export function counts(user) {
   if (user.is_admin) o.review = reviewCount();
   return o;
 }
-export const reviewCount = () => get("SELECT COUNT(*) AS n FROM support_tickets WHERE status='pending'").n
-  + all("SELECT thread FROM support_tickets WHERE status<>'pending' AND thread LIKE '%pending%'").filter(hasPendingReply).length;
+export const reviewCount = () => { const c = reviewCounts(); return c.tickets + c.replies; };
+/** Det som väntar på granskning: nya ärenden och svar från användare */
+export const reviewCounts = () => ({ tickets: get("SELECT COUNT(*) AS n FROM support_tickets WHERE status='pending'").n,
+  replies: all("SELECT thread FROM support_tickets WHERE status<>'pending' AND thread LIKE '%pending%'").filter(hasPendingReply).length });
+
+// ---------- notis till administratören ----------
+// Notistjänsten (ntfy, Pushover, Discord …) ligger oftast utanför servern, så notisen säger bara hur mycket som väntar
+// och var det finns – aldrig ärendets text, rubrik, nummer eller vem som skrev. Högst en notis per NOTICE_GAP: det som
+// kommer in under tiden samlas i en notis när tiden gått (om något fortfarande väntar då).
+export const NOTICE_GAP = 3600; // sekunder
+export const _notice = { last: 0, timer: null }; // exporteras för testerna
+/** Notisens text. url = serverns adress utifrån (public_url) eller tom */
+export function noticeText({ tickets, replies }, url) {
+  const parts = [tickets === 1 && !replies ? 'Ett ärende' : tickets ? `${tickets} ärenden` : '', replies ? `${replies} svar` : ''].filter(Boolean);
+  const where = url ? `Öppna Administration → Support: ${url.replace(/\/+$/, '')}/#/admin/support` : 'Öppna Administration → Support.';
+  return `${parts.join(' och ')} väntar på granskning. Inget skickas till teamet förrän du har godkänt det. ${where}`;
+}
+function sendNotice() {
+  const c = reviewCounts();
+  if (!c.tickets && !c.replies) return;
+  if (!notifyOn('support')) return; // avslaget: tiden räknas inte, nästa ärende ger en notis direkt om den slås på
+  _notice.last = Date.now();
+  notify('support', 'Feedback att granska', noticeText(c, getSetting('public_url', process.env.PUBLIC_URL || '')), { priority: 3 }).catch(() => {});
+}
+/** Något nytt väntar på granskning: notis nu, eller en samlad notis när NOTICE_GAP gått sedan den förra */
+function noticeReview() {
+  if (_notice.timer) return;
+  const wait = _notice.last + NOTICE_GAP * 1000 - Date.now();
+  if (wait <= 0) return sendNotice();
+  _notice.timer = setTimeout(_noticeFlush, wait);
+  _notice.timer.unref?.();
+}
+/** Väntar en samlad notis? (för testerna) */
+export const noticeWaiting = () => !!_notice.timer;
+/** Skicka den samlade notisen nu (timern, och testerna) */
+export function _noticeFlush() {
+  clearTimeout(_notice.timer); _notice.timer = null;
+  try { sendNotice(); } catch (e) { console.warn('[support] notisen:', e.message); }
+}
 
 /** Alla ärenden för administratören: det som väntar på granskning först, sedan öppna, sist avslutade */
 export function adminList() {
@@ -224,6 +266,27 @@ export function reject(id, b = {}) {
   if (note) th.push({ from: 'admin', text: note, ts: now(), local: 1 });
   return save(r, th, { status: 'rejected', reviewed: now() });
 }
+/**
+ * Öppna ett avslutat (åtgärdat eller avslaget) ärende igen, t.ex. när felet kom tillbaka eller avslaget var fel.
+ * to = 'approved' (syns för teamet igen, med note som förklaring) eller 'pending' (granskas på nytt – syns inte för
+ * teamet, och note stannar på servern som anteckningen vid avslag). Användaren ser den nya statusen i Mina ärenden.
+ */
+export const REOPEN_TO = ['approved', 'pending'];
+export function reopen(id, b = {}) {
+  const r = row(id);
+  if (!r) return null;
+  if (!['fixed', 'rejected'].includes(r.status)) throw err(409, 'Bara åtgärdade och avslagna ärenden kan öppnas igen');
+  const to = b.to ?? 'pending';
+  if (!REOPEN_TO.includes(to)) throw err(400, 'to ska vara approved eller pending');
+  const note = limited(b.note, MAX_REPLY, LONG.note);
+  const th = threadOf(r);
+  if (th.length >= MAX_THREAD) throw err(400, 'Ärendet har för många inlägg – skicka ett nytt ärende');
+  th.push({ from: 'admin', text: note, ts: now(), status: 'reopened', ...(to === 'pending' ? { local: 1 } : {}) });
+  return save(r, th, { status: to, version: null, reviewed: to === 'approved' ? now() : null });
+}
+/** Gallring (privacy.js): åtgärdade och avslagna ärenden som inte ändrats på days dagar. Öppna ärenden rörs aldrig. */
+export const pruneClosed = (days, at = now()) =>
+  Number(run("DELETE FROM support_tickets WHERE status IN ('fixed','rejected') AND updated < ?", at - days * 86400).changes);
 export const remove = (id) => { const r = row(id); return !!r && Number(run('DELETE FROM support_tickets WHERE id=?', r.id).changes) > 0; };
 
 /**
@@ -243,7 +306,9 @@ export function reply(r, user, b) {
     const n = mine(user.id).reduce((s, x) => s + threadOf(x).filter(m => m.from === 'user' && m.ts > since).length, 0);
     if (n >= MAX_REPLIES_HOUR) throw err(429, 'Du har skickat många svar den senaste timmen – vänta en stund');
     th.push({ from: 'user', text, ts: now(), pending: 1 });
-    return save(r, th);
+    const saved = save(r, th);
+    noticeReview();
+    return saved;
   }
   th.push({ from: 'admin', text, ts: now() });
   return save(r, th, { status: 'approved' });

@@ -127,7 +127,8 @@ const FROM = () => ({ team: t('Teamet'), admin: t('Administratören'), user: t('
 /** Svaren i ett ärende. who = namn per avsändare (administratörens vy visar "Användaren" i stället för "Du") */
 export function threadHtml(k, who = FROM()) {
   return k.thread.map(m => `<div class="fbmsg${m.from === 'team' ? ' team' : ''}"><div class="muted small"><b>${esc(who[m.from] || m.from)}</b> · ${fmtDate(m.created)}${m.pending ? ` · <span class="warn-badge">${t('Väntar på granskning')}</span>` : ''}</div>
-    ${m.text ? `<p class="fbtxt">${esc(m.text)}</p>` : `<p class="muted small">${esc(STATUS()[m.status]?.[0] || '')}</p>`}</div>`).join('');
+    ${m.status === 'reopened' ? `<p class="muted small">${t('Ärendet öppnades igen')}</p>` : ''}
+    ${m.text ? `<p class="fbtxt">${esc(m.text)}</p>` : m.status === 'reopened' ? '' : `<p class="muted small">${esc(STATUS()[m.status]?.[0] || '')}</p>`}</div>`).join('');
 }
 function ticketHtml(k) {
   const K = KIND(), A = AREA();

@@ -509,6 +509,7 @@ Bra att veta:
 | `ALLOW_DOWNGRADE` | 0 | 1 = starta även mot en databas från en nyare version (nedgradering, på egen risk) |
 | `HISTORY_DAYS` | 365 | Hur många dagar tittarhistoriken sparas (0 = för alltid; kan även sättas under Tittarstatistik) |
 | `AUDIT_DAYS` | 180 | Hur många dagar säkerhetsloggen sparas (30–3650; kan även sättas under Administration → Integritet) |
+| `SUPPORT_DAYS` | 180 | Hur många dagar åtgärdade och avslagna ärenden från Feedback sparas efter senaste ändringen (30–3650; kan även sättas under Administration → Integritet) |
 | `PRIVACY_CONTACT` | – | Kontakt för frågor om personuppgifter som visas för användarna under Integritet (kan även sättas i Administration) |
 | `WEBHOOK_INTERVAL` | 10 | Sekunder mellan genomgångar av webhook-kön (0 = av) |
 | `RADARR_URL` / `RADARR_API_KEY` / `SONARR_URL` / `SONARR_API_KEY` | – | Sonarr/Radarr (kan även sättas i webbgränssnittet) |

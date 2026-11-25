@@ -36,6 +36,7 @@ Allt ligger i databasen i `/config` på servern:
 | Tittarhistorik: vad, när, enhet, kvalitet, IP-adress | Min historik, statistik, föräldraöversikt | 365 dagar (inställbart, 0 = för alltid). **IP-adressen tas bort efter 90 dagar** |
 | Inloggade enheter: enhetstyp, IP-adress, senast aktiv | Visa och logga ut enheter | Tills du loggar ut eller inloggningen går ut |
 | Säkerhetsloggen: inloggningar, misslyckade försök, ändringar, IP-adress | Upptäcka intrång | 180 dagar (inställbart 30–3650) och högst 5000 rader |
+| Feedback och felrapporter: text, typ, område, teknisk information, svar | Rätta fel och ta emot idéer | Öppna ärenden tills kontot eller ärendet tas bort. **Åtgärdade och avslagna tas bort 180 dagar efter senaste ändringen** (inställbart 30–3650) |
 | Kopplingar du själv gör (Trakt, Last.fm, ListenBrainz, musikappar, OPDS, kalender) | Funktionen du slagit på | Tills du kopplar bort eller kontot tas bort |
 | Säkerhetskopior av databasen | Återställning | De senaste 14 (inställbart) |
 
@@ -50,6 +51,9 @@ e-postadresser maskeras. Användaren ser innan vad som bifogas. **Ett ärende l�
 när en administratör har läst och godkänt det** (*Administration → Support*), och då utan användarens namn.
 Administratörens egna ärenden godkänns direkt. Utvecklarna hämtar godkända ärenden med en API-nyckel som
 administratören själv har skapat. Ärendena följer med i *Ladda ner mina uppgifter* och tas bort med kontot.
+Åtgärdade och avslagna ärenden gallras efter 180 dagar (*Administration → Integritet* eller `SUPPORT_DAYS`).
+Administratören kan få en notis när något väntar på granskning; notisen säger bara att det finns något att granska
+och innehåller aldrig ärendets text eller vem som skrev, eftersom notistjänsten oftast ligger utanför servern.
 
 Webbläsaren sparar bara inloggningskakan och lokala val som språk, volym och tillgänglighet. Det finns inga kakor
 eller skript från tredje part för spårning eller reklam.
@@ -131,7 +135,9 @@ people they invite, and BraXhn TV has the tools needed to comply with the GDPR.
   - feedback and bug reports sent with the *Feedback* button stay on the server. The developers can fetch a report
     only after an administrator has read and approved it (*Administration → Support*), without the user's name
     and without IP addresses, using an API key the administrator has created. Users see what is attached before
-    sending. Reports are included in *Download my data* and removed with the account.
+    sending. Reports are included in *Download my data* and removed with the account. Fixed and rejected reports
+    are removed after 180 days (configurable). The administrator's notification about reports waiting for review
+    never contains the report's text or the sender's name.
 - **The person running the server** is the data controller:
   - Sharing only with your family is normally covered by the GDPR's household exemption (Article 2(2)(c)).
   - Inviting friends or others outside the household, or running the server for an association or a company,
@@ -141,6 +147,8 @@ people they invite, and BraXhn TV has the tools needed to comply with the GDPR.
 - **What is stored, and for how long:** see the table above.
   - Watch history: 365 days, configurable. IP addresses in the history are removed after 90 days.
   - Security log: 180 days, configurable from 30 to 3650 days, and at most 5000 rows.
+  - Feedback reports: open ones until the account or report is removed; fixed and rejected ones 180 days after the
+    last change, configurable from 30 to 3650 days.
   - Signed-in devices: until you sign out or the sign-in expires.
   - Backups: the latest 14, configurable.
 - **Your rights:** under *My account → Privacy* you can do the following yourself:
