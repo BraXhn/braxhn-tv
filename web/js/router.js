@@ -98,6 +98,15 @@ function showLogin() {
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
 }
+// Musikkön från förra gången (server/musicqueue.js): minispelaren visar låten pausad. Ljudspelaren laddas bara när
+// det finns en kö, och bara för profilen som var inloggad när svaret kom.
+function restoreQueue() {
+  const uid = me?.id;
+  if (!uid) return;
+  api('/me/queue', { bg: true }).then(q => {
+    if (q?.tracks?.length && me?.id === uid && !curPlayer()) return need('audio.js').then(m => m.restoreQueue(q, uid));
+  }).catch(() => {});
+}
 /** Det som bara görs med serverns svar: mätning, aktivitetsrutan, Spela på… och uppdateringsnotisen */
 function afterLogin(st) {
   // Utanför hemmet: mät uppkopplingen i förväg, så att första filmen startar i rätt kvalitet direkt
@@ -105,6 +114,7 @@ function afterLogin(st) {
   if (me.adminHere) idle(startActivity); else stopActivity();
   // "Spela på…": den här webbläsaren blir en enhet som kan styras och styra. Laddar spelaren – när sidan är ritad.
   idle(startRemote);
+  idle(restoreQueue);
   if (me.adminHere && me.update && !sessionStorageGet('upd' + me.update)) { sessionStorageSet('upd' + me.update); toast(t('Version {update} av BraXhn TV finns – se Administration', { update: me.update })); }
 }
 export async function boot({ fast = false } = {}) {

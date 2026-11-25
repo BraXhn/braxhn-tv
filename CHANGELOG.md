@@ -16,6 +16,21 @@
   - **Datum i UTC i stället för svensk tid:** strax efter midnatt fick inspelningens metadata och exporterade filer
     (Min historik, statistiken, ordlistan, Mina uppgifter) gårdagens datum. Nu gäller serverns lokala tid (`TZ`).
   - Kontospärrens nyckel (kontonamnet) är kortad till 64 tecken och antalet nycklar har ett tak.
+- **Musik: kön och platsen finns kvar när sidan laddas om.** Laddar man om sidan, stänger fliken eller öppnar appen
+  igen visar minispelaren samma låt, samma kö (i samma blandade ordning, med upprepning och låtradio) och samma
+  position, pausad. Ett tryck på *Spela* fortsätter där man var. Kön sparas på servern för varje profil, så den följer
+  också med till nästa dator eller telefon.
+  - Den flik eller enhet man senast använde vinner. En flik som bara visar kön skriver inget, så två flikar skriver inte
+    över varandra.
+  - En annan profils kö visas aldrig: vid byte av profil och utloggning sparas platsen och spelaren stängs. Låtar som
+    tagits bort ur biblioteket, eller som en barnprofil inte får se, hoppas över utan meddelande.
+  - Stänger man spelaren med ✕, eller börjar lyssna på en ljudbok eller podd, tas musikkön bort. Ljudböcker och poddar
+    fortsätter som förut från positionen på servern.
+  - Kön följer med i *Ladda ner mina uppgifter* och tas bort när kontot eller profilen raderas.
+- **Musik: två fel i spelaren rättade.**
+  - *Föregående* direkt efter *Nästa*, medan nästa låt ännu laddades, spolade förra låten till början i stället för
+    att gå tillbaka (spelaren läste förra låtens position).
+  - Spolade man precis när nästa låt just hade börjat (inom en kvarts sekund) kunde två låtar spela samtidigt.
 
 ## 1.3.0 – 2026-11-24
 - **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som

@@ -477,6 +477,20 @@ Bara tillägg (server/gapless.js, server/listening.js) – apparna kan använda 
 - `gl=1` på `/api/music/tracks/:tid/stream`: måste låten kodas om och klienten klarar FLAC (`a=…flac`, ingen `br`) blir det FLAC
   (exakt längd, ingen kodarfördröjning) i stället för MP3/AAC.
 
+## Musikkön: `/api/me/queue`
+
+Kön i webbens minispelare sparas per användare/profil (server/musicqueue.js), så att den överlever omladdning och följer
+med mellan enheter. Apparna kan använda samma adresser.
+
+- `GET /api/me/queue` → `{ tracks, idx, pos, repeat, radio, updated }`. `tracks` är spår som i albumlistorna, i köns
+  ordning (blandat är redan blandat). Spår som tagits bort eller som profilen inte får se är borttagna; saknas spåret på
+  `idx` pekar `idx` på nästa som finns kvar och `pos` är 0. Ingen kö (eller kön var slut): `tracks: []`, `idx: -1`.
+- `PUT /api/me/queue` `{ ids, idx, pos, repeat, radio: { seed: { trackId | albumId | artistId }, name }, uid }`. `ids` = spårens
+  id (heltal > 0), `idx` = platsen i `ids`, `pos` = sekunder. Längre köer än 1000 kortas till ett fönster runt platsen (200
+  före). `uid` är valfritt: skickas det och är någon annan än den inloggade svarar servern 409 (en flik från före ett
+  profilbyte). Tom `ids` tar bort kön. Fel: 400, högst 64 kB.
+- `DELETE /api/me/queue` tar bort kön (webben gör det när spelaren stängs med ✕ och när en bok eller ett avsnitt tar över).
+
 ## Bibliotekets filter: `/api/libraries/:id/items`, `/facets`, `/shuffle`
 
 Utan nya parametrar svarar `/api/libraries/:id/items` exakt som förut (`sort` = `title`/`added`/`year`/`rating`/`date`,

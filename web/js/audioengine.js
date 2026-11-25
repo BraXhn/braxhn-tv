@@ -345,7 +345,9 @@ export function seek(p) {
   const c = E.cur; if (!c) return;
   // Bara början är avkodad än: utanför den tar elementet över från positionen (audio.js)
   if (c.partial && p > c.dec.avail - 1) { E.hooks.underrun?.(c.t, c.i, p); return; }
-  cancelNext();
+  // Nästa låt kan redan ha börjat (vid next.at) utan att tick() hunnit byta till den (var 250:e ms). Spolningen gäller
+  // låten som visas – den nästa stoppas och planeras om, annars spelade båda samtidigt efter bytet
+  cancelNext(true);
   for (const v of E.old) kill(v);
   E.old = [];
   const v = voice(c.t, c.i, c.dec);
@@ -354,10 +356,10 @@ export function seek(p) {
   E.cur = v;
 }
 /** Tar bort en schemalagd nästa låt som inte börjat (kön ändrades, inställningarna ändrades eller spolning). */
-function cancelNext() {
+function cancelNext(started = false) {
   const n = E.next;
   if (!n) return;
-  if (E.ctx && E.ctx.currentTime >= n.at) return; // redan igång – byts i nästa tick
+  if (!started && E.ctx && E.ctx.currentTime >= n.at) return; // redan igång – byts i nästa tick (started: stoppas ändå)
   kill(n); E.next = null;
   if (E.handover) { E.handover = false; E.elFading = false; E.elGain.gain.cancelScheduledValues(0); applyGains(); return; }
   const c = E.cur;

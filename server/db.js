@@ -458,6 +458,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS support_tickets(id INTEGER PRIMARY KEY, user
 CREATE INDEX IF NOT EXISTS support_user ON support_tickets(user_id, created);
 CREATE INDEX IF NOT EXISTS support_status ON support_tickets(status, updated);`);
 
+// Musikkön per användare/profil (server/musicqueue.js): låtarnas id i köns ordning (JSON), platsen, positionen,
+// upprepning och låtradions start (JSON). En rad per användare; följer kontot (export och radering, privacy.js).
+db.exec(`CREATE TABLE IF NOT EXISTS music_queue(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  tracks TEXT NOT NULL, idx INTEGER NOT NULL DEFAULT 0, pos REAL NOT NULL DEFAULT 0, rep INTEGER NOT NULL DEFAULT 0, radio TEXT,
+  updated INTEGER NOT NULL);`);
+
 // Originaltitel från TMDB (sökbar: "Le Fabuleux Destin d'Amélie Poulain" hittar Amélie)
 addCol('items', 'original_title', 'TEXT');
 

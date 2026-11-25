@@ -129,7 +129,6 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
-- Musikkön finns bara i minnet och försvinner när sidan laddas om (`web/js/audio.js`). Spara kön och positionen.
 - Öppen GOP: titlar som måste omkodas i webben minns bara under besöket (`noRemux` i `web/js/player/video.js`).
   Känn igen dem på servern vid nyckelbildsindexeringen, så slipper man 1–2 s vid första spolningen varje gång.
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).

@@ -217,6 +217,58 @@ t('nätavbrott vid låtbyte: spelaren väntar och fortsätter av sig själv när
   await P.close();
 });
 
+t('spolning precis när nästa låt börjat (före bytet i tick): bara låten man spolar i spelar', async () => {
+  const P = await newPage();
+  await P.open(S.Korta);
+  await P.page.click('tr[data-ti="0"]');
+  // Nästa låt startar vid next.at men byts in först i nästa tick (var 250:e ms) – spola i det fönstret
+  const hit = await P.page.evaluate(() => new Promise((ok) => {
+    const E = window.__ae.E, end = Date.now() + 20000;
+    const iv = setInterval(() => {
+      if (Date.now() > end) { clearInterval(iv); ok(null); }
+      if (E.cur && E.next && E.ctx.currentTime >= E.next.at && E.cur.t.id !== E.next.t.id) {
+        clearInterval(iv);
+        const r = { from: E.cur.t.id, idx: window.__au.M.idx, late: E.ctx.currentTime - E.next.at };
+        window.__au.M.audio.currentTime = 0.5;
+        ok(r);
+      }
+    }, 2);
+  }));
+  assert.ok(hit, 'fönstret mellan nästa låts start och bytet hittades inte');
+  await sleep(700);
+  const st = await P.state();
+  const live = await P.page.evaluate(() => { const E = window.__ae.E; return [E.cur, E.next, ...E.old].filter(v => v && !v.done && v.at <= E.ctx.currentTime).map(v => v.t.id); });
+  // Förut: den startade nästa låten fick ligga kvar, tick() bytte till den och den spolade låten fortsatte bland de gamla – två låtar samtidigt
+  assert.equal(st.cur, hit.from, `låten man spolade i spelar (${JSON.stringify(st)}, ${JSON.stringify(hit)})`);
+  assert.equal(st.idx, hit.idx, 'kön står kvar på låten');
+  assert.deepEqual(live, [hit.from], 'bara en låt låter');
+  // Nästa låt planeras om och kommer när den spolade låten tagit slut
+  await P.page.waitForFunction((i) => window.__au.M.idx === i + 1, hit.idx, { timeout: 10000 });
+  assert.deepEqual(P.errors, []);
+  await P.close();
+});
+
+t('Föregående medan nästa låt väntar på sin buffert: byter tillbaka i stället för att spola förra låtens element', async () => {
+  const P = await newPage();
+  await P.net({ latency: 100, downloadThroughput: 0.5e6 / 8, uploadThroughput: 1e6 }); // elementet spelar (för långsamt för motorn)
+  await P.open(S.Stora);
+  await P.page.click('tr[data-ti="0"]');
+  await P.page.waitForFunction(() => { const el = document.querySelector('#maudio'); return !window.__ae.debugState().on && el.currentTime > 3.5; }, null, { timeout: 40000 });
+  await P.page.click('#mnext');
+  await sleep(150);
+  // Nästa låt väntar (upp till GRACE) på motorn; elementet står pausat kvar på förra låtens position (> 3 s)
+  assert.equal(await P.page.evaluate(() => window.__au.M.idx), 1);
+  await P.page.click('#mprev');
+  await sleep(300);
+  // Förut lästes elementets gamla position: > 3 s → "spola till början" av en låt som inte längre spelade, och kön stod kvar på låt 2
+  assert.equal(await P.page.evaluate(() => window.__au.M.idx), 0, 'Föregående gick tillbaka till första låten');
+  await P.page.waitForFunction(() => { const el = document.querySelector('#maudio'); return window.__ae.debugState().on || (!!el.getAttribute('src') && !el.paused); }, null, { timeout: 30000 });
+  const ids = await P.page.evaluate(() => ({ cur: window.__au.M.cur.id, first: window.__au.M.queue[0].id }));
+  assert.equal(ids.cur, ids.first);
+  assert.deepEqual(P.errors, []);
+  await P.close();
+});
+
 t('samplingsfrekvens: ljudsammanhanget får låtens takt – 48 kHz-album utan fel i skarven', async () => {
   const P = await newPage();
   await P.open(S.Takt48);

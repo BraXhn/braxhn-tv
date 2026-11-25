@@ -1,7 +1,7 @@
 // Ljudspelaren (följer med mellan sidor): musik, ljudböcker och poddar, mediesession, lyssningsinställningar och jämn ljudnivå.
 // Musik spelas glapplöst/med övertoning av Web Audio-motorn (audioengine.js) när det går, annars av <audio id="maudio">.
 // M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
-import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, mediaKey, routeGen, status, store, toast, t } from './core.js';
+import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, me, mediaKey, routeGen, status, store, toast, t } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
 import { audioCaps } from './player/caps.js';
 import { castAudio, castReady } from './player/cast.js';
@@ -20,15 +20,17 @@ import * as self from './audio.js';
 provide('audio', self); // fasaderna i lazy.js når modulen härifrån
 
 // ---------- musikspelare (följer med mellan sidor) ----------
-export const M = { queue: [], idx: -1, cur: null, audio: null, el: null, repeat: false, seekSeq: 0, loadSeq: 0 };
-// Fasaden M.audio: motorn när den spelar en buffert, annars elementet
+// resume: kön är återställd efter omladdning men inte startad ({ pos }) – Spela startar låten där.
+// starting: en ny låt väntar på sin buffert (positionen den ska börja på); elementet har kvar förra låtens position då.
+export const M = { queue: [], idx: -1, cur: null, audio: null, el: null, repeat: false, seekSeq: 0, loadSeq: 0, resume: null, starting: null };
+// Fasaden M.audio: motorn när den spelar en buffert, annars elementet (och den återställda kön innan den startats)
 const FACADE = {
-  get paused() { return AE.on() ? AE.paused() : M.el.paused; },
-  play() { return AE.on() ? AE.resume() : M.el.play(); },
-  pause() { if (AE.on()) AE.pause(); else M.el.pause(); },
-  get currentTime() { return AE.on() ? AE.pos() : M.el.currentTime; },
-  set currentTime(t) { if (AE.on()) AE.seek(t); else M.el.currentTime = t; },
-  get duration() { return AE.on() ? AE.dur() : M.el.duration; },
+  get paused() { return M.resume ? true : AE.on() ? AE.paused() : M.el.paused; },
+  play() { return M.resume ? resumeQueue() : AE.on() ? AE.resume() : M.el.play(); },
+  pause() { if (M.resume) return; if (AE.on()) AE.pause(); else M.el.pause(); },
+  get currentTime() { return M.resume ? M.resume.pos : AE.on() ? AE.pos() : M.el.currentTime; },
+  set currentTime(t) { if (M.resume) seekTo(t); else if (AE.on()) AE.seek(t); else M.el.currentTime = t; },
+  get duration() { return M.resume ? M.cur?.duration || 0 : AE.on() ? AE.dur() : M.el.duration; },
   get muted() { return M.el.muted; },
   set muted(v) { M.el.muted = !!v; applyVolume(); },
   get volume() { return +store.get('mvol', 1); },
@@ -40,7 +42,8 @@ const FACADE = {
 export function stopAudio() {
   if (!M.audio) return;
   if (M.spoken) spokenSave();
-  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.loadSeq++; M.radio = null;
+  queueStop(); // platsen sparas (byte av profil, utloggning) – sedan skrivs inget mer från den här kön
+  M.spoken = null; M.cur = null; M.queue = []; M.idx = -1; M.sfile = null; M.seekSeq++; M.loadSeq++; M.radio = null; M.resume = null; M.starting = null;
   setSleep(0); showLyrics(false); clearWait();
   AE.stop(); AE.only(null); AE.E.elT = null;
   stopVideo(M.el);
@@ -61,6 +64,7 @@ function timeUI() {
   const a = M.audio, t = a.currentTime + (M.offset || 0);
   $('#mcurt').textContent = fmtTime(t); $('#mbar').dataset.t = t.toFixed(1);
   const d = M.cur?.duration || a.duration; if (d) { $('#mfill').style.width = Math.min(100, t / d * 100) + '%'; $('#mdur').textContent = fmtTime(d); }
+  if (!a.paused && Date.now() - Q.saved > QUEUE_EVERY) saveQueue();
 }
 // Motorns krokar: nästa låt i kön, byte till den, slut, förlopp, spelar/pausad och att elementet ska tystna
 const HOOKS = {
@@ -68,7 +72,7 @@ const HOOKS = {
   advance: (t, i) => showTrack(t, i),
   ended: () => nextTrack(true),
   time: () => timeUI(),
-  state: (playing) => setPlaying(playing),
+  state: (playing) => { setPlaying(playing); queueTouch(); },
   stopElement: () => stopVideo(M.el),
   underrun: (t, i, pos) => elementTakeover(t, pos)
 };
@@ -94,20 +98,20 @@ function ensureBar() {
   a.ontimeupdate = () => { if (!AE.on()) timeUI(); };
   a.onended = () => { if (M.spoken) return spokenEnded(); if (AE.on() || AE.elementEnded()) return; nextTrack(true); };
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
-  a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) setPlaying(true); };
-  a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); };
+  a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) { setPlaying(true); queueTouch(); } };
+  a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); else queueTouch(); };
   a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; if (M.spoken || !M.cur?.id) return toast(t('Kunde inte spela låten'), { error: true }); elementFailed(); };
   $('#mplay').onclick = () => M.audio.paused ? M.audio.play() : M.audio.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
-  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (M.audio.currentTime + (M.offset || 0) > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
-  $('#mrep').onclick = () => { M.repeat = !M.repeat; $('#mrep').classList.toggle('on', M.repeat); $('#mrep').setAttribute('aria-pressed', String(M.repeat)); };
+  $('#mprev').onclick = () => { if (M.spoken) return spokenSeek(spokenPos() - LPREFS.skipBack); if (curPos() > 3) seekTo(0); else if (M.idx > 0) loadTrack(M.idx - 1); };
+  $('#mrep').onclick = () => { M.repeat = !M.repeat; setRepeatState(); queueTouch(); };
   $('#mset').onclick = (e) => soundMenu(e.currentTarget);
   $('#mvol').oninput = (e) => { store.set('mvol', +e.target.value); applyVolume(); };
   $('#msleep').onclick = sleepDialog;
   $('#mlyr').onclick = toggleLyrics;
   $('#mradio').onclick = act(() => M.cur?.id ? startRadio({ trackId: M.cur.id }, M.cur.title) : null);
   $('#mtrack').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(), d = M.spoken?.duration || M.cur?.duration || M.audio.duration; if (d) seekTo((e.clientX - r.left) / r.width * d); };
-  $('#mx').onclick = stopAudio;
+  $('#mx').onclick = () => { queueForget(); stopAudio(); }; // stängd spelare = ingen kö att fortsätta med
   $('#mq').onclick = showQueue;
   $('#mcast').onclick = castAudio;
   if (!P && !LP && !RP) musicSession();
@@ -123,8 +127,8 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'MediaStop') stopAudio();
   else if (k === 'MediaTrackNext') click('#mnext');
   else if (k === 'MediaTrackPrevious') click('#mprev');
-  else if (k === 'MediaFastForward') M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : seekTo(a.currentTime + (M.offset || 0) + 30);
-  else if (k === 'MediaRewind') M.spoken ? spokenSeek(spokenPos() - LPREFS.skipBack) : seekTo(Math.max(0, a.currentTime + (M.offset || 0) - 10));
+  else if (k === 'MediaFastForward') M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : seekTo(curPos() + 30);
+  else if (k === 'MediaRewind') M.spoken ? spokenSeek(spokenPos() - LPREFS.skipBack) : seekTo(Math.max(0, curPos() - 10));
   else return;
   e.preventDefault();
 });
@@ -162,7 +166,9 @@ export function playSpoken(s) {
   loadListenPrefs();
   closeAllPlayers();
   if (M.spoken) spokenSave();
-  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++;
+  if (M.queue.length) queueForget(); // boken/avsnittet ersätter musikkön (som förut) – den sparade kön ska inte komma tillbaka
+  queueStop();
+  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++; M.resume = null; M.starting = null;
   clearWait();
   AE.stop(); AE.only(null); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet (musikens jämna ljudnivå gäller inte)
   if (LPREFS.speechLevel) ensureEngine(); // jämn ljudnivå för tal går genom Web Audio (i användarens klick)
@@ -221,6 +227,8 @@ function spokenEnded() {
 window.addEventListener('pagehide', () => { if (M.spoken) spokenSave(); });
 export function seekTo(t) {
   if (M.spoken) return spokenSeek(t);
+  queueTouch();
+  if (M.resume) { M.resume.pos = Math.max(0, Math.min(t, (M.cur?.duration || 1e9) - 1)); return timeUI(); }
   if (AE.on()) return AE.seek(t);
   const a = M.el;
   // Omkodade strömmar saknar Range – starta om på rätt position
@@ -238,12 +246,14 @@ export function playQueue(tracks, i, opts = {}) {
   closeAllPlayers();
   ensureEngine(tracks[i]); // i användarens klick – annars får ljudsammanhanget inte starta
   loadListenPrefs();
-  M.queue = tracks; loadTrack(i);
+  M.queue = tracks; Q.owner = me?.id || 0; loadTrack(i);
 }
 /** Startar låt i i kön: som buffert (glapplöst/övertoning) om den hinner avkodas inom GRACE, annars i elementet. */
-async function loadTrack(i) {
+async function loadTrack(i, pos = 0) {
   const t = M.queue[i]; if (!t) return;
   const seq = ++M.loadSeq, el = M.el;
+  M.resume = null;
+  M.starting = pos; // tills låten börjar: elementet har kvar förra låtens position (Föregående och spolning läser den)
   showTrack(t, i);
   M.offset = 0; M.transcoded = false; M.want = 0; // inte föregående spårs (eller bokens) värden
   clearWait();
@@ -260,12 +270,15 @@ async function loadTrack(i) {
     if (!dec && seq === M.loadSeq && AE.hopeful(t)) dec = await Promise.race([AE.first(t), new Promise(r => {
       const end = Date.now() + 2 * AE.GRACE, iv = setInterval(() => { if (Date.now() > end || seq !== M.loadSeq || !AE.hopeful(t)) { clearInterval(iv); r(null); } }, 150); })]);
     if (seq !== M.loadSeq) return; // en annan låt hann starta
-    if (dec) { stopVideo(el); AE.play(t, i, dec); return; }
+    // Fortsätter efter omladdning: räcker inte början av låten till positionen tar elementet den (spolar dit)
+    if (dec && !(dec.partial && pos > dec.avail - 1)) { M.starting = null; stopVideo(el); AE.play(t, i, dec, pos); return; }
     AE.drop(t.id); // elementet hämtar låten själv – två hämtningar samtidigt halverar farten på långsamt nät
   }
+  if (pos > 0) return elementTakeover(t, pos);
   // Elementet: nästa låt kan ändå bli en buffert (motorn tar över vid övergången)
   AE.E.elT = t; AE.E.paused = false; AE.applyGains();
   M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  M.starting = null;
   el.src = M.url;
   el.play().catch(() => {});
   fetch(M.url, { method: 'HEAD' }).then(r => { if (M.cur === t) M.transcoded = r.headers.get('x-transcoded') === '1'; }).catch(() => {});
@@ -282,6 +295,7 @@ async function elementTakeover(t, pos) {
   AE.drop(t.id); // elementet hämtar själv – motorns hämtning av samma låt avbryts
   AE.E.elT = t; AE.E.paused = false; AE.applyGains();
   M.transcoded = tc;
+  M.starting = null;
   M.want = pos; // dit elementet ska – används om nätet försvinner innan det hunnit dit
   // Omkodade strömmar saknar Range – de startas på rätt position; filer spolas när de laddats
   if (tc) { M.offset = pos; el.src = M.url + '&ss=' + pos; }
@@ -321,7 +335,7 @@ async function elementFailed() {
 }
 window.addEventListener('online', () => M.wait?.again());
 /** Visar låten i spelaren och gör det som hör till en ny låt (text, mediesession, låtradio, "spelad"). */
-function showTrack(t, i) {
+function showTrack(t, i, restored = false) {
   M.idx = i; M.cur = t;
   const bar = $('#mbar');
   bar.hidden = false; document.body.classList.add('hasbar');
@@ -333,8 +347,10 @@ function showTrack(t, i) {
   $$('tr[data-ti]').forEach(r => r.classList.toggle('playing', r.dataset.tid === String(t.id)));
   if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist || '', album: t.album || '',
     artwork: t.cover ? [{ src: `/api/music/cover/${t.albumId}`, sizes: '600x600', type: 'image/jpeg' }] : [] });
+  if (restored) return; // återställd kö: inget spelas förrän man trycker Spela
   if (M.radio && M.queue.length - i <= 3) extendRadio();
   fetch(`/api/music/tracks/${t.id}/played`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+  queueTouch();
 }
 // ---------- låtradio (oändlig kö från ljudanalysen, server/sonic.js) ----------
 const setRadioState = () => { const b = $('#mradio'); if (!b) return; b.classList.toggle('on', !!M.radio); b.setAttribute('aria-pressed', String(!!M.radio)); };
@@ -356,6 +372,7 @@ async function extendRadio() {
     if (M.radio !== R) return; // annan kö har startats under tiden
     const have = new Set(M.queue.map(t => t.id));
     M.queue = [...M.queue, ...r.trackList.filter(t => !have.has(t.id))];
+    queueTouch();
   } catch {} finally { R.loading = false; }
 }
 function nextTrack(auto) {
@@ -364,6 +381,68 @@ function nextTrack(auto) {
   if (M.idx + 1 < M.queue.length) loadTrack(M.idx + 1);
   else if (M.repeat) loadTrack(0);
   else if (auto) { M.audio.pause(); }
+}
+// ---------- kön sparas på servern (server/musicqueue.js) ----------
+// Efter omladdning, i en ny flik eller på en annan enhet visar minispelaren samma låt, kö (blandad ordning, upprepning,
+// låtradio) och position, pausad. Bara den som använder spelaren skriver: en flik som bara visar en återställd kö
+// skriver inget, så den senast använda vinner och flikar skriver inte över varandra i en evig slinga. owner = profilen
+// kön hör till – efter byte av profil eller utloggning skrivs inget mer (servern nekar också en annan profils uid).
+const QUEUE_EVERY = 15000, QUEUE_MAX = 1000;
+const Q = { owner: 0, dirty: false, timer: 0, saved: 0 };
+/** Positionen i låten som spelas (eller ska spelas) – inte elementets gamla position medan en ny låt laddas */
+const curPos = () => M.resume ? M.resume.pos : M.starting != null ? M.starting : M.audio ? M.audio.currentTime + (M.offset || 0) : 0;
+const setRepeatState = () => { const b = $('#mrep'); if (!b) return; b.classList.toggle('on', M.repeat); b.setAttribute('aria-pressed', String(M.repeat)); };
+function saveQueue(final = false) {
+  clearTimeout(Q.timer); Q.timer = 0;
+  if (M.spoken || !M.cur?.id || !M.queue.length || !Q.owner || Q.owner !== me?.id) return;
+  Q.dirty = false; Q.saved = Date.now();
+  let ids = M.queue.map(x => x.id), idx = M.idx;
+  if (ids.length > QUEUE_MAX) { const from = Math.max(0, Math.min(idx - 200, ids.length - QUEUE_MAX)); ids = ids.slice(from, from + QUEUE_MAX); idx -= from; }
+  const body = { uid: Q.owner, ids, idx, pos: Math.round(curPos() * 10) / 10, repeat: M.repeat, radio: M.radio ? { seed: M.radio.seed, name: M.radio.name } : null };
+  fetch('/api/me/queue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: final }).catch(() => {});
+}
+/** Kön eller platsen ändrades av den som använder spelaren: sparas strax (flera ändringar i rad blir en skrivning) */
+function queueTouch() {
+  if (M.spoken || !Q.owner) return;
+  Q.dirty = true; clearTimeout(Q.timer); Q.timer = setTimeout(saveQueue, 1000);
+}
+/** Spelaren stängs eller byter till tal: det osparade sparas, sedan skrivs inget mer från den här kön */
+function queueStop() {
+  if (Q.owner && !M.spoken && (Q.dirty || (M.audio && !M.audio.paused))) saveQueue(true);
+  clearTimeout(Q.timer); Q.owner = 0; Q.dirty = false;
+}
+/** Kön ska inte komma tillbaka (spelaren stängdes, en bok eller ett avsnitt tog över) */
+function queueForget() {
+  if (Q.owner && Q.owner === me?.id) fetch('/api/me/queue', { method: 'DELETE', keepalive: true }).catch(() => {});
+  clearTimeout(Q.timer); Q.owner = 0; Q.dirty = false;
+}
+const queueLeave = () => { if (Q.owner && !M.spoken && M.audio && (Q.dirty || !M.audio.paused)) saveQueue(true); };
+window.addEventListener('pagehide', queueLeave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') queueLeave(); });
+/**
+ * Visar den sparade kön pausad (router.js anropar med serverns svar när sidan startat). Inget händer om något redan
+ * spelas eller om en annan profil hunnit logga in. Låtar som inte finns eller som profilen inte får se har servern tagit bort.
+ */
+export function restoreQueue(q, uid) {
+  if (M.cur || M.spoken || P || LP || RP || !q?.tracks?.length || !me || me.id !== uid) return false;
+  const i = Math.max(0, Math.min(q.idx | 0, q.tracks.length - 1));
+  ensureBar(); setBarMode(false);
+  M.queue = q.tracks; M.repeat = !!q.repeat; setRepeatState();
+  M.radio = q.radio?.seed ? { seed: q.radio.seed, name: q.radio.name || '', loading: false } : null; setRadioState();
+  M.resume = { pos: Math.max(0, +q.pos || 0) };
+  Q.owner = uid; Q.dirty = false; Q.saved = Date.now();
+  showTrack(M.queue[i], i, true);
+  setPlaying(false); timeUI();
+  return true;
+}
+/** Spela på den återställda kön: låten startar där man var (i användarens klick – ljudsammanhanget får starta då) */
+function resumeQueue() {
+  const r = M.resume; if (!r) return Promise.resolve();
+  closeAllPlayers();
+  ensureEngine(M.cur);
+  loadListenPrefs();
+  loadTrack(M.idx, r.pos);
+  return Promise.resolve();
 }
 function showQueue() {
   const h = openDialog({ title: M.radio ? t('Kö – låtradio{v}', { v: M.radio.name ? ': ' + M.radio.name : '' }) : t('Kö'), closeOnRoute: false, body: `<div class="scrollbox tall">${trackRows(M.queue, { showCover: true })}</div>` });

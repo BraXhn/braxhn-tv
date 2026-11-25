@@ -12,6 +12,7 @@ import * as ratings from '../ratings.js';
 import * as sonic from '../sonic.js';
 import * as mmeta from '../musicmeta.js';
 import * as mvideo from '../musicvideos.js';
+import * as mqueue from '../musicqueue.js';
 import { serveRemux } from '../trailers.js';
 import { sized } from '../imgsize.js';
 import { route, user, img, audio, admin, pub } from '../http/router.js';
@@ -267,6 +268,13 @@ route('PUT', '/api/me/listening', user, async (c) => {
 // ---------- Ljudanalys: liknande låtar/artister, låtradio, ljudresa (server/sonic.js) ----------
 // Musik har ingen åldersgräns och inga bibliotek per användare – samma regler som resten av musik-API:t.
 const ids = (v, max = 1000) => (Array.isArray(v) ? v : []).slice(-max).map(Number).filter(n => Number.isInteger(n) && n > 0);
+// Musikkön (webbens minispelare): sparas på servern så att den överlever omladdning och följer med mellan enheter
+route('GET', '/api/me/queue', user, (c) => send(c.res, 200, mqueue.load(c.user.id)));
+route('PUT', '/api/me/queue', user, async (c) => {
+  const e = mqueue.save(c.user.id, await readJson(c.req, 64 * 1024));
+  e ? fail(c.res, e.status, e.error) : send(c.res, 200, { ok: true });
+});
+route('DELETE', '/api/me/queue', user, (c) => { mqueue.clear(c.user.id); send(c.res, 200, { ok: true }); });
 route('GET', '/api/music/tracks/:tid/similar', user, (c) => {
   const t = trackRow(c); if (!t) return;
   const limit = Math.max(1, Math.min(100, parseInt(c.q.get('limit')) || 30));
