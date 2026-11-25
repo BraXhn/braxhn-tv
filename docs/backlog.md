@@ -174,7 +174,7 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
-- 2026-11-25 (gren `team/expo-2026-11-25`): Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
+- 2026-11-25: Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
 - 2026-11-25: Småfel – tak för medietoken, vitlista för biblioteksvar (inga sökvägar till andra än administratörer),
