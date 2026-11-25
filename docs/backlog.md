@@ -128,16 +128,39 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
+**Från arbetspasset 2026-11-25 (sett men inte gjort)**
+- Öppen GOP: skicka `mse=1` bara när webbläsaren avkodar i mjukvara (`mediaCapabilities.decodingInfo().powerEfficient`
+  i `web/js/player/video.js`), så att Chrome med grafikkortsavkodning slipper omkodningen.
+- Öppen GOP: efter ett byte till omkodning gäller `forceTc` resten av spelarsessionen, så ett senare val av *Original*
+  kodas också om (`web/js/player/video.js`).
+- Öppen GOP: åtta prov per fil missar ungefär var tionde fil med många felande nyckelbilder; ett ffmpeg-anrop med
+  flera `-ss` skulle halvera provets kostnad (`server/opengop.js`). Chromecast (också MSE) är inte provad med öppen GOP.
+- Kvalitetsetiketterna går inte via `t()` (*1,5 Mbit/s* med decimalkomma även på engelska; `QUALITY_STEPS` i
+  `web/js/player/hlsconfig.js`).
+- Musik: Subsonic-appar kunde dela kön med webben via `savePlayQueue`/`getPlayQueue` (`server/subsonic.js`,
+  `server/musicqueue.js`).
+- Musik: en bok eller podd återställs inte i minispelaren efter omladdning (`playSpoken` i `web/js/audio.js`).
+- Musik: `M.offset` och `M.transcoded` nollställs inte när motorn tar över efter ett omkodat element som spolats
+  (`HOOKS.advance` i `web/js/audio.js`) – tiden och Föregående blir fel för nästa låt.
+- Musik: spolning i elementet efter att nästa buffert startat tappas tyst (`web/js/audio.js`).
+- Musikfältets knappar är 34 px på telefon, under 44 px som rekommenderas för fingrar (`.mic` i `web/style.css`).
+- Expo-appen använder inte den sparade musikkön (`/api/me/queue`), och sparar bildtoken bara i minnet så att varje
+  appstart skapar en ny (`ensureImageToken` i `apps/expo/src/api.ts`).
+- Medietoken skapas vid varje uppspelningsanrop utan tak per användare (`server/routes/playback.js`, `routes/books.js`).
+- Datum i UTC: audit-texten för inbjudan och diagnostikfilens namn (`server/routes/admin.js`, `server/diagnostics.js`),
+  och fotots dag i Minnen (`dayOf` i `server/photos.js`, om det inte är avsiktligt).
+- `/api/libraries` skickar alla kolumner (`l.*`) till andra än administratörer; en vitlista vore säkrare
+  (`server/routes/library.js`).
+- Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
+  AirPlay) och inte genom startcachen (`server/pace.js`).
+- Webbtester som delar konto kan få en synlig minispelare från förra testets musikkö; en gemensam hjälpare som tömmer
+  kön vore säkrare.
+
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
-- Öppen GOP: titlar som måste omkodas i webben minns bara under besöket (`noRemux` i `web/js/player/video.js`).
-  Känn igen dem på servern vid nyckelbildsindexeringen, så slipper man 1–2 s vid första spolningen varje gång.
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
 - Feedback: notis till administratören när ett ärende väntar; öppna ett avslutat ärende igen; gallra gamla ärenden;
   Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
-- Musikfältets knappar är emoji och klipps på 390 px bredd (`web/js/audio.js`, `#mbar`).
-- Kvalitetsmenyn erbjuder 1080p och 720p för en källa med lägre upplösning (`web/js/player/video.js`).
-- Chromecast och fjärrstyrningen får fortfarande undertexternas råa namn (*sv (fil)*); ljudspår visas med språkkod.
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
 - M4A med `moov` sist kan inte snabbstartas (1,6 s på 20 Mbit/s); servern kan skicka `moov` först.
@@ -181,6 +204,12 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25 (i `:edge`): Femte granskningen av servern – sökvägar bara för administratörer, takt på originalfilen för
+  profiler med skärmtid, tak för bildtoken, reläets spärr först, lokalt datum i inspelningar och exporter.
+- 2026-11-25: Musikkön och platsen sparas per profil på servern och finns kvar efter omladdning; Föregående och
+  spolning vid låtbyte rättade; musikfältet med ikoner som ryms på telefon.
+- 2026-11-25: Öppen GOP känns igen på servern (remux från början, omkodning vid Fortsätt titta och spolning);
+  kvalitetsmenyn efter källans upplösning; spårens namn efter språket i spelaren, Chromecast och fjärrstyrningen.
 - 2026-11-24 (efter 1.2.2, i `:edge`): Feedback och felrapporter i appen med granskning under Administration → Support.
 - 2026-11-24: Öppen GOP i webben – Fortsätt titta och spolning fastnar inte längre på avkodningsfel.
 - 2026-11-24: Fjärde granskningen av servern (skärmtid räknas från strömmen, skanningens status, sortering).
