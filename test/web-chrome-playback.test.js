@@ -306,7 +306,11 @@ test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren hete
   assert.deepEqual(r.cast.tracks, [sub], 'Chromecasts undertextspår');
   // Titelsidan: ljudet med språkets namn
   await p.goto(`${srv.base}/#/item/${lang.id}`);
-  await p.waitForSelector(`text=${sv} · ac3`, { timeout: 60000 }); // titelsidan kan vara långsam när hela sviten körs
+  // Titelsidan kan vara långsam när hela sviten körs. Faller det: visa vad sidan visade, så att orsaken syns i loggen
+  try { await p.waitForSelector(`text=${sv} · ac3`, { timeout: 60000 }); } catch (e) {
+    const d = await p.evaluate(() => ({ hash: location.hash, player: document.querySelector('#player') ? getComputedStyle(document.querySelector('#player')).display : null, main: (document.querySelector('main')?.innerText || '').slice(0, 600) })).catch(() => null);
+    e.message += '\nSidan: ' + JSON.stringify(d); throw e;
+  }
   assert.doesNotMatch(await p.textContent('main'), /\bswe\b/);
   await close();
 });
