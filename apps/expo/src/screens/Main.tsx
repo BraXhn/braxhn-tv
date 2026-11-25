@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { C, R } from '../theme';
-import { api, ensureImageToken, servers, session, type HomeResponse, type Library, type MediaItem, type UserInfo } from '../api';
+import { api, ensureImageToken, servers, session, viaHome, type HomeResponse, type Library, type MediaItem, type UserInfo } from '../api';
 import { profileColor } from './Profiles';
 import { Button, Card, Empty, ErrorState, Loading, Shelf } from '../components/ui';
 import type { Props, Tab } from '../nav';
@@ -154,7 +154,7 @@ function Account({ user, onLogout, onSwitch, onProfiles, onAdd }: { user: UserIn
     <ScrollView contentContainerStyle={{ padding: 14, gap: 14 }}>
       <View style={st.panel}>
         <Text style={st.h2}>Mitt konto – {user?.name || ''}</Text>
-        <Text style={st.dim2}>Server: {session.server}{version ? `\nBraXhn TV ${version}` : ''}</Text>
+        <Text style={st.dim2}>Server: {session.saved || session.server}{viaHome() ? `\nHemma: direkt via ${session.server}` : ''}{version ? `\nBraXhn TV ${version}` : ''}</Text>
         {user?.kid ? <Text style={st.dim2}>Det här är en barnprofil: du ser bara det som profilen får se.</Text> : null}
         <Text style={st.dim2}>Lösenord, tvåstegsverifiering, profiler och övriga inställningar ändrar du i webbgränssnittet.</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>

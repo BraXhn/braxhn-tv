@@ -215,7 +215,7 @@ export async function handle(req, res) {
     // CSRF: ändrande anrop med kaka måste komma från samma origin. Inloggning och första kontot
     // utan kaka nekas också från annan origin (skyddar mot inloggnings-CSRF).
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && c.user?.via === 'cookie' && !sameOrigin(req)) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
-    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login|invite\/[^/]+|sso\/link\/[^/]+)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
+    if (!c.user && !['GET', 'HEAD'].includes(req.method) && !sameOrigin(req) && r.method === 'POST' && /\/api\/(login|setup|passkey\/login|invite\/[^/]+|sso\/link\/[^/]+|local\/redeem)$/.test(url.pathname) && req.headers.origin) return fail(res, 403, 'Förfrågan från annan webbplats nekades');
     // Fel med e.status är avsedda för användaren; övriga loggas och ger "Internt fel"
     try { return await r.fn(c); }
     catch (e) {

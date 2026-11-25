@@ -24,21 +24,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Näst på tur
 
-### 1. Hemma via den publika adressen: gå direkt till servern
-
-- **Vad:** när någon är hemma men öppnar servern via den publika adressen (t.ex. tv.braxhn.net) går all trafik ut
-  på internet och tillbaka – via reläet eller routern – och servern räknar dem som *utanför hemmet* (lägre kvalitet,
-  takt på ljudböcker, hastighetsprov). Ägaren upplevde det i supportärende #2. Låt webben och apparna upptäcka
-  att servern nås på hemnätet (t.ex. att servern i sitt svar anger sina lokala adresser och klienten provar dem
-  med en snabb förfrågan) och då gå direkt dit, eller åtminstone behandlas som hemma.
-- **Varför:** snabbast möjliga start och full kvalitet hemma, oavsett vilken adress familjen har sparat. Plex gör
-  så (lokal upptäckt av servern).
-- **Filer:** `server/relay.js`, `server/http/router.js` (`isTrusted`), `/api/status`, `web/js/core.js`/`router.js`,
-  apparnas serverval (`apps/expo/src/api.ts`, `apps/apple`, `apps/automotive`).
-- **Klart när:** en klient hemma som använder den publika adressen spelar med hemmets kvalitet och utan reläets
-  omväg, utan att säkerheten försvagas (ingen ska kunna utge sig för att vara hemma utifrån), med test.
-
-### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -49,7 +35,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först, och Anton har bekräftat på en riktig iPhone (se *Bara Anton kan göra*).
 
-### 3. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
+### 2. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
 
 - **Vad:** `POST /api/setup/hw-test` finns och används i installationsguiden. Gör resultatet synligt även under
   Administration, med uppmätt hastighet (bildrutor per sekund) för H.264 och HEVC och med ffmpegs felrad när det inte
@@ -62,7 +48,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
   har kört provet med NVENC (se *Bara Anton kan göra*).
 
-### 4. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
+### 3. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
 
 - **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
   bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
@@ -75,7 +61,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
   hörlurarna byter låt.
 
-### 5. Expo-appen: nedladdning för offline
+### 4. Expo-appen: nedladdning för offline
 
 - **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
   ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
@@ -83,7 +69,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 6. Skärmtid i Safari och apparna: paus och tiden kvar
+### 5. Skärmtid i Safari och apparna: paus och tiden kvar
 
 - **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
   (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
@@ -91,6 +77,19 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Varför:** webben visar nu tiden kvar och paus räknas inte där; i apparna stoppas barnet fortfarande utan förvarning.
 - **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
 - **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
+
+### 6. Hemma via den publika adressen i iOS/tvOS- och Android-appen
+
+- **Vad:** samma som Expo-appen gör (`apps/expo/src/localpick.ts`, `goHomeIfHere` i `api.ts`, docs/api.md *Hemma via
+  den publika adressen*): hämta `/api/local` från den sparade adressen, prova `addrs` med `/api/local/ping?n=` (800 ms,
+  ingen inloggning), använd hemadressen när `id` och `proof` stämmer, och gå tillbaka till den sparade vid nätverksfel.
+- **Varför:** servern och Expo-appen är klara (se *Klart*), men Google TV-appen och Apple TV-appen står oftast hemma och
+  är just de som sparats med reläets adress.
+- **Filer:** `apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt` (`server`), `apps/apple/Shared/AppModel.swift`
+  (`server`). Android byggs i GitHub Actions, Apple bara med Xcode – kontrollera först att klartext-http till en privat
+  adress är tillåten (Androids `network_security_config`, Apples ATS `NSAllowsLocalNetworking`).
+- **Klart när:** en Google TV hemma med reläets adress spelar med `remote: false` i `/api/status`, och tillbaka via reläet
+  när hemadressen inte svarar.
 
 ## Idéer
 
@@ -171,6 +170,12 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25: Hemma via den publika adressen (förut punkt 1, ärende #2), gren `team/hemma-2026-11-25`. Servern ger
+  inloggade sina hemadresser och ett prov som bara besvaras på hemnätet (`/api/local*`, `server/localaddr.js`); Expo-appen
+  går direkt till hemadressen när den svarar rätt, webben har *Mitt konto → Snabbare hemma* (byte till hemadressen med
+  engångskod). `isTrusted` är oförändrad – samma publika IP räknas med flit inte som hemma (CGNAT, gästnät, VPN).
+  `test/local-home.test.js`. Inte provat: riktigt hemnät med relä, riktig telefon, https-sida → http-hemadress i Chrome
+  med *Alltid säkra anslutningar*. Kvar: iOS/tvOS och Android (punkt 6).
 - 2026-11-25: Öppen GOP – spolning inom bufferten utan avkodningsfel i Chrome. Orsaken: Chrome avkodar om från
   nyckelbilden före målet, och bilderna som hänvisar till GOP:en innan var bara borttagna i segment hämtade med `ra=`.
   Spelaren tömmer nu bufferten från segmentet innan webbläsaren spolar (`guardSeeks` i `video.js`), och filer som måste
@@ -230,6 +235,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - **Gör paketet publikt** (containerimagen på GitHub).
 - **Slå på Private vulnerability reporting** i repots inställningar på GitHub.
 - **Prova Expo-appen i Expo Go** på en riktig iPhone och Android-telefon (`apps/expo/README.md`).
+- **Prova Snabbare hemma** hemma med reläets adress: *Mitt konto → Öppna hemadressen* i webben, och Expo-appen (Konto
+  visar *Hemma: direkt via …*). Står det ingen hemadress: öppna servern en gång på dess IP-adress eller ange den under
+  *Administration → Hemadressen*.
 - **Prova återupptagning på iPhone** (Safari, version 1.2.2): börja på en film, stäng, öppna igen – fortsätter den på
   rätt ställe direkt?
 - **Prova hack i Chrome på version 1.2.2** med de filer som frös förut.

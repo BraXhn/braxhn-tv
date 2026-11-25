@@ -304,6 +304,30 @@ Ungefär som Plex fjärråtkomst, men med ett relä som du kör själv: BraXhn T
 - **Säkerhet:** allt som kommer via reläet räknas alltid som **utanför hemmet** (betrott nät och hemnätets administration går aldrig att nå den vägen). Parningskoden (16 tecken, 15 minuter, en gång) och den delade hemligheten skickas aldrig över nätet; tunneln öppnas först när båda sidor bevisat hemligheten (HMAC åt båda hållen). Inloggningsspärren gäller per verklig klient-IP. Reläet ser trafiken okrypterad (som varje omvänd proxy) – kör det på en server du litar på.
 - **Bandbredd:** all video går två gånger genom reläservern (in från hemmet, ut till tittaren).
 
+### Hemma men via den publika adressen
+
+Har du sparat den publika adressen (reläet eller din domän) går trafiken ut på internet och tillbaka även när du är
+hemma, och servern räknar dig som utanför hemmet (lägre startkvalitet, takt på ljudböcker). Så här går du direkt till
+servern i stället:
+
+- **Expo-appen** gör det själv: den frågar servern efter dess adress på hemnätet och provar den (högst 0,8 s). Svarar
+  den rätt går strömmar, bilder och anrop direkt dit – hemmets kvalitet, ingen omväg. Utanför hemmet används den sparade
+  adressen som vanligt. iOS/tvOS- och Android-appen gör det inte än: spara hemmets IP-adress som en egen server där.
+- **Webben** kan inte göra det automatiskt (en https-sida får inte hämta från en http-adress i hemnätet). Under
+  **Mitt konto → Snabbare hemma** finns i stället knappen *Öppna hemadressen*, som byter till serverns adress på hemnätet
+  och loggar in dig där med en engångskod. Spara gärna den adressen som bokmärke hemma.
+- **Vad du behöver göra:** inget i routern. Servern lär sig sin hemadress när en administratör öppnar den på IP-adressen
+  hemma (t.ex. `http://192.168.1.10:8420`), eller så anger du den under **Administration → Hemadressen** (eller
+  `LOCAL_URL`). I Docker med bridge ser servern inte sin egen adress – öppna den en gång på IP-adressen eller ange den.
+- **Säkerhet:** ingen räknas som hemma av det här; hemma avgörs fortfarande av vilket nät förfrågan kommer från.
+  Apparna använder hemadressen bara när den svarat rätt på ett prov som servern bara besvarar på hemnätet, så en
+  annan maskin med samma adress på ett annat nät får aldrig din inloggning. Att räkna samma publika IP-adress som hemma
+  görs inte med flit (många hushåll kan dela samma adress hos operatören). Hemadressen är oftast `http://`, så på
+  hemnätet går trafiken okrypterad – som när du anger serverns IP-adress hemma.
+- **Alternativ för webben:** lokal DNS i routern (t.ex. `tv.dindomän.se` → serverns IP hemma) tillsammans med ett eget
+  certifikat på servern för samma namn. Det kräver att certifikatet finns på servern (inte bara på reläet) – kontrollera
+  först med din uppsättning.
+
 ## Appar och andra klienter
 
 - **Webben:** fungerar i alla moderna webbläsare och kan installeras som app (se nedan). På TV-webbläsare (Google TV, Fire TV, LG, Samsung) styrs hela appen med pilar, OK och Bakåt.
@@ -476,6 +500,8 @@ Bra att veta:
 | `X265_PRESET` / `SVTAV1_PRESET` | veryfast / 10 | Hastighet för processorns HEVC- och AV1-kodare (4K: superfast / 12) |
 | `GPU_TONEMAP` | 1 | 0 = tonmappa aldrig med libplacebo/OpenCL på grafikkortet (felsökning) |
 | `PUBLIC_URL` | – | Publik adress, t.ex. https://tv.dindomän.se |
+| `LOCAL_URL` | – | Serverns adress på hemnätet, t.ex. http://192.168.1.10:8420 (kommaseparerad lista). Apparna går direkt dit hemma; se *Hemma men via den publika adressen* |
+| `LOCAL_DETECT` | 1 | `0` = föreslå inte nätverkskortens adresser som hemadress (görs aldrig i Docker) |
 | `REMOTE_QUALITY` | 1080 | Maxkvalitet utanför hemmet |
 | `TRUST_PROXY` | auto | 1 = lita alltid på X-Forwarded-For, 0 = aldrig |
 | `HSTS` | 1 | 0 = skicka inte HSTS-header via HTTPS |

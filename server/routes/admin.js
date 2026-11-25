@@ -36,6 +36,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { configuredDonateUrl, donateShown } from '../project.js';
 import * as privacy from '../privacy.js';
+import * as localaddr from '../localaddr.js';
 
 // Integritetskontroll: vid start och högst var 10:e minut (läser alla programfiler)
 let integCache = null, integAt = 0;
@@ -178,6 +179,8 @@ route('GET', '/api/settings', admin, (c) => {
     subAuto: getSetting('sub_auto', '0') === '1', subAutoLangs: getSetting('sub_auto_langs', getSetting('sub_langs', 'sv,en')), subAutoHash: getSetting('sub_auto_hash', '1') === '1',
     subAutoMax: +getSetting('sub_auto_max', '10'), subAutoStats: autoSubs,
     remoteQuality: getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080'), publicUrl: getSetting('public_url', process.env.PUBLIC_URL || ''),
+    // Hemma via den publika adressen (server/localaddr.js): egen hemadress och de adresser klienterna provar
+    localUrl: getSetting('local_url', process.env.LOCAL_URL || ''), localAddrs: localaddr.addresses(),
     youAreLocal: isLocalReq(c.req), https: isHttps(c.req), tlsBuiltin: !!globalThis.__braxhnTls,
     adminAnywhere: adminAnywhere(), curateAnywhere: curateAnywhere(), curateRequire2fa: curate2fa(), require2faRemote: require2faRemote(), quickConnect: quickConnectOn(), subsonic: subsonic.enabled(), trustedNetworks: getSetting('trusted_networks', ''), trustVpnRange: trustVpn(),
     clientIp: clientIp(c.req), peerIp: peerIp(c.req),
@@ -210,6 +213,11 @@ route('PUT', '/api/settings', admin, async (c) => {
     const u = b.publicUrl.trim().replace(/\/+$/, '');
     if (u && !/^https?:\/\/[^\s/]+$/i.test(u)) return fail(c.res, 400, 'Publik adress ska vara t.ex. https://tv.dindomän.se');
     setSetting('public_url', u);
+  }
+  if (typeof b.localUrl === 'string') {
+    const list = b.localUrl.split(',').map(x => x.trim().replace(/\/+$/, '')).filter(Boolean);
+    if (list.length > localaddr.MAX_ADDRS || list.some(x => !localaddr.normOrigin(x))) return fail(c.res, 400, 'Hemadressen ska vara t.ex. http://192.168.1.10:8420');
+    setSetting('local_url', list.map(localaddr.normOrigin).join(','));
   }
   if (b.resetMarkers) run("UPDATE items SET markers_done=0 WHERE kind='episode'");
   if (b.adminAnywhere != null) {

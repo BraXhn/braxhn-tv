@@ -6,7 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { C } from './src/theme';
-import { api, currentServer, listProfiles, loadServers, rememberProfile, selectServer, servers, setProfile, setUnauthorizedHandler, signOut, type Server, type UserInfo } from './src/api';
+import { api, currentServer, listProfiles, loadServers, rememberProfile, selectServer, servers, setProfile, setUnauthorizedHandler, signOut, goHomeIfHere, type Server, type UserInfo } from './src/api';
 import type { Stack as StackParams } from './src/nav';
 import Login from './src/screens/Login';
 import Servers from './src/screens/Servers';
@@ -38,6 +38,9 @@ export default function App() {
     try {
       const s = await api<{ user: UserInfo | null }>('/api/status');
       if (!s.user) { await signOut(); setAgain(currentServer()); setState('add'); return; }
+      // Hemma via den publika adressen: provas i bakgrunden (startsidan väntar inte) – svarar hemadressen går allt
+      // efter det direkt dit, strömmar och bilder också
+      goHomeIfHere().catch(() => {});
       await setProfile(s.user.id); rememberProfile(s.user.name);
       // Profilens färg (till rutan uppe till höger) står bara i profillistan
       if ((s.user.profiles || 0) > 1) await listProfiles().then((l) => { s.user!.color = l.profiles.find((p) => p.id === s.user!.id)?.color; }).catch(() => {});

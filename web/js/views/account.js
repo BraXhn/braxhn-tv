@@ -1,6 +1,6 @@
 // Vy: Mitt konto – lösenord, uppspelningsval, tvåstegsverifiering, passkeys, profiler, Trakt, scrobbling, enheter, följda serier och nedladdning i appen
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
-import { $, $$, act, api, esc, fmtDate, later, main, me, toast, views, toastErr, t, lang, setLang } from '../core.js';
+import { $, $$, act, api, esc, fmtDate, later, main, me, status, toast, views, toastErr, t, lang, setLang } from '../core.js';
 import { renderListenPrefs } from '../audio.js';
 import { renderThemePrefs } from '../ui/thememusic.js';
 import { passkeyOk, passkeyRegister } from '../passkeys.js';
@@ -74,6 +74,7 @@ views.account = async () => {
     <p class="muted small" style="margin:6px 0 0">${t('Minst 10 tecken med tre olika teckentyper, eller en lösenfras på minst 14 tecken. Andra enheter loggas ut och lösenord för musikappar återkallas.')}</p>
     <div class="row" style="margin-top:12px"><button class="primary">${t('Byt lösenord')}</button></div></form>
   </div>
+  <div class="panel" id="homeaddr" hidden></div>
   <div class="panel"><h2>${t('Logga in på TV med kod')}</h2>
     <p class="muted small">${t('Slipp skriva lösenord med fjärrkontrollen: välj <b>Logga in med kod</b> på TV:n eller i TV-appen och godkänn koden här. TV:n loggas in på den profil du använder nu.')}</p>
     <div class="row"><a class="btn primary" href="#/quickconnect">${t('Godkänn inloggning på TV')}</a></div></div>
@@ -154,6 +155,7 @@ views.account = async () => {
   };
   $$('[data-rev]').forEach(b => b.onclick = act(async () => { await api('/me/sessions/' + b.dataset.rev, { method: 'DELETE' }); route(); }));
   renderListenPrefs($('#listenprefs')).catch(e => { if (!e?.aborted) $('#listenprefs').hidden = true; });
+  if (status.remote) renderHomeAddr($('#homeaddr')).catch(() => {});
   renderScrobble($('#scrobble')).catch(e => { if (!e?.aborted && $('#scrobble')) $('#scrobble').hidden = true; });
   renderSubsonic($('#subsonic')).catch(e => { if (!e?.aborted && $('#subsonic')) $('#subsonic').hidden = true; });
   renderOpds($('#opds')).catch(e => { if (!e?.aborted && $('#opds')) $('#opds').hidden = true; });
@@ -254,6 +256,22 @@ views.account = async () => {
 // ---------- scrobbling av musik (ListenBrainz och Last.fm) ----------
 // Enkel inloggning (server/routes/sso.js): koppla kontot till en leverantör (OIDC) eller ta bort kopplingen.
 // Kopplingen görs i leverantörens inloggning med den här webbläsarens kaka – ingen annan kan koppla ditt konto.
+// Snabbare hemma (server/localaddr.js): webben kan inte prova serverns hemadress från en https-sida (blandat innehåll),
+// så den visas här och hela sidan byts dit med en engångskod (#/login/home/<kod> i views/login.js). Bara utanför hemmet.
+async function renderHomeAddr(el) {
+  const L = await api('/local');
+  if (!el.isConnected || L.here || !L.addrs?.length) return;
+  el.innerHTML = `<h2>${t('Snabbare hemma')}</h2>
+    <p class="muted small">${t('Du använder BraXhn TV via {host}, som räknas som utanför hemmet. Är du hemma? Öppna servern direkt på hemnätet – filmer och ljudböcker startar snabbare och spelas med full kvalitet.', { host: `<b>${esc(location.host)}</b>` })}</p>
+    <p class="muted small">${t('Hemadressen: {addr}. Spara den gärna som bokmärke. Säger webbläsaren att sidan inte går att nå är enheten inte på hemnätet – gå då tillbaka.', { addr: `<code>${esc(L.addrs[0])}</code>` })}</p>
+    <div class="row"><button type="button" class="primary" id="homego">${t('Öppna hemadressen')}</button></div>`;
+  el.hidden = false;
+  $('#homego', el).onclick = act(async () => {
+    const r = await api('/local/handoff', { method: 'POST' });
+    location.href = `${r.addrs[0]}/#/login/home/${r.code}`;
+  });
+}
+
 async function renderSsoLinks(el) {
   const d = await api('/me/sso');
   if (!d.providers.length || d.profile) return;

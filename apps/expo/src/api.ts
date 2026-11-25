@@ -1,7 +1,8 @@
 // Anrop till BraXhn TV-servern: adress, inloggning (token i enhetens säkra lagring), fel på begriplig svenska
 // och adresser till bilder. Samma API som iOS- och Android-apparna (test/contracts/apps.json i repot).
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { isLocalUrl, pickLocal, type LocalInfo } from './localpick';
 
 export class ApiError extends Error {
   status: number; data: any;
@@ -21,8 +22,10 @@ const store = {
   },
 };
 
-// userId = profilen som är inloggad (från /api/status eller profilbytet); bildtoken sparas per profil
-export const session = { server: '', token: '', userId: 0, imgToken: '', imgUntil: 0 };
+// userId = profilen som är inloggad (från /api/status eller profilbytet); bildtoken sparas per profil.
+// saved = adressen i serverlistan; server = adressen som används just nu: den sparade, eller serverns adress på
+// hemnätet när appen är hemma (goHomeIfHere nedan)
+export const session = { server: '', saved: '', token: '', userId: 0, imgToken: '', imgUntil: 0 };
 
 /** Adressen som användaren skrev → fullständig adress. Domännamn får https, IP-adresser och namn i hemnätet http och port 8420. */
 export function normalizeServer(input: string): string {
@@ -60,7 +63,7 @@ export async function selectServer(id: string): Promise<boolean> {
   const sv = servers.find((x) => x.id === id);
   if (!sv) return false;
   currentId = id;
-  session.server = sv.url; session.token = (await store.get(tokenKey(id))) || '';
+  session.server = sv.url; session.saved = sv.url; session.token = (await store.get(tokenKey(id))) || '';
   session.userId = 0; session.imgToken = ''; session.imgUntil = 0;
   return !!session.token;
 }
@@ -81,7 +84,7 @@ export async function removeServer(id: string) {
   await saveList();
   await store.set(tokenKey(id), null);
   await store.set(imgKey(id), null);
-  if (currentId === id) { currentId = ''; session.server = ''; session.token = ''; session.userId = 0; session.imgToken = ''; session.imgUntil = 0; }
+  if (currentId === id) { currentId = ''; session.server = ''; session.saved = ''; session.token = ''; session.userId = 0; session.imgToken = ''; session.imgUntil = 0; }
 }
 /** Sparar profilens namn i serverlistan (visas under servern i Välj server) */
 export async function rememberProfile(name: string) {
@@ -142,7 +145,11 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   const timer = setTimeout(() => ctl.abort(), opts.timeout ?? 20000);
   let res: Response;
   try { res = await fetch(base + path, { method: opts.method || 'GET', headers, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined, signal: ctl.signal }); }
-  catch (e) { throw netError(e); }
+  catch (e) {
+    // Hemadressen svarar inte längre (t.ex. utanför hemmet nu): tillbaka till den sparade adressen och ett nytt försök
+    if (opts.server === undefined && base === session.server && session.saved && base !== session.saved) { session.server = session.saved; return api<T>(path, opts); }
+    throw netError(e);
+  }
   finally { clearTimeout(timer); }
   let data: any = null;
   const text = await res.text();
@@ -290,3 +297,37 @@ export function warmPlay(id: number, start = 0) {
   warmed.set(key, Date.now());
   api(`/api/items/${id}/playback?${playbackQuery({ start, warm: true })}`).catch(() => {});
 }
+
+// ---------- hemma via den publika adressen ----------
+// Servern ger sina adresser på hemnätet (/api/local). Svarar en av dem rätt på provet inom 800 ms (localpick.ts)
+// används den för allt – API, strömmar och bilder – så att uppspelningen går direkt i hemnätet med hemmets kvalitet
+// i stället för via reläet eller routern. Den sparade adressen ändras inte; svarar hemadressen inte längre går api()
+// tillbaka till den. Provet görs när servern öppnas och när appen kommer tillbaka till förgrunden.
+async function getJson(url: string, timeoutMs: number): Promise<any> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctl.signal });
+    if (!res.ok) throw new Error(String(res.status));
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+let localGen = 0, localAt = 0;
+/** Byter till serverns hemadress när appen är hemma, annars tillbaka till den sparade. true = hemadressen används. */
+export async function goHomeIfHere(): Promise<boolean> {
+  const saved = session.saved, token = session.token, gen = ++localGen;
+  localAt = Date.now();
+  if (!saved || !token || isLocalUrl(saved)) return false;
+  let info: LocalInfo | null = null;
+  try { info = await api<LocalInfo>('/api/local', { server: saved, timeout: 5000 }); } catch { return session.server !== saved; }
+  const hit = await pickLocal(info, getJson);
+  // Servern, profilen eller ett nyare prov kom emellan: låt det gälla
+  if (gen !== localGen || saved !== session.saved || token !== session.token) return session.server !== session.saved;
+  session.server = hit || saved;
+  return !!hit;
+}
+/** Används appen via hemadressen just nu? (visas under Konto) */
+export const viaHome = () => !!session.server && !!session.saved && session.server !== session.saved;
+AppState.addEventListener('change', (st) => {
+  if (st === 'active' && session.token && Date.now() - localAt > 30000) goHomeIfHere().catch(() => {});
+});

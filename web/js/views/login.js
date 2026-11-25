@@ -32,6 +32,7 @@ views.login = async (arg, arg2) => {
   // Tillbaka från enkel inloggning: inloggad (kakan är satt) – vidare som efter en vanlig inloggning
   if (arg === 'done' && me) { location.hash = me.profiles > 1 ? '#/profiles' : pageAfterLogin(); return; }
   if (arg === 'link' && /^[a-f0-9]{64}$/.test(arg2 || '')) return linkView(arg2);
+  if (arg === 'home' && /^[a-f0-9]{64}$/.test(arg2 || '')) return homeLogin(arg2);
   const [st, sso] = await Promise.all([api('/status'), api('/sso/providers').catch(() => ({ providers: [], ldap: [], localLogin: 'all' }))]);
   const setup = st.needsSetup;
   const ssoErr = arg === 'sso' ? (SSO_ERR[arg2] || SSO_ERR.state)() : '';
@@ -88,6 +89,22 @@ views.login = async (arg, arg2) => {
     } catch (e) { $('#e').textContent = e.message; }
   };
 };
+
+// ---------- Hemadressen (#/login/home/<kod>) ----------
+// Mitt konto → Snabbare hemma skickar hit från den publika adressen med en engångskod (server/routes/local.js). Koden
+// gäller bara på hemnätet, en gång och i två minuter; den står i fragmentet (skickas inte till servern i adressen) och
+// byts ut i historiken direkt.
+async function homeLogin(code) {
+  if (!me) {
+    try {
+      const r = await fetch('/api/local/redeem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ? t(d.error) : t('Fel {status}', { status: r.status }));
+      await boot();
+    } catch (e) { toast(e.message, { error: true }); location.replace('#/login'); return; }
+  }
+  location.replace(me.profiles > 1 ? '#/profiles' : '#/');
+}
 
 // ---------- Enkel inloggning: koppla till ett befintligt konto (#/login/link/<biljett>) ----------
 // Servern skapar biljetten när användaren hos leverantören har samma namn eller e-post som ett konto här som inte är

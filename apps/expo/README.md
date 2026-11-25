@@ -30,6 +30,10 @@ I appen väljer du **Lägg till server** och anger serverns adress, till exempel
 - Under **Konto** finns *Lägg till server* och, när du har flera, *Byt server*. I listan tar du bort en server med
   papperskorgen.
 - *Logga ut* tar bort inloggningen men behåller servern i listan. Nästa gång frågar appen bara efter lösenordet.
+- **Hemma via den publika adressen:** har du sparat reläets eller domänens adress provar appen serverns adress på
+  hemnätet (`/api/local`, högst 0,8 s) när servern öppnas och när appen kommer tillbaka till förgrunden. Svarar den rätt
+  går allt direkt dit, med hemmets kvalitet – under **Konto** står då *Hemma: direkt via …*. Svarar den inte längre går
+  appen tillbaka till den sparade adressen. Den sparade adressen ändras aldrig.
 
 ## Profiler
 

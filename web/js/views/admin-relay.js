@@ -51,3 +51,22 @@ export async function adminRelay() {
   // Statusen uppdateras medan avsnittet visas
   if (R.paired) later(again, R.connected ? 15000 : 4000);
 }
+
+// Hemma via den publika adressen (server/localaddr.js): adresserna som apparna provar och webbens knapp i Mitt konto
+// öppnar. Servern hittar den själv när en administratör öppnat servern direkt på IP-adressen hemma; i Docker med
+// bridge ser servern inte sin egen adress, så den kan anges här.
+export function adminLocal(S) {
+  const el = $('#adm-local'); if (!el) return;
+  const list = (S.localAddrs || []).map(a => `<code>${esc(a)}</code>`).join(', ');
+  el.innerHTML = `<h2>${t('Hemadressen')}</h2>
+    <p class="muted small">${t('Hemma men via den publika adressen? Apparna provar serverns adress på hemnätet och går direkt dit när den svarar (snabbare start, full kvalitet, ingen omväg via reläet). I webben finns knappen <i>Öppna hemadressen</i> under Mitt konto. Ingen räknas som hemma av det här – det avgörs som förut av vilket nät förfrågan kommer från.')}</p>
+    <p class="small">${list ? t('Klienterna provar: {v}', { v: list }) : t('Servern känner inte till någon adress på hemnätet än. Öppna servern en gång på dess IP-adress hemma (t.ex. http://192.168.1.10:8420) eller ange den här.')}</p>
+    <form id="lcform"><label for="lcurl">${t('Hemadress (valfri)')}</label><input id="lcurl" placeholder="http://192.168.1.10:8420" value="${esc(S.localUrl || '')}" autocomplete="off" spellcheck="false">
+      <div class="row" style="margin-top:12px"><button class="ghost">${t('Spara')}</button></div></form>`;
+  $('#lcform', el).onsubmit = act(async (e) => {
+    e.preventDefault();
+    await api('/settings', { method: 'PUT', body: { localUrl: $('#lcurl', el).value.trim() } });
+    toast(t('Sparat'));
+    adminLocal(await api('/settings'));
+  });
+}

@@ -850,6 +850,36 @@ Reläets egna adresser (`relay/server.js`): `GET /_relay/health`, `GET /_relay/a
 `PUT /_relay/api/servers/:id` `{ hosts: [] }`, `DELETE /_relay/api/servers/:id`. Fel token ger **401**; efter 10 fel
 från samma IP-adress ger alla anrop **429** – även med rätt token – tills spärren släppt (en ny chans var 3:e sekund).
 
+## Hemma via den publika adressen: `/api/local*`
+
+En app som är sparad med den publika adressen (reläet, en domän via routern) kan gå direkt till servern när den är
+hemma. Inget av detta gör någon till "hemma": det avgörs som förut av vilket nät varje förfrågan kommer från
+(`isTrusted`/`isLocalReq`). Vinsten kommer av att appen sedan talar med hemadressen, så att förfrågningarna kommer
+från hemnätet.
+
+- `GET /api/local` (inloggad: webb eller app, inte media-/bildtoken) → `{ id, here, addrs, n, proof, ttl }`. `addrs` =
+  serverns adresser på hemnätet (bara origin, högst fyra: administratörens `LOCAL_URL`/Hemadress, adressen en
+  administratör senast öppnade servern på direkt i hemnätet, och utanför Docker nätverkskortens privata IPv4-adresser med
+  `PORT`). `here` = förfrågan kommer redan från hemnätet (prova inget). `n`/`proof` = ett nytt prov som gäller `ttl`
+  sekunder (120). `Cache-Control: no-store`.
+- `GET <hemadress>/api/local/ping?n=<n>` (utan inloggning) → `{ id, proof }`, **bara när förfrågan kommer från hemnätet**.
+  Utifrån och via reläet: 404 (som en okänd adress). Gammalt eller ogiltigt `n`: 400. Appen använder hemadressen bara när
+  `id` och `proof` är exakt desamma som i `/api/local` – en annan maskin med samma IP på ett annat nät kan inte svara
+  rätt, så appen skickar ingen inloggning dit. Skicka **ingen** `Authorization` till pingen.
+- `POST /api/local/handoff` (bara webbens kaka) → `{ code, addrs, ttl }`: en engångskod. Webben öppnar
+  `<addrs[0]>/#/login/home/<code>`. 404 när servern inte känner någon hemadress.
+- `POST /api/local/redeem` `{ code }` (utan inloggning, på hemadressen) → `{ ok }` + `Set-Cookie` med en vanlig
+  webbinloggning för samma profil ("håll mig inloggad" som sessionen som skapade koden). Bara från hemnätet (annars 403), en
+  gång, inom två minuter (annars 400), och inte från en annan webbplats (`Origin`, som `/api/login`).
+- Administration: `GET /api/settings` har `localUrl` och `localAddrs`; `PUT /api/settings` `{ localUrl }` (kommaseparerade
+  origins, tomt = inget) – 400 för annat än `http(s)://värd[:port]`.
+
+**Expo-appen** (`apps/expo/src/localpick.ts` + `goHomeIfHere` i `api.ts`): när servern öppnats och när appen kommer
+tillbaka till förgrunden hämtas `/api/local` från den sparade adressen, alla `addrs` provas samtidigt med 800 ms
+tidsgräns, och den första som svarar rätt används för allt (API, strömmar, bilder). Den sparade adressen ändras inte; ett
+nätverksfel mot hemadressen går tillbaka till den sparade och gör om anropet. Sparade adresser i hemnätet (privat IP,
+`.local`, namn utan punkt) provas inte. **iOS/tvOS och Android** gör inte detta ännu (se backlog.md).
+
 ## Kontraktstestet
 
 `test/contracts/apps.json` beskriver för varje endpoint vad varje app skickar och vilka fält den avkodar, med

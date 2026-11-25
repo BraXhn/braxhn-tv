@@ -1,6 +1,16 @@
 # Ändringar
 
 ## Ej utgiven
+- **Hemma men via den publika adressen: direkt till servern.** Den som sparat den publika adressen (reläet eller en
+  domän) gick hemma ändå ut på internet och tillbaka och räknades som utanför hemmet – lägre startkvalitet, takt på
+  ljudböcker och långsamma boksidor via reläet (ärende #2). Nu talar servern om sin adress på hemnätet för inloggade.
+  **Expo-appen** provar den (högst 0,8 s) och går direkt dit när den svarar rätt – strömmar, bilder och anrop, med
+  hemmets kvalitet – och tillbaka till den sparade adressen utanför hemmet. **Webben** kan inte prova en hemadress från
+  en https-sida, så *Mitt konto → Snabbare hemma* har knappen *Öppna hemadressen*, som byter till hemadressen och
+  loggar in med en engångskod. Servern lär sig adressen när en administratör öppnar den på IP-adressen hemma, eller
+  så anges den under *Administration → Hemadressen* (`LOCAL_URL`). Ingen räknas som hemma av det här: apparna använder
+  hemadressen bara efter ett prov som servern bara besvarar på hemnätet, så en annan maskin med samma adress på ett
+  annat nät får aldrig inloggningen. iOS/tvOS- och Android-appen gör det inte än.
 - **Sidorna laddar fort via reläet även när något spelas.** Reläets tunnel är en enda anslutning, och allt
   hemservern skickat låg i en och samma kö: med en film, en ljudbok eller hastighetsprovet i gång låg upp till 4 MB
   före varje sida, omslag och knapp – 2–6 sekunder på 10 Mbit/s uppladdning. Nu håller hemservern själv kön i

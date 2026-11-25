@@ -18,6 +18,7 @@ import { kidsHaveChannels } from '../iptv/channels.js';
 import { vodAllowed } from '../iptv/vod.js';
 import * as family from '../familyfilter.js';
 import * as sso from '../sso.js';
+import * as localaddr from '../localaddr.js';
 import { route, pub, isTrusted, adminAnywhere, user, has2fa, curateHere, curateAnywhere } from '../http/router.js';
 import { ctx, householdRoot, canManage, setupPending, canDownload } from '../http/context.js';
 
@@ -29,7 +30,9 @@ route('GET', '/api/health', pub, (c) => {
 // API-version för apparna (docs/api.md): höjs bara om något som installerade appar läser måste ändras.
 // Inom samma version får fält bara läggas till – test/api-contract.test.js kontrollerar det apparna avkodar.
 const API_VERSION = 1;
-route('GET', '/api/status', pub, (c) => send(c.res, 200, {
+// Adressen en administratör öppnar servern på direkt i hemnätet (Hemma via den publika adressen, server/localaddr.js)
+const learnLocal = (c) => { if (c.user?.is_admin) localaddr.learn(c.req, c.user); };
+route('GET', '/api/status', pub, (c) => { learnLocal(c); send(c.res, 200, {
   api: API_VERSION,
   // Avslöja inte för utomstående att servern är nyinstallerad
   needsSetup: isTrusted(c.req) && !get('SELECT 1 FROM users LIMIT 1'), version: VERSION, name: 'BraXhn TV',
@@ -61,7 +64,7 @@ route('GET', '/api/status', pub, (c) => send(c.res, 200, {
     streaming: c.user.max_age == null && hasTmdb(), screenTime: screen.inLang(screen.status(c.user.id), reqLang(c.req)),
     liveTv: c.user.max_age == null ? !!get('SELECT 1 FROM channels c JOIN tuners t ON t.id=c.tuner_id WHERE t.enabled=1 AND c.hidden=0 LIMIT 1') : kidsHaveChannels(c.user),
     iptvVod: !!get("SELECT 1 FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id WHERE t.enabled=1 LIMIT 1") && vodAllowed(c.user) } : null
-}));
+}); });
 // Webbklientens språk för profilen (Mitt konto → Språk). Sidan (index.html) väljs efter det, se pageLang i http/router.js.
 route('PUT', '/api/me/lang', user, async (c) => {
   const { lang } = await readJson(c.req);

@@ -192,6 +192,19 @@ Three ways, which can be combined:
 
 > **Avoid Cloudflare Tunnel for video** – Cloudflare's terms restrict video streaming through their network.
 
+**At home but using the public address:** if you've saved the public address (the relay or your domain), traffic goes
+out to the internet and back even at home, and the server counts you as away (lower start quality, paced audiobooks).
+The **Expo app** handles this itself: it asks the server for its home-network address, tries it (at most 0.8 s) and, if
+it answers correctly, sends streams, images and API calls straight there. The **web app** can't do it automatically (an
+https page may not fetch from an http address on the home network), so **My account → Faster at home** has an *Open the
+home address* button that switches to the server's home address and signs you in there with a one-time code. The iOS/tvOS
+and Android apps don't do this yet – save the home IP address as a separate server there. Nothing is needed in the router:
+the server learns its home address when an administrator opens it on its IP address at home, or you enter it under
+**Administration → Home address** (or `LOCAL_URL`); in Docker with bridge networking the server can't see its own
+address. This doesn't make anyone count as at home – that's still decided by the network each request comes from, and
+the apps only use the home address after it has answered a check that the server only answers on the home network.
+Treating the same public IP as "home" is deliberately not done (many households can share one address at the ISP).
+
 ## Apps and other clients
 
 - **Web app:** every modern browser; install it as an app from the browser menu (Android/desktop) or *Share → Add to Home Screen* (iPhone/iPad). Full installation and offline start need HTTPS. On TV browsers (Google TV, Fire TV, LG, Samsung) the whole app works with arrows, OK and Back.
@@ -325,6 +338,8 @@ Many of these can also be changed in the web UI. Set them in the Unraid template
 | `X265_PRESET` / `SVTAV1_PRESET` | veryfast / 10 | Speed of the CPU's HEVC and AV1 encoders (4K: superfast / 12) |
 | `GPU_TONEMAP` | 1 | 0 = never tone map with libplacebo/OpenCL on the GPU (troubleshooting) |
 | `PUBLIC_URL` | – | Public address, e.g. https://tv.yourdomain.com |
+| `LOCAL_URL` | – | The server's address on the home network, e.g. http://192.168.1.10:8420 (comma-separated list). The apps go straight there at home; see *At home but using the public address* |
+| `LOCAL_DETECT` | 1 | `0` = don't offer the network interfaces' addresses as home address (never done in Docker) |
 | `REMOTE_QUALITY` | 1080 | Max quality away from home |
 | `TRUST_PROXY` | auto | 1 = always trust X-Forwarded-For, 0 = never |
 | `HSTS` | 1 | 0 = don't send the HSTS header over HTTPS |

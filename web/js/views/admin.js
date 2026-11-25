@@ -5,7 +5,7 @@ import { boot, loadLibs, route } from '../router.js';
 import { QUALITY_STEPS, qualityLabel } from '../player/hlsconfig.js';
 import { EVENTS } from './account.js';
 import { adminOps } from './admin-ops.js';
-import { adminRelay } from './admin-relay.js';
+import { adminLocal, adminRelay } from './admin-relay.js';
 import { adminApiKeys } from './admin-apikeys.js';
 import { adminSupport } from './admin-support.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
@@ -300,6 +300,7 @@ views.admin = async (sec) => {
     <pre id="aclog" class="small muted" style="white-space:pre-wrap;margin-top:10px;${AC.log.length ? '' : 'display:none'}">${esc(AC.log.join('\n'))}</pre>
   </div>
   <div class="panel" id="adm-relay">${loadingState()}</div>
+  <div class="panel" id="adm-local"></div>
   <div class="panel" id="adm-support">${loadingState()}</div>
   <div class="panel" id="adm-apikeys">${loadingState()}</div>
   <div id="opsp"></div>
@@ -509,6 +510,7 @@ views.admin = async (sec) => {
   poll();
   adminOps().catch(e => { toastErr(e); });
   adminRelay().catch(e => { const r = $('#adm-relay'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
+  adminLocal(S);
   adminSupport().catch(e => { const r = $('#adm-support'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   adminApiKeys().catch(e => { const r = $('#adm-apikeys'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   // #/admin/security, #/admin/acme (länkar från installationsguiden): visa avsnittet

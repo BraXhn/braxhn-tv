@@ -70,6 +70,7 @@ import './routes/apikeys.js'; // API-nycklar: skrivskyddat API för andra system
 import './routes/support.js'; // feedback och felrapporter: ärenden, granskning och teamets API (/api/v1/support)
 import './routes/privacy.js'; // personuppgifter: sidan Integritet, export av egna uppgifter och radering av eget konto
 import './routes/relay.js'; // fjärråtkomst via BraXhn Relay: parning och status (/api/relay, admin)
+import './routes/local.js'; // hemma via den publika adressen: adresserna på hemnätet, provanropet och webbens byte (/api/local*)
 import { handle } from './http/router.js';
 import * as relay from './relay.js';
 export { handle };
