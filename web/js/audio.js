@@ -3,7 +3,7 @@
 // M.audio är en fasad med samma gränssnitt som ett ljudelement (paused, play(), pause(), currentTime …) för resten av webben.
 import { $, $$, act, api, esc, fmtTime, imgUrl, keyClick, me, mediaKey, routeGen, status, store, toast, t } from './core.js';
 import { SLEEP, ensureLyricsPanel, loadLyrics, lyricsTick, setSleep, showLyrics, sleepDialog, toggleLyrics } from './audio-extras.js';
-import { audioCaps } from './player/caps.js';
+import { audioCaps, lastBandwidth, measureBandwidth, saveData } from './player/caps.js';
 import { castAudio, castReady } from './player/cast.js';
 import { LP, RP } from './player/live.js';
 import { stopVideo } from './player/overlay.js';
@@ -75,8 +75,63 @@ const HOOKS = {
   time: () => timeUI(),
   state: (playing) => { setPlaying(playing); queueTouch(); },
   stopElement: () => stopVideo(M.el),
-  underrun: (t, i, pos) => elementTakeover(t, pos)
+  underrun: (t, i, pos) => elementTakeover(t, pos),
+  // Kvalitet utanför hemmet: bithastigheten för låten (0 = originalet) och hämtningarnas takt (kbit/s)
+  br: (t) => musicBr(t),
+  rate: (kbps) => { if (status.remote) { NET.kbps = kbps; NET.at = Date.now(); } },
+  // Omkodad ström i elementet: ingen längd där, och den börjar på 0 efter spolning – låtens egen tidslinje
+  elTime: () => M.transcoded && M.cur?.duration ? { d: M.cur.duration, ct: M.el.currentTime + (M.offset || 0) } : null
 };
+// ---------- kvalitet utanför hemmet ----------
+// Hemma spelas alltid originalet. Utanför hemmet (status.remote) följer bithastigheten inställningen (Mitt konto →
+// Lyssning): Auto väljer efter uppkopplingen – uppmätt takt (hastighetsprovet som videon också använder, eller hur fort
+// motorn hämtat låtar) med marginal för nästa låt som hämtas samtidigt. Okänd uppkoppling: förlustfritt (FLAC) börjar
+// på 256 kbit/s och provet görs när låten spelar. Stannar elementet för att data inte räcker sänks kvaliteten ett steg
+// och låten fortsätter på samma ställe (gäller i 10 minuter). Servern kodar om till Opus (eller AAC/MP3) och skickar
+// filen som den är när den redan är under gränsen (server/music.js streamTrack).
+const BR_STEPS = [320, 256, 192, 128, 96];
+const NET = { kbps: 0, at: 0, cap: 0, capAt: 0, timer: 0 };
+const FRESH = 10 * 60e3;
+const fileKbps = (t) => t.bitrate || (['flac', 'alac', 'wav', 'ape', 'wavpack', 'pcm_s16le', 'pcm_s24le'].includes(t.codec) ? 1000 : 320);
+const stepAtMost = (k) => BR_STEPS.find(s => s <= k) || BR_STEPS.at(-1);
+/** Bithastigheten (kbit/s) att begära för låten, 0 = originalet */
+export function musicBr(t) {
+  if (!status.remote || !t?.id || M.spoken) return 0;
+  const q = String(LPREFS.remoteQuality || 'auto'), kb = fileKbps(t);
+  if (q === 'orig') return 0;
+  if (+q) return kb > +q * 1.2 ? +q : 0;
+  const bw = lastBandwidth() || (Date.now() - NET.at < FRESH ? NET.kbps : 0);
+  let cap = bw ? bw / 2 : kb > 320 ? 256 : Infinity;
+  if (saveData()) cap = Math.min(cap, 128);
+  if (NET.cap && Date.now() - NET.capAt < FRESH) cap = Math.min(cap, NET.cap);
+  return kb <= cap ? 0 : stepAtMost(cap);
+}
+const opusOk = () => audioCaps().split(',').includes('opus');
+/** Adressen till låten för elementet (med bithastighet utanför hemmet); M.br = det som begärdes */
+function trackUrl(t) {
+  const br = M.br = musicBr(t);
+  return `/api/music/tracks/${t.id}/stream?a=${audioCaps()}${br ? `&br=${br}${opusOk() ? '&fmt=opus' : ''}` : ''}`;
+}
+/** Elementet väntar på data mitt i en låt utanför hemmet: hjälper det inte inom en stund sänks kvaliteten */
+function stalled() {
+  clearTimeout(NET.timer);
+  const tr = M.cur, el = M.el, seq = M.loadSeq;
+  if (!status.remote || M.spoken || !tr?.id || AE.on() || String(LPREFS.remoteQuality || 'auto') !== 'auto') return;
+  NET.timer = setTimeout(() => {
+    if (seq !== M.loadSeq || M.cur !== tr || AE.on() || el.paused || el.readyState >= 3) return;
+    const cur = M.br || fileKbps(tr);
+    const lower = BR_STEPS.find(s => s < cur);
+    if (!lower) return; // redan lägsta steget
+    NET.cap = lower; NET.capAt = Date.now();
+    AE.only(tr.id); // nästa låt hämtas om i den lägre kvaliteten
+    elementTakeover(tr, Math.max(0, el.currentTime + (M.offset || 0)));
+  }, el.currentTime > 0.3 ? 1200 : 2500);
+}
+/** Spelar låten utanför hemmet utan uppmätt uppkoppling: provet görs när ljudet väl kommit igång */
+function measureLater() {
+  if (!status.remote || M.spoken || lastBandwidth()) return;
+  setTimeout(() => { if (!lastBandwidth()) measureBandwidth().catch(() => {}); }, 8000);
+}
 function upcoming() {
   if (M.spoken || SLEEP.end || !M.queue.length) return null;
   const i = M.idx + 1 < M.queue.length ? M.idx + 1 : M.repeat ? 0 : -1;
@@ -101,6 +156,8 @@ function ensureBar() {
   $('#mspeed').onchange = (e) => { a.playbackRate = +e.target.value; if (M.spoken) { M.spoken.speed = a.playbackRate; store.set('speed', a.playbackRate); } };
   a.onplay = () => { if (AE.E.ctx?.state === 'suspended') AE.E.ctx.resume().catch(() => {}); if (!AE.on()) { setPlaying(true); queueTouch(); } };
   a.onpause = () => { if (AE.on()) return; setPlaying(false); if (M.spoken) spokenSave(); else queueTouch(); };
+  a.addEventListener('waiting', stalled);
+  a.addEventListener('playing', () => { clearTimeout(NET.timer); measureLater(); });
   a.onerror = () => { if (AE.on() || !a.getAttribute('src')) return; if (M.spoken || !M.cur?.id) return toast(t('Kunde inte spela låten'), { error: true }); elementFailed(); };
   $('#mplay').onclick = () => M.audio.paused ? M.audio.play() : M.audio.pause();
   $('#mnext').onclick = () => M.spoken ? spokenSeek(spokenPos() + LPREFS.skipForward) : nextTrack(false);
@@ -275,10 +332,12 @@ async function loadTrack(i, pos = 0) {
     if (dec && !(dec.partial && pos > dec.avail - 1)) { M.starting = null; stopVideo(el); AE.play(t, i, dec, pos); return; }
     AE.drop(t.id); // elementet hämtar låten själv – två hämtningar samtidigt halverar farten på långsamt nät
   }
+  // Utanför hemmet beror adressen på inställningen för kvalitet – vänta kort på den första gången
+  if (status.remote && !LPREFS.choices?.remoteQuality && LP_LOADING) { await Promise.race([LP_LOADING, new Promise(r => setTimeout(r, 500))]); if (seq !== M.loadSeq) return; }
   if (pos > 0) return elementTakeover(t, pos);
   // Elementet: nästa låt kan ändå bli en buffert (motorn tar över vid övergången)
   AE.E.elT = t; AE.E.paused = false; AE.applyGains();
-  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  M.url = trackUrl(t);
   M.starting = null;
   el.src = M.url;
   el.play().catch(() => {});
@@ -288,7 +347,7 @@ async function loadTrack(i, pos = 0) {
 async function elementTakeover(t, pos) {
   if (M.cur !== t) return;
   const seq = ++M.loadSeq, el = M.el;
-  M.url = `/api/music/tracks/${t.id}/stream?a=${audioCaps()}`;
+  M.url = trackUrl(t);
   let tc = false;
   try { tc = (await fetch(M.url, { method: 'HEAD' })).headers.get('x-transcoded') === '1'; } catch {}
   if (seq !== M.loadSeq || M.cur !== t) return;
@@ -459,8 +518,9 @@ let LPREFS = { normalize: true, normMode: 'track', gapless: true, crossfade: 0, 
 const normMode = () => LPREFS.normalize === false ? 'off' : (LPREFS.normMode || 'track');
 function enginePrefs() { AE.setPrefs({ gapless: LPREFS.gapless !== false, crossfade: +LPREFS.crossfade || 0, normMode: M.spoken ? 'off' : normMode() }); AE.setVoice(!!M.spoken && !!LPREFS.speechLevel); }
 // Hämtas när uppspelning startar (kan ha ändrats i en annan app eller profil)
+let LP_LOADING = null;
 function loadListenPrefs() {
-  return api('/me/listening', { bg: true }).then(p => {
+  return LP_LOADING = api('/me/listening', { bg: true }).then(p => {
     LPREFS = p;
     enginePrefs();
     if (M.el) { if (M.spoken) setBarMode(true); else applyVolume(); }
@@ -474,6 +534,7 @@ async function saveListen(body) {
   if (M.el) { if (M.spoken) setBarMode(true); else applyVolume(); }
 }
 const NORM_LABEL = { track: t('Spår'), album: 'Album', off: t('Av') };
+const QUALITY_LABEL = { auto: t('Auto – efter uppkopplingen'), orig: t('Original'), 320: t('Hög (320 kbit/s)'), 192: t('Normal (192 kbit/s)'), 128: t('Låg (128 kbit/s) – sparar data') };
 const fadeLabel = (s) => s ? `${s} s` : t('Av');
 /** Musikspelarens meny med ljudinställningar (jämn ljudnivå, glapplöst, övertoning) – sparas på kontot. */
 function soundMenu(anchor) {
@@ -518,16 +579,18 @@ export async function renderListenPrefs(box) {
     <p class="muted small" style="margin:4px 0 12px">${t('Livealbum och klassiskt spelas utan hack mellan spåren. Övertoningen görs aldrig mellan låtar som går ihop på samma album, och blir kortare eller uteblir när låten redan slutar i tystnad. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).')}</p>
     <div class="row"><div><label for="lpback">${t('Hopp bakåt (ljudböcker och poddar)')}</label><select id="lpback">${opts(p.choices.skipBack, p.skipBack)}</select></div>
       <div><label for="lpfwd">${t('Hopp framåt')}</label><select id="lpfwd">${opts(p.choices.skipForward, p.skipForward)}</select></div></div>
+    <div class="row" style="margin-top:12px"><div><label for="lpq">${t('Musikkvalitet utanför hemmet')}</label><select id="lpq">${(p.choices.remoteQuality || ['auto']).map(q => `<option value="${q}" ${q === (p.remoteQuality || 'auto') ? 'selected' : ''}>${esc(QUALITY_LABEL[q] || q)}</option>`).join('')}</select></div></div>
+    <p class="muted small" style="margin:4px 0 12px">${t('Hemma spelas alltid originalet. Med Auto väljs kvaliteten efter uppkopplingen: hög upplösning (t.ex. FLAC 96 kHz) skickas med lägre bithastighet när nätet inte räcker, och sänks ett steg till om musiken skulle stanna.')}</p>
     <label class="row" style="margin-top:12px"><input type="checkbox" id="lpspeech" ${p.speechLevel ? 'checked' : ''} style="width:auto"> ${t('Jämn ljudnivå för tal (ljudböcker och poddar)')}</label>
     <p class="muted small" style="margin:4px 0 0">${t('Viskningar och höga partier spelas jämnare. Gäller webbspelaren (inte Chromecast eller Safari på iPhone/iPad).')}</p>
     <label class="row" style="margin-top:12px"><input type="checkbox" id="lpsil" ${p.skipSilence ? 'checked' : ''} style="width:auto"> ${t('Hoppa över tystnad i poddar')}</label>
     <p class="muted small" style="margin:4px 0 0">${t('Fungerar i Android-appen (och i bilen). Webben och iPhone/Apple TV saknar ett säkert sätt att korta tystnad utan att den sparade positionen blir fel.')}</p>`;
   const save = act(async () => {
     await saveListen({ normMode: $('#lpnorm').value, crossfade: +$('#lpfade').value, gapless: $('#lpgap').checked,
-      skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked, speechLevel: $('#lpspeech').checked });
+      skipBack: +$('#lpback').value, skipForward: +$('#lpfwd').value, skipSilence: $('#lpsil').checked, speechLevel: $('#lpspeech').checked, remoteQuality: $('#lpq').value });
     toast(t('Sparat'));
   });
-  for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil', '#lpspeech']) $(id, box).onchange = save;
+  for (const id of ['#lpnorm', '#lpfade', '#lpgap', '#lpback', '#lpfwd', '#lpsil', '#lpspeech', '#lpq']) $(id, box).onchange = save;
   $('#lpspeech', box).addEventListener('change', (e) => { if (e.target.checked) ensureEngine(); });
 }
 

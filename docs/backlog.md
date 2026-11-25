@@ -136,8 +136,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Feedback: Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
-- M4A med `moov` sist kan inte snabbstartas (1,6 s på 20 Mbit/s); servern kan skicka `moov` först.
-- FLAC 96 kHz på långsamt nät hackar: webben begär aldrig omkodning av musik (`br=` används inte).
 
 **Uppspelning och stabilitet**
 - `docs/jamforelse.md` är inaktuell: den säger att fjärråtkomst utan portöppning saknas (BraXhn Relay finns) och att

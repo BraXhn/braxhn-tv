@@ -284,13 +284,16 @@ export function smartName(id, uid) {
 export const SKIP_BACK = [5, 10, 15, 30, 45, 60], SKIP_FORWARD = [10, 15, 30, 45, 60, 90];
 /** Övertoning i sekunder (0 = av) och lägen för jämn ljudnivå (webbens musikspelare; normalize = av/på för apparna). */
 export const CROSSFADE = [0, 2, 4, 6, 8, 10, 12], NORM_MODES = ['track', 'album'];
+/** Musikens kvalitet utanför hemmet i webben: auto (efter uppkopplingen), original eller högst så många kbit/s */
+export const REMOTE_QUALITY = ['auto', 'orig', '320', '192', '128'];
 export function getPrefs(uid) {
   const r = get('SELECT * FROM listen_prefs WHERE user_id=?', uid);
   const normalize = r ? !!r.normalize : true;
   return { normalize, skipBack: r?.skip_back ?? 15, skipForward: r?.skip_fwd ?? 30, skipSilence: !!r?.skip_silence,
     normMode: normalize ? (NORM_MODES.includes(r?.norm_mode) ? r.norm_mode : 'track') : 'off', gapless: r ? !!r.gapless : true, crossfade: r?.crossfade ?? 0,
     speechLevel: !!r?.speech_level, // jämn ljudnivå för tal (webbens spelare, Web Audio)
-    choices: { skipBack: SKIP_BACK, skipForward: SKIP_FORWARD, crossfade: CROSSFADE, normMode: ['track', 'album', 'off'] }, reference: REFERENCE_LUFS };
+    remoteQuality: REMOTE_QUALITY.includes(r?.remote_quality) ? r.remote_quality : 'auto',
+    choices: { skipBack: SKIP_BACK, skipForward: SKIP_FORWARD, crossfade: CROSSFADE, normMode: ['track', 'album', 'off'], remoteQuality: REMOTE_QUALITY }, reference: REFERENCE_LUFS };
 }
 /** Sparar de fält som skickats med. Kastar Error med svensk text vid ogiltiga värden. */
 export function setPrefs(uid, b = {}) {
@@ -305,12 +308,14 @@ export function setPrefs(uid, b = {}) {
   if (b.skipSilence !== undefined) next.skipSilence = !!b.skipSilence;
   if (b.gapless !== undefined) next.gapless = !!b.gapless;
   if (b.speechLevel !== undefined) next.speechLevel = !!b.speechLevel;
+  if (b.remoteQuality !== undefined) { if (!REMOTE_QUALITY.includes(String(b.remoteQuality))) throw new Error('Ogiltig musikkvalitet'); next.remoteQuality = String(b.remoteQuality); }
   if (b.crossfade !== undefined) { if (!CROSSFADE.includes(+b.crossfade)) throw new Error('Ogiltig längd på övertoningen'); next.crossfade = +b.crossfade; }
   if (b.skipBack !== undefined) { if (!SKIP_BACK.includes(+b.skipBack)) throw new Error('Ogiltigt hopp bakåt'); next.skipBack = +b.skipBack; }
   if (b.skipForward !== undefined) { if (!SKIP_FORWARD.includes(+b.skipForward)) throw new Error('Ogiltigt hopp framåt'); next.skipForward = +b.skipForward; }
-  run(`INSERT INTO listen_prefs(user_id,normalize,skip_back,skip_fwd,skip_silence,norm_mode,gapless,crossfade,speech_level,updated) VALUES(?,?,?,?,?,?,?,?,?,?)
+  run(`INSERT INTO listen_prefs(user_id,normalize,skip_back,skip_fwd,skip_silence,norm_mode,gapless,crossfade,speech_level,remote_quality,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(user_id) DO UPDATE SET normalize=excluded.normalize, skip_back=excluded.skip_back, skip_fwd=excluded.skip_fwd,
-    skip_silence=excluded.skip_silence, norm_mode=excluded.norm_mode, gapless=excluded.gapless, crossfade=excluded.crossfade, speech_level=excluded.speech_level, updated=excluded.updated`,
-    uid, next.normalize ? 1 : 0, next.skipBack, next.skipForward, next.skipSilence ? 1 : 0, next.normMode, next.gapless ? 1 : 0, next.crossfade, next.speechLevel ? 1 : 0, now());
+    skip_silence=excluded.skip_silence, norm_mode=excluded.norm_mode, gapless=excluded.gapless, crossfade=excluded.crossfade, speech_level=excluded.speech_level,
+    remote_quality=excluded.remote_quality, updated=excluded.updated`,
+    uid, next.normalize ? 1 : 0, next.skipBack, next.skipForward, next.skipSilence ? 1 : 0, next.normMode, next.gapless ? 1 : 0, next.crossfade, next.speechLevel ? 1 : 0, next.remoteQuality, now());
   return getPrefs(uid);
 }

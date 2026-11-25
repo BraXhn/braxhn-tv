@@ -86,12 +86,17 @@ test('smarta spellistor per användare', () => {
 
 test('lyssningsinställningar: standard, sparas och valideras', () => {
   assert.deepEqual({ ...L.getPrefs(1), choices: undefined, reference: undefined },
-    { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, normMode: 'track', gapless: true, crossfade: 0, speechLevel: false, choices: undefined, reference: undefined });
+    { normalize: true, skipBack: 15, skipForward: 30, skipSilence: false, normMode: 'track', gapless: true, crossfade: 0, speechLevel: false, remoteQuality: 'auto', choices: undefined, reference: undefined });
   const p = L.setPrefs(1, { skipBack: 10, skipForward: '45', skipSilence: true, normalize: false });
   assert.equal(p.skipBack, 10); assert.equal(p.skipForward, 45); assert.equal(p.skipSilence, true); assert.equal(p.normalize, false);
   assert.equal(L.setPrefs(1, { skipBack: 30 }).skipForward, 45); // andra fält behålls
   assert.equal(L.setPrefs(1, { speechLevel: true }).speechLevel, true); // jämn ljudnivå för tal
   assert.equal(L.getPrefs(1).skipBack, 30);
+  // Musikens kvalitet utanför hemmet (webben)
+  assert.equal(L.setPrefs(1, { remoteQuality: '192' }).remoteQuality, '192');
+  assert.equal(L.setPrefs(1, { skipBack: 30 }).remoteQuality, '192');
+  assert.throws(() => L.setPrefs(1, { remoteQuality: '999' }), /musikkvalitet/);
+  assert.deepEqual(L.getPrefs(1).choices.remoteQuality, ['auto', 'orig', '320', '192', '128']);
   assert.throws(() => L.setPrefs(1, { skipBack: 7 }), /bakåt/);
   assert.throws(() => L.setPrefs(1, { skipForward: 1e9 }), /framåt/);
   assert.equal(L.getPrefs(2).skipBack, 15); // per användare

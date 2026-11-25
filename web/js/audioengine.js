@@ -113,7 +113,18 @@ export function applyGains() {
 }
 
 // ---------- hämtning och avkodning ----------
-const streamUrl = (t) => `/api/music/tracks/${t.id}/stream?a=${E.caps}&gl=1`;
+// Utanför hemmet kan audio.js begära en lägre bithastighet (hooks.br): då Opus om webbläsaren spelar det (exakt längd)
+const streamUrl = (t) => { const br = E.hooks.br?.(t) || 0; return `/api/music/tracks/${t.id}/stream?a=${E.caps}&gl=1${br ? `&br=${br}${E.caps.split(',').includes('opus') ? '&fmt=opus' : ''}` : ''}`; };
+/**
+ * Trim för en omkodad låt: FLAC och Opus är redan exakta. AAC/MP3 har kodarens fördröjning först (X-Encoder-Delay, i
+ * utdatans takt X-Sample-Rate) och utfyllnad sist – längden blir låtens (sampel från servern, annars längden i sekunder).
+ */
+export function transcodedTrim(len, rate, tm, delay, outRate) {
+  if (!(delay > 0) || !(outRate > 0)) return { front: 0, back: 0 };
+  const front = Math.round(delay * rate / outRate);
+  const g = tm?.gapless, want = g?.samples && g.sampleRate ? Math.round(g.samples * rate / g.sampleRate) : tm?.duration > 0 ? Math.round(tm.duration * rate) : 0;
+  return { front: Math.min(front, Math.max(0, len - 1)), back: want ? Math.max(0, len - front - want) : 0 };
+}
 const join = (parts, n) => { const all = new Uint8Array(n); let o = 0; for (const c of parts) { if (o >= n) break; all.set(o + c.length > n ? c.subarray(0, n - o) : c, o); o += c.length; } return all; };
 /** Avkodar och mäter farten (sekunder ljud per sekund) – den avgör om det lönar sig att vänta på hela låten */
 function decode(data) {
@@ -138,12 +149,15 @@ export function prepare(tm) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const total = ent.total = +res.headers.get('content-length') || 0;
     if (total > MAX_BYTES) throw new Error(t('för stor'));
+    const kbps = +res.headers.get('x-bitrate') || 0; // omkodad ström utan känd storlek: början räknas efter bithastigheten
+    ent.delay = res.headers.get('x-transcoded') === '1' ? [+res.headers.get('x-encoder-delay') || 0, +res.headers.get('x-sample-rate') || 0] : null;
     // Läs strömmen bit för bit: när början kommit avkodas den för sig (snabbstart) medan resten fortsätter komma
     let data;
     const rd = res.body?.getReader?.();
     if (!rd) data = await res.arrayBuffer();
     else {
-      ent.at = total && tm.duration > 0 ? Math.max(96e3, Math.min(QUICK_BYTES, total / tm.duration * QUICK_SECONDS)) : QUICK_BYTES / 2;
+      ent.at = total && tm.duration > 0 ? Math.max(96e3, Math.min(QUICK_BYTES, total / tm.duration * QUICK_SECONDS))
+        : kbps ? Math.max(48e3, kbps * 125 * QUICK_SECONDS) : QUICK_BYTES / 2;
       for (;;) {
         const { done, value } = await rd.read();
         if (done) break;
@@ -153,11 +167,13 @@ export function prepare(tm) {
         grow(ent);
       }
       ent.done = true;
+      // Hämtningens takt (kbit/s) till audio.js, som väljer kvalitet utanför hemmet efter den
+      if (ent.t0 && ent.got > 256e3) E.hooks.rate?.((ent.got - ent.got0) * 8 / Math.max(1, performance.now() - ent.t0));
       data = join(ent.parts, ent.got).buffer; ent.parts = [];
     }
     const buf = await decode(data);
-    // Omkodat (FLAC från servern) är redan exakt; annars jämförs längden med serverns sampelantal
-    const tr = res.headers.get('x-transcoded') === '1' ? { front: 0, back: 0 } : trimFor(buf.length, buf.sampleRate, tm.gapless);
+    // Omkodat: kodarens fördröjning bort (AAC/MP3; FLAC och Opus är exakta); annars jämförs längden med serverns sampelantal
+    const tr = ent.delay ? transcodedTrim(buf.length, buf.sampleRate, tm, ...ent.delay) : trimFor(buf.length, buf.sampleRate, tm.gapless);
     const n = Math.max(1, buf.length - tr.front - tr.back);
     return { buf, front: tr.front / buf.sampleRate, len: n / buf.sampleRate, trim: tr };
   })();
@@ -204,10 +220,11 @@ function grow(ent, urgent = false, left = Infinity) {
   decode(join(ent.parts, bytes).buffer).then(buf => {
     ent.busy = false;
     if (ent.dec || ent.err || E.cache.get(tm.id) !== ent) return; // hela låten hann före, eller låten behövs inte längre
-    const avail = buf.duration - QUICK_TAIL;
+    const front = ent.delay ? transcodedTrim(buf.length, buf.sampleRate, null, ...ent.delay).front / buf.sampleRate : 0; // AAC/MP3: fördröjningen bort
+    const avail = buf.duration - QUICK_TAIL - front;
     if (avail < QUICK_MIN) return again();
     const first = !ent.head;
-    const head = ent.head = { buf, front: 0, len: Math.max(tm.duration, buf.duration), avail, partial: true, bytes };
+    const head = ent.head = { buf, front, len: Math.max(tm.duration, buf.duration), avail, partial: true, bytes };
     if (first) {
       // Takten: sekunder ljud som kommit per sekund (efter filens storlek när den är känd – ett omslag först i filen räknas då rätt)
       const r = ent.total ? byteRate(ent, bytes) / (ent.total / tm.duration) : buf.duration / took;
@@ -458,7 +475,9 @@ function tick() {
   // Elementet spelar en låt – nästa kan bli en buffert (glapplöst med elementets precision, ~några ms)
   const el = E.el, t = E.elT;
   if (!t || !el || el.paused || E.next || !up || !wants(up.t)) return;
-  const d = el.duration, ct = el.currentTime, rate = el.playbackRate || 1;
+  // En omkodad ström saknar längd i elementet (och börjar på 0 efter spolning) – audio.js ger då låtens tidslinje
+  const tl = E.hooks.elTime?.();
+  const d = tl ? tl.d : el.duration, ct = tl ? tl.ct : el.currentTime, rate = el.playbackRate || 1;
   if (!(d > 0) || !isFinite(d)) return;
   if (d - ct > PREFETCH) return;
   prepare(up.t).catch(() => {});

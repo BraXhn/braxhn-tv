@@ -493,6 +493,16 @@ Bara tillägg (server/gapless.js, server/listening.js) – apparna kan använda 
   `crossfade` (sekunder, `choices.crossfade`). `normalize` finns kvar för apparna.
 - `gl=1` på `/api/music/tracks/:tid/stream`: måste låten kodas om och klienten klarar FLAC (`a=…flac`, ingen `br`) blir det FLAC
   (exakt längd, ingen kodarfördröjning) i stället för MP3/AAC.
+- `br=<kbit/s>` (högst 320) på `/api/music/tracks/:tid/stream`: filen kodas om när dess bithastighet är över 1,5 × `br`.
+  `fmt=opus` (och `opus` i `a`) ger då Opus i Ogg (`audio/ogg`, exakt längd) om serverns ffmpeg har libopus, annars AAC
+  (ADTS) eller MP3; över 48 kHz räknas AAC/MP3 om till 48 kHz. En omkodad ström har `X-Transcoded: 1` och `X-Bitrate`,
+  och AAC/MP3 dessutom `X-Encoder-Delay` (sampel som kodaren lagt först) och `X-Sample-Rate` (utdatans takt).
+- Spåren i musiklistorna har `bitrate` (filens bithastighet i kbit/s, `null` om okänd).
+- `GET/PUT /api/me/listening`: `remoteQuality` (`auto`, `orig`, `320`, `192`, `128`; `choices.remoteQuality`) – webbens
+  musikkvalitet utanför hemmet.
+- Direktspelad M4A/M4B/MP4 med `moov` efter ljudet (eller omslag i taggarna) skickas med `moov` först och utan omslaget
+  (`X-Moov-First: 1`, Range mot den nya ordningen; ljudet och övriga taggar är oförändrade). Originalfilen: Subsonic
+  `download` eller `stream` med `format=raw`.
 
 ## Musikkön: `/api/me/queue`
 

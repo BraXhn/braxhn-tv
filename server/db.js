@@ -250,6 +250,7 @@ addCol('listen_prefs', 'norm_mode', "TEXT NOT NULL DEFAULT 'track'");
 addCol('listen_prefs', 'gapless', 'INTEGER NOT NULL DEFAULT 1');
 addCol('listen_prefs', 'crossfade', 'INTEGER NOT NULL DEFAULT 0');
 addCol('listen_prefs', 'speech_level', 'INTEGER NOT NULL DEFAULT 0'); // jämn ljudnivå för tal (ljudböcker/poddar i webben)
+addCol('listen_prefs', 'remote_quality', "TEXT NOT NULL DEFAULT 'auto'"); // musikens kvalitet utanför hemmet (webben)
 // Skärmtid, notiser om nya avsnitt och automatisk offline-synk (JSON per användare)
 addCol('users', 'screen_time', 'TEXT');
 addCol('users', 'notify_personal', 'TEXT');

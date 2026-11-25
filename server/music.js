@@ -11,6 +11,7 @@ import { rootsOf, listRoots, removable, relOf, listWarnings } from './libpaths.j
 import { parseReplayGain, scheduleLoudness, refreshAlbumGains } from './listening.js';
 import * as gapless from './gapless.js';
 import * as moovfirst from './moovfirst.js';
+import { ffcaps } from './ffcaps.js';
 import * as sonic from './sonic.js';
 import { libOk, libFilter } from './perms.js';
 import * as mvideo from './musicvideos.js';
@@ -167,12 +168,14 @@ const ALBUM_COLS = `al.id, al.title, al.year, al.genre, al.cover, al.added, al.l
 const ALBUM_FROM = 'FROM albums al LEFT JOIN artists ar ON ar.id=al.artist_id';
 const ALBUM_SQL = `SELECT ${ALBUM_COLS} ${ALBUM_FROM}`;
 const shapeAlbum = (a) => ({ id: a.id, title: a.title, year: a.year, genre: a.genre, cover: !!a.cover, artist: a.artist, artistId: a.artist_id, tracks: a.tracks, duration: a.duration, added: a.added });
-const TRACK_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
+const TRACK_COLS = `t.id, t.title, t.track_no, t.disc_no, t.duration, t.codec, t.bitrate, t.album_id, al.title AS album, al.cover, ar.name AS artist, t.artist_id,
   t.rg_track, t.rg_album, t.rg_peak, t.rg_album_peak, al.rg_gain AS al_gain, al.rg_peak AS al_peak, t.gl,
   (SELECT v.id FROM music_videos v WHERE v.track_id=t.id ORDER BY v.kind != 'video', v.id LIMIT 1) AS mv`;
 const TRACK_FROM = 'FROM tracks t LEFT JOIN albums al ON al.id=t.album_id LEFT JOIN artists ar ON ar.id=t.artist_id';
 export const TRACK_SQL = `SELECT ${TRACK_COLS} ${TRACK_FROM}`;
 export const shapeTrack = (t, favs) => ({ id: t.id, title: t.title, track: t.track_no, disc: t.disc_no, duration: t.duration, codec: t.codec,
+  // Tillägg: filens bithastighet i kbit/s (null om okänd) – webben väljer kvalitet utanför hemmet efter den
+  bitrate: t.bitrate ? Math.round(t.bitrate / 1000) : null,
   albumId: t.album_id, album: t.album, cover: !!t.cover, artist: t.artist, artistId: t.artist_id, favorite: favs ? favs.has(t.id) : undefined,
   // Jämn ljudnivå: dB mot -18 LUFS (spårets värde, annars albumets) och toppvärde (linjärt) – null om okänt
   gain: t.rg_track ?? t.rg_album ?? null, albumGain: t.rg_album ?? t.al_gain ?? null, peak: t.rg_peak ?? null,
@@ -283,13 +286,24 @@ export function streamTrack(req, res, t, query, uid = 0) {
   const useMp3 = !caps.has('aac');
   // gl=1 (webbens glapplösa spelare): FLAC utan kodarfördröjning när webbläsaren spelar FLAC och ingen bithastighet är begärd
   const lossless = query.get('gl') === '1' && caps.has('flac') && !maxKbps;
-  const type = lossless ? 'audio/flac' : useMp3 ? 'audio/mpeg' : 'audio/aac';
-  if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Transcoded': '1' }); return res.end(); }
+  // fmt=opus (webben utanför hemmet): Opus i Ogg – bättre ljud per kbit/s än AAC, och avkodaren tar själv bort kodarens
+  // fördröjning (exakt längd, glapplöst). Bara när klienten säger att den spelar Opus och ffmpeg har libopus.
+  const opus = !lossless && query.get('fmt') === 'opus' && caps.has('opus') && ffcaps.encoders.has('libopus');
+  const type = lossless ? 'audio/flac' : opus ? 'audio/ogg' : useMp3 ? 'audio/mpeg' : 'audio/aac';
+  // AAC och MP3 över 48 kHz (hög upplösning) räknas om till 48 kHz – fler sampel ger inget hörbart på låg bithastighet
+  const rate = !lossless && !opus && t.sample_rate > 48000 ? 48000 : (t.sample_rate || 0);
+  // Kodarens fördröjning i början (sampel i utdatans takt) för klienter som vill skära bort den (webbens glapplösa spelare)
+  const delay = lossless || opus ? 0 : useMp3 ? 1105 : 1024;
+  const head = { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Transcoded': '1', ...(lossless ? {} : { 'X-Bitrate': String(kbps) }),
+    ...(delay && rate ? { 'X-Encoder-Delay': String(delay), 'X-Sample-Rate': String(rate) } : {}) };
+  if (req.method === 'HEAD') { res.writeHead(200, head); return res.end(); }
   for (const x of audioJobs) if (x.uid === uid && x.file === t.path) { audioJobs.delete(x); x.p.kill('SIGKILL'); }
   if ([...audioJobs].filter(x => x.uid === uid).length >= AUDIO_LIMITS.user || audioJobs.size >= AUDIO_LIMITS.total)
     return fail(res, 503, 'För många ljudströmmar omkodas samtidigt just nu – försök igen strax');
   const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', ...(ss ? ['-ss', String(ss)] : []), '-i', t.path,
-    '-map', '0:a:0', '-vn', ...(lossless ? ['-c:a', 'flac', '-compression_level', '1', '-f', 'flac'] : useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts']), 'pipe:1'],
+    '-map', '0:a:0', '-vn', ...(lossless ? ['-c:a', 'flac', '-compression_level', '1', '-f', 'flac']
+      : opus ? ['-c:a', 'libopus', '-b:a', `${kbps}k`, '-f', 'ogg']
+        : [...(rate && rate !== t.sample_rate ? ['-ar', String(rate)] : []), ...(useMp3 ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-f', 'mp3'] : ['-c:a', 'aac', '-b:a', `${kbps}k`, '-f', 'adts'])]), 'pipe:1'],
     { stdio: ['ignore', 'pipe', 'ignore'] });
   const job = { uid, file: t.path, p };
   audioJobs.add(job);
@@ -299,7 +313,7 @@ export function streamTrack(req, res, t, query, uid = 0) {
     console.warn('[music] kunde inte starta ffmpeg:', e.message);
     if (!res.headersSent) fail(res, 500, 'Omkodningen kunde inte startas'); else res.destroy();
   });
-  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Transcoded': '1' });
+  res.writeHead(200, head);
   pipeline(p.stdout, res, () => p.kill('SIGKILL'));
   req.on('close', () => p.kill('SIGKILL'));
 }

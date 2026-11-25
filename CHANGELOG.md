@@ -36,6 +36,18 @@
     positionen stått still och ingen data skickats under pausen.
 - **Pilarna fungerar i dialoger som öppnas från spelaren** (sovtimern, *Ögonblick*, *Det här har hänt*). Förut gjorde
   pilarna ingenting där, så fjärrkontrollen kunde inte välja något.
+- **Musik i M4A börjar direkt, också på mobilnät.** Många M4A-filer (från ffmpeg och en del rippare) har sitt index
+  (`moov`) sist, efter ljudet, och ofta ett omslag på några hundra kB i taggarna. Spelaren kunde inte börja förrän allt
+  det hämtats – i Chrome på 1 Mbit/s hela filen, 18 s för en låt på en minut. Servern skickar nu indexet först och
+  utan omslaget (som har en egen adress), med samma ljud bit för bit och utan att ändra filen: ljud efter
+  0,3 s på 20 Mbit/s och under 1 s på 1 Mbit/s. Inget sparas på disken; servern håller högst 48 MB index i minnet.
+  Subsonic `download` och `format=raw` skickar originalfilen som förut.
+- **FLAC i hög upplösning hackar inte längre utanför hemmet.** Webben begär en lägre bithastighet när uppkopplingen
+  inte räcker: utifrån uppmätt hastighet (samma prov som videon), och sänker ett steg till om musiken skulle stanna –
+  låten fortsätter då på samma ställe. Servern kodar om till Opus (eller AAC/MP3 i webbläsare utan Opus), och
+  glapplösa album går ihop som förut. Ny inställning under *Mitt konto → Lyssning*: *Musikkvalitet
+  utanför hemmet* (Auto, Original, 320, 192 eller 128 kbit/s). Hemma spelas alltid originalet. FLAC 96 kHz på
+  1 Mbit/s: förut 31 s tystnad under de första 40 s, nu ingen.
 - **Familjefiltret tystar lite tidigare** (0,08 s före ordet i stället för 0,03 s), så att en långsam TV eller telefon inte
   hinner släppa igenom början av ett ord innan ljudet stängs av.
 - **Servern svarar på engelska till den som valt engelska.** Felmeddelandena (inloggning, tvåstegsverifiering,
