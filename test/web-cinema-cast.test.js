@@ -351,6 +351,8 @@ t('Chromecast: avsnitt med kö, framsteg, panelens styrning och spårbyten', asy
 
 t('Chromecast: musik och ljudbok från ljudspelaren', async () => {
   for (const width of [1280, 375]) {
+    // Kön från förra varvet visas annars i minispelaren när sidan öppnas (sparad på servern) och täcker raderna
+    await req('/api/me/queue', { method: 'DELETE' });
     const { page, errors, reqs, close } = await newPage({ cast: true, width });
     await page.goto(B + '/#/album/' + S.album);
     await page.click('tr[data-ti="0"]');

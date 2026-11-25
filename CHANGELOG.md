@@ -31,6 +31,10 @@
   - *Föregående* direkt efter *Nästa*, medan nästa låt ännu laddades, spolade förra låten till början i stället för
     att gå tillbaka (spelaren läste förra låtens position).
   - Spolade man precis när nästa låt just hade börjat (inom en kvarts sekund) kunde två låtar spela samtidigt.
+- **Musikfältet har appens ikoner i stället för emoji** (upprepa, låtradio, sovtimer, låttext, Chromecast, stäng,
+  föregående och nästa – och hoppen bakåt/framåt med antal sekunder för ljudböcker och poddar). Alla knappar har ett
+  namn för skärmläsare (*Låttext* saknade det), och på en telefon ryms hela raden: på 390 px bredd klipptes låtradion
+  förut av.
 
 ## 1.3.0 – 2026-11-24
 - **Backlogg:** teamets arbetslista finns i `docs/backlog.md` – vad som pågår, vad som står näst på tur och vad som

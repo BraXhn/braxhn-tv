@@ -392,7 +392,9 @@ body.hasbar main{padding-bottom:110px}
 #mbar .track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
 #mbar .mright{display:flex;gap:8px;align-items:center;justify-content:flex-end}
 #mbar #mvol{width:100px;padding:0;accent-color:var(--accent)}
-#mbar .mctl svg{width:20px;height:20px;display:block} /* ⏮ ⏯ ⏭ som SVG (ICON) – samma ikoner som videospelaren */
+#mbar .mctl svg,#mbar .mic svg{width:20px;height:20px;display:block;flex:none} /* knapparna är SVG (ICON) – samma ikoner som videospelaren */
+#mbar .mic{width:38px;height:36px;padding:0!important;justify-content:center}
+#mbar #msleep:not(.mic){gap:4px}
 #mbar #mrep.on{border-color:var(--accent)}
 /* "Spela på…": fjärrkontrollpanelen (styr en annan enhet) – ligger ovanför ljudspelaren och det lilla fönstret */
 .playon svg{width:18px;height:18px;flex:none}
@@ -495,6 +497,8 @@ button.card.mvcard{background:none;border:0;padding:0;color:inherit;text-align:l
   #mbar .mmid{grid-area:m;min-width:0;width:100%}
   #mbar .mctl{flex-wrap:nowrap;max-width:100%;overflow-x:auto;scrollbar-width:none;justify-content:flex-start;justify-content:safe center}
   #mbar .mctl > *{flex:none}
+  #mbar .mctl{gap:4px}
+  #mbar .mic{width:34px;height:34px} /* nio knappar ryms på 360 px */
   #mbar .mseek span{display:none}
   .mhero{flex-direction:column;align-items:flex-start}
   .cover.big{width:160px;height:160px;flex:none}

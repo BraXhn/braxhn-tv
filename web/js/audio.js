@@ -12,7 +12,7 @@ import { screenBadge } from './screentime.js';
 import { cover, trackRows } from './views/music.js';
 import { openDialog } from './ui/dialog.js';
 import { openMenu } from './ui/menu.js';
-import { ICON } from './ui/icons.js';
+import { ICON, skipIcon } from './ui/icons.js';
 import { provide } from './lazy.js';
 import * as AE from './audioengine.js';
 import { gainFor } from './audiomix.js';
@@ -86,10 +86,10 @@ function ensureBar() {
   const bar = document.createElement('div'); bar.id = 'mbar'; bar.hidden = true;
   bar.innerHTML = `<audio id="maudio" preload="auto"></audio>
     <div class="mleft"><div id="mcov"></div><div class="mtxt"><b id="mtitle"></b><a id="martist" class="muted small"></a></div></div>
-    <div class="mmid"><div class="row mctl"><button class="ghost small" id="mprev" aria-label="${t('Föregående')}" title="${t('Föregående')}">${ICON.prev}</button><button class="primary" id="mplay" aria-label="${t('Pausa')}" title="${t('Pausa')}">${ICON.pause}</button><button class="ghost small" id="mnext" aria-label="${t('Nästa')}" title="${t('Nästa')}">${ICON.next}</button>
-      <button class="ghost small" id="mrep" title="${t('Upprepa')}" aria-label="${t('Upprepa')}" aria-pressed="false">🔁</button><button class="ghost small" id="mset" title="${t('Ljudinställningar')}" aria-label="${t('Ljudinställningar')}" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small" id="msleep" title="${t('Sovtimer')}" aria-label="${t('Sovtimer')}" aria-haspopup="dialog">☾</button><button class="ghost small" id="mlyr" title="${t('Låttext')}" aria-pressed="false">Text</button><button class="ghost small castbtn" id="mcast" title="${t('Casta till Chromecast')}" aria-label="${t('Casta till Chromecast')}" ${castReady ? '' : 'hidden'}>📺</button><button class="ghost small" id="mradio" title="${t('Starta låtradio från låten')}" aria-label="${t('Starta låtradio från låten')}" aria-pressed="false">📻</button></div>
+    <div class="mmid"><div class="row mctl"><button class="ghost small mic" id="mprev" aria-label="${t('Föregående')}" title="${t('Föregående')}">${ICON.prev}</button><button class="primary" id="mplay" aria-label="${t('Pausa')}" title="${t('Pausa')}">${ICON.pause}</button><button class="ghost small mic" id="mnext" aria-label="${t('Nästa')}" title="${t('Nästa')}">${ICON.next}</button>
+      <button class="ghost small mic" id="mrep" title="${t('Upprepa')}" aria-label="${t('Upprepa')}" aria-pressed="false">${ICON.repeat}</button><button class="ghost small mic" id="mset" title="${t('Ljudinställningar')}" aria-label="${t('Ljudinställningar')}" aria-haspopup="menu">${ICON.gear}</button><button class="ghost small mic" id="msleep" title="${t('Sovtimer')}" aria-label="${t('Sovtimer')}" aria-haspopup="dialog">${ICON.moon}</button><button class="ghost small mic" id="mlyr" title="${t('Låttext')}" aria-label="${t('Låttext')}" aria-pressed="false">${ICON.lyrics}</button><button class="ghost small mic castbtn" id="mcast" title="${t('Casta till Chromecast')}" aria-label="${t('Casta till Chromecast')}" ${castReady ? '' : 'hidden'}>${ICON.cast}</button><button class="ghost small mic" id="mradio" title="${t('Starta låtradio från låten')}" aria-label="${t('Starta låtradio från låten')}" aria-pressed="false">${ICON.radio}</button></div>
       <div class="mseek"><span id="mcurt" class="small muted">0:00</span><div class="track" id="mtrack"><i id="mfill"></i></div><span id="mdur" class="small muted">0:00</span></div></div>
-    <div class="mright"><select id="mspeed" title="${t('Hastighet')}" aria-label="${t('Uppspelningshastighet')}" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="${t('Volym')}" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">${t('Kö')}</button><button class="ghost small" id="mx" title="${t('Stäng spelaren')}" aria-label="${t('Stäng spelaren')}">✕</button></div>`;
+    <div class="mright"><select id="mspeed" title="${t('Hastighet')}" aria-label="${t('Uppspelningshastighet')}" hidden>${[0.75, 1, 1.1, 1.25, 1.5, 1.75, 2].map(v => `<option value="${v}">${String(v).replace('.', ',')}×</option>`).join('')}</select><input type="range" id="mvol" aria-label="${t('Volym')}" min="0" max="1" step="0.05" value="${store.get('mvol', 1)}"><button class="ghost small" id="mq" aria-haspopup="dialog">${t('Kö')}</button><button class="ghost small mic" id="mx" title="${t('Stäng spelaren')}" aria-label="${t('Stäng spelaren')}">${ICON.close}</button></div>`;
   document.body.append(bar);
   const a = M.el = $('#maudio');
   M.audio = FACADE;
@@ -155,7 +155,7 @@ export function musicSession() {
 function setBarMode(spoken) {
   $('#mspeed').hidden = !spoken; $('#mrep').hidden = spoken; $('#mq').hidden = spoken; $('#mlyr').hidden = spoken; $('#mradio').hidden = spoken;
   const b = LPREFS.skipBack, f = LPREFS.skipForward;
-  $('#mprev').textContent = spoken ? `↺${b}` : '⏮'; $('#mnext').textContent = spoken ? `${f}↻` : '⏭';
+  $('#mprev').innerHTML = spoken ? skipIcon(b, false) : ICON.prev; $('#mnext').innerHTML = spoken ? skipIcon(f, true) : ICON.next;
   $('#mprev').title = spoken ? t('{b} sekunder bakåt', { b }) : t('Föregående'); $('#mnext').title = spoken ? t('{f} sekunder framåt', { f }) : t('Nästa');
   $('#mprev').setAttribute('aria-label', $('#mprev').title); $('#mnext').setAttribute('aria-label', $('#mnext').title);
   if (spoken) showLyrics(false);

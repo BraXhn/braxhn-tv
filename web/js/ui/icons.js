@@ -16,7 +16,16 @@ export const ICON = {
   full: svg('<path d="M5 5h5v2H7v3H5zm9 0h5v5h-2V7h-3zM5 14h2v3h3v2H5zm12 0h2v5h-5v-2h3z"/>'),
   mini: svg('<path d="M3 5h18v14H3zm2 2v10h14V7zm6 4h7v5h-7z"/>'),
   expand: svg('<path d="M4 4h7v2H7.4l4.3 4.3-1.4 1.4L6 7.4V11H4zm16 16h-7v-2h3.6l-4.3-4.3 1.4-1.4 4.3 4.3V13h2z"/>'),
+  // Musikfältet (audio.js): upprepa, låtradio, sovtimer, låttext, Chromecast och stäng
+  repeat: svg('<path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/>'),
+  radio: svg('<path d="M3.2 6.2C2.5 6.4 2 7.2 2 8v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H8.3l8.3-3.3L15.9 1zM7 20a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm13-8h-2v-2h-2v2H4V8h16z"/>'),
+  moon: svg('<path d="M12.3 3a9 9 0 1 0 8.7 11.3A7 7 0 0 1 12.3 3z"/>'),
+  lyrics: svg('<path fill-rule="evenodd" d="M4 3h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8l-4 4zm3 4v2h10V7zm0 4v2h7v-2z"/>'),
+  cast: svg('<path d="M1 18v3h3a3 3 0 0 0-3-3zm0-4v2a5 5 0 0 1 5 5h2a7 7 0 0 0-7-7zm0-4v2a9 9 0 0 1 9 9h2A11 11 0 0 0 1 10zm20-7H3a2 2 0 0 0-2 2v3h2V5h18v14h-7v2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/>'),
+  close: svg('<path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4l5.6 5.6L5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6z"/>'),
 };
+/** Hopp bakåt/framåt med antalet sekunder i pilen (ljudböcker och poddar) */
+export const skipIcon = (n, fwd) => svg(`<path d="${fwd ? 'M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z' : 'M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z'}"/><text x="12" y="16.5" font-size="${n >= 100 ? 5.5 : 7}" text-anchor="middle" font-family="sans-serif" font-weight="700">${+n}</text>`);
 // Ikoner för sidomenyn (Hem och biblioteken). Storleken sätts i CSS.
 const rail = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 export const RAIL_ICON = {

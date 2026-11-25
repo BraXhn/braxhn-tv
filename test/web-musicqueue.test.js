@@ -162,8 +162,8 @@ t('GDPR: kön följer med i exporten och försvinner när profilen raderas', asy
 });
 
 // ---------- webbläsaren ----------
-async function newContext(kt = cookie) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
+async function newContext(kt = cookie, viewport = { width: 1280, height: 800 }) {
+  const ctx = await browser.newContext({ viewport, bypassCSP: true });
   await ctx.addCookies([{ name: 'kt', value: kt, url: B }]);
   return ctx;
 }
@@ -343,6 +343,32 @@ tw('ljudbok eller podd efter en återställd kö: talet spelar som förut och mu
   assert.equal(await A.page.evaluate(() => !document.querySelector('#mbar') || document.querySelector('#mbar').hidden), true);
   assert.deepEqual(A.errors, []);
   await ctx.close();
+});
+
+tw('musikfältet: ikoner med namn i stället för emoji, och hela raden ryms på en telefon (390 px)', async () => {
+  assert.equal((await req('/api/me/queue', { method: 'PUT', body: { ids: L, idx: 0, pos: 2 } })).status, 200);
+  for (const vp of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+    const ctx = await newContext(cookie, vp), A = await newPage(ctx);
+    await A.page.goto(B + '/');
+    await A.restored();
+    const r = await A.page.evaluate(() => {
+      const row = document.querySelector('#mbar .mctl'), W = document.documentElement.clientWidth;
+      const btns = [...document.querySelectorAll('#mbar button')].filter(b => !b.hidden && getComputedStyle(b).display !== 'none');
+      return { sw: row.scrollWidth, cw: row.clientWidth, W, out: btns.filter(b => { const x = b.getBoundingClientRect(); return x.left < 0 || x.right > W; }).map(b => b.id),
+        unnamed: btns.filter(b => !b.getAttribute('aria-label') && !b.textContent.trim()).map(b => b.id),
+        emoji: btns.filter(b => /\p{Extended_Pictographic}|[☾✕⏮⏭↺↻]/u.test(b.textContent)).map(b => b.id + ':' + b.textContent.trim()),
+        noIcon: btns.filter(b => b.id !== 'mq' && !b.querySelector('svg')).map(b => b.id) };
+    });
+    // Förut: 🔁 📻 ⏮ ⏭ ☾ 📺 ✕ som text, Låttext utan namn, och på 390 px rullade raden så att 📻 klipptes
+    assert.ok(r.sw <= r.cw, `${vp.width}: knappraden rullar (${r.sw} > ${r.cw})`);
+    assert.deepEqual(r.out, [], `${vp.width}: knappar utanför skärmen`);
+    assert.deepEqual(r.emoji, [], `${vp.width}: emoji i knapparna`);
+    assert.deepEqual(r.noIcon, [], `${vp.width}: knappar utan ikon`);
+    assert.deepEqual(r.unnamed, [], `${vp.width}: knappar utan namn`);
+    for (const id of ['mprev', 'mnext', 'mrep', 'msleep', 'mlyr', 'mradio', 'mx']) assert.ok(await A.page.locator('#' + id).getAttribute('aria-label'), id + ' har namn');
+    assert.deepEqual(A.errors, []);
+    await ctx.close();
+  }
 });
 
 tw('stängd spelare (✕): kön tas bort och kommer inte tillbaka', async () => {

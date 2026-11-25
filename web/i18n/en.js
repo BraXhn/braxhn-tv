@@ -21,7 +21,8 @@ self.BX_I18N = {
   "Videon kan inte spelas i webbläsaren (filformatet stöds inte)": "The video can't be played in the browser (the file format isn't supported)",
   // audio-extras.js
   "Sovtimern pausade uppspelningen": "The sleep timer paused playback",
-  "☾ slut": "☾ end",
+  "slut": "end",
+  "{v} min": "{v} min",
   "Sovtimer, {v} minuter kvar": "Sleep timer, {v} minutes left",
   "Sovtimer, pausar vid slutet": "Sleep timer, pauses at the end",
   "Sovtimer": "Sleep timer",

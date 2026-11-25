@@ -2,6 +2,7 @@
 import { $, $$, api, esc, keyClick, toast, t } from './core.js';
 import { M, applyVolume, seekTo, spokenPos } from './audio.js';
 import { iconButton } from './ui/buttons.js';
+import { ICON } from './ui/icons.js';
 import { openDialog } from './ui/dialog.js';
 import { loadingState } from './ui/states.js';
 
@@ -42,7 +43,9 @@ function sleepTick() {
 function sleepLabel(left) {
   const b = $('#msleep'); if (!b) return;
   b.classList.toggle('on', !!(SLEEP.until || SLEEP.end));
-  b.textContent = SLEEP.until ? t('☾ {v} min', { v: Math.max(1, Math.ceil((left ?? sleepLeft()) / 60)) }) : SLEEP.end ? t('☾ slut') : '☾';
+  const txt = SLEEP.until ? t('{v} min', { v: Math.max(1, Math.ceil((left ?? sleepLeft()) / 60)) }) : SLEEP.end ? t('slut') : '';
+  b.innerHTML = ICON.moon + (txt ? `<span aria-hidden="true">${esc(txt)}</span>` : '');
+  b.classList.toggle('mic', !txt); // med tid kvar blir knappen bredare
   b.setAttribute('aria-label', SLEEP.until ? t('Sovtimer, {v} minuter kvar', { v: Math.max(1, Math.ceil((left ?? sleepLeft()) / 60)) }) : SLEEP.end ? t('Sovtimer, pausar vid slutet') : t('Sovtimer'));
 }
 export function sleepDialog() {
