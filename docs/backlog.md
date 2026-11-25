@@ -24,7 +24,21 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Näst på tur
 
-### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Hemma via den publika adressen: gå direkt till servern
+
+- **Vad:** när någon är hemma men öppnar servern via den publika adressen (t.ex. tv.braxhn.net) går all trafik ut
+  på internet och tillbaka – via reläet eller routern – och servern räknar dem som *utanför hemmet* (lägre kvalitet,
+  takt på ljudböcker, hastighetsprov). Ägaren upplevde det i supportärende #2. Låt webben och apparna upptäcka
+  att servern nås på hemnätet (t.ex. att servern i sitt svar anger sina lokala adresser och klienten provar dem
+  med en snabb förfrågan) och då gå direkt dit, eller åtminstone behandlas som hemma.
+- **Varför:** snabbast möjliga start och full kvalitet hemma, oavsett vilken adress familjen har sparat. Plex gör
+  så (lokal upptäckt av servern).
+- **Filer:** `server/relay.js`, `server/http/router.js` (`isTrusted`), `/api/status`, `web/js/core.js`/`router.js`,
+  apparnas serverval (`apps/expo/src/api.ts`, `apps/apple`, `apps/automotive`).
+- **Klart när:** en klient hemma som använder den publika adressen spelar med hemmets kvalitet och utan reläets
+  omväg, utan att säkerheten försvagas (ingen ska kunna utge sig för att vara hemma utifrån), med test.
+
+### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -35,7 +49,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först, och Anton har bekräftat på en riktig iPhone (se *Bara Anton kan göra*).
 
-### 2. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
+### 3. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
 
 - **Vad:** `POST /api/setup/hw-test` finns och används i installationsguiden. Gör resultatet synligt även under
   Administration, med uppmätt hastighet (bildrutor per sekund) för H.264 och HEVC och med ffmpegs felrad när det inte
@@ -48,7 +62,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
   har kört provet med NVENC (se *Bara Anton kan göra*).
 
-### 3. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
+### 4. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
 
 - **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
   bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
@@ -61,7 +75,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
   hörlurarna byter låt.
 
-### 4. Expo-appen: nedladdning för offline
+### 5. Expo-appen: nedladdning för offline
 
 - **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
   ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
@@ -69,7 +83,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 5. Skärmtid i Safari och apparna: paus och tiden kvar
+### 6. Skärmtid i Safari och apparna: paus och tiden kvar
 
 - **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
   (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
