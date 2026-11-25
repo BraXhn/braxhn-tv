@@ -152,8 +152,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   uppspelningsvakten där det går.
 - Kvarlämnade mappar `*.gone-*` i omkodningsmappen efter avstängning (töms vid nästa start) – städa innan processen
   avslutas.
-- `test/familyfilter.test.js` (webbspelarens tystning) faller ibland när maskinen är hårt belastad – gör
-  tidsgränserna tåligare.
 - Docker-imagen för arm64 byggs i GitHub Actions men är inte provad på en arm-maskin.
 
 **Säkerhet och integritet**

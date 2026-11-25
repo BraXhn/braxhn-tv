@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- **Familjefiltret tystar lite tidigare** (0,08 s före ordet i stället för 0,03 s), så att en långsam TV eller telefon inte
+  hinner släppa igenom början av ett ord innan ljudet stängs av.
 - **Servern svarar på engelska till den som valt engelska.** Felmeddelandena (inloggning, tvåstegsverifiering,
   skärmtid, åldersgräns, uppspelning, nedladdning), skärmtidens besked, startsidans hyllnamn, *Den här dagen*, avsnitt
   utan namn (*Episode 2* i stället för *Avsnitt 2*), undertextspårens och versionernas namn, krockarna i Live-TV och

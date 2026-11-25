@@ -9,7 +9,7 @@
 import { $, $$, api, esc, fmtTime, me, toast, toastErr, t } from '../core.js';
 import { confirmDialog, openDialog } from '../ui/dialog.js';
 
-const LEAD = 0.03;   // tysta så här mycket före intervallet (s) – timern kan komma några ms sent
+const LEAD = 0.08;   // tysta så här mycket före intervallet (s) – timern kan komma sent på en långsam TV eller telefon
 const NEAR = 0.6;    // närmare gränsen än så: kontroll varje bildruta
 const SCOPE = { me: t('Bara jag'), household: t('Hushållet'), all: t('Alla på servern') };
 
