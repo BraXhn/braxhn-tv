@@ -1167,6 +1167,19 @@ fieldset.plain{border:0;padding:0;margin:12px 0}fieldset.plain legend{font-size:
 #player .skipcd{position:absolute;right:28px;width:max-content;max-width:calc(100% - 56px);bottom:calc(var(--ctlh) + 76px);display:flex;align-items:center;gap:12px;padding:8px 8px 8px 16px;
   border-radius:10px;background:rgba(27,28,31,.9);color:#fff;font-weight:600;font-size:.9375rem}
 #player.mini .skipcd,#player.cinema .skipcd{display:none}
+/* Sovtimern (player/sleep.js): knappen visar minuterna kvar; sista minuten en markering som syns med dolda kontroller */
+#player .ctl #psleep.on{display:flex;align-items:center;gap:4px;border-radius:999px;padding-right:10px;color:var(--accent,#e5a00d);font-size:.75rem;font-weight:700;line-height:1}
+/* Sovtimerns sista minut och skärmtidens varning: mitt i överkanten, under varandra (syns även med dolda kontroller) */
+#player .pnotes{position:absolute;top:calc(64px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:4;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:calc(100% - 36px)}
+#player .sleepcd,#player .stwarn{padding:6px 14px;border-radius:999px;background:rgba(27,28,31,.9);color:#fff;font-weight:600;font-size:.875rem;text-align:center}
+/* Skärmtiden (player/screenleft.js): "12 min kvar idag" i överkanten (kort på telefon), varningen de sista minuterna */
+#player .stwarn{border:1px solid var(--err)}
+#player .pbar .stleft{font-size:.8125rem;font-weight:600;padding:4px 10px;border-radius:999px;background:rgba(20,22,30,.85);border:1px solid #fff3;white-space:nowrap}
+#player .pbar .stleft.low{border-color:var(--err);color:#ffb3ba}
+#player .stleft .sts{display:none}
+@media (max-width:600px){#player .stleft .stl{display:none}#player .stleft .sts{display:inline}}
+#player.mini .pnotes,#player.cinema .pnotes{display:none}
 /* "Det här har hänt" (player/recap.js): erbjudandet i spelaren och dialogen */
 #player .recapoffer{position:absolute;left:28px;bottom:calc(var(--ctlh) + 16px);max-width:calc(100% - 56px);display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;
   padding:12px 14px;border-radius:10px;background:rgba(27,28,31,.92);color:#fff}

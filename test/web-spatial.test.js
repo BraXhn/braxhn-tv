@@ -373,6 +373,66 @@ t('spelarens inställningar: pilarna når kvalitet och undertexter, och fastnar 
   await close();
 });
 
+t('sovtimern med fjärrkontrollen: månen i kontrollraden, val med pilar och Enter, nedtoning, paus och sparad position', async () => {
+  const { page, errors, close } = await newPage();
+  await open(page, `item/${S.alfa}`);
+  await press(page, 'ArrowDown');
+  await until(page, x => x.play, 'fokus på Spela');
+  await press(page, 'Enter');
+  await page.waitForSelector('#player:not([hidden]):not(.mini) #vid');
+  await until(page, x => x.inPlayer && x.id === 'cplay', 'fokus på Spela/pausa');
+  await press(page, 'Enter'); // paus: kontrollerna ligger kvar
+  await page.waitForFunction(() => document.querySelector('#vid').paused);
+  for (let i = 0; i < 10 && (await focus(page)).id !== 'psleep'; i++) await press(page, 'ArrowRight');
+  assert.equal((await focus(page)).id, 'psleep', '→ når sovtimern');
+  await press(page, 'Enter');
+  await page.waitForSelector('dialog[open] [data-sl]');
+  await until(page, x => x.dialog && x.ring, 'fokus i sovtimerns dialog');
+  const sl = () => page.evaluate(() => document.activeElement?.dataset?.sl ?? null);
+  assert.equal(await sl(), '15', 'första valet har fokus');
+  await press(page, 'ArrowDown');
+  assert.equal(await sl(), '30', '↓ till 30 minuter');
+  await press(page, 'Enter');
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+  let f = await until(page, x => x.id === 'psleep', 'fokus tillbaka på sovtimern');
+  assert.ok(f.ring && f.onScreen, JSON.stringify(f));
+  const btn = () => page.evaluate(() => { const b = document.querySelector('#psleep'); return { text: b.textContent.trim(), aria: b.getAttribute('aria-label'), on: b.classList.contains('on') }; });
+  assert.deepEqual(await btn(), { text: '30 min', aria: 'Sovtimer, 30 minuter kvar', on: true });
+  // Timern löper ut om tre sekunder (i stället för 30 minuter): ljudet tonas ner och filmen pausas
+  const vol0 = await page.evaluate(async () => {
+    const v = document.querySelector('#vid'); v.volume = 0.8;
+    const m = await import('/m/js/player/sleep.js'); m.SL.until = Date.now() + 3000;
+    window.__minVol = 1; v.addEventListener('volumechange', () => { window.__minVol = Math.min(window.__minVol, v.volume); });
+    await v.play(); return v.volume;
+  });
+  assert.equal(vol0, 0.8);
+  await page.waitForFunction(() => document.querySelector('#vid').paused, null, { timeout: 10000 });
+  const after = await page.evaluate(() => { const v = document.querySelector('#vid'); return { pos: v.currentTime, vol: v.volume, minVol: window.__minVol, opacity: v.style.opacity, toast: document.querySelector('#toast')?.textContent || '', open: !document.querySelector('#player').hidden }; });
+  assert.ok(after.minVol < 0.8 * 0.4, `ljudet tonades ner (lägst ${after.minVol})`);
+  assert.equal(after.vol, 0.8, 'volymen återställd efter pausen');
+  assert.equal(after.opacity, '', 'bilden återställd efter pausen');
+  assert.match(after.toast, /Sovtimern pausade uppspelningen/);
+  assert.ok(after.open, 'spelaren står kvar pausad');
+  assert.deepEqual(await btn(), { text: '', aria: 'Sovtimer', on: false });
+  // Positionen sparas där timern pausade (Fortsätt titta; API:t visar den först efter två minuter, så läs databasen)
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(path.join(ROOT, 'config', 'braxhn-tv.db'), { readOnly: true });
+  db.exec('PRAGMA busy_timeout=5000');
+  let pos = 0;
+  for (let i = 0; i < 30 && Math.abs(pos - after.pos) > 1.5; i++) { await sleep(200); pos = db.prepare('SELECT position FROM progress WHERE item_id=?').get(S.alfa)?.position || 0; }
+  db.close();
+  assert.ok(Math.abs(pos - after.pos) <= 1.5, `sparad position ${pos} (pausad vid ${after.pos.toFixed(1)})`);
+  // "När filmen tar slut": pausar strax före slutet i stället för att stänga spelaren och gå vidare
+  await page.evaluate(async () => { const m = await import('/m/js/player/sleep.js'); m.setSleep('end'); const v = document.querySelector('#vid'); v.currentTime = v.duration - 3; await v.play(); });
+  assert.deepEqual(await btn(), { text: 'slut', aria: 'Sovtimer, pausar vid slutet', on: true });
+  await page.waitForFunction(() => document.querySelector('#vid').paused, null, { timeout: 10000 });
+  const end = await page.evaluate(() => { const v = document.querySelector('#vid'); return { left: v.duration - v.currentTime, ended: v.ended, open: !document.querySelector('#player').hidden }; });
+  assert.ok(end.open && !end.ended && end.left < 1.2, JSON.stringify(end));
+  await page.evaluate(() => document.querySelector('#cstop')?.click());
+  assert.deepEqual(errors, []);
+  await close();
+});
+
 t('utan TV-läge: pilarna gör inget förrän något saknar fokus, sedan rumslig navigering', async () => {
   const { page, errors, close } = await newPage({ viewport: { width: 1280, height: 800 } });
   await open(page, '');

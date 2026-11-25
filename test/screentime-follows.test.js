@@ -98,6 +98,71 @@ test('skärmtid: tid räknas per användare (ingen dubbelräkning), paus och gla
   assert.equal(screen.check(uid, { audio: true, d: new Date(t0 + 660e3) }), null);
 });
 
+test('skärmtid: en ström räknas fram till när data senast skickades – paus räknas inte (streamMeter)', () => {
+  // Uppmätt i Chrome före rättningen: direktuppspelning i 6 s och sedan 60 s paus gav 20 s räknad tid (14 s av pausen),
+  // eftersom livstecknet var 20:e sekund räknade fram till sig självt så fort något skickats sedan förra
+  const uid = Number(D.run("INSERT INTO users(name,pass,is_admin,created) VALUES('strömmen','x',0,0)").lastInsertRowid);
+  screen.setRules(uid, { daily: 60 });
+  const t0 = new Date(2026, 9, 14, 10).getTime();
+  const meter = screen.streamMeter(20000, t0, 0);
+  screen.heartbeat(uid, 'i:9', null, { at: t0 }); // svaret börjar
+  const beats = [];
+  // Spelar i 26 s (data varannan sekund), pausas sedan i två minuter med svaret öppet (inget skickas)
+  for (let s = 2, n = 0; s <= 146; s += 2) {
+    if (s <= 26) n += 65536;
+    const at = meter(t0 + s * 1000, n);
+    if (at != null) { beats.push((at - t0) / 1000); screen.heartbeat(uid, 'i:9', null, { at }); }
+  }
+  assert.deepEqual(beats, [20, 26], 'livstecken bara medan data skickas, det sista vid pausen');
+  assert.equal(screen.status(uid, new Date(t0 + 146e3)).used, 26, 'pausen räknas inte');
+  // Startar igen efter pausen: tiden räknas igen (efter ett glapp längre än CAP räknas glappet inte)
+  let n = 26 / 2 * 65536;
+  for (let s = 148; s <= 190; s += 2) {
+    n += 65536;
+    const at = meter(t0 + s * 1000, n);
+    if (at != null) screen.heartbeat(uid, 'i:9', null, { at });
+  }
+  assert.equal(screen.status(uid, new Date(t0 + 190e3)).used, 26 + (188 - 148), 'uppspelningen efter pausen räknas (glappet över pausen inte)');
+  // Data hela tiden: ett livstecken per period, fram till senaste skickade data
+  const m2 = screen.streamMeter(20000, 0, 0), got = [];
+  for (let s = 1; s <= 60; s++) { const at = m2(s * 1000, s); if (at != null) got.push(at / 1000); }
+  assert.deepEqual(got, [20, 40, 60]);
+});
+
+test('skärmtid: en kort paus (under CAP) räknas inte när spelaren rapporterar både paus och start', () => {
+  // Uppmätt i Chrome före rättningen: 20 s uppspelning, 30 s paus och 20 s till gav 63 s räknad tid (pausen räknades
+  // när nästa rapport kom, eftersom glappet var kortare än CAP)
+  const uid = Number(D.run("INSERT INTO users(name,pass,is_admin,created) VALUES('kortpaus','x',0,0)").lastInsertRowid);
+  screen.setRules(uid, { daily: 60 });
+  const t0 = new Date(2026, 9, 14, 18).getTime(), hb = (pos, s) => screen.heartbeat(uid, 'i:5', pos, { at: t0 + s * 1000 });
+  hb(10, 0); hb(20, 10);
+  hb(25, 15); // pausad: rapport vid pausen
+  hb(null, 16); // strömmen skickar det sista strax efter pausen
+  hb(25, 45); // startar igen 29 s senare: samma position
+  hb(35, 55);
+  assert.equal(screen.status(uid, new Date(t0 + 55e3)).used, 10 + 5 + 1 + 10, 'pausen 16–45 s räknas inte');
+  // En klient som säger att positionen står still medan strömmen skickar data räknas som vanligt
+  hb(null, 62); hb(35, 70); hb(45, 75);
+  assert.equal(screen.status(uid, new Date(t0 + 75e3)).used, 26 + 7 + 13);
+});
+
+test('skärmtid i spelaren: "X min kvar idag", varning de sista fem minuterna och inget utan skärmtid (playerLeft)', async () => {
+  const { playerLeft, WARN_LEFT } = await import('../web/js/player/screenleft.js');
+  assert.equal(WARN_LEFT, 300);
+  assert.equal(playerLeft(null), null, 'utan skärmtid');
+  assert.equal(playerLeft({ limited: false }), null);
+  assert.equal(playerLeft({ limited: true, allowed: true, left: null }), null, 'ingen gräns idag (bara veckodagar med gräns)');
+  assert.equal(playerLeft({ limited: true, allowed: false, left: 0 }), null, 'slut: spelaren stängs i stället');
+  assert.deepEqual(playerLeft({ limited: true, allowed: true, left: 720 }), { min: 12, warn: false });
+  assert.deepEqual(playerLeft({ limited: true, allowed: true, left: 301 }), { min: 6, warn: false });
+  assert.deepEqual(playerLeft({ limited: true, allowed: true, left: 300 }), { min: 5, warn: true });
+  assert.deepEqual(playerLeft({ limited: true, allowed: true, left: 20 }), { min: 1, warn: true }, 'sista minuten visas som 1 min');
+  // Samma fält som serverns status ger
+  const uid = Number(D.run("INSERT INTO users(name,pass,is_admin,created) VALUES('kvar','x',0,0)").lastInsertRowid);
+  screen.setRules(uid, { daily: 30 });
+  assert.deepEqual(playerLeft(screen.status(uid, new Date(2026, 9, 14, 10))), { min: 30, warn: false });
+});
+
 test('skärmtid: tillåtna klockslag, även över midnatt, och extra tid förlänger kvällen', () => {
   const uid = Number(D.run("INSERT INTO users(name,pass,is_admin,created) VALUES('klocka','x',0,0)").lastInsertRowid);
   screen.setRules(uid, { from: '07:00', until: '20:00' });

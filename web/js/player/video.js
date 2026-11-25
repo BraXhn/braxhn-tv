@@ -18,7 +18,9 @@ import { migrateLocalPrefs } from './playprefs.js';
 import { applyFilter, initFilter, stopFilter } from './familyfilter.js';
 import { applyAudioFx, applySubStyle, audioFx, bindSubStyleFields, measureCtl, serverFxParams, setAudioFx, stopAudioFx, subStyleFields, thumbStyle, webAudioFx } from './comfort.js';
 import { route } from '../router.js';
-import { screenBadge, timeUp } from '../screentime.js';
+import { screenBadge, screenSt, timeUp } from '../screentime.js';
+import { attachSleep, setSleep, sleepCarry, sleepClosed, sleepStopsNext } from './sleep.js';
+import { showScreenLeft } from './screenleft.js';
 import { ICON } from '../ui/icons.js';
 import { need, provide } from '../lazy.js';
 import { audioLabel } from '../ui/tracklabel.js';
@@ -69,6 +71,7 @@ export async function play(id, start = 0, opts = {}) {
   const keepParty = P && P.party && P.party === partyId ? P.es : null;
   if (keepParty) P.es = null;
   if (M.audio && !M.audio.paused) M.audio.pause();
+  const sleepKeep = sleepCarry(); // sovtimern följer med till nästa avsnitt (closeOverlays stänger av den)
   closeOverlays();
   const el = $('#player');
   const q = (s) => $(s, el);
@@ -85,7 +88,7 @@ export async function play(id, start = 0, opts = {}) {
   const chaps = it.chapters || [];
   const line2 = it.kind === 'episode' ? `${sxe(it)} — ${esc(it.title)}` : (it.year || '');
   el.innerHTML = `<video id="vid" autoplay playsinline x-webkit-airplay="allow"></video>
-    <div class="pbar"><button class="ghost small" id="pclose">${t('← Tillbaka')}</button><span class="title">${title}</span><span class="muted small" id="pmode"></span>
+    <div class="pbar"><button class="ghost small" id="pclose">${t('← Tillbaka')}</button><span class="title">${title}</span><span class="muted small" id="pmode"></span><span class="stleft" id="pstleft" hidden></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="${t('Casta till Chromecast')}">${t('📺 Casta')}</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
       ${remoteButton('pdevs', 'ghost small')}
@@ -94,7 +97,7 @@ export async function play(id, start = 0, opts = {}) {
     <div class="partybox" id="partybox" hidden><div class="row" style="justify-content:space-between"><b>${t('Titta tillsammans')}</b><button class="ghost small" id="pbclose" aria-label="${t('Stäng Titta tillsammans')}" title="${t('Stäng')}">✕</button></div>
       <div class="muted small" id="pmembers"></div><div class="row" style="margin:6px 0"><input id="plink" readonly><button class="ghost small" id="pcopy">${t('Kopiera')}</button></div>
       <div class="pchat" id="pchat"></div><input id="pmsg" placeholder="${t('Skriv ett meddelande…')}" maxlength="300"></div>
-    <div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">${t('Avbryt')}</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
+    <div class="pnotes"><div class="stwarn" id="pstwarn" role="status" hidden></div><div class="sleepcd" id="psleepcd" aria-hidden="true" hidden></div></div><div class="skipcd" id="pskipcd" role="status" hidden><span id="pskipt"></span><button class="ghost small" id="pskipx">${t('Avbryt')}</button></div><button class="skip" id="pskip" hidden></button><div class="pgs" id="pgs"></div><div class="subtxt" id="subtxt" aria-live="off"></div><div class="sr-only" id="pstate" role="status"></div><div class="sub2" id="sub2"></div><div class="chapters" id="chlist" hidden></div>
     <div class="setp" id="setp" hidden>
       <label>${t('Kvalitet')}<select id="pq"><option value="auto">Auto</option><option value="orig">Original</option>${qualitySteps(it.width, it.height, locale).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
       ${audios.length > 1 ? `<label>${t('Ljud')}<select id="pa">${audios.map(a => `<option value="${a.index}">${esc(audioLabel(a))}</option>`).join('')}</select></label>` : ''}
@@ -126,6 +129,7 @@ export async function play(id, start = 0, opts = {}) {
         </div>
         <div class="cright">
           ${chaps.length ? `<button id="pchap" title="${t('Kapitel')}" aria-label="${t('Kapitel')}">${ICON.list}</button>` : ''}
+          <button id="psleep" title="${t('Sovtimer')}" aria-label="${t('Sovtimer')}" aria-haspopup="dialog">${ICON.moon}</button>
           <button id="cset" title="${t('Kvalitet, ljud och undertexter')}" aria-label="${t('Kvalitet, ljud och undertexter')}">${ICON.gear}</button>
           <span class="vol"><button id="cmute" title="${t('Ljud av/på (m)')}" aria-label="${t('Ljud av/på (m)')}">${ICON.vol}</button><input type="range" id="cvol" min="0" max="1" step="0.05" aria-label="${t('Volym')}"></span>
           <button id="cmini" title="${t('Litet fönster (fortsätt bläddra)')}" aria-label="${t('Litet fönster (fortsätt bläddra)')}">${ICON.mini}</button>
@@ -138,6 +142,8 @@ export async function play(id, start = 0, opts = {}) {
   const v = q('#vid');
   applySubStyle(el);
   bindControls(cur, v);
+  attachSleep(cur, v, sleepKeep);
+  showScreenLeft(el, screenSt); // skärmtiden kvar (bara profiler med skärmtid); uppdateras med varje framstegsrapport
   initFilter(cur, v); // familjefiltret: tysta svordomar, hoppa över scener, markera scener under ⚙
   // "Det här har hänt": servern avgör om sammanfattningen erbjuds (första avsnittet i en ny säsong efter ett uppehåll)
   if (it.kind === 'episode' && !(start > 0) && !partyId) need('player/recap.js').then(m => { if (P === cur) m.offerRecap(cur, v); }).catch(() => {});
@@ -256,6 +262,9 @@ export async function play(id, start = 0, opts = {}) {
   track.onmouseleave = () => { prev.hidden = true; rect = null; if (raf) { cancelAnimationFrame(raf); raf = 0; } };
   track.onclick = (e) => { v.currentTime = tAt(e.clientX, track.getBoundingClientRect()); };
   v.addEventListener('pause', () => P === cur && sendProgress());
+  // Rapport även när filmen startar igen efter en paus: servern ser att positionen stått still och räknar inte pausen
+  // som skärmtid (screentime.js heartbeat)
+  v.addEventListener('play', () => { if (P === cur && v.currentTime >= 1) sendProgress(); });
   v.addEventListener('ended', () => P === cur && onEnded());
   // Spelar filmen (eller ska den spela)? Behövs när strömmen laddas om efter ett fel – en pausad film ska stå kvar pausad.
   // Webbläsaren pausar själv vid ett fel; den pausen räknas inte.
@@ -323,7 +332,8 @@ function markers() {
     stopSkipCountdown(cur);
     b.dataset.k = plan.kind; b.textContent = SKIP_TEXT[plan.kind][0];
     b.onclick = () => doSkip(cur, plan);
-    if (plan.auto && !cur.party) startSkipCountdown(cur, plan, v); // i ett rum styr ingen automatik de andras bild
+    // i ett rum styr ingen automatik de andras bild; sovtimern "när avsnittet tar slut" startar inte nästa avsnitt
+    if (plan.auto && !cur.party && !(plan.to === 'next' && sleepStopsNext())) startSkipCountdown(cur, plan, v);
   }
   b.hidden = false;
 }
@@ -579,7 +589,7 @@ function sendProgress(final = false) {
   if (final && navigator.sendBeacon) navigator.sendBeacon(`/api/items/${cur.it.id}/progress`, new Blob([body], { type: 'application/json' }));
   else fetch(`/api/items/${cur.it.id}/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     .then(r => r.json()).then(d => {
-      if (d.screenTime) screenBadge(d.screenTime);
+      if (d.screenTime) { screenBadge(d.screenTime); if (P === cur) showScreenLeft(cur.el, d.screenTime); }
       if (d.stop && P === cur) { if (d.screenTime && !d.screenTime.allowed) { closePlayer(false); timeUp(); } else { toast(me?.kid ? t('En vuxen stoppade uppspelningen') : t('Uppspelningen stoppades av administratören')); closePlayer(); } }
     }).catch(() => {});
 }
@@ -588,6 +598,8 @@ function onEnded() {
   sendProgress(true);
   const cur = P, { it } = cur;
   stopSkipCountdown(cur);
+  // Sovtimern "när avsnittet tar slut": stanna här i stället för att gå vidare (positionen är redan skickad)
+  if (sleepStopsNext()) { setSleep(0); toast(t('Sovtimern pausade uppspelningen')); return; }
   const plan = nextPlan(cur.pb, !!it.nextId);
   if (!plan) return closePlayer();
   if (plan.auto && plan.seconds === 0) return goNext(it.nextId);
@@ -623,6 +635,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
+  sleepClosed();
   pgsStop(P); textStop(P); stopAudioFx(v); stopFilter(P); stopStats(P); P.unwatch?.(); P.unwatch = null;
   P.tok = null; P.lmd = null;
   P = null;

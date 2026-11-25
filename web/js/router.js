@@ -296,7 +296,9 @@ window.addEventListener('keydown', (e) => {
   const dir = ARROW[e.key];
   if (!dir || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const P = curPlayer();
-  if (P && !P.mini) return; // helskärmsspelaren sköter pilarna själv (player/controls.js)
+  // Helskärmsspelaren sköter pilarna själv (player/controls.js) – men inte i en dialog som öppnats från den
+  // (sovtimern, Ögonblick, "Det här har hänt"): där navigerar pilarna som i alla dialoger. Förut gjorde de ingenting.
+  if (P && !P.mini && !document.querySelector('dialog[open]')) return;
   const a = document.activeElement;
   // Utan påslagen navigering: bara när inget har fokus, och mellan korten (som förut)
   if (!spatialOn && !noFocus(a) && !a.matches('.card > .clink')) return;

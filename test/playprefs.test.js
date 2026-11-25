@@ -20,6 +20,7 @@ process.env.CONFIG_DIR = path.join(ROOT, 'unitconfig');
 process.env.TRANSCODE_DIR = path.join(ROOT, 'unit-tc');
 const pp = await import('../server/playprefs.js');
 const { skipPlan, nextPlan } = await import('../web/js/player/autoskip.js');
+const SL = await import('../web/js/player/sleep.js');
 
 // ---------------- spårval ----------------
 const A = (index, lang, extra = {}) => ({ index, type: 'audio', lang, title: null, default: false, ...extra });
@@ -173,6 +174,30 @@ test('nextPlan: nästa avsnitt automatiskt med inställd nedräkning', () => {
   assert.deepEqual(nextPlan({ autoNext: { enabled: false, countdown: 15 } }, true), { auto: false, seconds: 15 });
   assert.deepEqual(nextPlan({ autoNext: { enabled: true, countdown: 0 } }, true), { auto: true, seconds: 0 });
   assert.deepEqual(nextPlan({}, true), { auto: true, seconds: 8 }); // äldre server
+});
+
+test('sovtimern i videospelaren: tid kvar, nedtoning och "när avsnittet tar slut" stoppar nästa avsnitt', () => {
+  const { sleepLeft, sleepFade, SLEEP_FADE, SLEEP_MINUTES } = SL;
+  assert.deepEqual(SLEEP_MINUTES, [15, 30, 45, 60], 'samma val som i ljudspelaren');
+  // Minuter: klockan, oberoende av filmen
+  assert.equal(sleepLeft({ until: 61000 }, 1000, 50, 100), 60);
+  assert.equal(sleepLeft({}, 1000, 50, 100), Infinity, 'ingen timer');
+  // Slutet: filmens tid kvar, snabbare uppspelning når slutet tidigare; okänd längd = okänt
+  assert.equal(sleepLeft({ end: true }, 0, 1300, 1320), 20);
+  assert.equal(sleepLeft({ end: true }, 0, 1300, 1320, 2), 10);
+  assert.equal(sleepLeft({ end: true }, 0, 1330, 1320), 0);
+  assert.equal(sleepLeft({ end: true }, 0, 10, 0), Infinity);
+  // Nedtoningen: full volym före de sista tio sekunderna, sedan linjärt ner till tyst
+  assert.equal(SLEEP_FADE, 10);
+  assert.equal(sleepFade(60), 1); assert.equal(sleepFade(10), 1); assert.equal(sleepFade(5), 0.5); assert.equal(sleepFade(0), 0); assert.equal(sleepFade(-1), 0);
+  // "När avsnittet tar slut" stoppar eftertexternas nästa avsnitt; minuttimern gör det inte (avsnitten fortsätter tills tiden gått)
+  SL.setSleep('end');
+  assert.equal(SL.sleepStopsNext(), true); assert.deepEqual(SL.sleepCarry(), { until: 0, end: true });
+  SL.setSleep(30);
+  assert.equal(SL.sleepStopsNext(), false);
+  assert.ok(Math.abs(SL.sleepCarry().until - Date.now() - 30 * 60e3) < 1000, 'timern följer med till nästa avsnitt');
+  SL.sleepClosed();
+  assert.equal(SL.sleepCarry(), null, 'stängd spelare: timern av');
 });
 
 // ---------------- API mot en riktig server ----------------

@@ -269,10 +269,13 @@ export const mediaItem = (c) => {
 // Strömmens data: originalfilen och HLS-segmenten (inte spellistor, undertexter, statistik eller nedladdning)
 const STREAM_DATA = /\/(direct|hls\/(init\.mp4|seg-\d+\.(ts|m4s)))$/;
 const STREAM_TICK = Math.max(200, +process.env.SCREEN_STREAM_TICK_MS || 20000);
+// Hur ofta det skickade räknas: en tiondel av perioden (2 s) – så mycket kan en paus som mest räknas
+const STREAM_SAMPLE = Math.max(50, Math.min(2000, Math.round(STREAM_TICK / 10)));
 /**
  * Räknar tittandet på servern för profiler med skärmtid: varje hämtat segment är ett livstecken, och ett långt svar
  * (originalfilen i en spelare som läser i takt med uppspelningen) ger ett livstecken var 20:e sekund så länge data
- * skickas. Pausad uppspelning läser inget och räknas inte. När tiden är slut bryts svaret.
+ * skickas – räknat fram till när data senast skickades (screentime.js streamMeter). Pausad uppspelning läser inget och
+ * räknas inte. När tiden är slut bryts svaret.
  */
 function countStream(c, id) {
   const uid = c.user.id, key = 'i:' + id;
@@ -280,14 +283,16 @@ function countStream(c, id) {
   screen.heartbeat(uid, key);
   const sock = c.req.socket;
   let sent = sock?.bytesWritten || 0;
+  const meter = screen.streamMeter(STREAM_TICK, Date.now(), sent);
   const t = setInterval(() => {
     if (c.res.writableEnded || c.res.destroyed) return clearInterval(t);
-    const n = sock?.bytesWritten || 0;
-    if (n === sent) return; // inget skickat sedan sist: pausat eller full buffert hos klienten
-    sent = n;
-    const s = screen.heartbeat(uid, key);
+    const n = sock?.bytesWritten || 0, now = Date.now();
+    if (n !== sent) { sent = n; screen.streamFlow(uid, now); } // data skickas: uppspelningen står inte pausad
+    const at = meter(now, n);
+    if (at == null) return; // inget skickat sedan förra livstecknet: pausat eller full buffert hos klienten
+    const s = screen.heartbeat(uid, key, null, { at });
     if (s && !s.allowed) { clearInterval(t); c.res.destroy(); }
-  }, STREAM_TICK);
+  }, STREAM_SAMPLE);
   t.unref();
   c.res.once('close', () => clearInterval(t));
 }

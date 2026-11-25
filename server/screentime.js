@@ -11,6 +11,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERE
 /** Längsta glapp (sekunder) mellan två rapporter som räknas som sammanhängande tittande.
  *  Klienterna rapporterar var 10:e sekund; längre glapp betyder paus, stopp eller avbrott. */
 export const CAP = 45;
+/** Millisekunder efter en rapport som strömmens sista data får komma utan att pausen räknas som tittande */
+const PAUSE_SLACK = 5000;
 const DAYS = ['söndag', 'måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag'];
 // "På måndagar går det att titta …" – nycklar i web/i18n/en.js (server/i18n.js)
 const DAYS_PL = ['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'];
@@ -90,8 +92,20 @@ export function resetToday(uid, d = new Date()) {
   u.seconds = 0; saveUsage(uid, u);
 }
 
-// Senaste räknade ögonblick per användare och senaste position per ström
-const beats = new Map(); // uid -> { t (ms), pos: Map(key -> position) }
+// Senaste räknade ögonblick per användare, senaste position och rapport per ström och när data senast skickades
+const beats = new Map(); // uid -> { t (ms), pos: Map(key -> position), last: Map(key -> ms), flow (ms) }
+function beatsOf(uid) {
+  let b = beats.get(uid);
+  if (!b) { b = { t: 0, pos: new Map(), last: new Map(), flow: 0 }; beats.set(uid, b); if (beats.size > 2000) beats.delete(beats.keys().next().value); }
+  return b;
+}
+/** Strömmen skickade data just nu (http/context.js countStream, varje gång något skickats) – räknas inte, men visar
+ *  att uppspelningen inte står pausad (heartbeat) */
+export function streamFlow(uid, at = Date.now()) {
+  if (!rulesFor(uid)) return;
+  const b = beatsOf(uid);
+  if (at > b.flow) b.flow = at;
+}
 export let onBlocked = null; // sätts av routes/social.js: stoppar pågående strömmar
 export const setOnBlocked = (fn) => { onBlocked = fn; };
 
@@ -103,14 +117,20 @@ export const setOnBlocked = (fn) => { onBlocked = fn; };
 export function heartbeat(uid, key, position = null, { audio = false, at = Date.now() } = {}) {
   const rules = rulesFor(uid);
   if (!rules || (audio && !rules.audio)) return null;
-  let b = beats.get(uid);
-  if (!b) { b = { t: 0, pos: new Map() }; beats.set(uid, b); if (beats.size > 2000) beats.delete(beats.keys().next().value); }
+  const b = beatsOf(uid);
+  if (position == null && at > b.flow) b.flow = at; // segment eller data från strömmen (live, HLS, originalfilen)
   let moving = true;
   if (position != null && Number.isFinite(+position)) {
     const prev = b.pos.get(key);
     moving = prev == null || Math.abs(+position - prev) >= 1;
-    b.pos.set(key, +position);
-    if (b.pos.size > 20) b.pos.delete(b.pos.keys().next().value);
+    // Positionen står still, och sedan förra rapporten för strömmen har inget annat livstecken kommit och ingen data
+    // skickats (utom strax efter, PAUSE_SLACK): den var pausad – webbspelaren rapporterar när den pausas och när den
+    // startar igen. Klockan börjar om här; annars räknades en paus kortare än CAP som tittande när nästa livstecken kom.
+    // Skickas data under tiden (en klient som spelar men säger att den står still) gäller den vanliga räkningen.
+    const since = b.last.get(key);
+    if (!moving && b.t && at > b.t && since != null && b.t - since <= PAUSE_SLACK && b.flow - since <= PAUSE_SLACK) b.t = at;
+    b.pos.set(key, +position); b.last.set(key, at);
+    if (b.pos.size > 20) { const k = b.pos.keys().next().value; b.pos.delete(k); b.last.delete(k); }
   }
   if (moving) {
     const gap = (at - b.t) / 1000;
@@ -124,6 +144,21 @@ export function heartbeat(uid, key, position = null, { audio = false, at = Date.
   const s = status(uid, new Date(at));
   if (s && !s.allowed && onBlocked) { try { onBlocked(uid, s); } catch (e) { console.warn('[skärmtid]', e.message); } }
   return s;
+}
+
+/**
+ * Livstecken från en ström som skickar data (http/context.js countStream). Mätaren anropas med jämna mellanrum med
+ * antalet skickade byte och ger tidpunkten (ms) som tiden ska räknas fram till – den senaste stunden data faktiskt
+ * skickades – högst en gång per tick, annars null. Förut räknades tiden fram till anropet om något skickats sedan förra
+ * livstecknet: en paus räknades då som tittande i upp till en hel period (20 s) efter att data slutat skickas.
+ */
+export function streamMeter(tick, now = Date.now(), bytes = 0) {
+  let sent = bytes, moved = now, beat = now;
+  return (t, n) => {
+    if (n !== sent) { sent = n; moved = t; }
+    if (moved > beat && t - beat >= tick) { beat = moved; return moved; }
+    return null;
+  };
 }
 
 /**

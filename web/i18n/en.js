@@ -521,6 +521,13 @@ self.BX_I18N = {
   "Synkningen misslyckades": "Syncing failed",
   "Återställd": "Reset",
   "Sparad – {body}": "Saved – {body}",
+  // player/sleep.js och player/screenleft.js
+  "filmen": "the movie",
+  "Ljudet tonas ner och filmen pausas – Fortsätt titta börjar där.": "The sound fades out and the movie pauses – Continue watching starts there.",
+  "Stäng av sovtimern": "Turn off the sleep timer",
+  "Sovtimern är avstängd": "The sleep timer is off",
+  "Sovtimern pausar om {v} s": "The sleep timer pauses in {v} s",
+  "Skärmtiden tar slut om {v} min": "Screen time runs out in {v} min",
   // player/video.js
   "📺 Casta": "📺 Cast",
   "Titta tillsammans med någon annanstans": "Watch together with someone elsewhere",

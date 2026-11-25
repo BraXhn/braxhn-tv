@@ -217,3 +217,45 @@ bt('barnprofilen: ingen översikt och inget menyval', async () => {
   assert.deepEqual(errors, []);
   await close();
 });
+
+// Skärmtiden i spelaren (player/screenleft.js): "X min kvar idag" i överkanten för barnet, inget för huvudkontot,
+// och en varning som syns även med dolda kontroller de sista fem minuterna
+bt('spelaren: skärmtiden kvar för barnet, varning de sista minuterna, inget utan skärmtid', async () => {
+  const startPlayer = async (page, kid = false) => {
+    await page.goto(srv.base + '/#/');
+    await page.waitForFunction(() => document.querySelector('#main') && !document.querySelector('#main[aria-busy]'), null, { timeout: 15000 });
+    if (kid) await page.waitForSelector('#stbadge', { state: 'attached' }); // skärmtiden hämtad (menyradens märke)
+    await page.evaluate(async (id) => { const lazy = await import('/m/js/lazy.js'); await lazy.loadPlayer(); await lazy.play(id, 0); document.querySelector('#vid')?.pause(); }, S.emil);
+    await page.waitForSelector('#player:not([hidden]) #vid');
+  };
+  const state = (page) => page.evaluate(() => {
+    const p = document.querySelector('#pstleft'), w = document.querySelector('#pstwarn');
+    return { pill: p && !p.hidden ? p.title : null, low: !!p?.classList.contains('low'), warn: w && !w.hidden ? w.textContent : null, role: w?.getAttribute('role') };
+  });
+  // Huvudkontot har ingen skärmtid: ingenting syns
+  let a = await newPage('desktop');
+  await startPlayer(a.page);
+  assert.deepEqual(await state(a.page), { pill: null, low: false, warn: null, role: 'status' });
+  assert.deepEqual(a.errors, []);
+  await a.close();
+  // Barnet: tiden kvar idag (60 min + extra tid från testet ovan, minus det som räknats)
+  a = await newPage('desktop', 'lisa');
+  await startPlayer(a.page, true);
+  let s = await state(a.page);
+  assert.match(s.pill || '', /^\d+ min kvar idag$|^1 h \d+ min kvar idag$/, JSON.stringify(s));
+  assert.equal(s.low, false); assert.equal(s.warn, null);
+  await a.close();
+  // Tre minuter kvar: markeringen blir röd och varningen syns, även när kontrollerna är dolda
+  assert.equal((await srv.req(`/api/screentime/${S.lisa}`, { method: 'PUT', body: { daily: 3 } })).status, 200);
+  await srv.req(`/api/screentime/${S.lisa}/extra`, { method: 'POST', body: { minutes: -240, reset: true } });
+  a = await newPage('desktop', 'lisa');
+  await startPlayer(a.page, true);
+  s = await state(a.page);
+  assert.equal(s.low, true, JSON.stringify(s));
+  assert.equal(s.warn, 'Skärmtiden tar slut om 3 min');
+  await a.page.evaluate(() => document.querySelector('#player').classList.add('idle'));
+  assert.ok(await a.page.evaluate(() => getComputedStyle(document.querySelector('#pstwarn')).opacity === '1' && document.querySelector('#pstwarn').getBoundingClientRect().height > 0), 'varningen syns med dolda kontroller');
+  assert.deepEqual(a.errors, []);
+  await a.close();
+  assert.equal((await srv.req(`/api/screentime/${S.lisa}`, { method: 'PUT', body: { daily: 60 } })).status, 200);
+});
