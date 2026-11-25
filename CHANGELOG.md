@@ -11,6 +11,14 @@
   så anges den under *Administration → Hemadressen* (`LOCAL_URL`). Ingen räknas som hemma av det här: apparna använder
   hemadressen bara efter ett prov som servern bara besvarar på hemnätet, så en annan maskin med samma adress på ett
   annat nät får aldrig inloggningen. iOS/tvOS- och Android-appen gör det inte än.
+- **Windows-app.** BraXhn TV i ett eget fönster på Windows 10 och 11, med Edge-motorn WebView2: samma utseende och
+  funktioner som webbappen, hårdvaruavkodning och HEVC direkt när datorn klarar det. Flera servrar (en öppnas direkt,
+  flera ger ett val vid start, *Byt server* i fönstermenyn), inloggningen sparas per server, fönstret minns sin
+  storlek, F11 och dubbelklick på videon ger helskärm, mörk titelrad, medietangenter och Windows medieruta, datorn
+  somnar inte medan video spelas, nedladdningar frågar var filen ska sparas och appen frågar om nya versioner (högst
+  en gång per dygn, inget installeras utan klick). Installationsfilen byggs av GitHub Actions (*Actions →
+  Windows-app → Run workflow*) och läggs i varje utgåva. Den är inte kodsignerad: Windows varnar första gången
+  (*Mer info* → *Kör ändå*). Inte provad på en riktig Windows-dator än. Se `apps/windows/README.md`.
 - **Sidorna laddar fort via reläet även när något spelas.** Reläets tunnel är en enda anslutning, och allt
   hemservern skickat låg i en och samma kö: med en film, en ljudbok eller hastighetsprovet i gång låg upp till 4 MB
   före varje sida, omslag och knapp – 2–6 sekunder på 10 Mbit/s uppladdning. Nu håller hemservern själv kön i

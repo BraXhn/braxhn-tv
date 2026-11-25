@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- BraXhn TV för Windows: ett fönster med serverns webbapp i WebView2 (Edge) -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>BraXhnTV</RootNamespace>
+    <AssemblyName>BraXhnTV</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <!-- Versionen sätts av bygget (package.json): dotnet publish -p:Version=1.4.0 -->
+    <Version>0.0.0</Version>
+    <Product>BraXhn TV</Product>
+    <Company>BraXhn</Company>
+    <Authors>BraXhn</Authors>
+    <Copyright>BraXhn</Copyright>
+    <Description>BraXhn TV</Description>
+    <NeutralLanguage>sv-SE</NeutralLanguage>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Går att kompilera på Linux och Mac också (kontroll av koden), men appen körs bara i Windows -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- En enda exe: .NET och WebView2Loader.dll ligger i filen -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Sidor\start.html" LogicalName="start.html" />
+    <EmbeddedResource Include="..\..\..\web\brand\icon-192.png" LogicalName="logo.png" Link="Sidor\logo.png" />
+  </ItemGroup>
+  <!-- WebView2-paketet tar med WPF-delen också; appen använder bara WinForms -->
+  <Target Name="UtanWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+</Project>

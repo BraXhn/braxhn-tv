@@ -1,0 +1,107 @@
+name: Windows-app
+# Bygger installationsfilen BraXhnTV-Setup-<version>.exe (apps/windows).
+#  - Run workflow (knappen under Actions → Windows-app): bygger och lägger filen under Artifacts. Med "utgava"
+#    (t.ex. v1.4.0) läggs den också i den utgåvan.
+#  - Push till main som ändrar apps/windows: bara Artifacts.
+#  - Utgåva: Docker-flödet skapar utgåvan; när det är klart byggs filen och läggs i utgåvan (workflow_run).
+#    En tagg v* som pushas för hand, eller en utgåva som skapas för hand, gör samma sak.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['apps/windows/**', '.github/workflows/windows.yml']
+  release:
+    types: [published]
+  workflow_run:
+    workflows: ['Bygg och publicera Docker-image']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      utgava:
+        description: 'Lägg också filen i den här utgåvan (t.ex. v1.4.0). Tomt = bara Artifacts.'
+        type: string
+        default: ''
+permissions:
+  contents: write        # lägga installationsfilen i utgåvan
+concurrency:
+  group: windows-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    # Efter Docker-flödet: bara när det gav ut en version (Run workflow) och lyckades
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Version och utgåva
+        id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UTGAVA: ${{ inputs.utgava }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REL_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          TAG=""
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch) TAG="$UTGAVA" ;;
+            release) TAG="$REL_TAG" ;;
+            push) if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; fi ;;
+            workflow_run)
+              # Utgåvan som Docker-flödet nyss skapade för den här commiten (versionen kan ha -beta.N)
+              for i in $(seq 1 10); do
+                TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" --jq ".[] | select(.target_commitish == \"$RUN_SHA\") | .tag_name" | head -1)
+                [ -n "$TAG" ] && break; sleep 15
+              done
+              [ -n "$TAG" ] || { echo "::error::Hittade ingen utgåva för $RUN_SHA."; exit 1; } ;;
+          esac
+          if [ -n "$TAG" ]; then V="${TAG#v}"; else V=$(node -p "require('./package.json').version"); fi
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then echo "::error::Konstig version: $V"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "num=${V%%-*}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Version: $V, utgåva: ${TAG:-ingen}"
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with: { dotnet-version: '8.0.x' }
+      - name: Tester
+        run: dotnet test apps/windows/BraXhnTV.Tests -c Release
+      - name: Bygg appen (en exe med .NET inbyggt)
+        run: >
+          dotnet publish apps/windows/BraXhnTV/BraXhnTV.csproj -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:Version=${{ steps.v.outputs.version }} -o apps/windows/ut/app
+      - name: Microsofts installerare för WebView2 (används bara om WebView2 saknas)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile apps/windows/installer/MicrosoftEdgeWebview2Setup.exe
+          $sig = Get-AuthenticodeSignature apps/windows/installer/MicrosoftEdgeWebview2Setup.exe
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw "WebView2-installeraren är inte signerad av Microsoft: $($sig.Status) $($sig.SignerCertificate.Subject)" }
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Host }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup hittades inte" }
+          & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" "/DAppVersionNum=${{ steps.v.outputs.num }}" "/DSourceDir=$PWD\apps\windows\ut\app" "/O$PWD\apps\windows\ut" apps\windows\installer\BraXhnTV.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup misslyckades" }
+          Get-ChildItem apps\windows\ut\*.exe | Format-Table Name, Length
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BraXhnTV-Setup-${{ steps.v.outputs.version }}
+          path: apps/windows/ut/BraXhnTV-Setup-*.exe
+          if-no-files-found: error
+      - name: Lägg filen i utgåvan
+        if: steps.v.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          # En tagg som pushas för hand får sin utgåva senare – vänta en stund på den
+          for i in $(seq 1 40); do gh release view "$TAG" >/dev/null 2>&1 && break; echo "Väntar på utgåvan $TAG …"; sleep 30; done
+          gh release view "$TAG" >/dev/null 2>&1 || { echo "::warning::Utgåvan $TAG finns inte. Filen finns under Artifacts."; exit 0; }
+          gh release upload "$TAG" apps/windows/ut/BraXhnTV-Setup-*.exe --clobber

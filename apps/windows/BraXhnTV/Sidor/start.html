@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BraXhn TV</title>
+<style>
+:root{--bg:#1b1c1f;--bg2:#232427;--bg3:#2e2f33;--line:#38393e;--text:#ececec;--dim:#a3a3a3;--accent:#ff6b4a;--err:#ff6b78}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.45 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+body{display:flex;align-items:center;justify-content:center;padding:24px;user-select:none}
+main{width:100%;max-width:440px}
+.brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:26px}
+.brand img{width:48px;height:48px;border-radius:11px}
+.brand b{font-size:26px;font-weight:800}
+h1{font-size:20px;margin:0 0 6px}
+p{margin:0 0 14px;color:var(--dim)}
+.row{display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;margin-bottom:10px}
+.pick{flex:1;display:flex;flex-direction:column;align-items:flex-start;padding:14px 16px;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:14px;min-width:0}
+.pick:hover,.pick:focus-visible{background:var(--bg3)}
+.pick b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.pick span{color:var(--dim);font-size:13px}
+.rm{background:none;border:0;color:var(--dim);font:inherit;padding:8px 12px;cursor:pointer;border-radius:8px;margin-right:6px}
+.rm:hover,.rm:focus-visible{color:var(--err);background:var(--bg3)}
+label{display:block;font-size:13px;color:var(--dim);margin-bottom:6px}
+input{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--bg2);color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.btns{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+button.b{padding:10px 18px;border-radius:999px;border:1px solid var(--line);background:var(--bg3);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+button.b.p{background:var(--accent);border-color:var(--accent);color:#fff}
+button.b:hover{filter:brightness(1.12)}
+button.b:disabled{opacity:.6;cursor:default}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.msg{color:var(--err);margin-top:12px;min-height:1.4em}
+.link{background:none;border:0;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
+.hint{font-size:13px;margin-top:6px}
+.ver{position:fixed;bottom:10px;right:14px;font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<main id="m"></main>
+<div class="ver" id="v"></div>
+<script>
+const D = /*DATA*/{};
+const S = D.lang !== 'en';
+const T = (sv, en) => (S ? sv : en);
+const send = (o) => window.chrome.webview.postMessage(o);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const m = document.getElementById('m');
+document.documentElement.lang = S ? 'sv' : 'en';
+document.getElementById('v').textContent = 'BraXhn TV ' + (D.version || '');
+const brand = `<div class="brand"><img src="${D.logo}" alt=""><b>BraXhn TV</b></div>`;
+
+function add(msg) {
+  m.innerHTML = `${brand}<h1>${T('Lägg till server', 'Add server')}</h1>
+    <p>${T('Skriv adressen till din BraXhn TV-server. Du loggar in på nästa sida.', 'Enter the address of your BraXhn TV server. You sign in on the next page.')}</p>
+    <form id="f"><label for="u">${T('Serverns adress', 'Server address')}</label>
+    <input id="u" autocomplete="url" spellcheck="false" value="${esc(D.def || '')}">
+    <div class="hint" style="color:var(--dim)">${T('Till exempel tv.braxhn.net eller 192.168.1.10 i hemnätet.', 'For example tv.braxhn.net, or 192.168.1.10 at home.')}</div>
+    <div class="msg" id="e">${esc(msg || '')}</div>
+    <div class="btns"><button class="b p" id="ok">${T('Lägg till', 'Add')}</button>
+    ${D.servers.length ? `<button class="b" type="button" id="back">${T('Avbryt', 'Cancel')}</button>` : ''}</div></form>`;
+  const u = document.getElementById('u'), ok = document.getElementById('ok');
+  u.focus(); u.select();
+  document.getElementById('f').onsubmit = (e) => {
+    e.preventDefault();
+    ok.disabled = true; ok.textContent = T('Ansluter …', 'Connecting …');
+    document.getElementById('e').textContent = '';
+    send({ t: 'add', url: u.value });
+  };
+  const back = document.getElementById('back');
+  if (back) back.onclick = () => send({ t: 'pick' });
+}
+
+function pick() {
+  m.innerHTML = `${brand}<h1>${T('Välj server', 'Choose server')}</h1><div id="l"></div>
+    <div class="btns"><button class="b" id="add">${T('Lägg till server', 'Add server')}</button></div>`;
+  const l = document.getElementById('l');
+  for (const s of D.servers) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<button class="pick"><b>${esc(s.label)}</b>${s.current ? `<span>${T('Öppen nu', 'Open now')}</span>` : ''}</button>
+      <button class="rm" title="${T('Ta bort', 'Remove')}">${T('Ta bort', 'Remove')}</button>`;
+    row.querySelector('.pick').onclick = () => send({ t: 'open', id: s.id });
+    const rm = row.querySelector('.rm');
+    rm.onclick = () => {
+      if (rm.dataset.sure) return send({ t: 'remove', id: s.id });
+      rm.dataset.sure = '1';
+      rm.textContent = T('Ta bort? Klicka igen', 'Remove? Click again');
+      rm.style.color = 'var(--err)';
+    };
+    l.appendChild(row);
+  }
+  document.getElementById('add').onclick = () => add();
+  l.querySelector('.pick')?.focus();
+}
+
+function error() {
+  m.innerHTML = `${brand}<h1>${T('Servern svarar inte', 'The server is not responding')}</h1>
+    <p>${T(`Det går inte att nå <b>${esc(D.label)}</b> just nu. Kontrollera att datorn är ansluten till internet och att servern är igång.`,
+           `<b>${esc(D.label)}</b> can't be reached right now. Check that the computer is connected to the internet and that the server is running.`)}</p>
+    <div class="btns"><button class="b p" id="r">${T('Försök igen', 'Try again')}</button>
+    <button class="b" id="s">${T('Byt server', 'Change server')}</button></div>`;
+  const r = document.getElementById('r');
+  r.onclick = () => { r.disabled = true; r.textContent = T('Ansluter …', 'Connecting …'); send({ t: 'retry' }); };
+  document.getElementById('s').onclick = () => send({ t: 'pick' });
+  r.focus();
+}
+
+window.chrome.webview.addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.t === 'addError') {
+    const ok = document.getElementById('ok');
+    if (ok) { ok.disabled = false; ok.textContent = T('Lägg till', 'Add'); }
+    const el = document.getElementById('e');
+    if (el) {
+      el.textContent = S ? d.sv : d.en;
+      if (d.canForce) {
+        const b = document.createElement('button');
+        b.className = 'link'; b.type = 'button';
+        b.textContent = T('Lägg till ändå', 'Add anyway');
+        b.onclick = () => send({ t: 'add', url: document.getElementById('u').value, force: true });
+        el.append(' ', b);
+      }
+    }
+  }
+});
+({ add, pick, error })[D.mode]?.();
+</script>
+</body>
+</html>
