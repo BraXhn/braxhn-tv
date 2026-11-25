@@ -37,9 +37,20 @@ export function tokens(s) {
 const nums = (toks) => new Set(toks.filter(t => /^\d+$/.test(t) && +t < 1900)); // årtal i titeln räknas inte som delnummer
 const words = (toks) => toks.filter(t => !STOP.has(t) && !/^\d+$/.test(t));
 
+/** Ihopskrivna ord ("bigbang theory" = "Big Bang Theory", "Spiderman" = "Spider-Man"): ett ord i den ena titeln som är två
+ *  intilliggande ord i den andra delas upp likadant. Bara ord (inte nummer) med minst två bokstäver i varje del. */
+export function splitJoined(a, b) {
+  const split = (x, y) => {
+    const pairs = new Map();
+    for (let i = 0; i + 1 < y.length; i++) if (/^[a-z]{2,}$/.test(y[i]) && /^[a-z]{2,}$/.test(y[i + 1])) pairs.set(y[i] + y[i + 1], [y[i], y[i + 1]]);
+    return pairs.size ? x.flatMap(t => !y.includes(t) && pairs.get(t) || [t]) : x;
+  };
+  return [split(a, b), split(b, a)];
+}
+
 /** Hur lik en träffs titel är sökt titel (0–1). numsFrom: titeln vars nummer gäller (originalet, även när en variant utan nummer jämförs) */
 export function similarity(query, title, numsFrom = query) {
-  const q = tokens(query), r = tokens(title);
+  const [q, r] = splitJoined(tokens(query), tokens(title));
   const qw = new Set(words(q)), rw = new Set(words(r));
   if (!qw.size || !rw.size) return 0;
   // Ett stavfel i ett långt ord räknas nästan som lika ("Madagascar" ≈ "Madagaskar", "labratorium" ≈ "laboratorium")
@@ -185,13 +196,14 @@ export const UNSURE = 0.75; // under detta (eller med en nära konkurrent) räkn
 
 /**
  * Bästa TMDB-träffen för en film eller serie, med förslag. Se findMatch.
- * Returnerar { match: { id, score, result, uncertain, margin } | null, cands: [{ id, title, year, score }] (bästa först, högst 5) }.
+ * Returnerar { match: { id, score, result, uncertain, margin } | null, cands: [{ id, title, year, score }] (bästa först, högst 5),
+ *   scores: Map(id → poäng) för alla kandidater som sökningen hittade }.
  */
 export async function matchDetail(api, q) {
   const tv = q.kind === 'show';
   const hints = (q.titles || []).filter(Boolean).map(titleHints);
   const titles = [...new Set(hints.map(h => h.title).filter(Boolean))];
-  if (!titles.length) return { match: null, cands: [] };
+  if (!titles.length) return { match: null, cands: [], scores: new Map() };
   const anim = !!q.anim || hints.some(h => h.anim), country = q.country || hints.find(h => h.country)?.country || null;
   const qs = queries(titles), year = q.year || null;
   const pool = new Map();
@@ -322,13 +334,14 @@ export async function matchDetail(api, q) {
   }
   const nameOf = (c) => (tv ? c.result.name : c.result.title) || c.names[0]?.n || '';
   const cands = list.slice(0, 5).filter(x => x.s >= GOOD - 0.25).map(x => ({ id: x.c.id, title: nameOf(x.c), year: x.c.year, score: Math.round(x.s * 1000) / 1000 }));
+  const scores = new Map(list.map(x => [x.c.id, x.s]));
   const b = list[0], r2 = list[1];
-  if (!b || b.s < GOOD) return { match: null, cands };
+  if (!b || b.s < GOOD) return { match: null, cands, scores };
   const margin = r2 ? b.s - r2.s : 1;
   // Två lika bra kandidater (samma titel, inget år/längd/säsong som skiljer): hellre omatchad med förslag än fel
-  if (r2 && r2.s >= GOOD && margin < 0.005) return { match: null, cands };
+  if (r2 && r2.s >= GOOD && margin < 0.005) return { match: null, cands, scores };
   const uncertain = b.s < UNSURE || (!!r2 && r2.s >= GOOD - 0.05 && margin < 0.06);
-  return { match: { id: b.c.id, score: b.s, result: b.c.result, uncertain, margin }, cands };
+  return { match: { id: b.c.id, score: b.s, result: b.c.result, uncertain, margin }, cands, scores };
 }
 
 /**

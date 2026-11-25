@@ -8,10 +8,11 @@
 //   premiärår (release_dates), primary_release_year= bara premiäråret.
 // - /movie/{id} (med release_dates) och /tv/{id} (längd, genrer, säsonger), /…/alternative_titles, /…/translations,
 //   /find/{imdb|tvdb}, /tv/{id}/season/{n} (avsnittsnamn), /tv/{id}/episode_groups och /tv/episode_group/{id}.
-// Fler titlar för den svenska korpusen ligger i tmdb-sv.js.
+// Fler titlar för den svenska korpusen ligger i tmdb-sv.js, serier som ofta felmatchas (med riktiga TMDB-id) i tmdb-real.js.
 // Id:n och titlarna är tagna efter TMDB men behöver inte stämma exakt – det är beteendet som ska efterliknas.
 
 import { MOVIES_SV, SHOWS_SV } from './tmdb-sv.js';
+import { SHOWS_REAL } from './tmdb-real.js';
 
 const ANIM = 16, FAM = 10751, KIDS = 10762;
 const GENRE = { 12: 'Äventyr', 14: 'Fantasy', 16: 'Animerat', 18: 'Drama', 28: 'Action', 35: 'Komedi', 53: 'Thriller', 80: 'Kriminal',
@@ -241,7 +242,7 @@ export const SHOWS = [
 ];
 
 // Den svenska korpusens titlar (samma id ersätter titeln ovan) och svenska premiärår
-for (const [list, extra] of [[MOVIES, MOVIES_SV], [SHOWS, SHOWS_SV]]) for (const r of extra) {
+for (const [list, extra] of [[MOVIES, MOVIES_SV], [SHOWS, SHOWS_SV], [SHOWS, SHOWS_REAL]]) for (const r of extra) {
   const i = list.findIndex(x => x.id === r.id);
   if (i >= 0) list[i] = r; else list.push(r);
 }

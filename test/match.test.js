@@ -81,3 +81,13 @@ test('dubbletter: filer som matchats till samma TMDB-film blir versioner av en f
   assert.equal(vo(b), a); assert.equal(vo(c), a);
   assert.equal(vo(wrong), null, 'slås inte ihop när årtalet inte stämmer');
 });
+
+test('ihopskrivna ord räknas som samma titel ("bigbang theory" = "The Big Bang Theory")', () => {
+  assert.ok(m.similarity('bigbang theory', 'The Big Bang Theory') >= 0.99);
+  assert.ok(m.similarity('Big Bang Theory', 'BigBang Theory') >= 0.99);
+  assert.ok(m.similarity('Spiderman', 'Spider-Man') >= 0.99);
+  // Bara intilliggande ord, och inte ett ord som redan finns i den andra titeln
+  assert.ok(m.similarity('bigbang theory', 'BIGBANG: The Beginning') < 0.62);
+  assert.deepEqual(m.splitJoined(['bang', 'big'], ['big', 'bang']), [['bang', 'big'], ['big', 'bang']]);
+  assert.deepEqual(m.splitJoined(['topgear'], ['top', 'gear', 'korea']), [['top', 'gear'], ['top', 'gear', 'korea']]);
+});

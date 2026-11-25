@@ -845,14 +845,20 @@ export function matchQuery(item) {
   const where = `${lib.name || ''}/${relPath}`;
   const q = { kind: item.kind, kids: KIDS_RE.test(where), anim: !!lib.anime || ANIM_RE.test(where), anime: !!lib.anime, ids: parsed?.ids || null,
     lang: SV_RE.test(relPath) ? 'sv' : null };
+  // En matchad titel har fått TMDB:s titel och år: de är svaret, inte ledtrådar. En felmatchning ("BIGBANG: The Beginning",
+  // 2006 för mappen "The Big Bang Theory") skulle annars hitta sig själv igen vid varje ny matchning. Titel och år som
+  // administratören låst under "Ändra" (items.locked) räknas däremot.
+  let locked = {}; try { locked = JSON.parse(item.locked || '{}') || {}; } catch {}
+  const fromTmdb = !!item.tmdb_id && !item.match_locked;
+  const ownTitle = !fromTmdb || 'title' in locked ? item.title : null, ownYear = !fromTmdb || 'year' in locked ? item.year : null;
   if (item.kind === 'movie') {
     // Mappens namn vägs alltid in ("Barnfilmer/Hitta Nemo (2003)/hn-sv.avi")
-    q.titles = [parsed?.title, item.title, file && relPath.includes(path.sep) ? movieFolderTitle(file) : null];
-    q.year = item.year || parsed?.year || null;
+    q.titles = [parsed?.title, ownTitle, file && relPath.includes(path.sep) ? movieFolderTitle(file) : null];
+    q.year = ownYear || parsed?.year || null;
     q.duration = item.duration || null;
   } else {
-    q.titles = [parsed?.show, item.title, item.src_name ? item.src_name.replace(/\s\((?:19|20)\d\d\)$/, '') : null];
-    q.year = item.year || parsed?.year || parsed?.yearHint || null;
+    q.titles = [parsed?.show, ownTitle, item.src_name ? item.src_name.replace(/\s\((?:19|20)\d\d\)$/, '') : null];
+    q.year = ownYear || parsed?.year || parsed?.yearHint || +(item.src_name || '').match(/\((\d{4})\)$/)?.[1] || null;
     // Säsonger och avsnitt i filerna (inte absolut numrerade, specialavsnitt eller datumavsnitt)
     const eps = all('SELECT season, MAX(episode) AS ep FROM items WHERE parent_id=? AND ep_guess=0 AND abs_episode IS NULL AND season BETWEEN 1 AND 1000 GROUP BY season', item.id);
     q.seasons = eps.length ? { max: Math.max(...eps.map(e => e.season)), eps: lib.anime ? {} : Object.fromEntries(eps.map(e => [e.season, e.ep])) } : null;
@@ -867,13 +873,18 @@ export function matchQuery(item) {
  * eller lika bra sökning ändrar aldrig något som fungerar. Returnerar TMDB-id eller null.
  */
 async function autoMatch(item, mq) {
-  const { match, cands } = await matchTmdb(mq);
+  const { match, cands, scores } = await matchTmdb(mq);
+  // Matchad för hand ("Fel titel?", Godkänn) medan vi sökte: valet gäller
+  const now = get('SELECT tmdb_id, match_locked FROM items WHERE id=?', item.id);
+  if (!now || (now.match_locked && now.tmdb_id)) return now?.tmdb_id ?? null;
   let id = match?.id ?? null, score = match?.score ?? null, unsure = match?.uncertain ? 1 : 0;
   if (item.tmdb_id && item.meta_done !== 2 && id !== item.tmdb_id) {
-    const cur = cands.find(c => c.id === item.tmdb_id);
-    const better = match && (cur ? match.score >= cur.score + 0.08 : match.score >= GOOD + 0.1 && !match.uncertain);
-    if (!better) { id = item.tmdb_id; score = cur?.score ?? null; unsure = match ? 1 : 0; }
-    else console.log(`[meta] ${item.title}: byter träff ${item.tmdb_id} → ${id} (${match.score.toFixed(2)} mot ${cur ? cur.score.toFixed(2) : 'ingen'})`);
+    // Den nuvarande träffens poäng i samma sökning (även när den inte är bland de fem bästa förslagen)
+    const cur = scores?.get(item.tmdb_id) ?? cands.find(c => c.id === item.tmdb_id)?.score ?? null;
+    // Hittades den inte alls räcker en god ny träff – är den osäker hamnar den bland Osäkra matchningar
+    const better = match && (cur != null ? match.score >= cur + 0.08 : match.score >= GOOD + 0.1);
+    if (!better) { id = item.tmdb_id; score = cur; unsure = match ? 1 : 0; }
+    else console.log(`[meta] ${item.title}: byter träff ${item.tmdb_id} → ${id} (${match.score.toFixed(2)} mot ${cur != null ? cur.toFixed(2) : 'ingen'})`);
   }
   const keep = cands.filter(c => c.id !== id).slice(0, 4);
   run('UPDATE items SET match_score=?, match_unsure=?, match_cands=? WHERE id=?', score, id ? unsure : 0, keep.length ? JSON.stringify(keep) : null, item.id);
@@ -885,7 +896,12 @@ async function autoMatch(item, mq) {
  * valda/uppladdade bilder (items.img_locked) räknas som lokala (hasLocal) så att image() inte hämtar TMDB:s.
  */
 export async function refreshItem(item, tmdbId = null) {
-  // Låst matchning ("Fel titel?"): alltid den valda titeln, aldrig en ny sökning
+  // Låst matchning ("Fel titel?"): alltid den valda titeln, aldrig en ny sökning. Raden läses om: en skanning som pågick
+  // när administratören valde titel har en gammal rad utan låset
+  if (!tmdbId) {
+    const now = get('SELECT tmdb_id, match_locked FROM items WHERE id=?', item.id);
+    if (now) item = { ...item, ...now };
+  }
   if (!tmdbId && item.match_locked && item.tmdb_id) tmdbId = item.tmdb_id;
   const mq = !tmdbId && (item.kind === 'movie' || item.kind === 'show') ? matchQuery(item) : null;
   if (!tmdbId && !item.match_locked) {
@@ -1185,11 +1201,14 @@ async function metadata(lib) {
   if (!tmdbKey() || (lib.type === 'movie' && lib.home_video)) return;
   // Bättre matchning (match.js): titlar som tidigare inte hittades får ett nytt försök en gång
   // Matchning v3 (parse.js, findMatch: svenska/engelska/alternativa titlar, barn/tecknat, längd, säsonger): samma sak en gång till
-  for (const v of ['match_v2', 'match_v3', 'match_v4']) if (getSetting(v, '0') !== '1') {
+  for (const v of ['match_v2', 'match_v3', 'match_v4', 'match_v5']) if (getSetting(v, '0') !== '1') {
     run('UPDATE items SET meta_done=0 WHERE meta_done=2 AND match_locked=0');
     // Matchning v4 (svensk korpus: mappnamn, felstavning, säsongs-/avsnittsantal, flera sidor): serier som matchats av en äldre
     // version prövas en gång till – träffen byts bara om den nya är klart bättre (autoMatch), låsta rörs aldrig
     if (v === 'match_v4') run("UPDATE items SET meta_done=0 WHERE kind='show' AND meta_done=1 AND match_locked=0 AND match_score IS NULL AND tmdb_id IS NOT NULL");
+    // Matchning v5: en felmatchad serie hittade sig själv igen (TMDB:s titel och år räknades som ledtrådar, matchQuery). Alla
+    // automatiskt matchade serier prövas en gång till; träffen byts bara mot en klart bättre, låsta och NFO-id rörs aldrig
+    if (v === 'match_v5') run("UPDATE items SET meta_done=0 WHERE kind='show' AND meta_done=1 AND match_locked=0 AND tmdb_id IS NOT NULL");
     setSetting(v, '1');
   }
   clearMatchCache();

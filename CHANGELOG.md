@@ -1,6 +1,16 @@
 # Ändringar
 
 ## Ej utgiven
+- **Serier som matchats fel rättar sig själva.** En serie som en gång fått fel träff hos TMDB (till exempel *The Big
+  Bang Theory* som ett koreanskt BIGBANG-program, eller *Top Gear* som serien från 1978 eller den amerikanska) behöll
+  den för alltid: vid nästa matchning användes den felaktiga seriens namn och år som ledtrådar, så den hittade sig
+  själv igen. Nu används bara mappens och filernas namn och år, och efter uppdateringen prövas alla automatiskt
+  matchade serier en gång till. Träffen byts bara mot en klart bättre; är det oklart (*Top Gear* med bara säsong 1–2
+  finns både i Storbritannien och USA) visas serien under *Administration → Osäkra matchningar* med förslag. Serier
+  som valts med *Fel titel?* eller godkänts rörs aldrig – inte heller om valet gjordes medan en skanning pågick, vilket
+  tidigare kunde skriva över det.
+- **Ihopskrivna seriernamn hittas.** En mapp som heter *bigbang theory* matchas nu till *The Big Bang Theory*
+  (tidigare ingen träff).
 - **Ljudböcker matchas igen.** Google Books svarar numera "för många anrop" på alla sökningar utan egen nyckel, och
   då stannade hela matchningen vid första boken: inga böcker fick beskrivning, omslag eller serie, och *Administration*
   visade bara *Senaste fel: … för många anrop*. Nu hoppas en källa som inte svarar över, och Audible och Open Library
