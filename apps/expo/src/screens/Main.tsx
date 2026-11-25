@@ -1,4 +1,5 @@
-// Skalet som i webbappen på en telefon: menyrad med logga och sök överst, flikarna Hem · Sök · Min lista · Konto nederst.
+// Skalet som i webbappen på en telefon: menyrad med logga och sök överst, flikarna Hem · Sök · Musik · Min lista · Konto
+// nederst och minispelaren ovanför flikarna när något spelas.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -10,9 +11,12 @@ import { api, ensureImageToken, servers, session, type HomeResponse, type Librar
 import { profileColor } from './Profiles';
 import { Button, Card, Empty, ErrorState, Loading, Shelf } from '../components/ui';
 import type { Props, Tab } from '../nav';
+import { Listen } from './Music';
+import { MiniPlayer } from '../components/audio';
 
 const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = { movie: 'film-outline', show: 'tv-outline', music: 'musical-notes-outline', audiobook: 'book-outline', photo: 'images-outline', ebook: 'library-outline' };
 const VIDEO = (l: Library) => l.type === 'movie' || l.type === 'show';
+const LISTEN = (l: Library) => l.type === 'music' || l.type === 'audiobook';
 
 export default function Main({ navigation, route, onLogout, onSwitch, onProfiles, onAdd, user }: Props<'Main'> & { onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void; user: UserInfo | null }) {
   const insets = useSafeAreaInsets();
@@ -22,7 +26,7 @@ export default function Main({ navigation, route, onLogout, onSwitch, onProfiles
   const [libs, setLibs] = useState<Library[]>([]);
   const open = useCallback((it: MediaItem) => navigation.push('Item', { id: it.kind === 'episode' && it.show ? it.show : it.id }), [navigation]);
 
-  useEffect(() => { api<Library[]>('/api/libraries').then((l) => setLibs(l.filter(VIDEO))).catch(() => {}); }, []);
+  useEffect(() => { api<Library[]>('/api/libraries').then((l) => setLibs(l.filter((x) => VIDEO(x) || LISTEN(x)))).catch(() => {}); }, []);
   const goSearch = () => { setTab('search'); setTimeout(() => searchRef.current?.focus(), 50); };
 
   return (
@@ -39,14 +43,16 @@ export default function Main({ navigation, route, onLogout, onSwitch, onProfiles
       </View>
 
       <View style={{ flex: 1, backgroundColor: C.bg }}>
-        {tab === 'home' ? <Home kid={!!user?.kid} libs={libs} open={open} openLib={(l) => navigation.push('Library', { id: l.id, name: l.name })} /> : null}
+        {tab === 'home' ? <Home kid={!!user?.kid} libs={libs} open={open} openLib={(l) => (LISTEN(l) ? setTab('music') : navigation.push('Library', { id: l.id, name: l.name }))} /> : null}
         {tab === 'search' ? <Search query={query} open={open} /> : null}
+        {tab === 'music' ? <Listen /> : null}
         {tab === 'list' ? <Watchlist open={open} /> : null}
         {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} /> : null}
       </View>
 
+      <MiniPlayer />
       <View style={[st.tabs, { paddingBottom: Math.max(insets.bottom, 6) }]}>
-        {([['home', 'home', 'Hem'], ['search', 'search', 'Sök'], ['list', 'bookmark', 'Min lista'], ['account', 'person', 'Konto']] as const).map(([k, icon, label]) => (
+        {([['home', 'home', 'Hem'], ['search', 'search', 'Sök'], ['music', 'musical-notes', 'Musik'], ['list', 'bookmark', 'Min lista'], ['account', 'person', 'Konto']] as const).map(([k, icon, label]) => (
           <Pressable key={k} style={st.tab} onPress={() => (k === 'search' ? goSearch() : setTab(k))} accessibilityRole="tab" accessibilityState={{ selected: tab === k }} accessibilityLabel={label}>
             <Ionicons name={icon} size={23} color={tab === k ? C.accent : C.dim} />
             <Text style={[st.tabText, tab === k && { color: C.accent }]}>{label}</Text>
@@ -80,7 +86,7 @@ function Home({ kid, libs, open, openLib }: { kid: boolean; libs: Library[]; ope
           </Pressable>
         ))}
       </ScrollView>
-      {empty ? <View style={{ padding: 24 }}><Text style={st.dim}>{kid ? 'Här finns inget som den här profilen får se än.' : 'Biblioteket är tomt än. Lägg till bibliotek i webbgränssnittet under Administration.'}</Text></View> : null}
+      {empty ? <View style={{ padding: 24 }}><Text style={st.dim}>{libs.some(LISTEN) && !libs.some(VIDEO) ? 'Musik och ljudböcker finns under fliken Musik.' : kid ? 'Här finns inget som den här profilen får se än.' : 'Biblioteket är tomt än. Lägg till bibliotek i webbgränssnittet under Administration.'}</Text></View> : null}
       <Shelf title="Fortsätt titta" items={data.continue} onOpen={open} />
       <Shelf title="Min lista" items={data.watchlist} onOpen={open} />
       {data.rows.map((r, i) => (

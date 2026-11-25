@@ -61,6 +61,55 @@ och sedan `npx expo install --fix`.
 - Titelsidan: Spela, Fortsätt, Börja om, Markera som sedd, Min lista, säsonger och avsnitt.
 - Spelaren: telefonens egen spelare med helskärm och bild-i-bild. Den fortsätter där du slutade, skickar framsteg
   till servern, hoppar över intro och går vidare till nästa avsnitt.
+- Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
+
+## Musik, ljudböcker och poddar
+
+Fliken **Musik** har en rad med bibliotek överst: varje musikbibliotek, varje ljudboksbibliotek och *Poddar* (bara om
+profilen har poddar – barnprofiler får inga av servern). Tryck på ett musik- eller ljudboksbibliotek på startsidan så
+hamnar du också här.
+
+- **Musik:** *Översikt* (spelat nyligen, smarta listor, nytt i biblioteket, favoriter), *Album* (sortera efter artist,
+  titel, senast tillagda eller år), *Artister* och *Spellistor* (egna och smarta). Sökrutan söker bland artister,
+  album och låtar. Albumsidan och artistsidan har *Spela*, *Blanda* och *Låtradio*. Varje låt har en meny (⋮) med
+  *Spela härnäst*, *Lägg sist i kön*, *Gå till albumet* och *Gå till artisten*.
+- **Minispelaren** ligger ovanför flikraden och längst ner på album-, artist-, spellist-, bok- och poddsidorna. Tryck
+  på den för **helskärmsspelaren**: stort omslag, tidslinje att dra i, föregående/nästa, blanda resten av kön,
+  upprepa, och kön (tryck för att hoppa dit, ✕ för att ta bort). Pilen ner minimerar, ✕ stänger spelaren.
+- **Kön delas med webben.** Den sparas på servern för profilen – vid låtbyte, paus, spolning, var 20:e sekund och när
+  appen går i bakgrunden. När appen startar visas den pausad där du var, och samma kö syns i webbappen (och tvärtom).
+  En kö som bara visas skrivs inte, så den enhet du senast spelade på vinner. Stänger du spelaren med ✕ tas kön bort.
+  Byter du profil eller loggar ut sparas kön på den gamla profilen och spelaren stängs.
+- **Nästa låt laddas i förväg** (en andra spelare, när under 30 sekunder återstår), så att bytet går fort. Det är inte
+  helt glapplöst som i webben: det kan bli ett kort uppehåll mellan låtarna.
+- **Ljudformat:** appen säger till servern vad telefonen spelar (iPhone: MP3, AAC, FLAC; Android: dessutom Opus och
+  Vorbis). Annat kodar servern om, och då spolar appen genom att be om en ny ström från rätt ställe.
+- **Ljudböcker:** *Fortsätt lyssna* och alla böcker. Boksidan har *Fortsätt från …*, *Börja om* och kapitlen. Platsen
+  sparas på servern var 15:e sekund, vid paus och när appen går i bakgrunden, så boken fortsätter där du slutade –
+  även i webben och de andra apparna. Helskärmsspelaren har 15 s bakåt, 30 s framåt, hastighet (0,8–2×) och kapitel.
+- **Poddar:** poddarna och de senaste avsnitten; tryck på ett avsnitt för att spela det där du slutade. Poddar läggs
+  till i webbgränssnittet.
+- **Skärmtid:** säger servern stopp (skärmtiden är slut eller en vuxen stoppade) pausar spelaren och visar varför.
+- Startar du en film eller ett avsnitt pausas musiken.
+
+### Låsskärm, hörlurar och bakgrund
+
+Appen ber om att få spela i bakgrunden och med ljudet avstängt (`setAudioModeAsync` med `shouldPlayInBackground`,
+`playsInSilentMode` och `interruptionMode: 'doNotMix'`) och visar titel, artist, album och omslag på låsskärmen
+(`setActiveForLockScreen`). På låsskärmen och i hörlurarna fungerar spela/pausa och spola (±10 s för musik, −15/+30 s
+för böcker och poddar). **Nästa och föregående låt på låsskärmen finns inte än:** `expo-audio` visar de knapparna bara
+för sin spellista (`AudioPlaylist`), och appen använder två vanliga spelare.
+
+Det här är **inte provat på en riktig telefon**, bara i webbläget (Chrome, där låsskärmen motsvaras av webbläsarens
+mediakontroller). Det här vet vi från Expos dokumentation för SDK 58:
+
+- `expo-audio` finns i Expo Go, så musiken spelar där.
+- Bakgrundsljud kräver inställningar i själva appen: `UIBackgroundModes: audio` på iPhone och en förgrundstjänst
+  (`FOREGROUND_SERVICE_MEDIA_PLAYBACK`) på Android. Dem lägger insticksmodulen `expo-audio` i `app.json` till, men
+  bara i ett **eget bygge** (`npx expo prebuild` / EAS Build). I Expo Go gäller Expo Gos egna inställningar, så om
+  musiken fortsätter med låst skärm där är inte kontrollerat. Utan låsskärmskontrollerna stoppar Android ljudet efter
+  ungefär tre minuter i bakgrunden.
+- Insticksmodulen är inställd utan mikrofon (`microphonePermission: false`, `recordAudioAndroid: false`).
 
 ## Snabb start
 
@@ -72,7 +121,9 @@ och sedan `npx expo install --fix`.
 - Expo Go spelar video med telefonens egen spelare. MKV, DTS och liknande kan den inte spela direkt, så servern
   packar om eller kodar om dem – precis som för webbappen. För att spela allt direkt krävs en egen spelare, och en
   sådan går inte att ladda i Expo Go.
-- Musik, ljudböcker, poddar, live-TV och nedladdning finns inte i den här appen än.
+- Live-TV och nedladdning finns inte i den här appen än. Musik, ljudböcker och poddar finns (se ovan), men utan
+  nästa/föregående på låsskärmen, utan helt glapplösa låtbyten och utan jämn ljudnivå (ReplayGain), övertoning,
+  sovtimer, låttexter, bokmärken och redigering av spellistor – det finns i webben.
 - Undertexter och val av ljudspår sköts av telefonens spelare, för de spår som strömmen innehåller.
 
 ## Utveckling
@@ -82,7 +133,12 @@ och sedan `npx expo install --fix`.
   Actions (`.github/workflows/expo.yml`).
 - Koden: `App.tsx` (vilken server, inloggat eller inte, profilväljaren, sidorna), `src/api.ts` (sparade servrar, serveranrop, fel, adresser), `src/theme.ts`
   (webbappens färger och mått), `src/components/ui.tsx` (knappar, kort, hyllor) och `src/screens/` (`Profiles.tsx` är
-  *Vem tittar?*).
+  *Vem tittar?*). Ljudet: `src/music.ts` (spelarna, kön mot `/api/me/queue`, böckernas och poddarnas position –
+  utanför React), `src/components/audio.tsx` (omslag, låtrader, minispelaren), `src/screens/Music.tsx` (fliken Musik,
+  album, artist, spellista), `src/screens/Books.tsx` (ljudböcker och poddar) och `src/screens/NowPlaying.tsx`
+  (helskärmsspelaren).
+- Paket utöver mallen: `expo-audio` (ljudspelaren, låsskärmen och bakgrundsljudet). Lägg till paket med
+  `npx expo install`, så att versionen passar Expo SDK.
 - I webbläget (`npx expo start --web` eller exporten) måste appen och servern ha samma adress, eftersom servern inte
   tillåter anrop från andra webbplatser till `/api/`. Lägg exporten bakom en enkel proxy som skickar `/api/` vidare
   till servern. Telefonen i Expo Go påverkas inte.

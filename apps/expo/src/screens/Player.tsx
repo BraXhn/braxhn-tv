@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
 import { absolute, api, playbackQuery, resumeAt, sxe, type ItemDetail, type MediaItem, type Playback } from '../api';
 import { Button } from '../components/ui';
+import { nowPlaying, pause as pauseAudio } from '../music';
 import type { Props } from '../nav';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
@@ -30,8 +31,9 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = 1; p.staysActiveInBackground = true; });
   const { status, error: playerError } = useEvent(player, 'statusChange', { status: player.status });
 
-  // Liggande läge går bra i spelaren; resten av appen är stående
+  // Liggande läge går bra i spelaren; resten av appen är stående. Musik eller en ljudbok som spelar pausas.
   useEffect(() => {
+    if (nowPlaying.get().playing) pauseAudio();
     ScreenOrientation.unlockAsync().catch(() => {});
     return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {}); };
   }, []);

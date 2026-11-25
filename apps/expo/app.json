@@ -36,7 +36,15 @@
     "plugins": [
       "expo-video",
       "expo-secure-store",
-      "expo-image"
+      "expo-image",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": true
+        }
+      ]
     ],
     "backgroundColor": "#1b1c1f",
     "scheme": "braxhntv",

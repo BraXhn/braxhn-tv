@@ -16,6 +16,10 @@ import LibraryScreen from './src/screens/Library';
 import ItemScreen from './src/screens/Item';
 import PlayerScreen from './src/screens/Player';
 import { Loading } from './src/components/ui';
+import { AlbumScreen, ArtistScreen, PlaylistScreen } from './src/screens/Music';
+import { BookScreen, PodcastScreen } from './src/screens/Books';
+import NowPlaying from './src/screens/NowPlaying';
+import { reset as resetAudio, restoreQueue } from './src/music';
 
 const Stack = createNativeStackNavigator<StackParams>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: C.bg, card: C.chrome, text: C.text, border: C.line, primary: C.accent } };
@@ -38,6 +42,8 @@ export default function App() {
       // Profilens färg (till rutan uppe till höger) står bara i profillistan
       if ((s.user.profiles || 0) > 1) await listProfiles().then((l) => { s.user!.color = l.profiles.find((p) => p.id === s.user!.id)?.color; }).catch(() => {});
       setUser(s.user); setAgain(null); setState(afterLogin && (s.user.profiles || 0) > 1 ? 'profiles' : 'in');
+      // Musikkön från förra gången (eller från webben) visas pausad i minispelaren
+      restoreQueue();
     } catch (e: any) {
       // Servern nås inte just nu: gå in ändå (startsidan visar felet och Försök igen). 401 sköts av hanteraren nedan.
       if (e?.status !== 401) { const sv = currentServer(); setUser({ id: 0, name: sv?.profile || sv?.user || '' }); setState('in'); }
@@ -55,6 +61,7 @@ export default function App() {
     setAgain(null); setState(servers.length ? 'pick' : 'add');
   }, [open]);
   const logout = useCallback(async () => {
+    await resetAudio(); // spara kön eller bokens plats med den gamla inloggningen, stoppa och töm
     api('/api/logout', { method: 'POST' }).catch(() => {});
     const sv = currentServer();
     await signOut(); setUser(null);
@@ -64,12 +71,13 @@ export default function App() {
   /** Efter Vem tittar?: ny profil → läs dess uppgifter (barnprofil m.m. står bara i /api/status), annars tillbaka */
   const afterProfile = useCallback(async (u: UserInfo | null) => {
     if (!u) { setState('in'); return; }
+    resetAudio(false); // Profiles sparade före bytet; den nya profilen får sin egen kö
     setUser(u); setState('loading');
     await enter(false);
   }, [enter]);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => { const sv = currentServer(); signOut(); setUser(null); setAgain(sv); setState('add'); });
+    setUnauthorizedHandler(() => { const sv = currentServer(); resetAudio(); signOut(); setUser(null); setAgain(sv); setState('add'); });
     start();
     return () => setUnauthorizedHandler(null);
   }, [start]);
@@ -85,10 +93,16 @@ export default function App() {
           : (
           <NavigationContainer theme={theme} key={user?.id || 0 /* ny profil: börja om på startsidan */}>
             <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}>
-              <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => setState('pick')} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
+              <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
               <Stack.Screen name="Library" component={LibraryScreen} />
               <Stack.Screen name="Item" component={ItemScreen} />
               <Stack.Screen name="Player" component={PlayerScreen} options={{ animation: 'fade', orientation: 'all', gestureEnabled: false }} />
+              <Stack.Screen name="Album" component={AlbumScreen} />
+              <Stack.Screen name="Artist" component={ArtistScreen} />
+              <Stack.Screen name="Playlist" component={PlaylistScreen} />
+              <Stack.Screen name="Book" component={BookScreen} />
+              <Stack.Screen name="Podcast" component={PodcastScreen} />
+              <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ animation: 'slide_from_bottom', presentation: 'fullScreenModal' }} />
             </Stack.Navigator>
           </NavigationContainer>
         )}

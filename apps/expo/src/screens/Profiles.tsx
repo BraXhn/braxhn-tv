@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { C, R } from '../theme';
 import { listProfiles, switchProfile, type Profile, type UserInfo } from '../api';
 import { Button, ErrorState, Loading } from '../components/ui';
+import { saveNow as saveAudio } from '../music';
 
 /** Samma färg som webben ger profilen: egen färg om den är satt, annars en nyans räknad ur namnet */
 export function profileColor(p: { name: string; color?: string | null }): string {
@@ -42,6 +43,7 @@ export default function Profiles({ current, onDone }: { current: string; onDone:
     if (p.hasPin && !extra.pin) { setAsk({ p, kind: 'pin', wrong: false }); setSecret(''); setNote(''); return; }
     setBusy(p.id); setNote('');
     try {
+      await saveAudio(); // kön eller bokens plats sparas på den gamla profilen innan inloggningen byts
       onDone(await switchProfile(p.id, extra));
     } catch (e: any) {
       if (e?.data?.needPin) { setAsk({ p, kind: 'pin', wrong: !!extra.pin }); setSecret(''); }
