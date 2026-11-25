@@ -386,3 +386,37 @@ tw('stängd spelare (✕): kön tas bort och kommer inte tillbaka', async () => 
   assert.deepEqual(A.errors, []);
   await ctx.close();
 });
+
+tw('motorn tar över efter en omkodad låt som spolats: tiden och Föregående gäller nästa låt', async () => {
+  await req('/api/me/queue', { method: 'DELETE' });
+  const ctx = await newContext(), A = await newPage(ctx);
+  // Elementets ström (och HEAD) kodas om (som för ett format webbläsaren inte spelar); motorn får inte första låten
+  // (elementet tar den) men hämtar nästa som vanligt, så att den kan ta över vid övergången
+  await A.page.route(/\/api\/music\/tracks\/\d+\/stream\?/, (r) => {
+    const u = new URL(r.request().url());
+    if (u.searchParams.get('gl') === '1') return u.pathname.includes(`/tracks/${L[0]}/`) ? r.abort() : r.continue();
+    u.searchParams.set('a', 'mp3'); r.continue({ url: String(u) });
+  });
+  await A.page.goto(B + '/#/album/' + S.Lugna);
+  await A.page.waitForSelector('tr[data-ti="0"]');
+  await A.mods();
+  await A.page.click('tr[data-ti="0"]');
+  await A.page.waitForFunction(() => { const el = document.querySelector('#maudio'); return window.__au.M.transcoded && !el.paused && el.currentTime > 0.3; }, null, { timeout: 30000 });
+  await A.page.evaluate(() => window.__au.seekTo(15));
+  await A.page.waitForFunction(() => window.__au.M.offset === 15 && !document.querySelector('#maudio').paused, null, { timeout: 15000 });
+  await A.page.waitForFunction(() => window.__au.M.idx === 1, null, { timeout: 30000 });
+  await sleep(700);
+  const st = await A.page.evaluate(() => ({ engine: window.__ae.debugState().on, offset: window.__au.M.offset, tc: window.__au.M.transcoded,
+    pos: window.__au.M.audio.currentTime + (window.__au.M.offset || 0), curt: document.querySelector('#mcurt').textContent }));
+  assert.equal(st.engine, true, 'förutsättning: motorn tog över vid övergången ' + JSON.stringify(st));
+  assert.equal(st.offset, 0, 'förra låtens startposition följer inte med: ' + JSON.stringify(st));
+  assert.equal(st.tc, false, 'nästa låt spelas inte omkodad');
+  assert.ok(st.pos < 3, 'tiden räknas från nästa låts början: ' + JSON.stringify(st));
+  // Föregående i början av låten går till förra låten (inte till början av den här)
+  await A.page.click('#mprev');
+  await A.page.waitForFunction(() => window.__au.M.idx === 0, null, { timeout: 5000 }).catch(() => {});
+  assert.equal(await A.page.evaluate(() => window.__au.M.idx), 0, 'Föregående gick till förra låten');
+  await A.page.click('#mx');
+  await sleep(300);
+  await ctx.close();
+});

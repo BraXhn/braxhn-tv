@@ -69,7 +69,8 @@ function timeUI() {
 // Motorns krokar: nästa låt i kön, byte till den, slut, förlopp, spelar/pausad och att elementet ska tystna
 const HOOKS = {
   upcoming: () => upcoming(),
-  advance: (t, i) => showTrack(t, i),
+  // Bytet görs av motorn: elementets värden (omkodad ström som spolats: startposition och omkodning) gäller inte längre
+  advance: (t, i) => { M.offset = 0; M.transcoded = false; M.want = 0; showTrack(t, i); },
   ended: () => nextTrack(true),
   time: () => timeUI(),
   state: (playing) => { setPlaying(playing); queueTouch(); },
