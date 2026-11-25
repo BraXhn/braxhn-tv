@@ -26,6 +26,7 @@ export const EVENTS = { login_ok: t('Inloggning'), login_fail: t('Misslyckad inl
 const device = (ua) => {
   ua = ua || '';
   if (/BraXhnTV-Android|Android.*Automotive/i.test(ua)) return 'Android-app';
+  if (/BraXhnTV-Windows/i.test(ua)) return 'Windows-app';
   if (/CFNetwork|Darwin|BraXhnTV/i.test(ua)) return 'iPhone/iPad/Apple TV-app';
   const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : t('Okänd');
   const o = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : '';

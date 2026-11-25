@@ -428,3 +428,11 @@ test('CSV-export: rubriker, semikolon, citattecken och skydd mot formler', async
   assert.ok(!r.data.includes('10.0.0.9'));
   assert.equal((await req(BO, '/api/playstats/history.csv')).status, 403);
 });
+
+test('uppspelning: Windows-appen (WebView2) visas som Windows-app, inte som Edge', () => {
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0 BraXhnTV-Windows/1.4.0';
+  start(ADMIN, ALFA, T0 + 90000, { ua });
+  const s = act.listActive().find(x => x.itemId === ALFA.id);
+  assert.equal(s?.device, 'Windows-app');
+  act.clientStop(ADMIN, ALFA.id, T0 + 90010);
+});

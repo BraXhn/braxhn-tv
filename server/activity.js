@@ -188,6 +188,7 @@ export function listActive() {
 function deviceName(ua = '') {
   ua = String(ua || '');
   if (/BraXhnTV-Android/i.test(ua)) return 'Android-app';
+  if (/BraXhnTV-Windows/i.test(ua)) return 'Windows-app';
   if (/AppleTV|tvOS/i.test(ua)) return 'Apple TV';
   if (/CFNetwork|Darwin/i.test(ua)) return 'iPhone/iPad-app';
   if (/CrKey/i.test(ua)) return 'Chromecast';
