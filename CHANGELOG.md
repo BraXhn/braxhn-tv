@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- **Ljudböcker matchas igen.** Google Books svarar numera "för många anrop" på alla sökningar utan egen nyckel, och
+  då stannade hela matchningen vid första boken: inga böcker fick beskrivning, omslag eller serie, och *Administration*
+  visade bara *Senaste fel: … för många anrop*. Nu hoppas en källa som inte svarar över, och Audible och Open Library
+  frågas för varje bok som förut. En bok som inte hittades någon annanstans markeras inte som "ingen träff" utan
+  försöks igen senare. Omslag från Open Library sparas också nu (de ligger hos Internet Archive, och den
+  vidarebefordran stoppades tidigare).
 - **Familjefiltret tystar lite tidigare** (0,08 s före ordet i stället för 0,03 s), så att en långsam TV eller telefon inte
   hinner släppa igenom början av ett ord innan ljudet stängs av.
 - **Servern svarar på engelska till den som valt engelska.** Felmeddelandena (inloggning, tvåstegsverifiering,

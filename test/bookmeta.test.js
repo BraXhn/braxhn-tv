@@ -65,6 +65,7 @@ process.env.OPENLIBRARY_COVERS_URL = base + '/olc';
 const { run, get, setSetting } = await import('../server/db.js');
 const books = await import('../server/audiobooks.js');
 const meta = await import('../server/bookmeta.js');
+const backoff = await import('../server/backoff.js');
 run("INSERT INTO users(id,name,pass,is_admin,created) VALUES(1,'anna','x',1,0)");
 after(() => { srv.close(); fs.rmSync(ROOT, { recursive: true, force: true }); });
 
@@ -80,6 +81,14 @@ test('titlar för sökning, svenska och poäng', () => {
   assert.equal(meta.coverUrlOk('http://books.google.com/books/content?id=x'), 'https://books.google.com/books/content?id=x');
   assert.equal(meta.coverUrlOk('https://evil.example/x.jpg'), null);
   assert.equal(meta.coverUrlOk('https://books.google.com:8443/x'), null);
+  // Omdirigering: inom samma värd, och Open Librarys omslag till Internet Archive (annars fick inga böcker omslag därifrån)
+  assert.ok(meta.redirectOk('https://openlibrary.org/works/OL1W.json', 'https://openlibrary.org/works/OL2W.json'));
+  assert.ok(meta.redirectOk('https://covers.openlibrary.org/b/id/1-L.jpg', 'https://archive.org/download/l_covers_0008/x.zip/1-L.jpg'));
+  assert.ok(meta.redirectOk('https://covers.openlibrary.org/b/id/1-L.jpg', 'https://ia802809.us.archive.org/view_archive.php?archive=x&file=1-L.jpg'));
+  assert.ok(!meta.redirectOk('https://covers.openlibrary.org/b/id/1-L.jpg', 'http://archive.org/x.jpg'));
+  assert.ok(!meta.redirectOk('https://covers.openlibrary.org/b/id/1-L.jpg', 'https://evil.example/x.jpg'));
+  assert.ok(!meta.redirectOk('https://openlibrary.org/search.json', 'https://archive.org/x'));
+  assert.ok(!meta.redirectOk('https://www.googleapis.com/books/v1/volumes', 'https://ia1.us.archive.org/x'));
 });
 
 let LIB, ids = {};
@@ -191,4 +200,34 @@ test('avstängd i inställningarna och fel hos källan', { skip: !hasFfmpeg }, a
   googleDown = false;
   assert.ok(meta.status.error);
   assert.ok(get('SELECT COUNT(*) AS n FROM book_meta WHERE state=0').n >= 1);
+});
+
+test('Google Books säger "för många anrop": matchningen fortsätter med Audible och Open Library', { skip: !hasFfmpeg }, async () => {
+  // Google Books utan nyckel svarar 429 för alla (den delade kvoten är slut). Egen värd, eftersom pausen gäller per värd.
+  const gb = [];
+  const limited = http.createServer((q, r) => { gb.push(q.url); json(r, { error: { code: 429, status: 'RESOURCE_EXHAUSTED' } }, 429); });
+  await new Promise(r => limited.listen(0, '127.0.0.1', r));
+  const host = `127.0.0.1:${limited.address().port}`;
+  process.env.GOOGLE_BOOKS_URL = `http://${host}/gb`;
+  run('DELETE FROM book_meta');
+  meta.clearCache();
+  try {
+    await meta.queue(9);
+    // Google frågas en gång – sedan är den pausad och hoppas över, utan att resten av kön stannar
+    assert.equal(gb.length, 1, gb.join('\n'));
+    // Böcker som finns hos en annan källa matchas ändå
+    assert.equal(books.book(ids['Okänd bok'], 1).meta.source, 'openlibrary');
+    assert.equal(books.book(ids['Kapitelboken'], 1).meta.source, 'audnexus');
+    // Alla böcker gicks igenom. De utan träff markeras inte som "ingen träff" (Google kunde ha haft dem) utan försöks igen senare
+    for (const t of ['Mio min Mio', 'Finns inte alls']) {
+      const m = get('SELECT state, next_try FROM book_meta WHERE book_id=?', ids[t]);
+      assert.ok(m, `${t} gicks igenom`);
+      assert.equal(m.state, 0, t); assert.ok(m.next_try > Date.now() / 1000, t);
+    }
+    assert.match(meta.status.error, /för många anrop/);
+  } finally {
+    process.env.GOOGLE_BOOKS_URL = base + '/gb';
+    backoff.reset(`bookmeta:${host}`);
+    limited.close();
+  }
 });

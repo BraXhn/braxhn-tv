@@ -67,6 +67,14 @@ async function readCapped(r, max) {
 // En tjänst som svarat 429/403 pausas (backoff.js, per värd): inga anrop under pausen, en loggrad när den börjar
 const svcOf = (host) => `bookmeta:${host}`;
 const paused = (host) => Object.assign(new Error(`${host}: för många anrop – pausad`), { rateLimited: true, paused: true });
+/** Får en omdirigering följas? Bara inom samma värd – utom Open Librarys omslag, som skickas vidare till Internet Archive
+ *  (covers.openlibrary.org → archive.org → iaNNN.us.archive.org, alltid https) */
+export function redirectOk(from, to) {
+  let a, b; try { a = new URL(from); b = new URL(to); } catch { return false; }
+  if (a.host === b.host) return true;
+  const olc = a.hostname === 'covers.openlibrary.org' || a.host === new URL(OLC()).host;
+  return olc && b.protocol === 'https:' && !b.port && (b.hostname === 'archive.org' || /^ia\d+\.us\.archive\.org$/.test(b.hostname));
+}
 async function fetchOk(url, accept) {
   const host = new URL(url).host;
   if (backoff.waitMs(svcOf(host))) throw paused(host);
@@ -75,7 +83,7 @@ async function fetchOk(url, accept) {
   try { r = await fetch(url, { headers: { Accept: accept, 'User-Agent': UA() }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT) }); }
   catch (e) { throw new Error(e.name === 'TimeoutError' ? `${host} svarade inte i tid` : `kunde inte nå ${host} (${e.cause?.code || e.message})`); }
   // Omdirigering får inte leda bort från värden (Open Library flyttar sammanslagna verk inom samma värd)
-  if (new URL(r.url || url).host !== host) { r.body?.cancel().catch(() => {}); throw new Error(`${host} skickade vidare till en annan värd`); }
+  if (!redirectOk(url, r.url || url)) { r.body?.cancel().catch(() => {}); throw new Error(`${host} skickade vidare till en annan värd`); }
   if (r.status === 404) { r.body?.cancel().catch(() => {}); return null; }
   if (r.status === 429 || r.status === 403) {
     r.body?.cancel().catch(() => {});
@@ -233,7 +241,8 @@ export async function findMatch(title, author) {
   title = cleanTitle(title); author = authorOf(author);
   if (!title) return null;
   const steps = [];
-  // Audible ger uppläsare, serie och ASIN (kapitel) – först för titlar som inte ser svenska ut. Fel hos Audible stoppar inte matchningen.
+  // Audible ger uppläsare, serie och ASIN (kapitel) – först för titlar som inte ser svenska ut. Andra fel hos Audible än
+  // "för många anrop" räknas som inga träffar (katalogen svarar ibland fel för vissa sökningar).
   const au = () => audible(title, author).catch(e => { if (e.rateLimited) throw e; return []; });
   if (looksSwedish(title)) steps.push(() => google(title, author, 'sv'));
   else steps.push(au);
@@ -241,11 +250,20 @@ export async function findMatch(title, author) {
   if (author) steps.push(() => google(title, null)); // författaren kan vara stavad annorlunda (eller vara uppläsaren)
   if (looksSwedish(title)) steps.push(au);
   steps.push(() => openLibrary(title, author));
+  // En källa som svarar fel eller "för många anrop" stoppar inte matchningen: nästa källa frågas. Google Books utan nyckel
+  // svarar 429 för alla (den delade kvoten är slut), och då måste Audible och Open Library ändå få frågas.
+  // Ingen träff och någon källa svarade fel: felet kastas, så att boken inte markeras som "ingen träff" utan försöks igen.
+  let err = null, asked = false;
   for (const step of steps) {
+    let list;
+    try { list = await step(); asked = true; }
+    catch (e) { if (!err || (e.rateLimited && !err.rateLimited)) err = e; if (!e.paused) asked = true; continue; }
     let best = null;
-    for (const c of await step()) { const s = score(c, title, author); if (!best || s > best.s) best = { c, s }; }
+    for (const c of list) { const s = score(c, title, author); if (!best || s > best.s) best = { c, s }; }
     if (best && best.s >= GOOD) return best.c;
   }
+  // "paused" betyder att inget anrop gjordes alls – bara då är det hela kön som ska vänta
+  if (err) throw err.paused && asked ? Object.assign(new Error(err.message), { rateLimited: true }) : err;
   return null;
 }
 /** Manuell sökning ("Fel bok?"): träffar från alla källor, bästa först. Ett ASIN söks direkt i Audnexus. */
@@ -413,12 +431,12 @@ async function runLibrary(libId) {
       if (e.rateLimited) {
         // För många anrop: pausen och loggraden sköts av backoff.js. Boken försöks igen senare (1 h, 4 h, 16 h …) så att
         // nästa skanning inte börjar med samma bok och samma 429. Den markeras inte som "ingen träff".
-        // En pausad tjänst (inget anrop gjordes) räknas inte mot boken.
-        if (!e.paused) {
-          const tries = (get('SELECT rl_tries FROM book_meta WHERE book_id=?', b.id)?.rl_tries || 0) + 1;
-          upsert(b.id, { rl_tries: tries, next_try: now() + backoff.nextTrySec(tries) });
-        }
-        break;
+        // Kön fortsätter: den pausade källan hoppas över och de andra frågas för nästa bok. Bara när inget anrop
+        // gjordes alls (alla källor pausade) stannar kön, och då räknas det inte mot boken.
+        if (e.paused) break;
+        const tries = (get('SELECT rl_tries FROM book_meta WHERE book_id=?', b.id)?.rl_tries || 0) + 1;
+        upsert(b.id, { rl_tries: tries, next_try: now() + backoff.nextTrySec(tries) });
+        continue;
       }
       console.warn('[bokmetadata]', b.title, '–', e.message);
       // Ingen kontakt: försök igen vid nästa skanning
