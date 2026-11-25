@@ -1,6 +1,6 @@
 // API-nycklar (server/apikeys.js, routes/apikeys.js): administratören skapar och tar bort nycklar, nyckeln visas en
 // gång och sparas bara som hash, behörigheterna gäller, /api/v1/* tar aldrig emot vanlig inloggning och nyckeln
-// gäller ingen annanstans. Nu spelas visar film/serier (sessioner), musik, ljudböcker och poddar.
+// gäller ingen annanstans; administratören kan ändra namn, behörigheter och hemnätet utan att nyckeln visas igen. Nu spelas visar film/serier (sessioner), musik, ljudböcker och poddar.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -64,6 +64,31 @@ test('administrationen: skapa, lista och ta bort – nyckeln visas en gång och 
   const del = await req('/api/apikeys/' + r.data.id, { method: 'DELETE', headers: asAdmin });
   assert.equal(del.status, 200);
   assert.equal((await req('/api/v1/status', { headers: { 'x-api-key': r.data.key } })).status, 401, 'borttagen nyckel gäller inte');
+});
+
+test('administrationen: ändra namn, behörigheter och hemnätet – nyckeln är densamma och visas aldrig igen', async () => {
+  const r = (await req('/api/apikeys', { method: 'POST', headers: asAdmin, body: { name: 'Köket', scopes: ['nowplaying'] } })).data;
+  const H = { 'x-api-key': r.key };
+  const fake = (trusted) => keys.check({ headers: H }, 'library', { trusted, ip: '203.0.113.9' });
+  assert.equal((await req('/api/v1/library', { headers: H })).status, 403, 'saknar library från början');
+  assert.equal((await req('/api/apikeys/' + r.id, { method: 'PUT', headers: { authorization: 'Bearer ' + tok.bo }, body: { name: 'x' } })).status, 403, 'bara administratörer');
+  assert.equal((await req('/api/apikeys/999999', { method: 'PUT', headers: asAdmin, body: { name: 'x' } })).status, 404);
+  assert.equal((await req('/api/apikeys/' + r.id, { method: 'PUT', headers: asAdmin, body: { name: '  ' } })).status, 400, 'tomt namn');
+  assert.equal((await req('/api/apikeys/' + r.id, { method: 'PUT', headers: asAdmin, body: { scopes: ['admin'] } })).status, 400, 'ingen giltig behörighet');
+  const u = await req('/api/apikeys/' + r.id, { method: 'PUT', headers: asAdmin, body: { name: 'Hallen', scopes: ['library', 'admin'], homeOnly: false, key: 'bxtv_egen', prefix: 'bxtv_xx' } });
+  assert.equal(u.status, 200, u.text);
+  assert.deepEqual([u.data.name, u.data.scopes, u.data.homeOnly, u.data.prefix], ['Hallen', ['library'], false, r.prefix], 'prefix och nyckel kan inte ändras');
+  assert.ok(!('key' in u.data) && !u.text.includes(r.key), 'svaret visar aldrig nyckeln');
+  assert.ok(!JSON.stringify(D.all('SELECT * FROM api_keys')).includes(r.key), 'databasen har fortfarande bara hashen');
+  assert.equal((await req('/api/v1/library', { headers: H })).status, 200, 'samma nyckel har nu library');
+  assert.equal((await req('/api/v1/now-playing', { headers: H })).status, 403, 'och inte längre nowplaying');
+  assert.ok(fake(false).key, 'även utanför hemmet');
+  // Bara det som skickas ändras
+  const h = await req('/api/apikeys/' + r.id, { method: 'PUT', headers: asAdmin, body: { homeOnly: true } });
+  assert.deepEqual([h.data.name, h.data.scopes, h.data.homeOnly], ['Hallen', ['library'], true]);
+  assert.equal(fake(false).status, 403, 'bara hemnätet igen'); assert.ok(fake(true).key);
+  assert.ok(D.get("SELECT 1 FROM audit WHERE event='apikey_changed'"));
+  await req('/api/apikeys/' + r.id, { method: 'DELETE', headers: asAdmin });
 });
 
 test('nyckeln: bara /api/v1/*, bara sina behörigheter, aldrig i adressen – och /api/v1 tar inte emot vanlig inloggning', async () => {

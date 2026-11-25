@@ -25,17 +25,41 @@ const shape = (r) => ({ id: r.id, name: r.name, prefix: r.prefix, scopes: r.scop
   created: r.created, lastUsed: r.last_used || null, lastIp: r.last_ip || null, uses: r.uses || 0 });
 export const list = () => all('SELECT * FROM api_keys ORDER BY created DESC').map(shape);
 
+const bad = (message) => Object.assign(new Error(message), { status: 400 });
+const cleanName = (name) => {
+  const n = String(name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
+  if (!n) throw bad('Ge nyckeln ett namn, t.ex. var den ska användas');
+  return n;
+};
+const cleanScopes = (scopes) => {
+  const sc = [...new Set((Array.isArray(scopes) ? scopes : []).map(String))].filter(s => s in SCOPES);
+  if (!sc.length) throw bad('Välj minst en sak som nyckeln får göra');
+  return sc;
+};
+
 /** Ny nyckel: { key (visas en gång), ...kortet } */
 export function create({ name, scopes, homeOnly = true }, userId) {
-  name = String(name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
-  if (!name) throw Object.assign(new Error('Ge nyckeln ett namn, t.ex. var den ska användas'), { status: 400 });
-  const sc = [...new Set((Array.isArray(scopes) ? scopes : []).map(String))].filter(s => s in SCOPES);
-  if (!sc.length) throw Object.assign(new Error('Välj minst en sak som nyckeln får göra'), { status: 400 });
+  name = cleanName(name);
+  const sc = cleanScopes(scopes);
   if (get('SELECT COUNT(*) AS n FROM api_keys').n >= MAX_KEYS) throw Object.assign(new Error(`Högst ${MAX_KEYS} nycklar – ta bort någon du inte använder`), { status: 400 });
   const key = PREFIX + crypto.randomBytes(30).toString('base64url');
   const id = Number(run('INSERT INTO api_keys(name,key_hash,prefix,scopes,home_only,created,created_by) VALUES(?,?,?,?,?,?,?)',
     name, sha(key), key.slice(0, PREFIX.length + 6), sc.join(','), homeOnly === false ? 0 : 1, now(), userId ?? null).lastInsertRowid);
   return { key, ...shape(get('SELECT * FROM api_keys WHERE id=?', id)) };
+}
+/**
+ * Ändra namn, behörigheter och/eller hemnätet på en befintlig nyckel (bara det som skickas). Själva nyckeln, hashen
+ * och prefixet ändras aldrig, och svaret har inte nyckeln – den visas bara när den skapas. null = finns inte.
+ */
+export function update(id, { name, scopes, homeOnly } = {}) {
+  const r = /^\d{1,12}$/.test(String(id)) ? get('SELECT * FROM api_keys WHERE id=?', +id) : null;
+  if (!r) return null;
+  const f = {};
+  if (name !== undefined) f.name = cleanName(name);
+  if (scopes !== undefined) f.scopes = cleanScopes(scopes).join(',');
+  if (homeOnly !== undefined) f.home_only = homeOnly === false ? 0 : 1;
+  if (Object.keys(f).length) run(`UPDATE api_keys SET ${Object.keys(f).map(k => `${k}=?`).join(', ')} WHERE id=?`, ...Object.values(f), r.id);
+  return shape(get('SELECT * FROM api_keys WHERE id=?', r.id));
 }
 export const remove = (id) => Number(run('DELETE FROM api_keys WHERE id=?', +id).changes) > 0;
 
@@ -60,7 +84,7 @@ export function check(req, scope, { trusted, ip }) {
   const r = get('SELECT * FROM api_keys WHERE key_hash=?', sha(k));
   if (!r) return { status: 401, error: 'API-nyckeln finns inte (den kan ha tagits bort)' };
   const has = r.scopes.split(','), want = scope == null ? has : [].concat(scope);
-  if (!want.some(x => has.includes(x))) return { status: 403, error: 'Nyckeln har inte den behörigheten – skapa en ny under Administration → API-nycklar' };
+  if (!want.some(x => has.includes(x))) return { status: 403, error: 'Nyckeln har inte den behörigheten – ändra den under Administration → API-nycklar' };
   if (r.home_only && !trusted) return { status: 403, error: 'Nyckeln gäller bara på hemnätverket' };
   const t = Date.now(), w = rate.get(r.id);
   if (!w || t - w.t > 60e3) rate.set(r.id, { t, n: 1 });

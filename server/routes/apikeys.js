@@ -1,5 +1,6 @@
 // API-nycklar (server/apikeys.js):
 //   GET/POST /api/apikeys, DELETE /api/apikeys/:id – administratören delar ut och tar bort nycklar (hemnätet)
+//   PUT /api/apikeys/:id                          – ändra namn, behörigheter och hemnätet ({ name?, scopes?, homeOnly? })
 //   GET /api/v1/status                           – serverns namn och version (vilken giltig nyckel som helst)
 //   GET /api/v1/now-playing                      – vad som spelas just nu (behörigheten nowplaying)
 //   GET /api/v1/library                          – antal och nyligen tillagt (behörigheten library)
@@ -26,6 +27,14 @@ route('POST', '/api/apikeys', admin, async (c) => {
     audit('apikey_created', { ...ctx(c), detail: `${k.name} (${k.scopes.join(', ')})` });
     send(c.res, 200, k);
   } catch (e) { fail(c.res, e.status || 500, e.status ? e.message : 'Kunde inte skapa nyckeln'); }
+});
+route('PUT', '/api/apikeys/:id', admin, async (c) => {
+  try {
+    const k = keys.update(c.p.id, await readJson(c.req));
+    if (!k) return fail(c.res, 404, 'Finns inte');
+    audit('apikey_changed', { ...ctx(c), detail: `${k.name} (${k.scopes.join(', ')}${k.homeOnly ? '' : ', även utanför hemmet'})` });
+    send(c.res, 200, k);
+  } catch (e) { fail(c.res, e.status || 500, e.status ? e.message : 'Kunde inte ändra nyckeln'); }
 });
 route('DELETE', '/api/apikeys/:id', admin, (c) => {
   if (!keys.remove(c.p.id)) return fail(c.res, 404, 'Finns inte');

@@ -4426,7 +4426,7 @@ self.BX_I18N = {
   "Skriv frågan i reply när status är needinfo": "Put the question in reply when status is needinfo",
   "status ska vara working, needinfo eller fixed": "status must be working, needinfo or fixed",
   "Välj minst en sak som nyckeln får göra": "Choose at least one thing the key may do",
-  "Nyckeln har inte den behörigheten – skapa en ny under Administration → API-nycklar": "The key does not have that permission – create a new one under Administration → API keys",
+  "Nyckeln har inte den behörigheten – ändra den under Administration → API-nycklar": "The key does not have that permission – change it under Administration → API keys",
   "BraXhn TV körs på en egen server hemma hos den som bjudit in dig. Det är den personen som ansvarar för uppgifterna – inte utvecklarna av BraXhn TV, som inte får någon information från servern. Enda undantaget är feedback och felrapporter som administratören själv har godkänt (se nedan).": "BraXhn TV runs on a private server at the home of the person who invited you. That person is responsible for the data – not the developers of BraXhn TV, who receive no information from the server. The only exception is feedback and bug reports that the administrator has personally approved (see below).",
   "<b>Feedback och felrapporter:</b> det du skickar med knappen Feedback sparas på servern tills kontot eller ärendet tas bort. En administratör läser ärendet först. Bara om administratören godkänner det kan utvecklarna av BraXhn TV hämta det – utan ditt namn och utan IP-adress. Du ser dina ärenden under <a href=\"#/support\">Mina ärenden</a>.": "<b>Feedback and bug reports:</b> what you send with the Feedback button is stored on the server until the account or the report is removed. An administrator reads the report first. Only if the administrator approves it can the developers of BraXhn TV fetch it – without your name and without an IP address. You see your reports under <a href=\"#/support\">My reports</a>.",
   " av {total}": " of {total}",
@@ -4576,4 +4576,8 @@ self.BX_I18N = {
   "Åtgärdade och avslagna ärenden tas bort så här många dagar efter den senaste ändringen. Öppna ärenden och ärenden som väntar på granskning tas aldrig bort.": "Fixed and rejected reports are removed this many days after the last change. Open reports and reports waiting for review are never removed.",
   "Åtgärdade och avslagna ärenden tas bort {d} efter den senaste ändringen.": "Fixed and rejected reports are removed {d} after the last change.",
   "Feedback att granska": "Feedback to review",
+  "Ändra nyckeln {name}": "Change the key {name}",
+  "Nyckeln är ändrad": "The key is changed",
+  "Själva nyckeln ändras inte och visas inte igen. Det som använder den fortsätter fungera med de nya behörigheterna.": "The key itself does not change and is not shown again. Whatever uses it keeps working with the new permissions.",
+  "API-nyckel ändrad": "API key changed",
 };

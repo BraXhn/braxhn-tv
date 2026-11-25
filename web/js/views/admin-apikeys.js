@@ -1,6 +1,6 @@
 // Administration – API-nycklar: dela ut åtkomst till Nu spelas och biblioteket åt andra system (väggskärm, Home
 // Assistant, Homepage …) och – med behörigheten Support – låt utvecklarteamet läsa godkända felrapporter och svara på dem.
-// Nyckeln visas en gång. Servern: server/apikeys.js, server/routes/apikeys.js.
+// Nyckeln visas en gång; namn, behörigheter och hemnätet kan ändras efteråt (Ändra) utan att nyckeln visas igen. Servern: server/apikeys.js, server/routes/apikeys.js.
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, esc, fmtDate, toast, t } from '../core.js';
 import { confirmDialog, openDialog } from '../ui/dialog.js';
@@ -19,6 +19,25 @@ function keyDialog(k) {
   });
 }
 
+/** Behörigheterna och hemnätet som kryssrutor (samma i Skapa och Ändra) */
+const scopeBoxes = (K, L, k) => Object.keys(K.scopes).map(s => `<label class="switch"><input type="checkbox" name="akscope" value="${esc(s)}" ${(k ? k.scopes.includes(s) : s === 'nowplaying') ? 'checked' : ''}> ${esc(L[s] || K.scopes[s])}</label>`).join('')
+  + `<label class="switch"><input type="checkbox" name="akhome" ${!k || k.homeOnly ? 'checked' : ''}> ${t('Bara från hemnätet')} <span class="muted">${t('(rekommenderas – stäng av bara om systemet finns utanför hemmet)')}</span></label>`;
+
+function editDialog(k, K, L) {
+  openDialog({
+    title: t('Ändra nyckeln {name}', { name: k.name }), form: true,
+    body: `<p class="muted small">${t('Själva nyckeln ändras inte och visas inte igen. Det som använder den fortsätter fungera med de nya behörigheterna.')}</p>
+      <label for="akename">${t('Namn (var nyckeln används)')}</label><input id="akename" maxlength="60" required value="${esc(k.name)}">
+      ${scopeBoxes(K, L, k)}`,
+    actions: [{ label: t('Avbryt'), kind: 'ghost' }, { label: t('Spara'), kind: 'primary', submit: true, onClick: async (d) => {
+      const scopes = $$('[name=akscope]', d.el).filter(x => x.checked).map(x => x.value);
+      await api('/apikeys/' + k.id, { method: 'PUT', bg: true, body: { name: d.$('#akename').value, scopes, homeOnly: d.$('[name=akhome]').checked } });
+      toast(t('Nyckeln är ändrad'));
+      adminApiKeys().catch(() => {});
+    } }]
+  });
+}
+
 export async function adminApiKeys() {
   const el = $('#adm-apikeys'); if (!el) return;
   const K = await api('/apikeys');
@@ -30,18 +49,19 @@ export async function adminApiKeys() {
     ${K.keys.length ? `<table>${K.keys.map(k => `<tr><td><b>${esc(k.name)}</b> <code class="muted small">${esc(k.prefix)}…</code>
       <div class="muted small">${k.scopes.map(s => esc(L[s] || s)).join(' · ')}${k.homeOnly ? ' · ' + t('bara hemnätet') : ' · ' + t('även utanför hemmet')}</div>
       <div class="muted small">${k.lastUsed ? t('Senast använd {v} från {ip}', { v: fmtDate(k.lastUsed), ip: esc(k.lastIp || '–') }) : t('Inte använd än')}</div></td>
-      <td class="r"><button class="ghost small" data-kdel="${k.id}">${t('Ta bort')}</button></td></tr>`).join('')}</table>` : `<p class="muted small">${t('Inga nycklar än.')}</p>`}
+      <td class="r"><button class="ghost small" data-kedit="${k.id}">${t('Ändra')}</button> <button class="ghost small" data-kdel="${k.id}">${t('Ta bort')}</button></td></tr>`).join('')}</table>` : `<p class="muted small">${t('Inga nycklar än.')}</p>`}
     <form id="akform" style="margin-top:12px"><label for="akname">${t('Namn (var nyckeln används)')}</label><input id="akname" maxlength="60" required placeholder="${t('t.ex. Väggskärmen i köket')}">
-      ${Object.keys(K.scopes).map(s => `<label class="switch"><input type="checkbox" name="akscope" value="${esc(s)}" ${s === 'nowplaying' ? 'checked' : ''}> ${esc(L[s] || K.scopes[s])}</label>`).join('')}
-      <label class="switch"><input type="checkbox" id="akhome" checked> ${t('Bara från hemnätet')} <span class="muted">${t('(rekommenderas – stäng av bara om systemet finns utanför hemmet)')}</span></label>
+      ${scopeBoxes(K, L)}
       <div class="row" style="margin-top:12px"><button class="primary">${t('Skapa nyckel')}</button></div></form>`;
   $('#akform', el).onsubmit = act(async (e) => {
     e.preventDefault();
-    const scopes = $$('[name=akscope]', el).filter(x => x.checked).map(x => x.value);
-    const k = await api('/apikeys', { method: 'POST', body: { name: $('#akname', el).value, scopes, homeOnly: $('#akhome', el).checked } });
+    const f = $('#akform', el);
+    const scopes = $$('[name=akscope]', f).filter(x => x.checked).map(x => x.value);
+    const k = await api('/apikeys', { method: 'POST', body: { name: $('#akname', el).value, scopes, homeOnly: $('[name=akhome]', f).checked } });
     keyDialog(k);
     adminApiKeys().catch(() => {});
   });
+  $$('[data-kedit]', el).forEach(b => b.onclick = act(() => editDialog(K.keys.find(x => x.id === +b.dataset.kedit), K, L)));
   $$('[data-kdel]', el).forEach(b => b.onclick = act(async () => {
     const k = K.keys.find(x => x.id === +b.dataset.kdel);
     if (!await confirmDialog(t('Ta bort nyckeln {name}? Det som använder den slutar fungera direkt.', { name: k?.name || '' }), { okLabel: t('Ta bort'), danger: true })) return;

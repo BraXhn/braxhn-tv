@@ -79,9 +79,11 @@ det förvalda ljudspåret) tar den över den redan startade strömmen. Webben g�
 API för andra system, till exempel en väggskärm, Home Assistant eller Homepage. Det är skrivskyddat med ett
 undantag: med behörigheten `support` kan utvecklarteamet sätta status och svar på felrapporter som administratören
 har godkänt (se [Support](#support-felrapporter-för-teamet)). Administratören skapar nycklar under
-*Administration → API-nycklar*. Där finns också `GET`/`POST /api/apikeys` och `DELETE /api/apikeys/:id`,
-som kräver admin och hemnätet. `POST` tar `{ name, scopes: ["nowplaying", "library", "support"], homeOnly: true }`
-och svarar med `key`, som bara visas den gången.
+*Administration → API-nycklar*. Där finns också `GET`/`POST /api/apikeys`, `PUT /api/apikeys/:id` och
+`DELETE /api/apikeys/:id`, som kräver admin och hemnätet. `POST` tar `{ name, scopes: ["nowplaying", "library",
+"support"], homeOnly: true }` och svarar med `key`, som bara visas den gången. `PUT` tar samma fält (bara de som
+skickas ändras) och svarar med kortet utan `key`: nyckeln, hashen och prefixet ändras aldrig, så det som använder
+nyckeln fortsätter fungera med de nya behörigheterna.
 
 **Nyckeln:**
 - Skicka den i rubriken `X-Api-Key: bxtv_…` eller som `Authorization: Bearer bxtv_…`. Den tas aldrig emot i adressen.

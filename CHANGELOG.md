@@ -20,6 +20,9 @@
     teamet inget förrän det godkänts). Den som skickade ärendet ser den nya statusen under *Mina ärenden*.
   - Åtgärdade och avslagna ärenden tas bort 180 dagar efter den senaste ändringen (*Administration → Integritet*
     eller `SUPPORT_DAYS`, 30–3650). Öppna ärenden och sådana som väntar på granskning rörs aldrig.
+- **API-nycklar kan ändras.** Under *Administration → API-nycklar* kan administratören byta namn, behörigheter och
+  *Bara från hemnätet* på en befintlig nyckel (*Ändra*, `PUT /api/apikeys/:id`) i stället för att skapa en ny. Själva
+  nyckeln är densamma och visas aldrig igen, så det som använder den fortsätter fungera.
 - **Expo-appen: profilbyte.** Har kontot flera profiler visar appen *Vem tittar?* efter inloggningen, med en ruta per
   profil som i webbappen. Profiler med PIN frågar efter den, och från en barnprofil till en profil med högre
   åldersgräns krävs huvudkontots lösenord. Under *Konto* finns *Byt profil*. Barnprofiler ser bara det de får se,
