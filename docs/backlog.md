@@ -80,31 +80,25 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 6. Sömntimer i videospelaren
+### 6. Skärmtid i Safari och apparna: paus och tiden kvar
 
-- **Vad:** samma val som i ljudspelaren (15, 30, 60 minuter eller "efter det här avsnittet") i videospelarens meny.
-- **Varför:** den som somnar till en serie vaknar annars tre avsnitt senare, och *Fortsätt titta* pekar fel. Finns
-  för ljud men inte för video (kontrollerat i `web/js/player/`).
-- **Filer:** `web/js/player/controls.js`, `web/js/player/video.js`, `web/i18n/en.js`, `web/sw.js` om en ny modul
-  behövs.
-- **Klart när:** uppspelningen stannar vid vald tid, positionen sparas där, och valet finns på engelska.
-
-### 7. Skärmtid: mät räkningen vid paus och visa tiden som är kvar
-
-- **Vad:** servern räknar nu tiden även från själva strömmen. Mät i riktig Chrome och Safari att paus inte räknas
-  (direktuppspelning av en stor fil och HLS), och visa "X minuter kvar" i spelaren i webben och apparna när det är
-  mindre än tio minuter kvar.
-- **Varför:** skärmtiden är det föräldrar litar mest på. Räknas paus som tittande tappar barnen förtroendet för den,
-  och ett stopp utan förvarning mitt i ett avsnitt ger bråk.
-- **Filer:** `server/http/context.js` (`countStream`), `server/screentime.js`, `web/js/player/overlay.js`,
-  `test/security-review4.test.js`, `test/web-family.test.js`.
-- **Klart när:** tio minuters paus ger högst en halv minuts räknad tid i båda webbläsarna, och varningen syns.
+- **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
+  (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
+  Android- och Expo-apparna (fältet `screenTime` finns i svaret på framstegsrapporten).
+- **Varför:** webben visar nu tiden kvar och paus räknas inte där; i apparna stoppas barnet fortfarande utan förvarning.
+- **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
+- **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
 
 ## Idéer
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
+- Skärmtid: hls.js hämtar segment i upp till 60 s framåt även när filmen är pausad, och varje segment är ett
+  livstecken – kort efter start eller spolning, och med en långsam omkodning, kan några sekunder av pausen räknas
+  (inte uppmätt med omkodning; remux hemma fyllde bufferten på 6 s och räknade 0 s).
+- Sovtimern i videospelaren tonar ner med `video.volume`; med Nattläge/Tydligare dialog (Web Audio, `player/comfort.js`)
+  är nedtoningen inte provad, och apparna (iOS, Android, Expo) har ingen sovtimer för video.
 - Engelska i servern, det som är kvar: fel med variabler som saknar nyckel i `web/i18n/en.js` (t.ex. bibliotekets
   mappfel i `server/routes/library.js`, Sonarr/Radarr i `server/routes/health.js`), administratörens tekniska fel
   (ffmpeg, nätet, IPTV) och diskens namn i disklarmet (`server/diskmon.js`, *Konfiguration*). Fältet `weekday` i
@@ -176,6 +170,12 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25: Sovtimer i videospelaren (15/30/45/60 min eller *När avsnittet tar slut*, nedtoning, paus som sparar
+  positionen, följer med till nästa avsnitt, fjärrkontroll) och skärmtiden i webbspelaren (*X min kvar idag*, varning de
+  sista fem minuterna). Paus räknades som skärmtid: vid direktuppspelning upp till 20 s per paus (Chrome: 6 s
+  uppspelning + 60 s paus = 20 s räknat, nu 7 s; `streamMeter`), och en paus under 45 s helt när filmen startade igen
+  (rapport vid start, `heartbeat`). Pilarna i dialoger från spelaren fungerar (`router.js`). Inte gjort: Safari och
+  apparna (se *Näst på tur* 6).
 - 2026-11-25: Feedback – notis till administratören när något väntar (utan text och namn, högst en i timmen),
   *Öppna igen* för avslutade ärenden, gallring efter 180 dagar; API-nycklar går att ändra.
 - 2026-11-25: Engelska i serverns texter – felmeddelanden, skärmtid,

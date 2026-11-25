@@ -19,6 +19,23 @@
   frågas för varje bok som förut. En bok som inte hittades någon annanstans markeras inte som "ingen träff" utan
   försöks igen senare. Omslag från Open Library sparas också nu (de ligger hos Internet Archive, och den
   vidarebefordran stoppades tidigare).
+- **Sovtimer i videospelaren.** Månen i spelarens kontrollrad ger samma val som i musikspelaren: 15, 30, 45 eller 60
+  minuter, eller *När avsnittet tar slut* (*När filmen tar slut*). De sista tio sekunderna tonas ljudet ner och bilden
+  mörknar, sedan pausas filmen och positionen sparas, så att *Fortsätt titta* börjar där. Knappen visar minuterna kvar
+  och den sista minuten syns en nedräkning även när kontrollerna är dolda. Timern följer med till nästa avsnitt, och
+  *När avsnittet tar slut* stoppar i stället för att nästa avsnitt startar. Fungerar med fjärrkontroll.
+- **Skärmtiden syns i spelaren.** Profiler med skärmtid ser tiden kvar i spelarens överkant (*12 min kvar idag*), och
+  de sista fem minuterna en varning mitt i bilden (*Skärmtiden tar slut om 4 min*) som syns även när kontrollerna är
+  dolda. Profiler utan skärmtid ser ingenting nytt.
+- **Paus räknas inte längre som skärmtid.** Två fel, båda uppmätta i Chrome:
+  - Vid direktuppspelning räknade servern tiden fram till sitt eget livstecken (var 20:e sekund) så fort strömmen
+    skickat något sedan förra, så en paus kunde kosta upp till 20 sekunder (6 s uppspelning och 60 s paus gav 20 s).
+    Nu räknas tiden fram till när data senast skickades.
+  - En paus kortare än 45 sekunder räknades helt när filmen startade igen (20 s uppspelning, 30 s paus och 20 s till
+    gav 63 s). Webbspelaren rapporterar nu också när filmen startar igen, och servern börjar räkna om från där när
+    positionen stått still och ingen data skickats under pausen.
+- **Pilarna fungerar i dialoger som öppnas från spelaren** (sovtimern, *Ögonblick*, *Det här har hänt*). Förut gjorde
+  pilarna ingenting där, så fjärrkontrollen kunde inte välja något.
 - **Familjefiltret tystar lite tidigare** (0,08 s före ordet i stället för 0,03 s), så att en långsam TV eller telefon inte
   hinner släppa igenom början av ett ord innan ljudet stängs av.
 - **Servern svarar på engelska till den som valt engelska.** Felmeddelandena (inloggning, tvåstegsverifiering,

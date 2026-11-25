@@ -94,7 +94,7 @@ Inbäddade och externa `.srt/.vtt/.ass`. Teckenkodningen för gamla svenska srt-
 
 ### Spelaren
 
-Uppspelningshastighet 0,75–2×, kapitellista med förhandsbild per kapitel, *Hoppa över intro/sammanfattning*, tydlig fokusmarkering och pilar mellan knapparna med tangentbord eller fjärrkontroll.
+Uppspelningshastighet 0,75–2×, kapitellista med förhandsbild per kapitel, *Hoppa över intro/sammanfattning*, tydlig fokusmarkering och pilar mellan knapparna med tangentbord eller fjärrkontroll. Sovtimer i webbspelaren (månen i kontrollraden, som i musikspelaren): 15, 30, 45 eller 60 minuter eller *När avsnittet/filmen tar slut* – ljudet tonas ner och bilden mörknar de sista tio sekunderna, sedan pausas filmen och positionen sparas i *Fortsätt titta*. Knappen visar minuterna kvar, och den sista minuten syns en nedräkning även när kontrollerna är dolda. Timern följer med till nästa avsnitt, och *När avsnittet tar slut* startar aldrig nästa avsnitt. Går att nå med fjärrkontrollen.
 
 ### Hoppa över intro
 
@@ -210,7 +210,7 @@ Tryck ? för en lista. `/` söker, i spelaren `j`/`l` eller pilarna ±10 s, `k`/
 
 ### Skärmtid
 
-Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer.
+Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer. Pausad uppspelning räknas inte (en paus kostar högst ett par sekunder). I webbspelaren syns tiden kvar i överkanten (*12 min kvar idag*), och de sista fem minuterna en varning mitt i bilden (*Skärmtiden tar slut om 4 min*) som syns även när kontrollerna är dolda; profiler utan skärmtid ser ingenting.
 
 ### Föräldraöversikt
 
