@@ -1,6 +1,13 @@
 # Ändringar
 
 ## Ej utgiven
+- **Expo-appen: profilbyte.** Har kontot flera profiler visar appen *Vem tittar?* efter inloggningen, med en ruta per
+  profil som i webbappen. Profiler med PIN frågar efter den, och från en barnprofil till en profil med högre
+  åldersgräns krävs huvudkontots lösenord. Under *Konto* finns *Byt profil*. Barnprofiler ser bara det de får se,
+  eftersom appen använder profilens egen inloggning; nästa start öppnar samma profil.
+- **Expo-appen tar inte längre en ny bildtoken vid varje start.** Den sparas per server och profil i telefonens säkra
+  lagring och förnyas först när det är mindre än ett dygn kvar, eller när servern svarar att den inte gäller. Förut
+  skapade varje start en ny, vilket kunde knuffa ut de andra apparnas token ur serverns tak på 50.
 - **Säkerhet: femte granskningen av servern** (det som blev kvar efter den fjärde; varje punkt har ett test i
   `test/security-review5.test.js`, reläets i `test/relay.test.js`):
   - **Skärmtiden gick att kringgå genom att hämta hela originalfilen snabbt** och titta ur en egen kopia. För profiler

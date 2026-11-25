@@ -21,7 +21,8 @@ const store = {
   },
 };
 
-export const session = { server: '', token: '', imgToken: '', imgUntil: 0 };
+// userId = profilen som är inloggad (från /api/status eller profilbytet); bildtoken sparas per profil
+export const session = { server: '', token: '', userId: 0, imgToken: '', imgUntil: 0 };
 
 /** Adressen som användaren skrev → fullständig adress. Domännamn får https, IP-adresser och namn i hemnätet http och port 8420. */
 export function normalizeServer(input: string): string {
@@ -36,7 +37,9 @@ export function normalizeServer(input: string): string {
 
 // ---------- sparade servrar ----------
 // Listan (adress, namn, vem som är inloggad) och varje servers inloggning sparas var för sig i enhetens säkra lagring.
-export interface Server { id: string; url: string; user: string }
+// user = kontot som loggade in (ifyllt när lösenordet behövs igen), profile = profilen som används just nu.
+// Servern tar bort den gamla inloggningen vid profilbyte, så varje server har en token: den valda profilens.
+export interface Server { id: string; url: string; user: string; profile?: string }
 export const servers: Server[] = [];
 let currentId = '';
 export const currentServer = () => servers.find((x) => x.id === currentId) || null;
@@ -44,6 +47,7 @@ export const currentServer = () => servers.find((x) => x.id === currentId) || nu
 export const serverLabel = (sv: Server) => sv.url.replace(/^https?:\/\//i, '').replace(/:8420$/, '');
 const saveList = () => store.set('bx.servers', JSON.stringify(servers));
 const tokenKey = (id: string) => 'bx.token.' + id;
+const imgKey = (id: string) => 'bx.img.' + id; // bildtoken per profil: { [profilens id]: { token, until } }
 
 /** Läser listan vid start. Svaret är servern som ska öppnas direkt (precis en sparad), annars null. */
 export async function loadServers(): Promise<Server | null> {
@@ -57,7 +61,7 @@ export async function selectServer(id: string): Promise<boolean> {
   if (!sv) return false;
   currentId = id;
   session.server = sv.url; session.token = (await store.get(tokenKey(id))) || '';
-  session.imgToken = ''; session.imgUntil = 0;
+  session.userId = 0; session.imgToken = ''; session.imgUntil = 0;
   return !!session.token;
 }
 /** Sparar en ny inloggning: samma adress och användare ersätter den gamla posten */
@@ -76,12 +80,37 @@ export async function removeServer(id: string) {
   servers.splice(i, 1);
   await saveList();
   await store.set(tokenKey(id), null);
-  if (currentId === id) { currentId = ''; session.server = ''; session.token = ''; }
+  await store.set(imgKey(id), null);
+  if (currentId === id) { currentId = ''; session.server = ''; session.token = ''; session.userId = 0; session.imgToken = ''; session.imgUntil = 0; }
 }
+/** Sparar profilens namn i serverlistan (visas under servern i Välj server) */
+export async function rememberProfile(name: string) {
+  const sv = currentServer();
+  if (!sv || sv.profile === name) return;
+  sv.profile = name; await saveList();
+}
+
+// ---------- profiler (som webbens "Vem tittar?") ----------
+export interface Profile { id: number; name: string; owner?: boolean; kid?: boolean; maxAge?: number | null; hasPin?: boolean; color?: string | null }
+export interface UserInfo { id: number; name: string; is_admin?: number; kid?: boolean; profiles?: number; color?: string | null }
+export const listProfiles = () => api<{ current: number; profiles: Profile[] }>('/api/profiles');
+/** Byter profil. Servern tar bort den gamla inloggningen och ger en ny token för profilen, som ersätter den sparade.
+ *  Barnprofilens begränsningar sköter servern efter token. Fel PIN ger ApiError med data.needPin (data.needPassword
+ *  när en barnprofil byter till en profil utan PIN med högre åldersgräns – då krävs huvudkontots lösenord). */
+export async function switchProfile(id: number, secret: { pin?: string; password?: string } = {}): Promise<UserInfo> {
+  const r = await api<{ token: string; user: UserInfo }>('/api/profiles/switch', { method: 'POST', body: { id, ...secret } });
+  if (!r?.token || !r.user) throw new ApiError('Kunde inte byta profil – försök igen.');
+  session.token = r.token;
+  if (currentId) await store.set(tokenKey(currentId), r.token);
+  await rememberProfile(r.user.name);
+  await setProfile(r.user.id);
+  return r.user;
+}
+
 /** Loggar ut från den valda servern (den finns kvar i listan och frågar efter lösenordet nästa gång) */
 export async function signOut() {
-  if (currentId) await store.set(tokenKey(currentId), null);
-  session.token = ''; session.imgToken = ''; session.imgUntil = 0;
+  if (currentId) { await store.set(tokenKey(currentId), null); await store.set(imgKey(currentId), null); }
+  session.token = ''; session.userId = 0; session.imgToken = ''; session.imgUntil = 0;
 }
 
 function netError(e: any): ApiError {
@@ -106,7 +135,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   const base = opts.server ?? session.server;
   if (!base) throw new ApiError('Ingen server är vald.');
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (opts.auth !== false && session.token) headers.Authorization = 'Bearer ' + session.token;
+  const sent = opts.auth !== false ? session.token : '';
+  if (sent) headers.Authorization = 'Bearer ' + sent;
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeout ?? 20000);
@@ -120,19 +150,82 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   if (!res.ok) {
     // Serverns egen förklaring går först (t.ex. skärmtid, rättigheter, för många strömmar)
     const err = new ApiError((data && typeof data.error === 'string' && data.error) || httpText(res.status), res.status, data);
-    if (res.status === 401 && opts.auth !== false && !data?.need2fa && !data?.needPin && !data?.needPassword) onUnauthorized?.();
+    // Bara om token fortfarande är den som skickades: ett anrop som startade före ett profilbyte (den gamla token är
+    // borttagen på servern) ska inte logga ut den nya profilen
+    if (res.status === 401 && sent && sent === session.token && !data?.need2fa && !data?.needPin && !data?.needPassword) onUnauthorized?.();
     throw err;
   }
   return data as T;
 }
 
-/** Bildtoken (gäller en vecka): bilder laddas via adress och kan inte skicka Authorization på alla plattformar */
-export async function ensureImageToken() {
-  if (session.imgToken && Date.now() < session.imgUntil) return;
+// ---------- bildtoken ----------
+// Bilder laddas via adress och kan inte skicka Authorization på alla plattformar, så de får en egen token (?t=) som
+// gäller en vecka. Servern sparar högst 50 per användare och tar bort de äldsta (server/auth.js IMG_MAX), så appen
+// sparar sin token per server och profil och förnyar den bara när det är mindre än ett dygn kvar, eller när servern
+// svarar 401 på en bild. Annars skulle varje appstart skapa en ny och knuffa ut de andra apparnas.
+const RENEW_BEFORE = 86400e3;
+const imgListeners = new Set<() => void>();
+let imgVersion = 0;
+const imgChanged = () => { imgVersion++; imgListeners.forEach((fn) => fn()); };
+/** För useSyncExternalStore: bilderna ritas om när bildtoken byts */
+export const imageToken = {
+  subscribe(fn: () => void) { imgListeners.add(fn); return () => { imgListeners.delete(fn); }; },
+  version: () => imgVersion,
+};
+async function readImgTokens(): Promise<Record<string, { token: string; until: number }>> {
+  if (!currentId) return {};
+  try { const m = JSON.parse((await store.get(imgKey(currentId))) || '{}'); return m && typeof m === 'object' ? m : {}; } catch { return {}; }
+}
+async function saveImgToken(token: string, until: number) {
+  if (!currentId || !session.userId) return;
+  const m = await readImgTokens();
+  for (const k of Object.keys(m)) if (!(m[k]?.until > Date.now())) delete m[k]; // utgångna
+  if (token) m[session.userId] = { token, until }; else delete m[session.userId];
+  await store.set(imgKey(currentId), Object.keys(m).length ? JSON.stringify(m) : null);
+}
+let imgPending: Promise<void> | null = null;
+/** Ser till att det finns en bildtoken som gäller minst ett dygn till: först i minnet, sedan i lagringen, sist en ny */
+export function ensureImageToken(): Promise<void> {
+  if (session.imgToken && session.imgUntil - Date.now() > RENEW_BEFORE) return Promise.resolve();
+  if (!imgPending) imgPending = (async () => {
+    try {
+      if (session.userId) {
+        const t = (await readImgTokens())[session.userId];
+        if (t?.token && t.until - Date.now() > RENEW_BEFORE) {
+          if (t.token !== session.imgToken) { session.imgToken = t.token; session.imgUntil = t.until; imgChanged(); }
+          return;
+        }
+      }
+      const user = session.userId, server = session.server;
+      const r = await api<{ token: string; ttl: number }>('/api/media-token', { method: 'POST' });
+      if (user !== session.userId || server !== session.server) return; // profilen eller servern byttes under tiden
+      session.imgToken = r.token; session.imgUntil = Date.now() + Math.max(60, r.ttl || 0) * 1000;
+      await saveImgToken(session.imgToken, session.imgUntil);
+      imgChanged();
+    } catch {} finally { imgPending = null; }
+  })();
+  return imgPending;
+}
+/** Byter till profilen som /api/status eller profilbytet säger: hämtar profilens sparade bildtoken (eller en ny) */
+export async function setProfile(userId: number) {
+  if (userId === session.userId && session.imgToken) return;
+  session.userId = userId; session.imgToken = ''; session.imgUntil = 0;
+  imgChanged();
+  await ensureImageToken();
+}
+let imgChecked = 0;
+/** En bild gick inte att ladda: fråga servern om det var bildtoken (401, t.ex. utknuffad av taket) och förnya den
+ *  då. Högst en kontroll per minut, så att en bild som saknas på servern (404) inte ger en ström av anrop. */
+export async function imageFailed(url: string) {
+  if (!session.imgToken || !url.includes('t=' + session.imgToken) || Date.now() - imgChecked < 60e3) return;
+  imgChecked = Date.now();
   try {
-    const r = await api<{ token: string; ttl: number }>('/api/media-token', { method: 'POST' });
-    session.imgToken = r.token; session.imgUntil = Date.now() + Math.max(60, r.ttl - 3600) * 1000;
-  } catch {}
+    const res = await fetch(url, { method: 'GET' });
+    if (res.status !== 401 || !url.includes('t=' + session.imgToken)) return;
+  } catch { return; }
+  await saveImgToken('', 0);
+  session.imgToken = ''; session.imgUntil = 0;
+  await ensureImageToken();
 }
 export function imageUrl(id: number, type: 'poster' | 'backdrop' | 'thumb' = 'poster', w = 300): string {
   return `${session.server}/api/image/${id}/${type}?w=${w}${session.imgToken ? '&t=' + session.imgToken : ''}`;

@@ -25,7 +25,7 @@ export default function Servers({ onPick, onAdd, onChanged }: { onPick: (sv: Ser
               <View style={st.icon}><Ionicons name="server-outline" size={20} color={C.accent} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={st.name} numberOfLines={1}>{serverLabel(sv)}</Text>
-                <Text style={st.sub} numberOfLines={1}>{sv.user}</Text>
+                <Text style={st.sub} numberOfLines={1}>{sv.user}{sv.profile && sv.profile !== sv.user ? ` · profil ${sv.profile}` : ''}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={C.dim} />
             </Pressable>

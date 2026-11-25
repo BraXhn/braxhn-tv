@@ -1,10 +1,10 @@
 // Gemensamma delar: knappar, kort, hyllor och tomma lägen – med webbappens utseende (web/style.css).
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { C, R, TOUCH } from '../theme';
-import { imageUrl, sxe, type MediaItem } from '../api';
+import { imageFailed, imageToken, imageUrl, sxe, type MediaItem } from '../api';
 
 export function Button({ label, onPress, onPressIn, kind = 'ghost', icon, disabled, style, small }: {
   label: string; onPress?: () => void; onPressIn?: () => void; kind?: 'primary' | 'ghost' | 'danger';
@@ -20,15 +20,20 @@ export function Button({ label, onPress, onPressIn, kind = 'ghost', icon, disabl
   );
 }
 
+/** Ritar om när bildtoken byts (ny profil, förnyad eller utknuffad token) */
+export const useImageToken = () => useSyncExternalStore(imageToken.subscribe, imageToken.version, imageToken.version);
+
 /** Bilden till ett kort: affisch (2:3) eller stillbild (16:9), med titeln som reserv när bilden saknas */
 export function Art({ it, land, width }: { it: MediaItem; land?: boolean; width: number }) {
   const ep = it.kind === 'episode';
   const id = land ? it.id : ep && it.show ? it.show : it.id;
   const has = land ? it.thumb : ep ? it.showPoster : it.poster;
   const done = it.duration && it.position ? Math.min(1, it.position / it.duration) : 0;
+  useImageToken();
+  const uri = imageUrl(id, land ? 'thumb' : 'poster', land ? 480 : 300);
   return (
     <View style={[s.art, { width, aspectRatio: land ? 16 / 9 : 2 / 3 }]}>
-      {has ? <Image source={{ uri: imageUrl(id, land ? 'thumb' : 'poster', land ? 480 : 300) }} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} recyclingKey={`${id}-${land ? 't' : 'p'}`} />
+      {has ? <Image source={{ uri }} onError={() => imageFailed(uri)} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} recyclingKey={`${id}-${land ? 't' : 'p'}`} />
         : <View style={s.ph}><Text style={s.phText} numberOfLines={3}>{ep ? it.showTitle || it.title : it.title}</Text></View>}
       {it.watched ? <View style={s.seen}><Ionicons name="checkmark" size={13} color={C.accent} /></View> : null}
       {done > 0 && !it.watched ? <View style={s.barBg}><View style={[s.barFill, { width: `${done * 100}%` }]} /></View> : null}

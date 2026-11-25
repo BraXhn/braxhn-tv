@@ -59,15 +59,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
   har kört provet med NVENC (se *Bara Anton kan göra*).
 
-### 4. Expo-appen: profilbyte
-
-- **Vad:** välj profil efter inloggning och byt profil under *Konto*, med PIN (`POST /api/profiles/switch`).
-- **Varför:** utan profilbyte hamnar barnen i förälderns konto – utan åldersgräns, skärmtid och egen *Fortsätt
-  titta*. Det är det som hindrar att appen används i familjen.
-- **Filer:** `apps/expo/src/screens/*`, `apps/expo/src/api.ts`, `apps/expo/src/nav.ts`, `apps/expo/README.md`.
-- **Klart när:** en barnprofil kan väljas, en profil med PIN kräver PIN, och appen visar bara det profilen får se.
-
-### 5. Expo-appen: musik, ljudböcker och poddar
+### 4. Expo-appen: musik, ljudböcker och poddar
 
 - **Vad:** flikar för musik, ljudböcker och poddar med bakgrundsuppspelning, sparad position och låsskärmens knappar.
 - **Varför:** Spotify/Plexamp och Audiobookshelf används mest på telefonen, med låst skärm och i hörlurar. Appen
@@ -75,7 +67,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/screens/*` (nya skärmar), `apps/expo/src/api.ts`, `apps/expo/package.json`.
 - **Klart när:** en ljudbok fortsätter där man slutade efter att appen stängts, och musiken spelar med låst skärm.
 
-### 6. Expo-appen: nedladdning för offline
+### 5. Expo-appen: nedladdning för offline
 
 - **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
   ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
@@ -83,7 +75,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 7. Android-appen på engelska
+### 6. Android-appen på engelska
 
 - **Vad:** flytta texterna till `res/values/strings.xml` med svenska i `values-sv` (appen har i dag ingen
   `strings.xml` och ett hundratal texter direkt i Kotlin-koden) och översätt dem.
@@ -94,7 +86,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** appen följer telefonens språk, inga svenska texter syns på en engelsk telefon, och bygget i GitHub
   Actions går igenom.
 
-### 8. Sömntimer i videospelaren
+### 7. Sömntimer i videospelaren
 
 - **Vad:** samma val som i ljudspelaren (15, 30, 60 minuter eller "efter det här avsnittet") i videospelarens meny.
 - **Varför:** den som somnar till en serie vaknar annars tre avsnitt senare, och *Fortsätt titta* pekar fel. Finns
@@ -103,7 +95,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
   behövs.
 - **Klart när:** uppspelningen stannar vid vald tid, positionen sparas där, och valet finns på engelska.
 
-### 9. Skärmtid: mät räkningen vid paus och visa tiden som är kvar
+### 8. Skärmtid: mät räkningen vid paus och visa tiden som är kvar
 
 - **Vad:** servern räknar nu tiden även från själva strömmen. Mät i riktig Chrome och Safari att paus inte räknas
   (direktuppspelning av en stor fil och HLS), och visa "X minuter kvar" i spelaren i webben och apparna när det är
@@ -114,7 +106,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
   `test/security-review4.test.js`, `test/web-family.test.js`.
 - **Klart när:** tio minuters paus ger högst en halv minuts räknad tid i båda webbläsarna, och varningen syns.
 
-### 10. Engelska i notiser, serverns felmeddelanden och offlinesidan
+### 9. Engelska i notiser, serverns felmeddelanden och offlinesidan
 
 - **Vad:** notiser, felmeddelanden från servern och offlinesidan finns bara på svenska. Låt dem följa profilens
   språk (`users.lang`).
@@ -144,8 +136,11 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   (`HOOKS.advance` i `web/js/audio.js`) – tiden och Föregående blir fel för nästa låt.
 - Musik: spolning i elementet efter att nästa buffert startat tappas tyst (`web/js/audio.js`).
 - Musikfältets knappar är 34 px på telefon, under 44 px som rekommenderas för fingrar (`.mic` i `web/style.css`).
-- Expo-appen använder inte den sparade musikkön (`/api/me/queue`), och sparar bildtoken bara i minnet så att varje
-  appstart skapar en ny (`ensureImageToken` i `apps/expo/src/api.ts`).
+- Expo-appen använder inte den sparade musikkön (`/api/me/queue`) – hör till musiken i punkt 4 (förslag på
+  uppläggning i gren `team/expo-2026-11-25`, rapporten).
+- iOS- och Android-apparna sparar bildtoken bara i minnet och tar en ny vid varje start (`restore()` i
+  `apps/apple/Shared/AppModel.swift`, `refreshImageToken` i `apps/automotive/.../Api.kt`) – samma knuff mot taket på
+  50 som Expo-appen hade. Spara den som Expo-appen gör nu.
 - Medietoken skapas vid varje uppspelningsanrop utan tak per användare (`server/routes/playback.js`, `routes/books.js`).
 - Datum i UTC: audit-texten för inbjudan och diagnostikfilens namn (`server/routes/admin.js`, `server/diagnostics.js`),
   och fotots dag i Minnen (`dayOf` i `server/photos.js`, om det inte är avsiktligt).
@@ -204,6 +199,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-25 (gren `team/expo-2026-11-25`): Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
+  Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
+  server och profil och förnyas bara när den snart går ut eller servern svarar 401.
 - 2026-11-25 (i `:edge`): Femte granskningen av servern – sökvägar bara för administratörer, takt på originalfilen för
   profiler med skärmtid, tak för bildtoken, reläets spärr först, lokalt datum i inspelningar och exporter.
 - 2026-11-25: Musikkön och platsen sparas per profil på servern och finns kvar efter omladdning; Föregående och

@@ -6,14 +6,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { C, R } from '../theme';
-import { api, ensureImageToken, servers, session, type HomeResponse, type Library, type MediaItem } from '../api';
+import { api, ensureImageToken, servers, session, type HomeResponse, type Library, type MediaItem, type UserInfo } from '../api';
+import { profileColor } from './Profiles';
 import { Button, Card, Empty, ErrorState, Loading, Shelf } from '../components/ui';
 import type { Props, Tab } from '../nav';
 
 const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = { movie: 'film-outline', show: 'tv-outline', music: 'musical-notes-outline', audiobook: 'book-outline', photo: 'images-outline', ebook: 'library-outline' };
 const VIDEO = (l: Library) => l.type === 'movie' || l.type === 'show';
 
-export default function Main({ navigation, route, onLogout, onSwitch, onAdd, user }: Props<'Main'> & { onLogout: () => void; onSwitch: () => void; onAdd: () => void; user: { name: string } | null }) {
+export default function Main({ navigation, route, onLogout, onSwitch, onProfiles, onAdd, user }: Props<'Main'> & { onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void; user: UserInfo | null }) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>(route.params?.tab || 'home');
   const [query, setQuery] = useState('');
@@ -34,14 +35,14 @@ export default function Main({ navigation, route, onLogout, onSwitch, onAdd, use
             placeholder="Sök" placeholderTextColor={C.dim} returnKeyType="search" autoCorrect={false} autoCapitalize="none" accessibilityLabel="Sök" />
           {query ? <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityLabel="Rensa sökningen"><Ionicons name="close-circle" size={17} color={C.dim} /></Pressable> : null}
         </View>
-        <Pressable onPress={() => setTab('account')} style={st.avatar} accessibilityLabel="Konto"><Text style={st.avatarText}>{(user?.name || '?').slice(0, 1).toUpperCase()}</Text></Pressable>
+        <Pressable onPress={() => setTab('account')} style={[st.avatar, user?.name ? { backgroundColor: profileColor(user) } : null]} accessibilityLabel="Konto"><Text style={[st.avatarText, user?.name ? { color: '#fff' } : null]}>{(user?.name || '?').slice(0, 1).toUpperCase()}</Text></Pressable>
       </View>
 
       <View style={{ flex: 1, backgroundColor: C.bg }}>
-        {tab === 'home' ? <Home libs={libs} open={open} openLib={(l) => navigation.push('Library', { id: l.id, name: l.name })} /> : null}
+        {tab === 'home' ? <Home kid={!!user?.kid} libs={libs} open={open} openLib={(l) => navigation.push('Library', { id: l.id, name: l.name })} /> : null}
         {tab === 'search' ? <Search query={query} open={open} /> : null}
         {tab === 'list' ? <Watchlist open={open} /> : null}
-        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onAdd={onAdd} /> : null}
+        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} /> : null}
       </View>
 
       <View style={[st.tabs, { paddingBottom: Math.max(insets.bottom, 6) }]}>
@@ -56,7 +57,7 @@ export default function Main({ navigation, route, onLogout, onSwitch, onAdd, use
   );
 }
 
-function Home({ libs, open, openLib }: { libs: Library[]; open: (it: MediaItem) => void; openLib: (l: Library) => void }) {
+function Home({ kid, libs, open, openLib }: { kid: boolean; libs: Library[]; open: (it: MediaItem) => void; openLib: (l: Library) => void }) {
   const [data, setData] = useState<HomeResponse | null>(null);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -79,7 +80,7 @@ function Home({ libs, open, openLib }: { libs: Library[]; open: (it: MediaItem) 
           </Pressable>
         ))}
       </ScrollView>
-      {empty ? <View style={{ padding: 24 }}><Text style={st.dim}>Biblioteket är tomt än. Lägg till bibliotek i webbgränssnittet under Administration.</Text></View> : null}
+      {empty ? <View style={{ padding: 24 }}><Text style={st.dim}>{kid ? 'Här finns inget som den här profilen får se än.' : 'Biblioteket är tomt än. Lägg till bibliotek i webbgränssnittet under Administration.'}</Text></View> : null}
       <Shelf title="Fortsätt titta" items={data.continue} onOpen={open} />
       <Shelf title="Min lista" items={data.watchlist} onOpen={open} />
       {data.rows.map((r, i) => (
@@ -140,7 +141,7 @@ function Watchlist({ open }: { open: (it: MediaItem) => void }) {
   return <Grid items={items} open={open} />;
 }
 
-function Account({ user, onLogout, onSwitch, onAdd }: { user: { name: string } | null; onLogout: () => void; onSwitch: () => void; onAdd: () => void }) {
+function Account({ user, onLogout, onSwitch, onProfiles, onAdd }: { user: UserInfo | null; onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void }) {
   const [version, setVersion] = useState('');
   useEffect(() => { api<{ version?: string }>('/api/status').then((s) => setVersion(s.version || '')).catch(() => {}); }, []);
   return (
@@ -148,8 +149,12 @@ function Account({ user, onLogout, onSwitch, onAdd }: { user: { name: string } |
       <View style={st.panel}>
         <Text style={st.h2}>Mitt konto – {user?.name || ''}</Text>
         <Text style={st.dim2}>Server: {session.server}{version ? `\nBraXhn TV ${version}` : ''}</Text>
+        {user?.kid ? <Text style={st.dim2}>Det här är en barnprofil: du ser bara det som profilen får se.</Text> : null}
         <Text style={st.dim2}>Lösenord, tvåstegsverifiering, profiler och övriga inställningar ändrar du i webbgränssnittet.</Text>
-        <Button label="Logga ut" kind="danger" icon="log-out-outline" onPress={onLogout} style={{ marginTop: 14, alignSelf: 'flex-start' }} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
+          {(user?.profiles || 0) > 1 ? <Button label="Byt profil" icon="people-outline" onPress={onProfiles} /> : null}
+          <Button label="Logga ut" kind="danger" icon="log-out-outline" onPress={onLogout} />
+        </View>
       </View>
       <View style={st.panel}>
         <Text style={st.h2}>Servrar</Text>
