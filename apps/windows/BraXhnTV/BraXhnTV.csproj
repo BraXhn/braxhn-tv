@@ -34,10 +34,14 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <!-- Uppackning av mpv-arkivet (.7z) när appen hämtar den inbyggda spelaren. MIT-licens. -->
+    <PackageReference Include="SharpCompress" Version="0.50.8" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Sidor\start.html" LogicalName="start.html" />
     <EmbeddedResource Include="..\..\..\web\brand\icon-192.png" LogicalName="logo.png" Link="Sidor\logo.png" />
+    <!-- Den egna LGPL-byggnaden av libmpv (adress och SHA-256) som appen hämtar efter ett klick – saknas den används mpv-projektets byggen -->
+    <EmbeddedResource Include="..\libmpv.json" LogicalName="libmpv.json" Link="libmpv.json" Condition="Exists('..\libmpv.json')" />
   </ItemGroup>
   <!-- WebView2-paketet tar med WPF-delen också; appen använder bara WinForms -->
   <Target Name="UtanWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">

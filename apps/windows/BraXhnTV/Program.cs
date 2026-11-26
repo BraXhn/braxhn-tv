@@ -7,6 +7,8 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Provprocessen för libmpv (MpvProbe): ingen fönster, inget annat
+        if (args.Length == 2 && args[0] == "--prova-mpv") { Environment.Exit(MpvProbe.Child(args[1])); return; }
         // En app i taget: startas den igen visas fönstret som redan är öppet
         using var mutex = new Mutex(true, @"Local\BraXhnTV-en-instans", out var first);
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\BraXhnTV-visa");

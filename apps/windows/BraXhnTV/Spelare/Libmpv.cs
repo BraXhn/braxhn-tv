@@ -4,7 +4,7 @@ using System.Text;
 namespace BraXhnTV.Spelare;
 
 /// <summary>
-/// libmpv-2.dll (mpv:s C-API, client.h) laddad dynamiskt. Saknas filen eller är den för gammal blir Load null och
+/// libmpv-2.dll (mpv:s C-API, client.h) laddad dynamiskt. Saknas filen, är den för fel processor eller för gammal blir Load null och
 /// webbspelaren används. DLL:en byts mot en annan version genom att filen ersätts (LGPL).
 /// </summary>
 unsafe sealed class Libmpv
@@ -40,44 +40,119 @@ unsafe sealed class Libmpv
     public static string[] Candidates() =>
     [
         System.IO.Path.Combine(AppContext.BaseDirectory, FileName),
-        System.IO.Path.Combine(AppSettings.Dir, "mpv", FileName),
+        System.IO.Path.Combine(Folder, FileName),
     ];
 
-    static Libmpv? loaded;
-    static string? loadError;
+    /// <summary>%LOCALAPPDATA%\BraXhnTV\mpv – dit appen hämtar mpv</summary>
+    public static string Folder => System.IO.Path.Combine(AppSettings.Dir, "mpv");
+    /// <summary>Följer libmpv med installationen (bredvid BraXhnTV.exe)? Då hämtar appen den aldrig själv.</summary>
+    public static bool Bundled => File.Exists(System.IO.Path.Combine(AppContext.BaseDirectory, FileName));
+    /// <summary>En nyare version som hämtades medan den gamla var laddad; byts in vid nästa start</summary>
+    public static string Pending => System.IO.Path.Combine(Folder, FileName + ".ny");
 
-    /// <summary>Laddar en bestämd fil (testerna). null om den inte går att använda.</summary>
-    public static Libmpv? LoadFrom(string path)
+    /// <summary>Utfallet för en plats: Missing (ingen fil), WrongArch, NeedsNewerCpu (t.ex. x86_64-v3 utan AVX2), NotLoadable, TooOld, Loaded</summary>
+    public enum Outcome { Missing, WrongArch, NeedsNewerCpu, NotLoadable, TooOld, Loaded }
+
+    /// <summary>
+    /// Provning i en egen process innan filen laddas i appen (sätts av appen när processorn saknar AVX2): en
+    /// x86_64-v3-byggnad kraschar då med "otillåten instruktion" – det får inte ta med sig hela appen.
+    /// Svar: null = gick bra, annars utfallet och felet.
+    /// </summary>
+    public static Func<string, (Outcome outcome, string? detail)?>? Precheck { get; set; }
+    static readonly Dictionary<string, (Outcome outcome, string? detail)?> prechecked = new();
+    public sealed record Attempt(string Path, Outcome Outcome, string? Machine, string? Detail);
+
+    static readonly object Gate = new();
+    static Libmpv? loaded;
+    static IReadOnlyList<Attempt> attempts = [];
+    /// <summary>Vad senaste laddningen provade, plats för plats (Om den inbyggda spelaren)</summary>
+    public static IReadOnlyList<Attempt> LastAttempts { get { lock (Gate) return attempts; } }
+    public static bool IsLoaded { get { lock (Gate) return loaded != null; } }
+    /// <summary>Processorns arkitektur som DLL:en måste vara byggd för (appen är x64, även på ARM-datorer)</summary>
+    public static string ProcessMachine => RuntimeInformation.ProcessArchitecture switch { Architecture.X86 => "x86", Architecture.Arm64 => "arm64", _ => "x64" };
+
+    /// <summary>Laddar en bestämd fil (testerna och kontrollen efter nedladdning). null om den inte går att använda.</summary>
+    public static Libmpv? LoadFrom(string path) => Probe(path, out _);
+
+    /// <summary>Provar en fil: laddas den, och annars varför inte</summary>
+    public static Libmpv? Probe(string path, out Attempt attempt)
     {
-        if (!NativeLibrary.TryLoad(path, out var h)) return null;
-        var m = new Libmpv { Path = path };
-        m.Bind(h);
-        return (m.apiVersion() >> 16) >= 2 ? m : null;
+        if (!File.Exists(path)) { attempt = new(path, Outcome.Missing, null, null); return null; }
+        // En Windows-DLL för fel processor (t.ex. 32-bitarsvarianten i686) går inte att ladda – säg det tydligt
+        var machine = Pe.Machine(path);
+        if (machine != null && machine != ProcessMachine) { attempt = new(path, Outcome.WrongArch, machine, null); return null; }
+        if (Precheck != null)
+        {
+            var fi = new FileInfo(path);
+            var key = $"{path}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}";
+            if (!prechecked.TryGetValue(key, out var r)) prechecked[key] = r = Precheck(path);
+            if (r is { } bad) { attempt = new(path, bad.outcome, machine, bad.detail); return null; }
+        }
+        IntPtr h;
+        try { h = NativeLibrary.Load(path); }
+        catch (Exception e) { attempt = new(path, Outcome.NotLoadable, machine, e.Message); return null; }
+        try
+        {
+            var m = new Libmpv { Path = path };
+            m.Bind(h);
+            var api = m.apiVersion();
+            // libmpv-2 = API-version 2.x
+            if ((api >> 16) < 2) { attempt = new(path, Outcome.TooOld, machine, $"API {api >> 16}.{api & 0xffff}"); return null; }
+            attempt = new(path, Outcome.Loaded, machine, null);
+            return m;
+        }
+        catch (Exception e) { attempt = new(path, Outcome.NotLoadable, machine, e.Message); return null; }
     }
 
-    /// <summary>Laddar libmpv en gång. null = finns inte eller går inte att använda (orsaken i error).</summary>
+    /// <summary>
+    /// Laddar libmpv. null = finns inte eller går inte att använda (orsaken i error, alla försök i LastAttempts).
+    /// Bara en lyckad laddning sparas: läggs filen dit (eller hämtas den) medan appen kör används den nästa gång,
+    /// utan omstart.
+    /// </summary>
     public static Libmpv? Load(out string? error)
     {
-        if (loaded != null || loadError != null) { error = loadError; return loaded; }
-        foreach (var p in Candidates())
+        lock (Gate)
         {
-            if (!File.Exists(p)) continue;
-            try
+            if (loaded != null) { error = null; return loaded; }
+            ApplyPending();
+            var list = new List<Attempt>();
+            foreach (var p in Candidates())
             {
-                if (!NativeLibrary.TryLoad(p, out var h)) { loadError = "Kunde inte läsa " + p; continue; }
-                var m = new Libmpv { Path = p };
-                m.Bind(h);
-                // libmpv-2 = API-version 2.x
-                if ((m.apiVersion() >> 16) < 2) { loadError = "För gammal libmpv: " + p; continue; }
-                loaded = m;
-                loadError = null;
-                break;
+                var m = Probe(p, out var a);
+                list.Add(a);
+                if (m != null) { loaded = m; break; }
             }
-            catch (Exception e) { loadError = e.Message; }
+            attempts = list;
+            var bad = list.LastOrDefault(x => x.Outcome != Outcome.Missing && x.Outcome != Outcome.Loaded);
+            error = loaded != null ? null
+                : bad == null ? FileName + " saknas"
+                : bad.Outcome == Outcome.WrongArch ? $"{bad.Path}: fel arkitektur ({bad.Machine}, behöver {ProcessMachine})"
+                : bad.Outcome == Outcome.TooOld ? $"{bad.Path}: för gammal libmpv ({bad.Detail})"
+                : bad.Outcome == Outcome.NeedsNewerCpu ? $"{bad.Path}: kräver en nyare processor (AVX2 – troligen varianten x86_64-v3)"
+                : $"{bad.Path}: {bad.Detail}";
+            return loaded;
         }
-        loadError ??= loaded == null ? "libmpv-2.dll saknas" : null;
-        error = loadError;
-        return loaded;
+    }
+
+    /// <summary>En version som hämtades medan den förra var laddad byts in innan något laddas</summary>
+    static void ApplyPending()
+    {
+        try { if (File.Exists(Pending)) File.Move(Pending, System.IO.Path.Combine(Folder, FileName), true); }
+        catch { /* filen används: nästa gång */ }
+    }
+
+    /// <summary>mpv:s version ("mpv v0.39.0-…"), eller null. Startar och stänger en tom mpv.</summary>
+    public string? MpvVersion()
+    {
+        var h = create();
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            SetOption(h, "vo", "null");
+            SetOption(h, "ao", "null");
+            return initialize(h) < 0 ? null : GetString(h, "mpv-version");
+        }
+        finally { terminateDestroy(h); }
     }
 
     void Bind(IntPtr h)

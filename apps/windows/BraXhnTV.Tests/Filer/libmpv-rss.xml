@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:files="https://sourceforge.net/api/files.rdf#" xmlns:media="http://video.search.yahoo.com/mrss/" xmlns:doap="http://usefulinc.com/ns/doap#" xmlns:sf="https://sourceforge.net/api/sfelements.rdf#" version="2.0">
+  <channel xmlns:files="https://sourceforge.net/api/files.rdf#" xmlns:media="http://video.search.yahoo.com/mrss/" xmlns:doap="http://usefulinc.com/ns/doap#" xmlns:sf="https://sourceforge.net/api/sfelements.rdf#">
+    <title>mpv player (Windows)</title>
+    <link>https://sourceforge.net</link>
+    <description><![CDATA[Files from mpv player (Windows) mpv is a free (as in freedom) media player for the command line. It supports a wide variety of media file formats, audio and video codecs, and subtitle types.
+
+Main project site:
+https://mpv.io/]]></description>
+    <pubDate>Thu, 26 Nov 2026 06:25:28 UT</pubDate>
+    <managingEditor>noreply@sourceforge.net (SourceForge.net)</managingEditor>
+    <docs>http://blogs.law.harvard.edu/tech/rss</docs>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-x86_64-v3-20261108-git-55d3feb45c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261108-git-55d3feb45c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261108-git-55d3feb45c.7z/download</guid>
+      <pubDate>Sun, 08 Nov 2026 00:41:39 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-x86_64-v3-20261108-git-55d3feb45c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68626562</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261108-git-55d3feb45c.7z/download" filesize="32990183"><media:hash algo="md5">48a983169f493140b622ea41a290dabb</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z/download</guid>
+      <pubDate>Sun, 08 Nov 2026 00:41:38 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68626561</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z/download" filesize="31733282"><media:hash algo="md5">c5752f29461773e8c945fde5547bf511</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-i686-20261108-git-55d3feb45c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261108-git-55d3feb45c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261108-git-55d3feb45c.7z/download</guid>
+      <pubDate>Sun, 08 Nov 2026 00:41:37 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-i686-20261108-git-55d3feb45c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68626560</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261108-git-55d3feb45c.7z/download" filesize="29581285"><media:hash algo="md5">edfdccbec0f5ad70c1e35231d2828320</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-aarch64-20261108-git-55d3feb45c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261108-git-55d3feb45c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261108-git-55d3feb45c.7z/download</guid>
+      <pubDate>Sun, 08 Nov 2026 00:41:36 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-aarch64-20261108-git-55d3feb45c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68626559</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261108-git-55d3feb45c.7z/download" filesize="26291805"><media:hash algo="md5">d32f985f171d391b363b7db56f718397</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-x86_64-20261101-git-48fca90e8c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261101-git-48fca90e8c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261101-git-48fca90e8c.7z/download</guid>
+      <pubDate>Sun, 01 Nov 2026 00:45:15 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-x86_64-20261101-git-48fca90e8c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68323994</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261101-git-48fca90e8c.7z/download" filesize="31681465"><media:hash algo="md5">1c0884cde0559bfb95d86fc974bb1d69</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-x86_64-v3-20261101-git-48fca90e8c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261101-git-48fca90e8c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261101-git-48fca90e8c.7z/download</guid>
+      <pubDate>Sun, 01 Nov 2026 00:45:15 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-x86_64-v3-20261101-git-48fca90e8c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68323995</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20261101-git-48fca90e8c.7z/download" filesize="32944759"><media:hash algo="md5">d6c20c09c226c2118e039f665038b2f0</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-i686-20261101-git-48fca90e8c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261101-git-48fca90e8c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261101-git-48fca90e8c.7z/download</guid>
+      <pubDate>Sun, 01 Nov 2026 00:45:14 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-i686-20261101-git-48fca90e8c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68323993</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20261101-git-48fca90e8c.7z/download" filesize="29532342"><media:hash algo="md5">7475776cb5d2869167fb494a993ad5e9</media:hash></media:content>
+    </item>
+    <item>
+      <title><![CDATA[/libmpv/mpv-dev-aarch64-20261101-git-48fca90e8c.7z]]></title>
+      <link>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261101-git-48fca90e8c.7z/download</link>
+      <guid>https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261101-git-48fca90e8c.7z/download</guid>
+      <pubDate>Sun, 01 Nov 2026 00:45:13 UT</pubDate>
+      <description><![CDATA[/libmpv/mpv-dev-aarch64-20261101-git-48fca90e8c.7z]]></description>
+      <files:sf-file-id xmlns:files="https://sourceforge.net/api/files.rdf#">68323992</files:sf-file-id>
+      <files:extra-info xmlns:files="https://sourceforge.net/api/files.rdf#">7-zip archive data</files:extra-info>
+      <media:content xmlns:media="http://video.search.yahoo.com/mrss/" type="application/x-7z-compressed; charset=binary" url="https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-aarch64-20261101-git-48fca90e8c.7z/download" filesize="26246721"><media:hash algo="md5">73a5f06759e7f4e98df59da89d9c0d92</media:hash></media:content>
+    </item>
+    </channel>
+</rss>

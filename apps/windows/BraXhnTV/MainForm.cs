@@ -27,11 +27,14 @@ sealed partial class MainForm : Form
     string awake = "none";
 
     // Fönstermenyn
-    const uint MenuServers = 0x1000, MenuAdd = 0x1010, MenuAutostart = 0x1020, MenuUpdates = 0x1030, MenuAbout = 0x1040;
+    const uint MenuServers = 0x1000, MenuAdd = 0x1010, MenuAutostart = 0x1020, MenuUpdates = 0x1030, MenuAbout = 0x1040, MenuReload = 0x1050;
 
     public MainForm(bool autostart)
     {
         this.autostart = autostart;
+        // Utan AVX2 provas libmpv i en egen process först (en x86_64-v3-byggnad skulle annars krascha appen)
+        if (!System.Runtime.Intrinsics.X86.Avx2.IsSupported) Libmpv.Precheck = MpvProbe.Run;
+        Logg.Write($"start: {AppInfo.Name} {AppInfo.Version}, Windows {Environment.OSVersion.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}, AVX2 {(System.Runtime.Intrinsics.X86.Avx2.IsSupported ? "ja" : "nej")}");
         Text = AppInfo.Name;
         BackColor = Bg;
         MinimumSize = new Size(480, 320);
@@ -108,6 +111,10 @@ sealed partial class MainForm : Form
         s.IsStatusBarEnabled = false;
         s.IsGeneralAutofillEnabled = true;
         s.IsPasswordAutosaveEnabled = true;
+        // Utvecklarverktygen (Granska) bara för felsökning: "DevTools": true i installningar.json eller BRAXHN_DEVTOOLS=1
+        s.AreDevToolsEnabled = cfg.DevTools || Environment.GetEnvironmentVariable("BRAXHN_DEVTOOLS") == "1";
+        // Högerklick: webbappens egna menyer som förut; annars appens meny i stället för webbläsarens (se OnContextMenu)
+        core.ContextMenuRequested += OnContextMenu;
         _ = core.AddScriptToExecuteOnDocumentCreatedAsync(Inject.Script);
         core.WebMessageReceived += OnMessage;
         core.NavigationStarting += OnNavigationStarting;
@@ -273,6 +280,8 @@ sealed partial class MainForm : Form
 
     async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
+        // Serverns sida laddades: är servern ny nog för den inbyggda spelaren? (MainForm.Spelare.cs)
+        if (e.IsSuccess && current != null && web?.CoreWebView2 != null && Address.SameOrigin(web.CoreWebView2.Source, current.Url)) { await CheckServerAsync(current); return; }
         if (e.IsSuccess || current == null) return;
         // Servern nås inte: visa felsidan. (Fel som servern själv svarar med, t.ex. 404, visar webbappen.)
         if (e.WebErrorStatus is CoreWebView2WebErrorStatus.CannotConnect or CoreWebView2WebErrorStatus.HostNameNotResolved
@@ -407,6 +416,7 @@ sealed partial class MainForm : Form
         Native.AppendMenu(menu, Native.MF_SEPARATOR, 0, null);
         Native.AppendMenu(menu, Native.MF_STRING, MenuServers, L.T("Byt server …", "Change server …"));
         Native.AppendMenu(menu, Native.MF_STRING, MenuAdd, L.T("Lägg till server …", "Add server …"));
+        Native.AppendMenu(menu, Native.MF_STRING, MenuReload, L.T("Ladda om", "Reload"));
         Native.AppendMenu(menu, Native.MF_SEPARATOR, 0, null);
         Native.AppendMenu(menu, Native.MF_STRING | (Autostart ? Native.MF_CHECKED : 0), MenuAutostart, L.T("Starta med Windows", "Start with Windows"));
         Native.AppendMenu(menu, Native.MF_STRING, MenuUpdates, L.T("Sök efter uppdateringar …", "Check for updates …"));
@@ -416,22 +426,66 @@ sealed partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == Native.WM_SYSCOMMAND)
-        {
-            if (PlayerMenu((uint)(m.WParam.ToInt64() & 0xFFF0))) return;
-            switch ((uint)(m.WParam.ToInt64() & 0xFFF0))
-            {
-                case MenuServers: _ = ShowLocal(cfg.Servers.Count == 0 ? "add" : "pick"); return;
-                case MenuAdd: _ = ShowLocal("add"); return;
-                case MenuAutostart:
-                    Autostart = !Autostart;
-                    Native.CheckMenuItem(Native.GetSystemMenu(Handle, false), MenuAutostart, Native.MF_BYCOMMAND | (Autostart ? Native.MF_CHECKED : Native.MF_UNCHECKED));
-                    return;
-                case MenuUpdates: _ = Updater.CheckAsync(this, cfg, manual: true); return;
-                case MenuAbout: About(); return;
-            }
-        }
+        if (m.Msg == Native.WM_SYSCOMMAND && RunMenu((uint)(m.WParam.ToInt64() & 0xFFF0))) return;
         base.WndProc(ref m);
+    }
+
+    /// <summary>Ett val i appens meny (fönstermenyn eller högerklicksmenyn). false = inte appens.</summary>
+    bool RunMenu(uint id)
+    {
+        if (PlayerMenu(id)) return true;
+        switch (id)
+        {
+            case MenuServers: _ = ShowLocal(cfg.Servers.Count == 0 ? "add" : "pick"); return true;
+            case MenuAdd: _ = ShowLocal("add"); return true;
+            case MenuReload: web?.CoreWebView2?.Reload(); return true;
+            case MenuAutostart:
+                Autostart = !Autostart;
+                Native.CheckMenuItem(Native.GetSystemMenu(Handle, false), MenuAutostart, Native.MF_BYCOMMAND | (Autostart ? Native.MF_CHECKED : Native.MF_UNCHECKED));
+                return true;
+            case MenuUpdates: _ = Updater.CheckAsync(this, cfg, manual: true); return true;
+            case MenuAbout: About(); return true;
+        }
+        return false;
+    }
+
+    // ---------- högerklick ----------
+    // Text som går att redigera eller är markerad: bara klipp ut/kopiera/klistra in och liknande ur webbläsarens meny.
+    // Annars (och aldrig Granska, Spara som, Skriv ut …): appens meny, så att den finns där man letar.
+    static readonly HashSet<string> TextItems = ["cut", "copy", "paste", "pasteAndMatchStyle", "selectAll", "undo", "redo", "emoji", "copyLinkLocation", "copyImage", "spellCheck"];
+
+    void OnContextMenu(object? sender, CoreWebView2ContextMenuRequestedEventArgs e)
+    {
+        var items = e.MenuItems;
+        for (var i = items.Count - 1; i >= 0; i--)
+        {
+            var it = items[i];
+            var spelling = it.Name.StartsWith("spell", StringComparison.OrdinalIgnoreCase) || it.Name.Contains("Suggestion", StringComparison.OrdinalIgnoreCase);
+            if (it.Kind != CoreWebView2ContextMenuItemKind.Separator && !TextItems.Contains(it.Name) && !spelling) items.RemoveAt(i);
+        }
+        // Avgränsare först, sist eller dubbelt tas bort
+        for (var i = items.Count - 1; i >= 0; i--)
+            if (items[i].Kind == CoreWebView2ContextMenuItemKind.Separator && (i == 0 || i == items.Count - 1 || items[i - 1].Kind == CoreWebView2ContextMenuItemKind.Separator)) items.RemoveAt(i);
+        if (items.Count > 0) return;
+        var env = web?.CoreWebView2?.Environment;
+        if (env == null) { e.Handled = true; return; }
+        void Add(uint id, string label, bool? check = null)
+        {
+            var item = env.CreateContextMenuItem(label, null, check == null ? CoreWebView2ContextMenuItemKind.Command : CoreWebView2ContextMenuItemKind.CheckBox);
+            if (check != null) item.IsChecked = check.Value;
+            item.CustomItemSelected += (_, _) => BeginInvoke(() => RunMenu(id));
+            items.Add(item);
+        }
+        void Sep() => items.Add(env.CreateContextMenuItem("", null, CoreWebView2ContextMenuItemKind.Separator));
+        Add(MenuReload, L.T("Ladda om", "Reload"));
+        Add(MenuServers, L.T("Byt server …", "Change server …"));
+        Add(MenuAdd, L.T("Lägg till server …", "Add server …"));
+        Sep();
+        AddPlayerItems(Add);
+        Sep();
+        Add(MenuAutostart, L.T("Starta med Windows", "Start with Windows"), Autostart);
+        Add(MenuUpdates, L.T("Sök efter uppdateringar …", "Check for updates …"));
+        Add(MenuAbout, L.T("Om BraXhn TV", "About BraXhn TV"));
     }
 
     void About()

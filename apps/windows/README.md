@@ -35,8 +35,12 @@ installationsfilen den från Microsoft.
   `https://`, en IP-adress eller ett namn i hemnätet blir `http://…:8420` (samma regler som de andra apparna). Sedan
   loggar du in som vanligt i webbappen; inloggningen sparas till nästa gång.
 - **En server:** den öppnas direkt. **Flera:** appen frågar vilken vid start.
-- **Byt server, Lägg till server, Starta med Windows, Sök efter uppdateringar** finns i fönstermenyn: högerklicka
-  på titelraden (eller tryck **Alt + mellanslag**). Ta bort en server i *Byt server* (klicka *Ta bort* två gånger).
+- **Appens meny:** högerklicka i fönstret (där webbappen inte har en egen meny) – *Ladda om, Byt server, Lägg till
+  server*, den inbyggda spelarens val, *Starta med Windows, Sök efter uppdateringar, Om BraXhn TV*. Samma meny finns
+  på titelraden (högerklick eller **Alt + mellanslag**). I textfält ger högerklick klipp ut/kopiera/klistra in.
+  Webbläsarens egen meny och utvecklarverktygen (Granska) är avstängda; för felsökning slås verktygen på med
+  `"DevTools": true` i `installningar.json` eller miljövariabeln `BRAXHN_DEVTOOLS=1`.
+- **Byt server, Lägg till server, Starta med Windows, Sök efter uppdateringar** finns i appens meny. Ta bort en server i *Byt server* (klicka *Ta bort* två gånger).
 - **Helskärm:** **F11**, eller dubbelklicka på videon / helskärmsknappen i spelaren. **Esc** går ur helskärm.
 - **Medietangenter och Windows medieruta** (spela/paus på tangentbordet, rutan vid volymen): appen slår på Edge-motorns
   stöd för det, så det som spelas visas där som i Edge.
@@ -72,7 +76,7 @@ bildundertexter), volym. Överst: *← Tillbaka* och *Nästa avsnitt*. Tangenter
 9/0 = volym, # = byt ljudspår, j = byt undertext, **f**, **F11** eller dubbelklick = helskärm, **Esc** = ur helskärm
 (och sedan tillbaka), **q** = tillbaka, **N** = nästa avsnitt.
 
-**Inställningar** i fönstermenyn (högerklick på titelraden):
+**Inställningar** i appens meny (högerklick i fönstret eller på titelraden):
 - *Använd den inbyggda spelaren* – på som standard. Stäng av den om något krånglar; då spelar webbspelaren allt.
 - *Ljud orört till förstärkaren (AC3, DTS, TrueHD)* – bitström till förstärkaren (exklusivt läge i Windows). Av som
   standard.
@@ -80,25 +84,63 @@ bildundertexter), volym. Överst: *← Tillbaka* och *Nästa avsnitt*. Tangenter
   tillbaka när du stänger spelaren. Av som standard.
 - Hårdvaruavkodning (`hwdec=auto-safe`) är alltid på.
 
-### mpv följer inte med än – så lägger du till den
+### Hämta mpv med ett klick
 
-mpv (libmpv) är fri programvara men under LGPL/GPL, och den måste komma från någon annans byggnad för Windows. Därför
-ligger den **inte** i installationsfilen än (se *Licensen* nedan). Utan den spelar webbspelaren allt, precis som
-förut. Vill du använda mpv redan nu, för egen del:
+Följer mpv inte med installationen hämtar appen den själv – men bara när du klickar:
 
-1. Ladda ner `mpv-dev-x86_64-v3-<datum>-git-<hash>.7z` från
-   [sourceforge.net/projects/mpv-player-windows/files/libmpv](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/)
-   (`x86_64` utan `-v3` för datorer äldre än ungefär 2015).
-2. Öppna arkivet (7-Zip) och lägg `libmpv-2.dll` i `%LOCALAPPDATA%\BraXhnTV\mpv\` (skriv adressen i
-   Utforskarens adressfält; skapa mappen `mpv` om den saknas). *Om den inbyggda spelaren …* i fönstermenyn har en
-   knapp som öppnar mappen.
-3. Starta om appen. *Om den inbyggda spelaren …* visar att mpv finns.
+- Första gången en film hade kunnat spelas i den inbyggda spelaren frågar appen **Hämta den inbyggda spelaren (mpv,
+  ca 30 MB)?** med knapparna *Hämta* och *Inte nu* (filmen spelas i webbspelaren under tiden). Frågan kommer bara
+  den gången.
+- Sedan finns **Hämta den inbyggda spelaren (mpv) …** – eller **Uppdatera den inbyggda spelaren …** när den redan finns
+  – i appens meny (högerklick) och i *Om den inbyggda spelaren …*. Inget hämtas automatiskt.
+
+Appen hämtar i första hand **BraXhn TV:s egen LGPL-byggnad** (zip-arkivet i utgåvan som `apps/windows/libmpv.json`
+pekar på, kontrollerat mot SHA-256 i samma fil). Saknas den filen i appen, eller går utgåvan inte att nå, hämtas
+**mpv-projektets Windows-bygge** från SourceForge (`sourceforge.net/projects/mpv-player-windows`, mappen `libmpv`):
+appen läser projektets lista (`…/rss?path=/libmpv`) och tar den nyaste `mpv-dev-x86_64-<datum>-git-<hash>.7z` –
+varianten **x86_64**, inte `x86_64-v3`, som kräver en processor med AVX2 och inte fungerar på alla datorer. Det
+arkivet kontrolleras mot storleken och MD5 i listan. I båda fallen packar appen upp `libmpv-2.dll`, kontrollerar att
+den är för 64-bitars Windows, lägger den i `%LOCALAPPDATA%\BraXhnTV\mpv\` och provar att mpv startar och svarar med
+sin version. Den används direkt, utan omstart. En uppdatering medan mpv redan är laddad används från nästa start.
+Går något fel får du veta vad (på svenska eller engelska) och webbspelaren spelar som förut.
+
+Följer `libmpv-2.dll` med installationen (bredvid `BraXhnTV.exe`) används den, och appen erbjuder ingen hämtning –
+den uppdateras med appen.
+
+**Det krävs av servern:** BraXhn TV **1.4.1 eller senare**. Webbappen kommer från servern, och det är den som lämnar
+över filmen till den inbyggda spelaren – en äldre server frågar aldrig appen, och då spelar webbspelaren allt hur mpv
+än är installerad. Appen läser serverns version (`/api/status`) och säger till en gång nere i fönstret, och *Om den
+inbyggda spelaren …* visar det. Har servern bytt version sedan förra gången laddar appen om sidan en gång, så att
+webbappen säkert är serverns nya och inte en äldre ur webbläsarens cache.
+
+**Utanför hemmet** (via den publika adressen, även hemifrån) med kvalitet *Auto* spelar mpv originalfilen när
+webbappens mätning av uppkopplingen rymmer filens bithastighet med 10 % marginal, eller när mätningen inte hann bli
+klar – mpv buffrar själv. Webbspelarens marginaler och kvalitetstakets bithastighet (1080p ≈ 10 Mbit/s) gäller inte
+mpv (`buf=1` i frågan till servern); upplösningstaket (serverns eller kontots, t.ex. 720p utanför hemmet) gäller.
+Räcker uppkopplingen inte kodar servern om och webbspelaren spelar.
+
+**Varför webbspelaren?** När en film inte spelas i mpv säger appen varför en gång nere i fönstret (t.ex. *Webbspelaren
+används eftersom servern valde omkodning (sänkt kvalitet till 1080p) – utanför hemmet, uppmätt 8 Mbit/s*), och den
+senaste orsaken står i *Om den inbyggda spelaren …*.
+
+**Om den inbyggda spelaren …** i appens meny visar serverns version, mpv:s version och fil, varje plats som provades
+(finns inte / fel sorts fil, t.ex. 32-bitars / kräver AVX2, t.ex. varianten `x86_64-v3` / gick inte att ladda och
+Windows felmeddelande / laddad), om processorn saknar AVX2, och var loggen ligger. Saknar processorn AVX2 provar appen
+en `libmpv-2.dll` i en egen process innan den laddas, så att en `-v3`-fil inte kan krascha appen. *Kopiera felsökningsinformation* lägger allt detta och slutet av loggen i
+urklipp, så att det kan klistras in i *Feedback* i webbappen. Loggen är `%LOCALAPPDATA%\BraXhnTV\logg.txt` (högst
+256 kB; strömlänkar och token skrivs aldrig dit).
 
 ### Licensen (för den som ger ut appen)
 
+- Appen packar upp mpv-arkivet med [SharpCompress](https://github.com/adamhathcock/sharpcompress) (7z, MIT-licens,
+  inbyggd i `BraXhnTV.exe`) och .NET:s egen `System.IO.Compression` (zip). SharpCompress licenstext:
+  Copyright (c) 2014 Adam Hathcock, MIT – se länken.
+- Att appen på användarens dator hämtar mpv när användaren ber om det är inte att *sprida* den med appen: filen kommer
+  från den som byggt den, med dennes licens. Hämtade licenstexter (finns de i arkivet) läggs i
+  `%LOCALAPPDATA%\BraXhnTV\mpv\licens\`.
 - BraXhn TV är MIT. libmpv-2.dll laddas som en egen fil när appen kör (dynamisk länkning) och kan bytas ut av
   användaren – det är det LGPL kräver av ett program som använder ett LGPL-bibliotek.
-- **GPL-byggnaderna får inte läggas i installationsfilen.** shinchiro/mpv-winbuild-cmake (SourceForge-länken ovan)
+- **GPL-byggnaderna får inte läggas i installationsfilen.** shinchiro/mpv-winbuild-cmake (reserven på SourceForge ovan)
   bygger FFmpeg med `--enable-gpl` (x264, x265 m.fl.) och mpv utan `-Dgpl=false`, alltså GPL. Att ladda ner den själv
   för egen användning är fritt; att sprida den tillsammans med en MIT-app är det inte utan att hela appen följer GPL.
 - **LGPL-byggnaden finns:** zhongfly/mpv-winbuild ger ut `mpv-dev-lgpl-x86_64-…7z` (mpv LGPL 2.1+ med FFmpeg LGPL 3
@@ -119,7 +161,9 @@ förut. Vill du använda mpv redan nu, för egen del:
 - `installningar.json` – serverlistan, fönstrets storlek och läge, när uppdateringar senast kontrollerades.
 - `Servrar\<id>\` – WebView2:s data för varje server (inloggning, kakor, cache). Servrar delar aldrig kakor.
 - `App\` – data för appens egna sidor (Välj server, Lägg till server).
-- `mpv\` – `libmpv-2.dll` om du lagt den där, och `input.conf` (den inbyggda spelarens tangenter för appen).
+- `mpv\` – `libmpv-2.dll` som appen hämtat (eller du lagt där), `kalla.json` (vilket arkiv och när), `licens\`,
+  och `input.conf` (den inbyggda spelarens tangenter för appen).
+- `logg.txt` – vad den inbyggda spelaren och serverkontrollen gjorde (högst 256 kB).
 
 *Starta med Windows* är en rad i `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (av som standard).
 
@@ -141,6 +185,9 @@ testad, men **ingenting är provat på en riktig Windows-dator**. Särskilt:
   bitström till förstärkaren, byte av skärmens frekvens och mpv:s medieruta. Spelardelen (laddning av libmpv,
   spårval, start mitt i filmen, tangenterna, slut, fel och stängning) är provad mot en riktig libmpv 0.37 på Linux,
   och webbens överlämning och serverns beslut är testade i Node – men inte tillsammans i Windows.
+- **Hämtningen av mpv i Windows:** dialogrutorna, förloppet, omdirigeringen från GitHub/SourceForge till filen, att
+  den hämtade DLL:en laddas utan omstart och bytet vid nästa start. Valet i SourceForge-listan, kontrollen av
+  arkiven, uppackningen (även av ett riktigt arkiv från SourceForge), PE-kontrollen och loggen är testade på Linux.
 
 Hittar du fel: *Ladda ner diagnostik* i webbappen fungerar som vanligt, och *Om BraXhn TV* i fönstermenyn visar
 appens och WebView2:s version.
@@ -150,10 +197,13 @@ appens och WebView2:s version.
 - `BraXhnTV/` – appen (C#, .NET 8, WinForms + WebView2). `Sidor/start.html` är Välj server / Lägg till server /
   felsidan; den pratar med appen via `chrome.webview.postMessage`. `Inject.cs` körs i serverns sidor och berättar om
   video eller ljud spelas (viloläget) och fångar F11/Esc.
-- `BraXhnTV/Spelare/` – den inbyggda spelaren: `Libmpv.cs` (C-API:t, laddas dynamiskt), `MpvPlayer.cs` (en
+- `BraXhnTV/MpvSetup.cs` – hämtningen av mpv (dialogerna); `Logik/MpvSource.cs` – källorna (`libmpv.json`, SourceForge),
+  kontrollen och uppackningen; `Logik/ServerInfo.cs` – serverns version; `Logik/Logg.cs` – loggfilen.
+- `BraXhnTV/Spelare/` – den inbyggda spelaren: `Libmpv.cs` (C-API:t, laddas dynamiskt, rapporterar varje plats), `MpvPlayer.cs` (en
   uppspelning), `Display.cs` (skärmens frekvens). `MainForm.Spelare.cs` tar emot webbens `native-*`-meddelanden;
   webbens sida är `web/js/player/native.js` och `nativeplan.js`.
-- `BraXhnTV.Tests/` – tester som går att köra på alla system: `dotnet test apps/windows/BraXhnTV.Tests`. Spelartesterna
+- `BraXhnTV.Tests/` – tester som går att köra på alla system: `dotnet test apps/windows/BraXhnTV.Tests` (på Linux/Mac med
+  `-p:EnableWindowsTargeting=true`). `BRAXHN_MPV_7Z=<nedladdat mpv-dev-x86_64-….7z>` provar också ett riktigt arkiv. Spelartesterna
   körs när libmpv finns (Linux: `apt install libmpv2`, annars `BRAXHN_LIBMPV=<sökväg>`) och hoppas annars över.
 - `installer/BraXhnTV.iss` – Inno Setup.
 - Bygget: `.github/workflows/windows.yml`. Lokalt (även på Linux/Mac, bara för att kontrollera koden):
@@ -179,9 +229,18 @@ the same look and features as the web app, with hardware video decoding and HEVC
 - **Built-in player (mpv):** like Jellyfin Media Player, movies and episodes the server can send untouched play in
   mpv inside the app window (4K HDR, DTS/TrueHD, image subtitles); the web app keeps handling Continue watching,
   screen time and next episode. Family filter, low bandwidth away from home, a lower chosen quality, cinema trailers
-  and Watch together use the web player. Settings in the window menu: *Use the built-in player* (on), *Send audio
-  untouched to the receiver*, *Match the display refresh rate*. libmpv is **not bundled yet** (licence: the common
-  builds are GPL; the LGPL build has a 30-day retention and its builder gives no guarantee) – put `libmpv-2.dll` in
-  `%LOCALAPPDATA%\BraXhnTV\mpv\` yourself, or set the `LIBMPV_URL`/`LIBMPV_SHA256` repository variables to bundle an
-  LGPL build.
+  and Watch together use the web player. Settings in the app menu (right-click in the window, or on the title bar): *Use the built-in player* (on), *Send audio
+  untouched to the receiver*, *Match the display refresh rate*. **mpv is downloaded with one click** when it isn't
+  bundled: the app asks once (*Download the built-in player (mpv, about 30 MB)?*) and offers *Download/Update the
+  built-in player* in the window menu – never without a click. It fetches BraXhn TV's own LGPL build (the zip that
+  `apps/windows/libmpv.json` points to, checked against its SHA-256), or as a fallback the newest
+  `mpv-dev-x86_64-….7z` (not `-v3`, which needs AVX2) from the mpv project's SourceForge builds, checks and unpacks
+  `libmpv-2.dll` to `%LOCALAPPDATA%\BraXhnTV\mpv\` and uses it without a restart. **Requires server 1.4.1 or later**
+  (older servers' web app never hands videos to the app; the app says so). *About the built-in player* shows what was
+  tried and why it failed (also a `-v3` file on a CPU without AVX2, probed in a separate process), and the app says once
+  why the web player was used for a video; the log is `%LOCALAPPDATA%\BraXhnTV\logg.txt`. 7z unpacking uses SharpCompress (MIT).
+- **Away from home** (public address) with Auto, mpv gets the original file when the measured connection fits it with a
+  10% margin, or when it could not be measured (`buf=1`; the resolution cap still applies).
+- **Right-click** shows the app menu instead of the browser menu (text fields keep cut/copy/paste); DevTools are off
+  unless `"DevTools": true` in `installningar.json` or `BRAXHN_DEVTOOLS=1`.
 - **Not yet tested on real Windows** – it compiles and its logic tests pass, but everything that needs Windows is untried.

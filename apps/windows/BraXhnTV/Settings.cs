@@ -30,6 +30,14 @@ public sealed class AppSettings
     public bool MatchRefresh { get; set; }
     /// <summary>Den inbyggda spelarens volym (0–100)</summary>
     public int Volume { get; set; } = 100;
+    /// <summary>Frågan "Hämta den inbyggda spelaren?" har visats av sig själv (en gång; sedan bara i fönstermenyn)</summary>
+    public bool MpvOffered { get; set; }
+    /// <summary>Servrar ("adress|version") som redan fått meddelandet att servern behöver uppdateras för mpv</summary>
+    public List<string> ServerNotes { get; set; } = new();
+    /// <summary>Senast sedda version per server (id → version): byter servern version laddas sidan om en gång</summary>
+    public Dictionary<string, string> ServerSeen { get; set; } = new();
+    /// <summary>Utvecklarverktygen i webbvyn (dold inställning för felsökning; finns inte i menyn)</summary>
+    public bool DevTools { get; set; }
 
     public static string Dir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BraXhnTV");
     static string FilePath => Path.Combine(Dir, "installningar.json");

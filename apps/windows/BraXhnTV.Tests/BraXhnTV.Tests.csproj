@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Tester av det som inte behöver Windows: adresser, versioner och GitHub-svaret. Körs på alla system. -->
+  <!-- Tester av det som inte behöver Windows: adresser, versioner, GitHub-svaret, serverns version och hämtningen av mpv. Körs på alla system. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -12,10 +12,13 @@
     <Compile Include="..\BraXhnTV\Logik\*.cs" Link="Logik\%(Filename)%(Extension)" />
     <!-- Spelaren (mpv) provas mot en riktig libmpv när den finns (Linux: paketet libmpv2, eller BRAXHN_LIBMPV) -->
     <Compile Include="..\BraXhnTV\Spelare\Libmpv.cs;..\BraXhnTV\Spelare\MpvPlayer.cs;..\BraXhnTV\Settings.cs" Link="Spelare\%(Filename)%(Extension)" />
+    <!-- Små test-7z (låtsad libmpv-2.dll) och ett utdrag ur SourceForge-listan -->
+    <None Include="Filer\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="SharpCompress" Version="0.50.8" />
   </ItemGroup>
 </Project>
