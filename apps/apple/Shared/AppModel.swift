@@ -5,7 +5,8 @@ import AVFoundation
 /// Håller serveradress, inloggning och gör alla API-anrop.
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var server: String = UserDefaults.standard.string(forKey: "server") ?? ""
+    /// Den sparade adressen (ändras bara av inloggningen). Förfrågningarna går till apiBase (Hemma.swift).
+    @Published var server: String = UserDefaults.standard.string(forKey: "server") ?? "" { didSet { if server != oldValue { resetHome() } } }
     @Published private(set) var token: String? = Keychain.read("token")
     @Published var user: UserInfo?
     /// Kortlivad token som bara gäller bilder (bild-URL:er kan inte skicka Authorization-header)
@@ -25,6 +26,8 @@ final class AppModel: ObservableObject {
     @Published var notice: String?
 
     var isLoggedIn: Bool { token != nil && !server.isEmpty }
+    /// Hemma via den publika adressen: hemadressen som används just nu (Hemma.swift)
+    let home = HomeState()
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -45,13 +48,13 @@ final class AppModel: ObservableObject {
     }
 
     func url(_ path: String, _ query: [URLQueryItem] = []) -> URL? {
-        guard var c = URLComponents(string: server + path) else { return nil }
+        guard var c = URLComponents(string: apiBase + path) else { return nil }
         if !query.isEmpty { c.queryItems = (c.queryItems ?? []) + query }
         return c.url
     }
 
     /// Relativ URL från servern (t.ex. strömmar) → absolut. Token finns redan med i strömmarnas URL:er.
-    func absolute(_ relative: String) -> URL? { URL(string: server + relative) }
+    func absolute(_ relative: String) -> URL? { URL(string: apiBase + relative) }
 
     func imageURL(_ item: MediaItem, landscape: Bool = false) -> URL? {
         let type: String?
@@ -78,7 +81,11 @@ final class AppModel: ObservableObject {
             r.httpBody = try JSONSerialization.data(withJSONObject: b)
         }
         let pair: (Data, URLResponse)
-        do { pair = try await session.data(for: r) } catch { throw networkError(error) }
+        do { pair = try await session.data(for: r) } catch {
+            // Hemadressen svarar inte (t.ex. utanför hemmet nu): samma anrop via den sparade adressen
+            if !isCancellation(error), homeFailed(u) { return try await request(path, method: method, query: query, body: body) }
+            throw networkError(error)
+        }
         let (data, resp) = pair
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 && token != nil && path != "/api/login" && path != "/api/media-token" && path != "/api/profiles/switch" { logout(); throw APIError(message: L("Du har loggats ut")) }
@@ -173,6 +180,7 @@ final class AppModel: ObservableObject {
         token = nil
         user = nil
         imageToken = nil
+        resetHome()
     }
 
     // MARK: Uppspelning

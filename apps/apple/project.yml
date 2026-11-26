@@ -35,6 +35,10 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIBackgroundModes: [audio]
         NSLocalNetworkUsageDescription: BraXhn TV ansluter till din mediaserver på hemnätverket.
+        # http behövs till servern i hemnätet (IP, tower, nas.local, nas.lan) och till hemadressen (Hemma.swift).
+        # Lägg INTE till NSAllowsLocalNetworking här: då struntar iOS/tvOS i NSAllowsArbitraryLoads, och http till
+        # t.ex. nas.lan eller en egen domän utan https slutar fungera. Appen provar http bara mot adresser i hemnätet
+        # (LocalPick.swift) och skickar inloggningen bara till den sparade eller en bekräftad hemadress.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
@@ -55,6 +59,7 @@ targets:
         CFBundleDisplayName: BraXhn TV
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: BraXhn TV ansluter till din mediaserver på hemnätverket.
+        # Samma som iOS ovan (inte NSAllowsLocalNetworking)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:

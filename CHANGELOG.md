@@ -10,6 +10,12 @@
   räknar tiden i appen; spelaren stoppar med samma besked som servern. Vad som inte går att upprätthålla utan nät står
   i `apps/automotive/README.md`. Logiken i `OfflineCore.kt` med JVM-tester (sommartid, ny dag, fönster över midnatt),
   som nu körs i Android-bygget. Inte provat på riktig telefon, TV eller bil.
+- **Hemma via den publika adressen i iPhone-, iPad- och Apple TV-appen.** Är appen sparad med reläets adress eller en
+  domän och står hemma, går den direkt till serverns adress på hemnätet – anrop, filmer, musik och bilder – med hemmets
+  kvalitet och utan omväg via reläet. Adressen används bara när den svarat rätt på serverns prov (som bara besvaras på
+  hemnätet), provas när servern öppnas, när appen kommer tillbaka och när nätet byts, och slutar gälla så fort nätet
+  ändras. Utanför hemmet används den sparade adressen igen och filmen fortsätter där den var. *Inställningar* visar
+  *Hemma: direkt via …*. Nedladdningar går alltid via den sparade adressen. Inte provat på en riktig iPhone eller Apple TV.
 
 ## 1.4.4 – 2026-11-26
 - **Prova hårdvaruomkodningen under Administration.** *Administration → Hårdvaruomkodning → Prova omkodningen* kodar

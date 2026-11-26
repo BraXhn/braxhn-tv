@@ -333,10 +333,9 @@ Har du sparat den publika adressen (reläet eller din domän) går trafiken ut p
 hemma, och servern räknar dig som utanför hemmet (lägre startkvalitet, takt på ljudböcker). Så här går du direkt till
 servern i stället:
 
-- **Expo-appen och Android-appen** (telefon, Google TV och bil) gör det själva: de frågar servern efter dess adress på
-  hemnätet och provar den (högst 0,8 s). Svarar den rätt går strömmar, bilder och anrop direkt dit – hemmets kvalitet,
-  ingen omväg. Utanför hemmet används den sparade adressen som vanligt. iOS/tvOS-appen gör det inte än: spara hemmets
-  IP-adress som en egen server där.
+- **Apparna** (Expo, Android på telefon, Google TV och i bilen, iPhone, iPad och Apple TV) gör det själva: de frågar
+  servern efter dess adress på hemnätet och provar den (högst 0,8 s). Svarar den rätt går strömmar, bilder och anrop
+  direkt dit – hemmets kvalitet, ingen omväg. Utanför hemmet används den sparade adressen som vanligt.
 - **Webben** kan inte göra det automatiskt (en https-sida får inte hämta från en http-adress i hemnätet). Under
   **Mitt konto → Snabbare hemma** finns i stället knappen *Öppna hemadressen*, som byter till serverns adress på hemnätet
   och loggar in dig där med en engångskod. Spara gärna den adressen som bokmärke hemma.

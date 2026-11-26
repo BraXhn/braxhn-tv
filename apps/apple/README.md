@@ -48,6 +48,24 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
    Via BraXhn Relay fungerar inloggning, strömning, bilder och AirPlay som hemma, men servern ser anslutningen som
    *utanför hemmet* (syns under Inställningar) och kvaliteten kan vara begränsad.
 
+### Hemma men sparad med den publika adressen
+
+Är appen sparad med reläets adress eller en domän och står hemma, frågar den servern efter dess adress på hemnätet och
+provar den i bakgrunden (högst 0,8 s) när servern öppnas, när appen kommer tillbaka till förgrunden och när nätet byts.
+Svarar den rätt går anrop, filmer, musik och bilder direkt dit – hemmets kvalitet och ingen omväg via reläet – och
+*Inställningar* visar *Hemma: direkt via http://192.168.1.10:8420*. Utanför hemmet, eller när hemadressen slutar svara,
+används den sparade adressen igen (filmen som spelas fortsätter där den var). Den sparade adressen ändras aldrig.
+Nedladdningar på iPhone/iPad hämtas alltid via den sparade adressen, eftersom de fortsätter i bakgrunden, kanske på ett
+annat nät. Servern måste känna sin hemadress (se *Hemma men via den publika adressen* i huvud-README).
+
+Första gången frågar iPhone/iPad om appen får hitta enheter i det lokala nätverket. Svarar du nej används alltid den
+sparade adressen (ändras under *Inställningar → Integritet och säkerhet → Lokalt nätverk*).
+
+**Säkerhet:** inloggningen, bildtoken och strömlänkar går bara till den sparade adressen eller till en hemadress som
+bevisat att den är just den här servern (provet besvaras bara på hemnätet). http provas bara mot adresser i hemnätet,
+provet skickas utan inloggning och följer inga omdirigeringar, och byts nätet slutar appen använda hemadressen innan
+nästa förfrågan. Koden: `Shared/LocalPick.swift` (valet, bara Foundation) och `Shared/Hemma.swift` (när och vart).
+
 ### Raden "Stöd projektet" (bara egna byggen)
 
 Apples regler (App Store Review Guidelines 3.2.1(vi)) tillåter bara donationer till godkända ideella organisationer.
@@ -82,3 +100,6 @@ appen att installera alls. Därför är det inte byggt – hellre en app som all
 ## Kontrollera att koden bygger
 
 Workflowet `.github/workflows/apple.yml` kompilerar båda målen på GitHubs macOS-maskiner vid varje push, utan signering. Koden är skriven och granskad, men **har inte kompilerats** i miljön där den skapades eftersom Xcode saknades där. Kör workflowet, eller bygg i Xcode, och rätta eventuella kompileringsfel.
+
+Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`) är en ren typ utan nät och app, så att ett testmål kan
+läggas till för den utan att något annat behöver ändras.

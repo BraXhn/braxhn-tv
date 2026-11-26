@@ -884,7 +884,12 @@ nätverksfel mot hemadressen går tillbaka till den sparade och gör om anropet.
 nätet byts (ConnectivityManager). http provas bara till adresser i hemnätet (privat IP, `.local`/`.lan`/`.home`, namn
 utan punkt), och hemadressen slutar gälla så fort enhetens nät inte längre är det nät där den bekräftades. Adresser som
 lämnas till systemet (nedladdningshanteraren, Google TV:s *Fortsätt titta*, bilens mediaspelare) använder den sparade
-adressen. **iOS/tvOS** gör inte detta ännu (se backlog.md).
+adressen.
+
+**iOS/tvOS** (`apps/apple/Shared/LocalPick.swift` + `Hemma.swift`) gör likadant: provet när servern öppnas, när appen
+blir aktiv (scenePhase, högst var 30:e s) och när nätet byts (NWPathMonitor); en ändring av nätet gör att hemadressen
+slutar gälla innan nästa förfrågan byggs. Filmen som spelas byter till den sparade adressen (samma ström-URL) där den
+var. Nedladdningar (bakgrundssessionen) använder den sparade adressen.
 
 ## Kontraktstestet
 

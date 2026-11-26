@@ -145,7 +145,8 @@ final class Downloads: ObservableObject {
                     if st.status == "error" { throw APIError(message: st.error ?? L("Servern kunde inte skapa filen")) }
                     active[item.id] = Double(st.progress ?? 0) / 200 // förberedelse = första halvan
                 } while st.status != "ready"
-                guard let rel = st.url, let url = model.absolute(rel) else { throw APIError(message: L("Ingen nedladdningslänk")) }
+                // Den sparade adressen: nedladdningen fortsätter i bakgrunden, kanske på ett annat nät (Hemma.swift)
+                guard let rel = st.url, let url = model.savedAbsolute(rel) else { throw APIError(message: L("Ingen nedladdningslänk")) }
                 // 2. Ladda ner i bakgrundssessionen (resultatet kommer via DownloadDelegate)
                 let task = session.downloadTask(with: url)
                 task.taskDescription = String(item.id)

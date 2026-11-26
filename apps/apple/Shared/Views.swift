@@ -32,12 +32,16 @@ let accent = Color(red: 1.0, green: 0.42, blue: 0.29)
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var phase
     var body: some View {
         Group {
             if model.isLoggedIn { MainTabs() } else { LoginView() }
         }
         .tint(accent)
         .task { await model.restore() }
+        // Hemma via den publika adressen (Hemma.swift): när servern öppnas och när appen kommer tillbaka
+        .task(id: model.isLoggedIn) { if model.isLoggedIn { model.checkHome(force: true) } }
+        .onChange(of: phase) { p in if p == .active && model.isLoggedIn { model.checkHome() } }
     }
 }
 
@@ -402,6 +406,9 @@ struct SettingsView: View {
         List {
             Section {
                 LabeledContent("Adress", value: model.server)
+                if let h = model.home.via {
+                    LabeledContent("Hemma", value: String(format: L("direkt via %@"), h))
+                }
                 LabeledContent("Inloggad som", value: model.user?.name ?? "–")
                 if model.remote {
                     LabeledContent("Anslutning", value: L("Utanför hemmet"))

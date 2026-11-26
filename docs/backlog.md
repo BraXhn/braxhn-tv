@@ -65,18 +65,6 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
 - **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
 
-### 5. Hemma via den publika adressen i iOS/tvOS-appen
-
-- **Vad:** samma som Expo-appen (`apps/expo/src/localpick.ts`, `goHomeIfHere` i `api.ts`) och Android-appen
-  (`apps/automotive/…/LocalPick.kt`, `Hemma.kt`) gör, docs/api.md *Hemma via den publika adressen*: hämta `/api/local` från den sparade adressen, prova `addrs` med `/api/local/ping?n=` (800 ms,
-  ingen inloggning), använd hemadressen när `id` och `proof` stämmer, och gå tillbaka till den sparade vid nätverksfel.
-- **Varför:** servern, Expo- och Android-appen är klara (se *Klart*), men Apple TV-appen står oftast hemma och är just den
-  som sparats med reläets adress.
-- **Filer:** `apps/apple/Shared/AppModel.swift` (`server`). Apple byggs bara med Xcode – kontrollera först att klartext-http
-  till en privat adress är tillåten (ATS `NSAllowsLocalNetworking`).
-- **Klart när:** en Apple TV hemma med reläets adress spelar med `remote: false` i `/api/status`, och tillbaka via reläet
-  när hemadressen inte svarar.
-
 ## Idéer
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
@@ -166,6 +154,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `android-automotive.yml` (`testReleaseUnitTest`). Ljudböcker och poddar kan inte laddas ner i Android-appen, så de
   berörs inte. Inte provat: kompilering av hela appen (`OfflineSync.kt` kompilerad mot Android 14:s klasser, inte
   `PlayerScreen.kt`), riktig enhet i flygplansläge.
+- 2026-11-26: Hemma via den publika adressen i iOS/tvOS-appen (förut punkt 5), gren `team/apple-hemma-2026-11-26`.
+  Samma regler som Expo- och Android-appen: `/api/local` från den sparade adressen, alla hemadresser provas samtidigt
+  (800 ms, utan inloggning, kakor och omdirigeringar), används bara när `id` och `proof` stämmer exakt. Provet görs när
+  servern öppnas, när appen blir aktiv (scenePhase, högst var 30:e s) och när nätet byts (NWPathMonitor); hemadressen
+  slutar gälla innan nästa förfrågan när nätet ändrats. Nätverksfel → den sparade adressen och nytt försök (API; filmen
+  byter adress där den var). http provas bara mot adresser i hemnätet; nedladdningar går via den sparade adressen.
+  Inställningar visar *Hemma: direkt via …*. ATS: `NSAllowsArbitraryLoads` fanns redan; `NSAllowsLocalNetworking` lades
+  med flit inte till (den stänger av `NSAllowsArbitraryLoads`). **Inte provat:** kompilering (ingen Xcode här – bygg med
+  `apple.yml`), riktig iPhone/Apple TV, frågan om lokalt nätverk, *Klart när* (Apple TV hemma med reläets adress spelar
+  med `remote: false`).
 - 2026-11-26: Hårdvaruomkodning – provet i Administration (förut punkt 2), gren `team/hwprov-2026-11-26`.
   *Administration → Hårdvaruomkodning → Prova omkodningen* (`server/hwprobe.js`, `web/js/views/admin-hwprobe.js`,
   `/api/admin/hwprobe`): genererad testbild, H.264/HEVC/HEVC 10 bitar i 1080p och 4K med `HWACCEL` och med processorn,

@@ -109,12 +109,17 @@ final class PlayerController: ObservableObject {
     private var playbackBegan = false
     /// Nya försök med samma ström-URL (samma session på servern) under starten
     private var retries = 0
+    /// Hemadressen slutade gälla (Hemma.swift) – filmen byter adress
+    private var homeObserver: NSObjectProtocol?
 
     init(model: AppModel) {
         self.model = model
         night = model.nightMode
         dialog = model.clearDialog
         player.allowsExternalPlayback = true // AirPlay till Apple TV
+        homeObserver = NotificationCenter.default.addObserver(forName: .homeLeft, object: model, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.homeLeft() }
+        }
         // När bilden börjar röra sig är förberedelsen klar
         timeControl = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             let playing = p.timeControlStatus == .playing
@@ -544,6 +549,7 @@ final class PlayerController: ObservableObject {
         player.pause()
         if let o = observer { player.removeTimeObserver(o); observer = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
+        if let h = homeObserver { NotificationCenter.default.removeObserver(h); homeObserver = nil }
         player.replaceCurrentItem(with: nil)
     }
 }
@@ -847,6 +853,11 @@ extension PlayerController {
     fileprivate func mainFailed(_ oid: ObjectIdentifier, gen: Int, message: String?) {
         guard !closed, gen == generation, let cur = player.currentItem, ObjectIdentifier(cur) == oid,
               stopNotice == nil, error == nil else { return }
+        // Hemadressen svarar inte längre: samma ström-URL (samma session) via adressen som gäller nu, där filmen var
+        if let url = mainURL {
+            _ = model.homeFailed(url)
+            if let fixed = model.homeRewrite(url) { switchStream(fixed, gen: gen); return }
+        }
         if !playbackBegan, retries < 3, let url = mainURL {
             retries += 1
             let at = mainStart
@@ -873,6 +884,30 @@ extension PlayerController {
         }
         error = text
         canRetry = !isLocal
+    }
+
+    /// Hemadressen slutade gälla (annat nät): filmen byter till adressen som gäller nu, så att inget mer skickas till
+    /// den gamla hemadressen. Samma ström-URL, alltså samma session på servern.
+    fileprivate func homeLeft() {
+        guard !closed, let url = mainURL, let fixed = model.homeRewrite(url) else { return }
+        // Bio-läget: filmen har inte startat än – den väntande posten byggs om
+        if mainItem != nil { mainURL = fixed; mainItem = makeMainItem(fixed); return }
+        guard error == nil, stopNotice == nil, player.currentItem != nil else { return }
+        switchStream(fixed, gen: generation)
+    }
+
+    /// Byter filmens adress och fortsätter där den var (pausad film förblir pausad)
+    fileprivate func switchStream(_ url: URL, gen: Int) {
+        mainURL = url
+        let t = player.currentTime().seconds
+        let at = t.isFinite && t > 1 ? t : mainStart
+        let paused = playbackBegan && player.timeControlStatus == .paused
+        let item = makeMainItem(url)
+        Task { [weak self] in
+            guard let self, self.generation == gen, !self.closed else { return }
+            await self.startMain(item, at: at, gen: gen)
+            if paused, self.generation == gen { self.player.pause() }
+        }
     }
 
     /// Servern svarade stop på framstegsanropet: sluta spela och visa varför

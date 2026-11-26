@@ -187,6 +187,8 @@
 "Finska" = "Finnish";
 "Adress" = "Address";
 "Inloggad som" = "Signed in as";
+"Hemma" = "At home";
+"direkt via %@" = "direct via %@";
 "Anslutning" = "Connection";
 "Utanför hemmet" = "Away from home";
 "Server" = "Server";
