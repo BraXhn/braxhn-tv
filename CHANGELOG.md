@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.4 – 2026-11-26
 - **Prova hårdvaruomkodningen under Administration.** *Administration → Hårdvaruomkodning → Prova omkodningen* kodar
   en genererad testbild i några sekunder per format – H.264, HEVC och 10-bitars HEVC, i 1080p och 4K – med det
   grafikkort som `HWACCEL` pekar på och med processorn som jämförelse. Varje rad säger *Grafikkortet används*,
