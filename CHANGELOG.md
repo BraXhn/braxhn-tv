@@ -1,6 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+- **Undertexterna följer med i filmer som laddats ner för offline.** Filen som apparna laddar ner har nu filmens
+  textundertexter inbyggda (även undertextfiler bredvid filmen, som `.sv.srt`, och nedladdade undertexter), med språk
+  och namn. Telefonens egen spelare kan då visa dem i helskärm, i bild-i-bild och på AirPlay/Chromecast – förut syntes
+  de bara när appen ritade dem själv. Undertexten som är förvald följer kontots val under *Uppspelning*, och med
+  familjefiltret på är svordomarna bytta mot `***` precis som vid vanlig uppspelning (en maskerad och en omaskad fil
+  blandas aldrig ihop). Bildundertexter (PGS/VobSub) kan inte göras om till text och följer inte med. Redan nedladdade
+  filmer i telefonen ändras inte; servern bygger filen på nytt nästa gång den laddas ner (bilden kodas inte om när den
+  förra filen finns kvar). Inte provat på en riktig iPhone eller Android-telefon.
 - **Android-appen glömde var du var när en nedladdad film spelades utan nät, och skärmtiden gällde inte där.**
   Positionen skickades bara till servern; svarade den inte försvann den, och utan svar på titelns uppgifter skickades
   ingenting alls. *Spela* under Nedladdat för offline började dessutom alltid från början. Nu sparas positionen i appen

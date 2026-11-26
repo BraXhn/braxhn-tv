@@ -606,6 +606,27 @@ Bara tillägg – apparna påverkas inte.
 - `at` (Unix-sekunder) i `POST /api/items/:id/progress` och `POST /api/audiobooks/book/:id/progress`: när positionen sparades
   offline. Finns ett framsteg som är nyare än `at` ändras inget och svaret har `stale: true`; annars sparas positionen med
   `updated = at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
+## Undertexter i offline-filen (`/api/items/:id/offline`, `/api/stream/:id/offline-file`)
+
+Inga nya fält – anropen och svaren är desamma. MP4-filen som apparna laddar ner (`q` = 480/720/1080/orig) har nu
+titelns **textundertexter som `mov_text`-spår** (inbäddade SRT/ASS/WebVTT/mov_text, externa filer bredvid videon som
+`.sv.srt`, nedladdade undertexter; högst 12, samma lista och ordning som `subtitles` i `/api/items/:id`), så att
+telefonens egen spelare visar dem i helskärm, bild-i-bild och AirPlay/Chromecast.
+
+- Spåren har språk (ISO 639-2, `sv` → `swe`, okänt → `und`) och titel (spårets namn, t.ex. `sv (fil)`), tvingade
+  undertexter är märkta `forced`. Standardspåret (`default`) är det som profilens uppspelningsval förvalt (`defaultSub`,
+  `/api/me/playback-prefs`). Väljs inget markerar ffmpeg ändå första undertextspåret som påslaget (MP4-muxerns regel).
+- Samma synkjustering som vid uppspelning (`/api/items/:id/subs/:sid/sync`) och, för profiler med familjefiltret på,
+  samma maskning (`***`) som `/api/stream/:id/subs/:sid`. Filen byggs därför per variant: profiler med olika val får
+  olika filer, profiler med samma val delar fil.
+- **Bildundertexter (PGS/VobSub) och kommentarsspår följer inte med** och bränns inte in – appen visar PGS som förut.
+- `q=orig` för en MP4 som redan passar: utan textundertexter serveras originalfilen som förut (`original: true`); med
+  textundertexter muxas den om (bild och ljud kopieras) och svaret saknar `original`.
+- Befintliga nedladdningar i apparna påverkas inte. På servern byggs filen om (snabbt – bilden kodas inte om när den
+  tidigare filen finns kvar i cachen) första gången den begärs igen: `status` kan alltså vara `none` för en titel som
+  tidigare var `ready`.
+- `subs=1` (separata WebVTT-filer för apparnas egen undertextvisning) fungerar som förut.
+
 ## IPTV: `/api/iptv/*`
 
 Tillägg (apparna behöver inte läsa dem; `/api/live/*` är oförändrat). Barnprofiler ser bara kanaler med en åldersgräns

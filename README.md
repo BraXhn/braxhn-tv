@@ -650,6 +650,7 @@ Det jag inte har kunnat prova här:
 - riktiga skärmläsare (NVDA, JAWS, VoiceOver, TalkBack) och Windows högkontrast på riktigt – bara roller, namn och live-regioner i Chromium och emulerad forced-colors
 - inloggning med kod i Apple TV- och Google TV-appen och i en riktig TV-webbläsare
 - offline-nedladdning och musik i en riktig bil
+- att telefonens egen spelare (iPhone, Android, AirPlay, Chromecast) visar undertexterna som är inbyggda i en nedladdad film – filen är bara kontrollerad med ffprobe
 - CarPlay (kräver ett särskilt tillstånd från Apple och är därför inte byggt)
 - Docker-bygget
 - BraXhn Relay bakom Caddy/Nginx och Let's Encrypt på en riktig VPS, reläets Docker-image, och apparna och Chromecast via reläet

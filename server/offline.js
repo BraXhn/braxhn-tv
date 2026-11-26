@@ -1,11 +1,27 @@
 // Offline-nedladdning: skapar en mobilanpassad MP4 (H.264/AAC, faststart) som appar kan ladda ner och spela utan nät.
+//
+// Undertexter i filen: textundertexterna (inbäddade SRT/ASS/WebVTT/mov_text och externa/nedladdade filer, samma lista
+// som uppspelningen, stream.js subtitlesOf) läggs in som mov_text-spår med språk och titel, så att telefonens egen
+// spelare visar dem även i helskärm, bild-i-bild och AirPlay/Chromecast. Bildundertexter (PGS/VobSub) och
+// kommentarsspår följer inte med (mov_text är text; de bränns inte heller in). Undertexterna får samma synkjustering
+// som vid uppspelning (subsync.js) och, för profiler med familjefiltret på, samma maskning (familyfilter.maskVtt).
+// Standardspåret (disposition default) är det som kontots uppspelningsval förvalt (playprefs.pickSub).
+//
+// Två steg: grundfilen (bild + ljud, nyckel <id>-<mtime>-<q>, samma som före undertexterna) kodas en gång per titel och
+// kvalitet; varianten med undertexter (nyckel <grund>-t<hash>) muxas ihop av grundfilen och undertexterna utan
+// omkodning. Hashen täcker undertextlistan (id, språk, externa filers ändringstid), standardspåret och – med
+// familjefiltret – ordlistorna, så en maskerad och en omaskad fil får olika nycklar och delas bara mellan profiler som
+// får exakt samma fil. Titlar utan textundertexter serveras som förut (grundfilen eller originalfilen).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { CACHE, getSetting } from './db.js';
-import { streamsOf } from './stream.js';
+import { streamsOf, subtitlesOf, subtitleVtt, shiftVtt } from './stream.js';
 import { fail, streamFile, MIME } from './util.js';
+import * as family from './familyfilter.js';
+import * as playprefs from './playprefs.js';
+import * as subsync from './subsync.js';
 
 const DIR = path.join(CACHE, 'offline');
 fs.mkdirSync(DIR, { recursive: true });
@@ -16,6 +32,33 @@ const queue = []; // { key, fn }
 
 const keyOf = (it, q) => `${it.id}-${it.mtime}-${q}`;
 const fileOf = (key) => path.join(DIR, key + '.mp4');
+const MAX_SUBS = 12;
+
+// ISO 639-1 → 639-2 för MP4:ns språkfält (filerna har oftast tre bokstäver, externa .sv.srt två)
+const TO3 = {};
+for (const [k3, k2] of Object.entries(playprefs.L3)) if (!TO3[k2]) TO3[k2] = k3;
+export function lang3(code) {
+  const c = String(code || '').trim().toLowerCase().split(/[-_.]/)[0];
+  if (/^[a-z]{3}$/.test(c)) return c;
+  return TO3[playprefs.langKey(c)] || 'und';
+}
+const mtimeOf = (f) => { try { return fs.statSync(f).mtimeMs | 0; } catch { return 0; } };
+/**
+ * Vad offline-filen för profilen ska innehålla: textundertexterna, standardspåret, maskning och filens nyckel.
+ * uid = null (okänd profil): inga undertexter förvalda, ingen maskning.
+ */
+export function planOf(it, q, uid = null) {
+  const subs = subtitlesOf(it).filter(s => !s.bitmap && !s.comment).slice(0, MAX_SUBS);
+  const base = keyOf(it, q);
+  if (!subs.length) return { subs, def: null, mask: false, base, key: base };
+  const mask = uid != null && family.modeFor(uid) !== 'off';
+  const audio = streamsOf(it).find(s => s.type === 'audio') || null;
+  const def = uid != null ? playprefs.pickSub(subs, audio, playprefs.getPrefs(uid))?.id ?? null : null;
+  const sig = JSON.stringify(['mov_text-1', subs.map(s => [s.id, s.lang || '', s.label || '', !!s.forced, s.file ? mtimeOf(s.file) : 0]), def,
+    mask ? [getSetting('family_words', ''), getSetting('family_words_off', '')] : 0]);
+  const key = `${base}-t${crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12)}`;
+  return { subs, def, mask, base, key };
+}
 
 /** Kan originalfilen laddas ner som den är? (MP4 med H.264 8-bit/HEVC + AAC) */
 function originalOk(it) {
@@ -28,28 +71,30 @@ const GONE = () => ({ status: 'missing', error: 'Filen finns inte längre' });
 // q = 'src' (webbappen): källfilen som den är, oavsett format – webbappen väljer det bara när webbläsaren kan spela
 // filen direkt (uppspelningsbeslutet). Apparna skickar aldrig 'src'; för dem gäller orig/1080/720/480 som förut.
 const srcStatus = (it) => { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } };
-export function status(it, q = '720') {
+export function status(it, q = '720', uid = null) {
   if (q === 'src') return srcStatus(it);
   if (!Q[q]) q = '720';
-  // Originalfilen kan ha flyttats eller tagits bort sedan skanningen (eller disken svarar inte)
-  if (q === 'orig' && originalOk(it)) { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } }
-  const key = keyOf(it, q), f = fileOf(key);
+  const plan = planOf(it, q, uid);
+  // Originalfilen kan ha flyttats eller tagits bort sedan skanningen (eller disken svarar inte). Med textundertexter
+  // muxas den om (bilden och ljudet kopieras) så att undertexterna kommer med.
+  if (q === 'orig' && originalOk(it) && !plan.subs.length) { try { return { status: 'ready', original: true, size: fs.statSync(it.path).size }; } catch { return GONE(); } }
+  const key = plan.key, f = fileOf(key);
   if (!jobs.get(key)) { try { fs.utimesSync(f, new Date(), new Date()); return { status: 'ready', size: fs.statSync(f).size }; } catch {} }
   const j = jobs.get(key);
   if (j) return { status: j.status, progress: j.progress, error: j.error };
   return { status: 'none' };
 }
 
-export function start(it, q = '720') {
+export function start(it, q = '720', uid = null) {
   if (q === 'src') return srcStatus(it);
   if (!Q[q]) q = '720';
-  const st = status(it, q);
+  const st = status(it, q, uid);
   if (st.status !== 'none' && st.status !== 'error') return st;
   if (!fs.existsSync(it.path)) return GONE();
-  const key = keyOf(it, q);
+  const plan = planOf(it, q, uid), key = plan.key;
   const job = { status: 'queued', progress: 0 };
   jobs.set(key, job);
-  queue.push({ key, job, fn: () => run(it, q, key, job) });
+  queue.push({ key, job, fn: () => build(it, q, plan, job) });
   pump();
   return { status: 'queued', progress: 0 };
 }
@@ -64,7 +109,85 @@ function pump() {
   }
 }
 
-function run(it, q, key, job) {
+// Grundfilen (om den saknas), sedan varianten med undertexter. Ett fel i undertexterna ger en fil utan dem hellre
+// än ingen fil: bara spår som gick att läsa kommer med.
+async function build(it, q, plan, job) {
+  if (job.cancelled) return;
+  const fromOrig = q === 'orig' && originalOk(it);
+  if (!fromOrig && !fs.existsSync(fileOf(plan.base))) {
+    // Bara grundfilen: den är färdig när kodningen är klar
+    await run(it, q, plan.base, job, plan.subs.length ? 90 : 99);
+    if (!plan.subs.length || job.cancelled || job.status === 'error') return;
+  }
+  if (!plan.subs.length) { if (jobs.get(plan.key) === job) jobs.delete(plan.key); return; }
+  await mux(it, fromOrig ? it.path : fileOf(plan.base), plan, job, fromOrig);
+}
+
+/** Undertexten som WebVTT med uppspelningens synkjustering och (för profilen) familjefiltrets maskning */
+export async function subVtt(it, sub, mask) {
+  const sync = subsync.adjustment(it, sub);
+  let vtt = shiftVtt(await subtitleVtt(it, sub), sync?.offset || 0, sync?.ratio || 1);
+  if (mask) vtt = family.maskVtt(vtt, sub.lang);
+  return vtt;
+}
+
+async function mux(it, src, plan, job, fromOrig) {
+  const out = fileOf(plan.key), tag = crypto.randomBytes(4).toString('hex');
+  const tmp = `${out}.${tag}.part`;
+  // Undertexterna som WebVTT bredvid (.part – städas av cleanup om något blir kvar)
+  const parts = [], tracks = [];
+  try {
+    for (const [i, sub] of plan.subs.entries()) {
+      if (job.cancelled) break;
+      let vtt;
+      try { vtt = await subVtt(it, sub, plan.mask); } catch (e) { console.warn('[offline] undertext', sub.id, it.path, e.message); continue; }
+      if (!vtt.includes('-->')) continue; // tom undertext
+      const f = `${out}.${tag}.${i}.vtt.part`;
+      fs.writeFileSync(f, vtt);
+      parts.push(f); tracks.push(sub);
+    }
+    if (job.cancelled) return;
+    // Originalfilen: alla ljudspår som MP4 klarar kopieras (som när filen laddades ner som den är); grundfilen har ett
+    const aud = fromOrig ? streamsOf(it).filter(s => s.type === 'audio' && ['aac', 'ac3', 'eac3', 'mp3', 'alac'].includes(s.codec)) : [];
+    const v = streamsOf(it).find(x => x.type === 'video');
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-i', src];
+    for (const f of parts) args.push('-f', 'webvtt', '-i', f);
+    args.push('-map', '0:v:0', ...(aud.length ? aud.flatMap(a => ['-map', '0:' + a.index]) : ['-map', '0:a:0?']));
+    tracks.forEach((_, n) => args.push('-map', `${n + 1}:0`));
+    args.push('-c:v', 'copy', '-c:a', 'copy', '-c:s', 'mov_text');
+    if (fromOrig && v?.codec === 'hevc') args.push('-tag:v', 'hvc1');
+    tracks.forEach((s, n) => {
+      const title = String(s.label || s.lang || `Undertext ${n + 1}`).slice(0, 80);
+      args.push(`-metadata:s:s:${n}`, `language=${lang3(s.lang)}`, `-metadata:s:s:${n}`, `title=${title}`, `-metadata:s:s:${n}`, `handler_name=${title}`,
+        `-disposition:s:${n}`, [s.id === plan.def ? 'default' : '', s.forced ? 'forced' : ''].filter(Boolean).join('+') || '0');
+    });
+    args.push('-movflags', '+faststart', '-f', 'mp4', tmp);
+    job.status = 'running';
+    await new Promise((resolve) => {
+      const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      job.proc = p;
+      let err = '', finished = false;
+      const end = (msg) => {
+        if (finished) return; finished = true;
+        job.proc = null;
+        if (job.cancelled) { fs.rmSync(tmp, { force: true }); return resolve(); }
+        if (msg == null) {
+          try { fs.renameSync(tmp, out); if (jobs.get(plan.key) === job) jobs.delete(plan.key); cleanup(); }
+          catch (e) { fs.rmSync(tmp, { force: true }); job.status = 'error'; job.error = 'Kunde inte spara filen: ' + e.message; }
+        } else { fs.rmSync(tmp, { force: true }); job.status = 'error'; job.error = msg; }
+        resolve();
+      };
+      p.on('error', (e) => end('Kunde inte starta ffmpeg: ' + e.message));
+      p.stderr.on('data', (d) => { err = (err + d).slice(-1000); });
+      p.on('close', (code) => end(code === 0 ? null : err.trim().split('\n').pop() || 'ffmpeg misslyckades'));
+    });
+  } finally {
+    for (const f of parts) fs.rmSync(f, { force: true });
+  }
+}
+
+// Grundfilen: bild och ljud (utan undertexter). until = förloppets tak (resten är undertextsteget).
+function run(it, q, key, job, until = 99) {
   return new Promise((resolve) => {
     if (job.cancelled) return resolve();
     const v = streamsOf(it).find(x => x.type === 'video');
@@ -91,7 +214,7 @@ function run(it, q, key, job) {
     });
     p.stdout.on('data', (d) => {
       const m = /out_time_ms=(\d+)/.exec(String(d));
-      if (m && it.duration) job.progress = Math.min(99, Math.round(+m[1] / 1e6 / it.duration * 100));
+      if (m && it.duration) job.progress = Math.min(until, Math.round(+m[1] / 1e6 / it.duration * until));
     });
     p.stderr.on('data', (d) => { err = (err + d).slice(-1000); });
     p.on('close', (code) => {
@@ -107,10 +230,10 @@ function run(it, q, key, job) {
   });
 }
 
-export function cancel(it, q) {
+export function cancel(it, q, uid = null) {
   if (q === 'src') return;
   if (!Q[q]) q = '720';
-  const key = keyOf(it, q), j = jobs.get(key);
+  const key = planOf(it, q, uid).key, j = jobs.get(key);
   if (j) j.cancelled = true;
   // Köade jobb tas bort ur kön; pågående stoppas
   for (let i = queue.length - 1; i >= 0; i--) if (queue[i].key === key) queue.splice(i, 1);
@@ -119,13 +242,15 @@ export function cancel(it, q) {
 }
 
 /** Servera filen med Range-stöd (nedladdning kan återupptas). */
-export function serveFile(req, res, it, q) {
+export function serveFile(req, res, it, q, uid = null) {
   if (q === 'src') {
     let st; try { st = fs.statSync(it.path); } catch { return fail(res, 404, 'Filen finns inte längre'); }
     const ext = path.extname(it.path).toLowerCase();
     return streamFile(req, res, it.path, st.size, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Disposition': `attachment; filename="braxhn-${it.id}${ext.replace(/[^.\w]/g, '')}"` });
   }
-  const f = q === 'orig' && originalOk(it) ? it.path : fileOf(keyOf(it, Q[q] ? q : '720'));
+  if (!Q[q]) q = '720';
+  const plan = planOf(it, q, uid);
+  const f = q === 'orig' && originalOk(it) && !plan.subs.length ? it.path : fileOf(plan.key);
   let st; try { st = fs.statSync(f); } catch { return fail(res, 404, 'Inte klar än'); }
   streamFile(req, res, f, st.size, { 'Content-Type': 'video/mp4', 'Content-Disposition': `attachment; filename="braxhn-${it.id}.mp4"` });
 }

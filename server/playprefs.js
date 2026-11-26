@@ -17,7 +17,7 @@ const DEFAULTS = Object.freeze({
 });
 
 // ISO 639-2 (B och T) → 639-1. Filernas språktaggar är oftast tre bokstäver (swe, eng), användarens val två (sv, en).
-const L3 = {
+export const L3 = {
   swe: 'sv', eng: 'en', nor: 'no', nob: 'no', nno: 'no', nb: 'no', nn: 'no', dan: 'da', fin: 'fi', ice: 'is', isl: 'is',
   ger: 'de', deu: 'de', fre: 'fr', fra: 'fr', spa: 'es', ita: 'it', dut: 'nl', nld: 'nl', pol: 'pl', por: 'pt', rus: 'ru',
   jpn: 'ja', kor: 'ko', chi: 'zh', zho: 'zh', cmn: 'zh', yue: 'zh', ara: 'ar', tur: 'tr', gre: 'el', ell: 'el', heb: 'he',

@@ -144,6 +144,12 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-26: Undertexter i offline-filen, gren `team/offline-undertext-2026-11-26`. Fel: `server/offline.js` kodade
+  med `-sn`, så nedladdade filmer saknade undertexter i filen – apparna ritade egna ovanpå, som inte syns i telefonens
+  helskärm, bild-i-bild eller AirPlay/Chromecast. Nu läggs textundertexterna (inbäddade, externa `.sv.srt` och
+  nedladdade) in som `mov_text` med språk, namn, kontots förval och familjefiltrets maskning; grundfilen kodas en gång
+  och varianterna muxas utan omkodning. Bildundertexter följer inte med. `test/offline-subs.test.js` (6 fall med
+  ffprobe). **Inte provat:** att iPhone/Android/AirPlay/Chromecast faktiskt visar spåren från en nedladdad fil.
 - 2026-11-26: Android-appen: positioner och skärmtid utan nät (samma regler som Expo-appen), gren
   `team/android-offline-2026-11-26`. Fel: `PlayerScreen.report` gjorde inget när `/api/items/:id` inte svarade (nedladdad
   titel utan nät), och `Api.reportProgress` släppte positionen vid nätfel; skärmtiden kollades bara i serverns svar.

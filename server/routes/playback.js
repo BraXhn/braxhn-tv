@@ -48,7 +48,7 @@ route('GET', '/api/items/:id/offline', user, (c) => {
   if (noDownload(c)) return;
   const it = mediaItem(c); if (!it || familyBlock(c, it)) return;
   const q = c.q.get('q') || '720';
-  const st = offline.status(it, q);
+  const st = offline.status(it, q, c.user.id);
   if (st.status === 'missing') return fail(c.res, 404, st.error);
   if (st.status === 'ready') {
     const t = createSession(c.user.id, 'media', { item: it.id, ip: clientIp(c.req) });
@@ -65,13 +65,13 @@ route('POST', '/api/items/:id/offline', user, async (c) => {
   if (noDownload(c)) return;
   const it = mediaItem(c); if (!it || familyBlock(c, it)) return;
   const { q } = await readJson(c.req);
-  const st = offline.start(it, q || '720');
+  const st = offline.start(it, q || '720', c.user.id);
   if (st.status === 'missing') return fail(c.res, 404, st.error);
   send(c.res, 200, st);
 });
-route('DELETE', '/api/items/:id/offline', user, (c) => { const it = mediaItem(c); if (!it) return; offline.cancel(it, c.q.get('q') || '720'); send(c.res, 200, { ok: true }); });
-route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
-route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720'); });
+route('DELETE', '/api/items/:id/offline', user, (c) => { const it = mediaItem(c); if (!it) return; offline.cancel(it, c.q.get('q') || '720', c.user.id); send(c.res, 200, { ok: true }); });
+route('GET', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720', c.user.id); });
+route('HEAD', '/api/stream/:id/offline-file', media, (c) => { const it = mediaItem(c); if (it && !familyBlock(c, it)) offline.serveFile(c.req, c.res, it, c.q.get('q') || '720', c.user.id); });
 // ---------- Uppspelning ----------
 // Klienten skickar sina förmågor; svaret anger läge och färdiga URL:er
 // Högsta kvalitetssteg som ryms i den uppmätta bandbredden (med marginal för variationer i mobilnätet),

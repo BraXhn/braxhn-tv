@@ -492,7 +492,7 @@ setInterval(sweepLiveSubs, 60e3).unref();
  *  repliksökningen (sublines.js, { low: true }) */
 export const subtitleVtt = (it, sub, opts) => extractVtt(it, sub, opts);
 // t' = t · ratio + offset (ratio ≠ 1 när undertexten är gjord för en annan bildfrekvens, se subsync.js)
-function shiftVtt(vtt, offset, ratio = 1) {
+export function shiftVtt(vtt, offset, ratio = 1) {
   if (!offset && ratio === 1) return vtt;
   const fmt = (t) => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`; };
   const parse = (x) => x.split(':').reduce((a, v) => a * 60 + parseFloat(v), 0);
