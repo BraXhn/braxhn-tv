@@ -1,6 +1,6 @@
 {
   "om": "libmpv-2.dll (LGPL) som läggs i installationsfilen. Byggs av Actions → libmpv; skriv sedan in taggen, zip-filen och dess SHA-256 här (se apps/windows/README.md). Tomt = installationsfilen byggs utan den inbyggda spelaren.",
-  "tagg": "",
-  "fil": "",
-  "sha256": ""
+  "tagg": "libmpv-0.42.0-20261126",
+  "fil": "libmpv-0.42.0-20261126-win64-lgpl.zip",
+  "sha256": "78990f765085e28cf12a1b84eb1d040f7195922beec010c3c432c9ba42bf9fab"
 }

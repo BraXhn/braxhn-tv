@@ -3,6 +3,9 @@
 ## Ej utgiven
 
 ## 1.4.2 – 2026-11-26
+- **Den inbyggda spelaren följer med Windows-appen.** mpv (libmpv 0.42.0) byggs nu av oss själva som LGPL i GitHub Actions och
+  läggs i installationsfilen – inget att hämta eller lägga dit för hand. Källkoden och licenserna finns i förhandsutgåvan
+  `libmpv-0.42.0-20261126`.
 - **Spolning långt fram i en omkodad film kunde fastna utan bild.** hls.js avbryter segmentet den väntar på när man
   spolar förbi det, och servern startar om omkodningen vid målet. Blev det gamla segmentet klart i samma ögonblick
   skickades det ändå, och servern räknade försprånget från det gamla stället och pausade den nya omkodningen – ingen
