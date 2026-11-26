@@ -35,20 +35,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först, och Anton har bekräftat på en riktig iPhone (se *Bara Anton kan göra*).
 
-### 2. Hårdvaruomkodning: provet i Administration ska ge ett svar man kan lita på
-
-- **Vad:** `POST /api/setup/hw-test` finns och används i installationsguiden. Gör resultatet synligt även under
-  Administration, med uppmätt hastighet (bildrutor per sekund) för H.264 och HEVC och med ffmpegs felrad när det inte
-  går. Lägg resultatet i diagnostikpaketet.
-- **Varför:** NVENC, VAAPI och QSV är inte verifierade på riktig hårdvara – bara kommandoraderna. Ett prov som
-  användaren själv kör är det enda sättet att veta att omkodningen går på grafikkortet och inte på processorn, där
-  4K hackar.
-- **Filer:** `server/routes/setup.js`, `server/stream.js` (`testEncode`), `server/diagnostics.js`,
-  `web/js/views/setup.js`, administrationsvyn, `web/i18n/en.js`.
-- **Klart när:** en administratör ser "grafikkortet används, N bildrutor/s" eller en begriplig förklaring, och Anton
-  har kört provet med NVENC (se *Bara Anton kan göra*).
-
-### 3. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
+### 2. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
 
 - **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
   bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
@@ -61,7 +48,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
   hörlurarna byter låt.
 
-### 4. Expo-appen: nedladdning för offline
+### 3. Expo-appen: nedladdning för offline
 
 - **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
   ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
@@ -69,7 +56,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
 - **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
 
-### 5. Skärmtid i Safari och apparna: paus och tiden kvar
+### 4. Skärmtid i Safari och apparna: paus och tiden kvar
 
 - **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
   (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
@@ -78,7 +65,7 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
 - **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
 
-### 6. Hemma via den publika adressen i iOS/tvOS-appen
+### 5. Hemma via den publika adressen i iOS/tvOS-appen
 
 - **Vad:** samma som Expo-appen (`apps/expo/src/localpick.ts`, `goHomeIfHere` i `api.ts`) och Android-appen
   (`apps/automotive/…/LocalPick.kt`, `Hemma.kt`) gör, docs/api.md *Hemma via den publika adressen*: hämta `/api/local` från den sparade adressen, prova `addrs` med `/api/local/ping?n=` (800 ms,
@@ -169,6 +156,14 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-26: Hårdvaruomkodning – provet i Administration (förut punkt 2), gren `team/hwprov-2026-11-26`.
+  *Administration → Hårdvaruomkodning → Prova omkodningen* (`server/hwprobe.js`, `web/js/views/admin-hwprobe.js`,
+  `/api/admin/hwprobe`): genererad testbild, H.264/HEVC/HEVC 10 bitar i 1080p och 4K med `HWACCEL` och med processorn,
+  *grafikkortet används / processorn används / fungerar inte*, bildrutor/s och gånger realtid, förklaring per felkod och
+  ffmpegs felrad. Lägsta prioritet, vägrar vid två eller fler omkodningar. Senaste resultatet sparas och ligger i
+  diagnostikpaketet. `test/hwprobe.test.js` (felrader från NVENC, VAAPI och QSV, rutten, riktigt prov med processorn).
+  Inte provat: riktig NVENC, VAAPI eller QSV – felraderna utan hårdvara är fångade här, övriga är kända rader ur ffmpeg
+  och felrapporter, och hastighetsmätningen med grafikkort är inte körd (se *Bara Anton kan göra*).
 - 2026-11-26: Hemma via den publika adressen i Android-appen (telefon, Google TV, bil; punkt 6 för Android), gren
   `team/android-hemma-2026-11-26`. Samma regler som Expo-appen: `/api/local` från den sparade adressen, alla hemadresser
   provas samtidigt (800 ms, utan inloggning, utan omdirigeringar), används bara när `id` och `proof` stämmer exakt.
@@ -249,7 +244,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - **Prova återupptagning på iPhone** (Safari, version 1.2.2): börja på en film, stäng, öppna igen – fortsätter den på
   rätt ställe direkt?
 - **Prova hack i Chrome på version 1.2.2** med de filer som frös förut.
-- **Kör hårdvaruprovet med NVENC** på Unraid-servern och skicka resultatet (se punkt 3).
+- **Kör hårdvaruprovet med NVENC** på Unraid-servern: *Administration → Hårdvaruomkodning → Prova omkodningen* när
+  ingen tittar. Skicka en skärmbild, eller diagnostikpaketet (*Hälsokontroll*, `hardware.json` → `probe`). Står det
+  *Fungerar inte* för H.264: följ förklaringen och prova igen. Blir 10-bitars HEVC eller 4K långsammare än 1 × vill vi veta det.
 - Det som i övrigt kräver riktig hårdvara eller konton står i *Testat och otestat* i README: Chromecast och AirPlay,
   Google TV-appen på en TV, Android Auto, Let's Encrypt med en publik domän, BraXhn Relay på en riktig VPS, riktiga
   IPTV-leverantörer och passkeys på telefon.

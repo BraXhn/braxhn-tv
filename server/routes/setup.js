@@ -10,6 +10,8 @@ import { send, readJson, fail, isHttps } from '../util.js';
 import { audit, require2faRemote, quickConnectOn } from '../auth.js';
 import { tmdbCheck, hasTmdb, status as scanStatus } from '../scanner.js';
 import * as st from '../stream.js';
+import * as hwp from '../hwprobe.js';
+import { activeLive } from '../livetv.js';
 import * as acme from '../acme.js';
 import * as pk from '../passkeys.js';
 import { route, admin, adminAnywhere } from '../http/router.js';
@@ -216,11 +218,30 @@ route('POST', '/api/setup/hw-test', admin, async (c) => {
   const b = await readJson(c.req);
   const mode = String(b.mode || st.hwStatus.active || 'none');
   if (!['none', 'vaapi', 'qsv', 'nvenc'].includes(mode)) return fail(c.res, 400, 'Okänt läge');
-  if (testing) return fail(c.res, 409, 'Ett test pågår redan');
+  if (testing || hwp.state.running) return fail(c.res, 409, 'Ett test pågår redan');
   testing = true;
   try {
     const r = await st.testEncode(mode);
     console.log(`[hårdvara] testkodning ${mode}: ${r.ok ? `${r.fps} bilder/s` : 'misslyckades – ' + r.error}`);
     send(c.res, 200, r);
   } finally { testing = false; }
+});
+
+// ---------- Administration → Hårdvaruomkodning: provet med uppmätt hastighet (server/hwprobe.js) ----------
+// Provet tar 10–40 sekunder, så det körs i bakgrunden: POST startar, GET visar förloppet och senaste resultatet.
+const busyNow = () => st.activeTranscodes().length + activeLive().length;
+const probeInfo = () => ({ running: hwp.state.running, done: hwp.state.done, total: hwp.state.total, step: hwp.state.step,
+  busy: busyNow(), busyLimit: hwp.limits.busy, wanted: st.hwStatus.wanted, active: st.hwStatus.active, detected: hwp.detected(), last: hwp.last() });
+route('GET', '/api/admin/hwprobe', admin, (c) => send(c.res, 200, probeInfo()));
+route('POST', '/api/admin/hwprobe', admin, async (c) => {
+  const b = await readJson(c.req);
+  if (b.mode != null && !hwp.MODES.includes(b.mode)) return fail(c.res, 400, 'Okänt läge');
+  if (hwp.state.running || testing) return fail(c.res, 409, 'Ett prov pågår redan');
+  const n = busyNow();
+  if (n >= hwp.limits.busy) return fail(c.res, 409, `${n} strömmar omkodas just nu – prova igen när färre tittar`);
+  hwp.runProbe({ mode: b.mode || undefined, busy: busyNow }).then(r => {
+    const ok = r.results.filter(x => x.status !== 'fail').map(x => `${x.encoder} ${x.fps['1080p']} bilder/s`);
+    console.log(`[hårdvara] provet (${r.mode}): ${ok.length ? ok.join(', ') : 'ingen kodare fungerade'}${r.aborted ? ' – avbrutet, strömmar omkodas' : ''}`);
+  }).catch(e => console.warn('[hårdvara] provet misslyckades:', e.message));
+  send(c.res, 202, probeInfo());
 });

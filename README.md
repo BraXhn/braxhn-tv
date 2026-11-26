@@ -235,6 +235,29 @@ Tar varje omkodning flera sekunder innan första bilden kommer (loggen: `[hårdv
 
 Videon avkodas också på grafikkortet (nvenc/vaapi), vilket gör 4K-HEVC mycket lättare. Fungerar hårdvaran inte går servern automatiskt över till processorn, och *Administration → Säkerhet* visar felet.
 
+### Prova att grafikkortet används
+
+*Administration → Hårdvaruomkodning → Prova omkodningen* kodar en genererad testbild (aldrig dina filer) i några
+sekunder per format – H.264, HEVC och 10-bitars HEVC, i 1080p och 4K – med grafikkortet som `HWACCEL` pekar på och med
+processorn som jämförelse. Varje rad visar *Grafikkortet används*, *Processorn används* eller *Fungerar inte*, och
+bildrutor per sekund och gånger realtid (25 bildrutor/s = 1 ×). När det inte fungerar står det vad du ska göra, och
+ffmpegs felrad finns i en utfällbar ruta. Är `HWACCEL=none` men ett grafikkort syns i containern provas det kortet, så
+att du ser om det lönar sig att slå på. Provet tar 10–40 sekunder, körs med lägsta prioritet och vägrar starta (eller
+avbryts) när två eller fler strömmar omkodas. Senaste resultatet sparas med datum och följer med i diagnostikpaketet.
+
+| Provet säger | Gör så här |
+|---|---|
+| *Grafikkortet syns inte i containern* (ffmpeg: `Cannot load libcuda.so.1`) | Pluginen *Nvidia-Driver*, `--runtime=nvidia` under *Extra Parameters* och `NVIDIA_VISIBLE_DEVICES=all` – eller mallen braxhn-tv-nvidia. Starta om containern. |
+| *Drivrutinen syns, men utan videodelen* (`Cannot load libnvidia-encode.so.1`) | `NVIDIA_DRIVER_CAPABILITIES=all` i mallen. |
+| *Drivrutinen är för gammal* (`Driver does not support the required nvenc API version`) | Uppdatera i pluginen *Nvidia-Driver* och starta om Unraid. |
+| *Containern kör med den gamla drivrutinen* (`CUDA_ERROR_UNKNOWN`) | Starta om containern efter en uppdatering av drivrutinen, annars Unraid. |
+| *Tar inte emot fler kodningar* (`OpenEncodeSessionEx failed`) | GeForce-kort tillåter bara några samtidigt – stäng av omkodning med grafikkortet i Plex/Jellyfin. |
+| *`/dev/dri` saknas* (`No VA display found`) | Lägg till enheten `/dev/dri` (*GPU-enhet*) i mallen. |
+| *`/dev/dri` finns men får inte användas* | Containerns användare måste ha gruppen som äger enheten (`ls -l /dev/dri` på servern): `--group-add` med gruppens nummer, eller annan PUID/PGID. |
+| *Grafikdrivrutinen startar inte* (`va_openDriver() returns -1`) | Intel 8:e generationen och nyare: `LIBVA_DRIVER_NAME=iHD`, äldre Intel `i965`, AMD `radeonsi`. NVIDIA fungerar inte med VA-API – välj `nvenc`. |
+| *Quick Sync hittar ingen Intel-grafik* (`Error creating a MFX session`) | Kräver Intel med inbyggd grafik och `/dev/dri`. AMD och äldre Intel: `HWACCEL=vaapi`. |
+| *Klarar inte just det här formatet* (t.ex. 10-bitars HEVC: `No usable encoding entrypoint`, `10 bit encode not supported`) | Hårdvarans gräns (10-bitars HEVC kräver NVIDIA GTX 10 eller Intel 7:e generationen). De format som fungerar används ändå. |
+
 Utan GPU klarar en modern processor omkodning av 1080p i realtid. Tonmappning av 4K HDR med processor är tungt, så använd en GPU om du har mycket HDR-material.
 
 Vilka kodare och tonmappningsvägar servern hittade står i loggen vid start (`[omkodning] ffmpeg 7.1… – HEVC/AV1: …`) och under *Administration → Omkodning*. Imagen bygger på Debian 13 (trixie) med Debians ffmpeg 7.1 för både amd64 och arm64: paketen kommer från Debians signerade paketförråd och uppdateras med imagen. jellyfin-ffmpeg har några tillägg till (t.ex. `tonemap_cuda`); servern använder dem om de finns, men imagen följer Debian för att slippa ett eget paketförråd och en egen nyckel.
@@ -450,7 +473,7 @@ Mer i [PRIVACY.md](PRIVACY.md), som också är integritetspolicyn för apparna.
 
 ### Diagnostikpaket
 
-Börja gärna här om du ska rapportera ett fel. *Administration → Hälsokontroll → Skapa diagnostikpaket* visar först exakt vad som följer med och laddar sedan ner ett `.tar.gz` att bifoga i en buggrapport: version, miljövariabler (nycklar, lösenord, token och adresser bara som *(satt)*), hårdvaruacceleration (`HWACCEL`, kodare, `/dev/dri`, NVIDIA), de senaste 2 000 loggraderna, databasens storlek och migreringsversion, inställningar som påverkar felsökningen och bibliotekens typ, antal och storlek. Token, nycklar, lösenord, kakor, e-postadresser och IP-adresser maskeras (`<lan-ip>`, `<vpn-ip>`, `<ip>`, `<ipv6>`). Fil- och mappnamn (bibliotekens namn och mappar, sökvägar i loggen) tas bara med om du kryssar i det. Paketet finns kvar i 15 minuter och byggs bara på begäran.
+Börja gärna här om du ska rapportera ett fel. *Administration → Hälsokontroll → Skapa diagnostikpaket* visar först exakt vad som följer med och laddar sedan ner ett `.tar.gz` att bifoga i en buggrapport: version, miljövariabler (nycklar, lösenord, token och adresser bara som *(satt)*), hårdvaruacceleration (`HWACCEL`, kodare, `/dev/dri`, NVIDIA och senaste hårdvaruprovet), de senaste 2 000 loggraderna, databasens storlek och migreringsversion, inställningar som påverkar felsökningen och bibliotekens typ, antal och storlek. Token, nycklar, lösenord, kakor, e-postadresser och IP-adresser maskeras (`<lan-ip>`, `<vpn-ip>`, `<ip>`, `<ipv6>`). Fil- och mappnamn (bibliotekens namn och mappar, sökvägar i loggen) tas bara med om du kryssar i det. Paketet finns kvar i 15 minuter och byggs bara på begäran.
 
 ### Vanliga problem
 

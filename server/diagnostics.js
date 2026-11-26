@@ -12,6 +12,7 @@ import { db, get, all, CONFIG, getSetting } from './db.js';
 import { VERSION } from './updates.js';
 import { ffcaps } from './ffcaps.js';
 import * as st from './stream.js';
+import * as hwprobe from './hwprobe.js';
 import * as logs from './logs.js';
 import * as jobs from './jobs.js';
 import * as diskmon from './diskmon.js';
@@ -73,7 +74,9 @@ function hardware() {
     ffmpeg: { version: ffcaps.version || null, hwEncoders: [...ffcaps.encoders].filter(e => /^(h264|hevc|av1)_(nvenc|vaapi|qsv|amf|videotoolbox|v4l2m2m|vulkan)$/.test(e)).sort(),
       hwFilters: [...ffcaps.filters].filter(f => /^(libplacebo|tonemap_\w+|scale_(cuda|npp|vaapi|qsv|vulkan)|hwupload\w*|overlay_(cuda|vaapi|qsv))$/.test(f)).sort() },
     devices: { dri: dri.map(d => ({ name: d, access: access('/dev/dri/' + d) })), nvidia: devList('/dev', /^nvidia/),
-      NVIDIA_VISIBLE_DEVICES: process.env.NVIDIA_VISIBLE_DEVICES || null, NVIDIA_DRIVER_CAPABILITIES: process.env.NVIDIA_DRIVER_CAPABILITIES || null }
+      NVIDIA_VISIBLE_DEVICES: process.env.NVIDIA_VISIBLE_DEVICES || null, NVIDIA_DRIVER_CAPABILITIES: process.env.NVIDIA_DRIVER_CAPABILITIES || null },
+    // Senaste provet från Administration → Hårdvaruomkodning (hastighet per kodare och ffmpegs felrad), null = aldrig kört
+    probe: hwprobe.last()
   };
 }
 
@@ -125,7 +128,7 @@ Created from Administration → Health check. Attach it to a bug report on GitHu
 Innehåll / contents:
   system.json     version, Node, ffmpeg, operativsystem, container, minne, användare (uid/gid), tidszon
   environment.json miljövariabler – nycklar, lösenord, token och adresser visas bara som "(satt)"
-  hardware.json   hårdvaruacceleration: HWACCEL, vad som fungerar, kodare, /dev/dri och NVIDIA
+  hardware.json   hårdvaruacceleration: HWACCEL, vad som fungerar, kodare, /dev/dri, NVIDIA och senaste provet
   database.json   databasens storlek, migreringsversion (schema) och antal rader per tabell
   libraries.json  bibliotekens typ, antal titlar/filer och storlek${names ? ' – med namn och mappar (valt)' : ' – utan namn och mappar'}
   settings.json   inställningar som påverkar felsökningen (inga nycklar eller adresser)

@@ -1008,6 +1008,15 @@ a.calrow:hover,a.calrow:focus-visible{background:var(--bg2)}
 .setup-hw{margin-top:12px}
 .setup-hw th{text-align:left;font-weight:500;color:var(--dim);padding:6px 12px 6px 0;width:38%;vertical-align:top}
 .setup-hw td{padding:6px 0;overflow-wrap:anywhere}
+/* Administration → Hårdvaruomkodning (views/admin-hwprobe.js) */
+.hwp-wrap{overflow-x:auto}
+.hwp-table th[scope=row]{text-transform:none;letter-spacing:0;font-size:.875rem;color:var(--text);font-weight:600}
+.hwp-table thead th{text-transform:none;letter-spacing:0}
+.hwp-table td{white-space:nowrap}
+.hwp-table tr:has(+ .hwp-why) > *{border-bottom:0}
+.hwp-why td{white-space:normal;padding-top:0}
+.hwp-why summary{cursor:pointer;overflow-wrap:anywhere}
+.hwp-log{background:var(--bg3);padding:10px;border-radius:var(--r-sm);font-size:.75rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;margin:6px 0 0}
 .setup-choice{border:0;padding:0;margin:16px 0 0}
 .setup-choice legend{font-size:.8125rem;color:var(--dim);margin-bottom:4px;padding:0}
 .setup-links{margin-top:14px}

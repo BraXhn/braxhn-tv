@@ -8,6 +8,7 @@ import { adminOps } from './admin-ops.js';
 import { adminLocal, adminRelay } from './admin-relay.js';
 import { adminApiKeys } from './admin-apikeys.js';
 import { adminSupport } from './admin-support.js';
+import { adminHwProbe } from './admin-hwprobe.js';
 import { confirmDialog, openDialog, promptDialog } from '../ui/dialog.js';
 import { adminInvites, editPerms, permsSummary } from './admin-users.js';
 import { emptyState, errorState, loadingState } from '../ui/states.js';
@@ -312,6 +313,7 @@ views.admin = async (sec) => {
   <div class="panel" id="adm-family"></div>
   <div class="panel" id="adm-sonic" aria-live="polite"></div>
   <div class="panel" id="adm-mmeta"></div>
+  <div class="panel" id="adm-hwprobe"><h2>${t('Hårdvaruomkodning')}</h2><div id="hwp">${loadingState({ kind: 'inline', label: t('Läser…') })}</div></div>
   <div class="panel"><h2>${t('Inställningar')}</h2><form id="settings">
     <label for="tk">${t('TMDB API-nyckel (gratis på themoviedb.org – ger affischer, beskrivningar och betyg)')}</label>
     <input id="tk" type="password" placeholder="${S.tmdbKeySet ? (S.tmdbFromEnv ? t('Satt via miljövariabel') : t('•••••••• (sparad – lämna tomt för att behålla)')) : t('Ingen nyckel – endast filnamn och miniatyrer används')}">
@@ -511,6 +513,7 @@ views.admin = async (sec) => {
   adminOps().catch(e => { toastErr(e); });
   adminRelay().catch(e => { const r = $('#adm-relay'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   adminLocal(S);
+  adminHwProbe().catch(e => { const r = $('#hwp'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   adminSupport().catch(e => { const r = $('#adm-support'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   adminApiKeys().catch(e => { const r = $('#adm-apikeys'); if (r && !e.aborted) r.innerHTML = errorState(e, { compact: true }); });
   // #/admin/security, #/admin/acme (länkar från installationsguiden): visa avsnittet
