@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.2 – 2026-11-26
 - **Spolning långt fram i en omkodad film kunde fastna utan bild.** hls.js avbryter segmentet den väntar på när man
   spolar förbi det, och servern startar om omkodningen vid målet. Blev det gamla segmentet klart i samma ögonblick
   skickades det ändå, och servern räknade försprånget från det gamla stället och pausade den nya omkodningen – ingen
@@ -8,7 +10,6 @@
   snabbare omkodningen går (uppspelningsvakten stoppade 1.4.2 i GitHub Actions på det). Nu skickas inget till en
   avbruten begäran, och omkodningen går alltid medan någon väntar på ett segment.
 
-## 1.4.2 – 2026-11-26
 - **Kontrollrad i Windows-appens inbyggda spelare.** I mpv syntes inga reglage och musen gjorde ingenting – bara
   tangentbordet fungerade (ärende #4). Nu har spelaren en egen rad i webbspelarens stil: tidslinje som går att klicka
   och dra i med tiden vid muspekaren, −10 s, spela/paus, +10 s, nästa avsnitt, stopp, sovtimer, ljudspår, undertexter
