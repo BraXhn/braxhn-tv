@@ -2,9 +2,10 @@
 // Ligger utanför React så att musiken fortsätter när man byter sida; skärmarna läser läget med useNowPlaying().
 // Två spelare för musik: den som spelar och nästa låt som laddas i förväg, så att bytet blir så kort det går.
 import { useSyncExternalStore } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
-import { absolute, api, ApiError, session } from './api';
+import { absolute, api, ApiError, audioCaps, session } from './api';
+import * as off from './offline';
 
 // ---------- typer (det appen använder ur serverns svar) ----------
 export interface Track {
@@ -14,7 +15,7 @@ export interface Track {
 export interface Album { id: number; title: string; year?: number | null; artist?: string | null; artistId?: number | null; cover?: boolean; tracks?: number; duration?: number | null; genre?: string | null }
 export interface Radio { seed: { trackId?: number; albumId?: number; artistId?: number }; name?: string }
 export interface Chapter { start: number; end?: number; title: string }
-interface BookFile { id: number; offset: number; duration: number; codec?: string | null; url: string }
+interface BookFile { id: number; offset: number; duration: number; codec?: string | null; url: string; local?: boolean }
 export interface BookInfo { id: number; title: string; author?: string | null; narrator?: string | null; cover?: boolean; duration?: number | null; chapters: Chapter[] }
 export interface EpisodeInfo { id: number; podcast: number; podcastTitle?: string | null; title: string; duration?: number | null }
 type Mode = 'music' | 'book' | 'podcast';
@@ -44,14 +45,10 @@ export const useNowPlayingPart = <T extends string | number | boolean | null>(se
 export const currentTrack = () => (S.mode === 'music' ? S.queue[S.idx] || null : null);
 
 // ---------- ljudformat och adresser ----------
-/** Ljudformat som telefonens spelare klarar – annat kodar servern om (server/music.js streamTrack, parametern a) */
-export function audioCaps(): string {
-  if (Platform.OS === 'ios') return 'mp3,aac,flac'; // AVPlayer: inte Ogg (Opus/Vorbis)
-  return 'mp3,aac,flac,opus,vorbis'; // Android (ExoPlayer) och webbläsare
-}
+export { audioCaps };
 const direct = (codec?: string | null) => !!codec && codec !== 'alac' && audioCaps().split(',').includes(codec);
 export const coverUrl = (aid: number, w = 300) => `${session.server}/api/music/cover/${aid}?w=${w}${session.imgToken ? '&t=' + session.imgToken : ''}`;
-export const bookCoverUrl = (bid: number, w = 300) => `${session.server}/api/audiobooks/cover/${bid}?w=${w}${session.imgToken ? '&t=' + session.imgToken : ''}`;
+export const bookCoverUrl = (bid: number, w = 300) => off.localArt('book', bid) || `${session.server}/api/audiobooks/cover/${bid}?w=${w}${session.imgToken ? '&t=' + session.imgToken : ''}`;
 export const podImageUrl = (pid: number, w = 300) => `${session.server}/api/podcasts/${pid}/image?w=${w}${session.imgToken ? '&t=' + session.imgToken : ''}`;
 
 // Kortlivade länkar per spår (GET /play ger en mediatoken som gäller ett dygn) – återanvänds i 12 timmar
@@ -303,7 +300,7 @@ let restored = false; // kön är visad men ingen ljudfil laddad än: Spela ladd
 
 // ---------- ljudböcker och poddar ----------
 let bookFiles: BookFile[] = [];
-const P = { timer: 0 as any, last: 0, sent: 0 };
+const P = { timer: 0 as any, last: 0, sent: 0, beat: 0 };
 
 /** Lämnar musiken innan en bok eller ett avsnitt startar: kön sparas, och tas sedan bort som i webben (talet tar över) */
 async function leaveSpoken() {
@@ -315,10 +312,13 @@ async function leaveMusic() {
   Q.owner = 0; Q.touched = false; clearTimeout(Q.timer);
 }
 
-/** Spelar en ljudbok där profilen slutade (positionen sparas på servern) */
+/** Spelar en ljudbok där profilen slutade (positionen sparas på servern). En nedladdad bok spelas från telefonen. */
 export async function playBook(bid: number, from?: number) {
   await leaveSpoken(); await leaveMusic();
   await audioMode();
+  const local = off.localBook(bid);
+  if (local) return playLocalBook(local, from);
+  localBook = 0;
   const ca = encodeURIComponent(audioCaps());
   const b = await api<BookInfo & { position?: number; speed?: number; finished?: boolean; files: BookFile[] }>(`/api/audiobooks/book/${bid}/play?a=${ca}`);
   dropAll();
@@ -330,15 +330,38 @@ export async function playBook(bid: number, from?: number) {
   P.sent = Date.now();
   playBookAt(pos, true);
 }
+// Nedladdad bok: filerna spelas från telefonen. Positionen går till servern som vanligt när den svarar (skärmtiden räknas
+// och kan säga stopp), annars sparas den i telefonen och skickas med "at" när nätet är tillbaka (offline.ts).
+let localBook = 0;
+async function playLocalBook(local: NonNullable<ReturnType<typeof off.localBook>>, from?: number) {
+  const e = local.entry;
+  // Skärmtid: hämta statusen om servern svarar, annars gäller den senaste och tiden som räknats i telefonen
+  const reachable = await off.refreshScreen(3000);
+  const gate = off.screenGate(true);
+  if (!gate.allowed) throw new ApiError(gate.message);
+  // Servern har den senaste positionen (även från webben) – om den svarar och inget väntar på att skickas härifrån
+  let pos = e.finished && !e.pending ? 0 : e.position || 0;
+  if (reachable && !e.pending) {
+    try { const b = await api<{ position?: number; finished?: boolean }>(`/api/audiobooks/book/${e.id}`, { timeout: 4000 }); pos = b.finished ? 0 : b.position || 0; } catch {}
+  }
+  if (from != null) pos = from;
+  dropAll();
+  bookFiles = local.files.map((f) => ({ id: f.id, offset: f.offset, duration: f.duration, codec: null, url: f.uri, local: true }));
+  localBook = e.id;
+  set({ ...EMPTY, mode: 'book', book: { id: e.id, title: e.title, author: e.author, narrator: e.narrator, cover: !!local.cover, duration: e.duration, chapters: e.chapters || [] },
+    pos, dur: e.duration || 0, rate: e.speed || 1 });
+  P.sent = Date.now(); P.beat = Date.now();
+  playBookAt(pos, true);
+}
 function playBookAt(pos: number, play: boolean) {
   let f = bookFiles[0];
   for (const x of bookFiles) if (pos >= x.offset - 0.01) f = x;
   const at = Math.max(0, pos - f.offset);
   const key = 'b' + f.id;
   // Samma fil som spelar och formatet spelas direkt: bara spola
-  if (cur && cur.key === key && direct(f.codec)) { cur.player.seekTo(at).catch(() => {}); set({ pos }); if (play) cur.player.play(); return; }
+  if (cur && cur.key === key && (f.local || direct(f.codec))) { cur.player.seekTo(at).catch(() => {}); set({ pos }); if (play) cur.player.play(); return; }
   drop(cur); cur = null;
-  const ss = !direct(f.codec) && at > 0 ? Math.floor(at) : 0;
+  const ss = !f.local && !direct(f.codec) && at > 0 ? Math.floor(at) : 0;
   const player = createAudioPlayer({ uri: ss ? f.url + '&ss=' + ss : f.url }, { updateInterval: 500 });
   set({ pos, buffering: play });
   attach(player, key, f.offset + ss, ss ? 0 : at, play);
@@ -355,7 +378,7 @@ export async function playEpisode(eid: number) {
   await leaveSpoken(); await leaveMusic();
   await audioMode();
   const [e, p] = await Promise.all([api<EpisodeInfo & { position?: number; played?: boolean }>(`/api/podcasts/episodes/${eid}`), api<{ url: string }>(`/api/podcasts/episodes/${eid}/play`)]);
-  dropAll(); bookFiles = [];
+  dropAll(); bookFiles = []; localBook = 0;
   const pos = e.played ? 0 : e.position || 0;
   set({ ...EMPTY, mode: 'podcast', episode: { id: e.id, podcast: e.podcast, podcastTitle: e.podcastTitle, title: e.title, duration: e.duration }, pos, dur: e.duration || 0 });
   P.sent = Date.now();
@@ -368,10 +391,22 @@ async function progress(final = false, played?: boolean) {
   const pos = S.pos;
   P.sent = Date.now();
   let r: { stop?: boolean; screenTime?: { allowed?: boolean; message?: string } } | null = null;
+  const lb = S.mode === 'book' && S.book && S.book.id === localBook ? localBook : 0;
+  const beat = P.beat; P.beat = Date.now();
   try {
-    if (S.mode === 'book' && S.book) r = await api(`/api/audiobooks/book/${S.book.id}/progress`, { method: 'POST', body: { position: pos, speed: S.rate }, timeout: final ? 8000 : 20000 });
+    if (S.mode === 'book' && S.book) r = await api(`/api/audiobooks/book/${S.book.id}/progress`, { method: 'POST', body: { position: pos, speed: S.rate }, timeout: final || lb ? 8000 : 20000 });
     else if (S.mode === 'podcast' && S.episode) r = await api(`/api/podcasts/episodes/${S.episode.id}/progress`, { method: 'POST', body: played != null ? { position: pos, played } : { position: pos }, timeout: final ? 8000 : 20000 });
-  } catch { return; }
+  } catch (err: any) {
+    if (!lb || err?.status !== 0) return;
+    // Nedladdad bok utan nät: positionen i telefonen (skickas senare), tiden räknas för skärmtiden, och den senaste
+    // statusen från servern avgör om det får spelas vidare
+    off.savePosition('book', lb, pos, { speed: S.rate });
+    if (beat) off.countOffline((Date.now() - beat) / 1000);
+    const g = off.screenGate(true);
+    if (!g.allowed && S.playing) { try { cur?.player.pause(); } catch {} set({ playing: false, stopped: g.message }); }
+    return;
+  }
+  if (lb) { off.savePosition('book', lb, pos, { speed: S.rate, sent: true }); if (r?.screenTime) off.noteScreen(r.screenTime as any); }
   if (r?.stop && S.playing) {
     try { cur?.player.pause(); } catch {}
     const st = r.screenTime;
@@ -390,7 +425,12 @@ export async function toggle() {
   } else if (!cur) {
     if (S.mode === 'book') { playBookAt(S.pos, true); return; }
   }
+  if (S.mode === 'book' && localBook) {
+    const g = off.screenGate(true);
+    if (!g.allowed) { set({ stopped: g.message }); return; }
+  }
   set({ stopped: '' });
+  P.beat = Date.now();
   cur?.player.play();
 }
 export function pause() {
@@ -429,7 +469,7 @@ export async function close() {
 /** Stoppar och tömmer utan att röra serverns kö (profilbyte, utloggning, 409) */
 function stopAll() {
   clearTimeout(Q.timer); clearTimeout(P.timer);
-  dropAll(); bookFiles = []; restored = false;
+  dropAll(); bookFiles = []; restored = false; localBook = 0;
   set(EMPTY);
 }
 /** Sparar kön eller platsen i boken/avsnittet nu (före ett profilbyte, medan den gamla inloggningen gäller) */

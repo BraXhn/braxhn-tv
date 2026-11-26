@@ -13,5 +13,7 @@ export type Stack = {
   Book: { id: number };
   Podcast: { id: number };
   NowPlaying: undefined;
+  // Nedladdat (fungerar utan nät)
+  Downloads: undefined;
 };
 export type Props<T extends keyof Stack> = NativeStackScreenProps<Stack, T>;

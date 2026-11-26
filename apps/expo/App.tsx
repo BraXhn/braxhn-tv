@@ -20,6 +20,10 @@ import { AlbumScreen, ArtistScreen, PlaylistScreen } from './src/screens/Music';
 import { BookScreen, PodcastScreen } from './src/screens/Books';
 import NowPlaying from './src/screens/NowPlaying';
 import { reset as resetAudio, restoreQueue } from './src/music';
+import DownloadsScreen from './src/screens/Downloads';
+import * as off from './src/offline';
+import { startView } from './src/offlinecore';
+import { confirm } from './src/components/download';
 
 const Stack = createNativeStackNavigator<StackParams>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: C.bg, card: C.chrome, text: C.text, border: C.line, primary: C.accent } };
@@ -30,6 +34,8 @@ export default function App() {
   const [state, setState] = useState<'loading' | 'add' | 'pick' | 'profiles' | 'in'>('loading');
   const [user, setUser] = useState<UserInfo | null>(null);
   const [again, setAgain] = useState<Server | null>(null);
+  // Servern svarade inte vid start och profilen har något nedladdat: appen öppnar Nedladdat
+  const [offlineStart, setOfflineStart] = useState(false);
   const [, redraw] = useState(0);
 
   /** Öppnar den valda servern: kontrollerar inloggningen och hämtar vem som är inloggad. Direkt efter inloggningen
@@ -42,6 +48,10 @@ export default function App() {
       // efter det direkt dit, strömmar och bilder också
       goHomeIfHere().catch(() => {});
       await setProfile(s.user.id); rememberProfile(s.user.name);
+      // Nedladdningarna för den här servern och profilen: kön fortsätter, positioner skickas, behörigheten kontrolleras
+      const sv = currentServer();
+      if (sv) { off.openScope(sv.id, s.user); off.online(s.user.canDownload).catch(() => {}); }
+      setOfflineStart(false);
       // Profilens färg (till rutan uppe till höger) står bara i profillistan
       if ((s.user.profiles || 0) > 1) await listProfiles().then((l) => { s.user!.color = l.profiles.find((p) => p.id === s.user!.id)?.color; }).catch(() => {});
       setUser(s.user); setAgain(null); setState(afterLogin && (s.user.profiles || 0) > 1 ? 'profiles' : 'in');
@@ -49,7 +59,14 @@ export default function App() {
       restoreQueue();
     } catch (e: any) {
       // Servern nås inte just nu: gå in ändå (startsidan visar felet och Försök igen). 401 sköts av hanteraren nedan.
-      if (e?.status !== 401) { const sv = currentServer(); setUser({ id: 0, name: sv?.profile || sv?.user || '' }); setState('in'); }
+      // Har profilen som senast var inloggad något nedladdat öppnas Nedladdat direkt (fungerar utan nät).
+      if (e?.status !== 401) {
+        const sv = currentServer();
+        const last = sv ? off.openLast(sv.id) : null;
+        setUser({ id: last?.uid || 0, name: last?.name || sv?.profile || sv?.user || '', kid: last?.kid });
+        setOfflineStart(startView({ reachable: false, downloads: off.count() }) === 'Downloads');
+        setState('in');
+      }
     }
   }, []);
   const open = useCallback(async (sv: Server) => {
@@ -64,23 +81,32 @@ export default function App() {
     setAgain(null); setState(servers.length ? 'pick' : 'add');
   }, [open]);
   const logout = useCallback(async () => {
-    await resetAudio(); // spara kön eller bokens plats med den gamla inloggningen, stoppa och töm
-    api('/api/logout', { method: 'POST' }).catch(() => {});
     const sv = currentServer();
-    await signOut(); setUser(null);
-    if (servers.length > 1) setState('pick'); else { setAgain(sv); setState('add'); }
+    const go = async () => {
+      await resetAudio(); // spara kön eller bokens plats med den gamla inloggningen, stoppa och töm
+      await off.syncPending().catch(() => {}); // positioner som väntar skickas medan inloggningen gäller
+      api('/api/logout', { method: 'POST' }).catch(() => {});
+      if (sv) off.removeServer(sv.id); // nedladdningarna hör till inloggningen
+      await signOut(); setUser(null);
+      if (servers.length > 1) setState('pick'); else { setAgain(sv); setState('add'); }
+    };
+    // Nedladdat tas bort vid utloggning – fråga först
+    if (sv && off.hasServerDownloads(sv.id)) confirm('Logga ut?', 'Allt som laddats ner från den här servern tas bort från telefonen. Du kan ladda ner det igen när du loggat in.', 'Logga ut och ta bort', () => { go(); });
+    else await go();
   }, []);
 
   /** Efter Vem tittar?: ny profil → läs dess uppgifter (barnprofil m.m. står bara i /api/status), annars tillbaka */
   const afterProfile = useCallback(async (u: UserInfo | null) => {
     if (!u) { setState('in'); return; }
     resetAudio(false); // Profiles sparade före bytet; den nya profilen får sin egen kö
+    off.closeScope(); // den nya profilen har sina egna nedladdningar
     setUser(u); setState('loading');
     await enter(false);
   }, [enter]);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => { const sv = currentServer(); resetAudio(); signOut(); setUser(null); setAgain(sv); setState('add'); });
+    // Inloggningen gäller inte längre: nedladdningarna ligger kvar och syns igen när samma profil loggar in
+    setUnauthorizedHandler(() => { const sv = currentServer(); resetAudio(); off.closeScope(); signOut(); setUser(null); setAgain(sv); setState('add'); });
     start();
     return () => setUnauthorizedHandler(null);
   }, [start]);
@@ -94,9 +120,9 @@ export default function App() {
           : state === 'profiles' ? <Profiles current={user?.name || ''} onDone={afterProfile} />
           : state === 'pick' ? <Servers onPick={open} onAdd={() => { setAgain(null); setState('add'); }} onChanged={() => (servers.length ? redraw((n) => n + 1) : setState('add'))} />
           : (
-          <NavigationContainer theme={theme} key={user?.id || 0 /* ny profil: börja om på startsidan */}>
-            <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}>
-              <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
+          <NavigationContainer theme={theme} key={`${user?.id || 0}${offlineStart ? '-off' : ''}` /* ny profil: börja om på startsidan */}>
+            <Stack.Navigator initialRouteName={offlineStart ? 'Downloads' : 'Main'} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}>
+              <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); off.closeScope(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
               <Stack.Screen name="Library" component={LibraryScreen} />
               <Stack.Screen name="Item" component={ItemScreen} />
               <Stack.Screen name="Player" component={PlayerScreen} options={{ animation: 'fade', orientation: 'all', gestureEnabled: false }} />
@@ -105,6 +131,7 @@ export default function App() {
               <Stack.Screen name="Playlist" component={PlaylistScreen} />
               <Stack.Screen name="Book" component={BookScreen} />
               <Stack.Screen name="Podcast" component={PodcastScreen} />
+              <Stack.Screen name="Downloads">{(p) => <DownloadsScreen {...p} offline={offlineStart} onRetry={() => { setState('loading'); enter(false); }} />}</Stack.Screen>
               <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ animation: 'slide_from_bottom', presentation: 'fullScreenModal' }} />
             </Stack.Navigator>
           </NavigationContainer>

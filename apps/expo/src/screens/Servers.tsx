@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { C, R } from '../theme';
 import { removeServer, serverLabel, servers, type Server } from '../api';
 import { Button } from '../components/ui';
+import * as off from '../offline';
 
 export default function Servers({ onPick, onAdd, onChanged }: { onPick: (sv: Server) => void; onAdd: () => void; onChanged: () => void }) {
   const [asking, setAsking] = useState(''); // servern som "Ta bort?" visas för
@@ -31,7 +32,8 @@ export default function Servers({ onPick, onAdd, onChanged }: { onPick: (sv: Ser
             </Pressable>
             {asking === sv.id ? (
               <View style={st.confirm}>
-                <Button small kind="danger" label="Ta bort" onPress={async () => { await removeServer(sv.id); setAsking(''); onChanged(); }} />
+                {off.hasServerDownloads(sv.id) ? <Text style={{ color: C.dim, fontSize: 13 }}>Det nedladdade tas också bort.</Text> : null}
+                <Button small kind="danger" label="Ta bort" onPress={async () => { off.removeServer(sv.id); await removeServer(sv.id); setAsking(''); onChanged(); }} />
                 <Button small label="Avbryt" onPress={() => setAsking('')} />
               </View>
             ) : (
@@ -60,5 +62,5 @@ const st = StyleSheet.create({
   name: { color: C.text, fontSize: 16, fontWeight: '700' },
   sub: { color: C.dim, fontSize: 13, marginTop: 2 },
   trash: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  confirm: { flexDirection: 'row', gap: 6 },
+  confirm: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, maxWidth: 220 },
 });

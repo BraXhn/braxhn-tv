@@ -10,6 +10,7 @@ import { api, ensureImageToken, fmtDur, fmtTime, type Library } from '../api';
 import { bookCoverUrl, playBook, playEpisode, podImageUrl, useNowPlayingPart, type Chapter } from '../music';
 import { Button, Empty, ErrorState, Loading } from '../components/ui';
 import { Cover, Header, MiniPlayer, s as as } from '../components/audio';
+import { DownloadBook } from '../components/download';
 import { st } from './Music';
 import type { Props, Stack } from '../nav';
 
@@ -99,6 +100,7 @@ export function BookScreen({ navigation, route }: Props<'Book'>) {
               </>) : <Button kind="primary" icon="play" label={playingThis ? 'Spelas nu' : 'Spela'} onPress={() => start(b.finished ? 0 : undefined)} />}
             </View>
             {err ? <Text style={[st.dim, { color: C.err, paddingHorizontal: 14 }]}>{err}</Text> : null}
+            <DownloadBook id={b.id} cover={!!b.cover} />
             {b.description ? <Text style={bs.desc}>{b.description.replace(/<[^>]+>/g, '')}</Text> : null}
             {b.chapters.length > 1 ? <Text style={[st.h2, { marginTop: 18 }]}>Kapitel</Text> : null}
             {b.chapters.length > 1 ? b.chapters.map((c, i) => (

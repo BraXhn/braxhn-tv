@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { C, R } from '../theme';
 import { api, ensureImageToken, fmtDur, fmtTime, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem } from '../api';
 import { Art, Button, ErrorState, Loading, Shelf } from '../components/ui';
+import { DownloadSeason, DownloadVideo, EpisodeDownload } from '../components/download';
 import type { Props } from '../nav';
 
 export default function ItemScreen({ navigation, route }: Props<'Item'>) {
@@ -37,6 +38,8 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
   if (!it) return <View style={[st.root, { paddingTop: insets.top }]}>{back}<View style={st.body}><Loading /></View></View>;
 
   const show = it.kind === 'show';
+  // Avsnitten i säsongen, med serien ifylld (för Nedladdat: serie, säsong och avsnitt syns utan nät)
+  const epsOf = (n: number | null) => (it.children || []).filter((e) => (e.season ?? 0) === n).map((e) => ({ ...e, kind: 'episode', show: it.id, showTitle: e.showTitle || it.title }));
   const pos = resumeAt(it.position, it.duration);
   const nx = it.next || null;
   const nxPos = nx ? resumeAt(nx.position, nx.duration) : 0;
@@ -62,6 +65,7 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
           {!show ? <Button label={it.watched ? 'Markera som osedd' : 'Markera som sedd'} onPress={() => act(`/api/items/${it.id}/watched`, { watched: !it.watched })} /> : null}
           <Button label={it.inWatchlist ? '✓ Min lista' : '+ Min lista'} onPress={() => act(`/api/items/${it.id}/watchlist`, { add: !it.inWatchlist })} />
         </View>
+        {!show ? <View style={{ paddingHorizontal: 14 }}><DownloadVideo it={it} /></View> : null}
         {error ? <Text style={st.err}>{error}</Text> : null}
         {it.overview ? <Text style={st.overview}>{it.overview}</Text> : null}
 
@@ -76,7 +80,8 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
                 ))}
               </ScrollView>
             ) : <Text style={st.h2}>{curSeason === 0 ? 'Specialer' : `Säsong ${curSeason}`}</Text>}
-            {(it.children || []).filter((e) => (e.season ?? 0) === curSeason).map((e) => {
+            <DownloadSeason eps={epsOf(curSeason)} label={curSeason === 0 ? 'specialerna' : `säsong ${curSeason}`} />
+            {epsOf(curSeason).map((e) => {
               const p = resumeAt(e.position, e.duration);
               return (
                 <Pressable key={e.id} style={({ pressed }) => [st.ep, pressed && { backgroundColor: C.bg2 }]} onPressIn={() => warmPlay(e.id, p)} onPress={() => play(e, p)}
@@ -86,6 +91,7 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
                     <Text style={st.epT} numberOfLines={2}>{e.episode}. {e.title}</Text>
                     <Text style={st.facts}>{[fmtDur(e.duration), p > 0 ? `fortsätt från ${fmtTime(p)}` : ''].filter(Boolean).join(' · ')}</Text>
                   </View>
+                  <EpisodeDownload it={e} />
                   <Ionicons name="play-circle" size={30} color={C.accent} />
                 </Pressable>
               );

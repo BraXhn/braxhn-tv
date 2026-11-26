@@ -13,6 +13,8 @@ import { Button, Card, Empty, ErrorState, Loading, Shelf } from '../components/u
 import type { Props, Tab } from '../nav';
 import { Listen } from './Music';
 import { MiniPlayer } from '../components/audio';
+import * as off from '../offline';
+import { fmtSize, usedBytes } from '../offlinecore';
 
 const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = { movie: 'film-outline', show: 'tv-outline', music: 'musical-notes-outline', audiobook: 'book-outline', photo: 'images-outline', ebook: 'library-outline' };
 const VIDEO = (l: Library) => l.type === 'movie' || l.type === 'show';
@@ -47,7 +49,7 @@ export default function Main({ navigation, route, onLogout, onSwitch, onProfiles
         {tab === 'search' ? <Search query={query} open={open} /> : null}
         {tab === 'music' ? <Listen /> : null}
         {tab === 'list' ? <Watchlist open={open} /> : null}
-        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} /> : null}
+        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} onDownloads={() => navigation.push('Downloads')} /> : null}
       </View>
 
       <MiniPlayer />
@@ -147,8 +149,9 @@ function Watchlist({ open }: { open: (it: MediaItem) => void }) {
   return <Grid items={items} open={open} />;
 }
 
-function Account({ user, onLogout, onSwitch, onProfiles, onAdd }: { user: UserInfo | null; onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void }) {
+function Account({ user, onLogout, onSwitch, onProfiles, onAdd, onDownloads }: { user: UserInfo | null; onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void; onDownloads: () => void }) {
   const [version, setVersion] = useState('');
+  const dl = off.useDownloads();
   useEffect(() => { api<{ version?: string }>('/api/status').then((s) => setVersion(s.version || '')).catch(() => {}); }, []);
   return (
     <ScrollView contentContainerStyle={{ padding: 14, gap: 14 }}>
@@ -162,6 +165,13 @@ function Account({ user, onLogout, onSwitch, onProfiles, onAdd }: { user: UserIn
           <Button label="Logga ut" kind="danger" icon="log-out-outline" onPress={onLogout} />
         </View>
       </View>
+      {off.supported ? (
+        <View style={st.panel}>
+          <Text style={st.h2}>Nedladdat</Text>
+          <Text style={st.dim2}>{dl.length ? `${dl.length} ${dl.length === 1 ? 'titel' : 'titlar'} på telefonen (${fmtSize(usedBytes(dl))}) – spelas utan nät.` : off.mayDownload() ? 'Ladda ner filmer, avsnitt och ljudböcker på titelsidan för att se dem utan nät.' : 'Det här kontot får inte ladda ner. Det ändras i webbgränssnittet.'}</Text>
+          <View style={{ flexDirection: 'row', marginTop: 6 }}><Button label="Visa Nedladdat" icon="download-outline" onPress={onDownloads} /></View>
+        </View>
+      ) : null}
       <View style={st.panel}>
         <Text style={st.h2}>Servrar</Text>
         <Text style={st.dim2}>{servers.length > 1 ? `${servers.length} servrar är sparade. Appen frågar vilken du vill öppna när den startar.` : 'Med en enda server öppnas den direkt när appen startar. Lägger du till fler får du välja vid start.'}</Text>

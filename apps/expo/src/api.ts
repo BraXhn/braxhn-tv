@@ -95,7 +95,7 @@ export async function rememberProfile(name: string) {
 
 // ---------- profiler (som webbens "Vem tittar?") ----------
 export interface Profile { id: number; name: string; owner?: boolean; kid?: boolean; maxAge?: number | null; hasPin?: boolean; color?: string | null }
-export interface UserInfo { id: number; name: string; is_admin?: number; kid?: boolean; profiles?: number; color?: string | null }
+export interface UserInfo { id: number; name: string; is_admin?: number; kid?: boolean; profiles?: number; color?: string | null; canDownload?: boolean }
 export const listProfiles = () => api<{ current: number; profiles: Profile[] }>('/api/profiles');
 /** Byter profil. Servern tar bort den gamla inloggningen och ger en ny token för profilen, som ersätter den sparade.
  *  Barnprofilens begränsningar sköter servern efter token. Fel PIN ger ApiError med data.needPin (data.needPassword
@@ -275,6 +275,11 @@ export function fmtTime(s: number): string {
   return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`;
 }
 
+/** Ljudformat som telefonens spelare klarar – annat kodar servern om (server/music.js streamTrack, parametern a) */
+export function audioCaps(): string {
+  if (Platform.OS === 'ios') return 'mp3,aac,flac'; // AVPlayer: inte Ogg (Opus/Vorbis)
+  return 'mp3,aac,flac,opus,vorbis'; // Android (ExoPlayer) och webbläsare
+}
 /** Förmågorna appen anger för /playback – som de andra apparna gör, efter vad enhetens spelare klarar */
 export function playbackCaps(): Record<string, string> {
   if (Platform.OS === 'ios') return { c: 'mp4', v: 'h264,hevc', a: 'aac,ac3,eac3,mp3,flac,alac', hdr: '0', dv: '0', nhls: '1' };
@@ -326,6 +331,8 @@ export async function goHomeIfHere(): Promise<boolean> {
   session.server = hit || saved;
   return !!hit;
 }
+/** Hemadressen svarade inte (t.ex. en nedladdning som avbröts när man lämnade hemmet): tillbaka till den sparade */
+export function leaveHome() { if (session.saved) session.server = session.saved; }
 /** Används appen via hemadressen just nu? (visas under Konto) */
 export const viaHome = () => !!session.server && !!session.saved && session.server !== session.saved;
 AppState.addEventListener('change', (st) => {
