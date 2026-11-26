@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.1 – 2026-11-26
 - **Hemma men via den publika adressen: direkt till servern.** Den som sparat den publika adressen (reläet eller en
   domän) gick hemma ändå ut på internet och tillbaka och räknades som utanför hemmet – lägre startkvalitet, takt på
   ljudböcker och långsamma boksidor via reläet (ärende #2). Nu talar servern om sin adress på hemnätet för inloggade.
