@@ -2,6 +2,14 @@
 
 ## Ej utgiven
 
+- **Android-appen går direkt till servern hemma** (telefon, Google TV och bil), som Expo-appen sedan 1.4.1. Är appen
+  sparad med den publika adressen (reläet eller en domän) provar den serverns hemadress i bakgrunden när servern öppnas,
+  när appen kommer tillbaka och när nätet byts. Svarar den rätt går anrop, strömmar och bilder direkt dit, med hemmets
+  kvalitet, och *Inställningar* visar *Hemma: direkt via …*. Utanför hemmet, eller när hemadressen slutar svara, används
+  den sparade adressen igen och anropet görs om. Inloggningen skickas aldrig till en hemadress som inte bevisat att den är
+  just den här servern, http provas bara mot adresser i hemnätet, och byts nätet slutar appen använda hemadressen direkt.
+  Nedladdningar, *Fortsätt titta* på Google TV och bilens mediaspelare använder alltid den sparade adressen.
+
 ## 1.4.1 – 2026-11-26
 - **Hemma men via den publika adressen: direkt till servern.** Den som sparat den publika adressen (reläet eller en
   domän) gick hemma ändå ut på internet och tillbaka och räknades som utanför hemmet – lägre startkvalitet, takt på

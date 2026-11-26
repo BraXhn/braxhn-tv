@@ -878,7 +878,13 @@ från hemnätet.
 tillbaka till förgrunden hämtas `/api/local` från den sparade adressen, alla `addrs` provas samtidigt med 800 ms
 tidsgräns, och den första som svarar rätt används för allt (API, strömmar, bilder). Den sparade adressen ändras inte; ett
 nätverksfel mot hemadressen går tillbaka till den sparade och gör om anropet. Sparade adresser i hemnätet (privat IP,
-`.local`, namn utan punkt) provas inte. **iOS/tvOS och Android** gör inte detta ännu (se backlog.md).
+`.local`, namn utan punkt) provas inte.
+
+**Android-appen** (telefon, Google TV och bil, `apps/automotive/…/LocalPick.kt` + `Hemma.kt`) gör samma sak, även när
+nätet byts (ConnectivityManager). http provas bara till adresser i hemnätet (privat IP, `.local`/`.lan`/`.home`, namn
+utan punkt), och hemadressen slutar gälla så fort enhetens nät inte längre är det nät där den bekräftades. Adresser som
+lämnas till systemet (nedladdningshanteraren, Google TV:s *Fortsätt titta*, bilens mediaspelare) använder den sparade
+adressen. **iOS/tvOS** gör inte detta ännu (se backlog.md).
 
 ## Kontraktstestet
 

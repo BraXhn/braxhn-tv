@@ -83,7 +83,7 @@ object Downloads {
         val rel = st.url ?: throw ApiException(str(R.string.dl_no_link))
         val name = "${item.id}.mp4"
         val target = File(dir, name).also { it.delete() }
-        val req = DownloadManager.Request(Uri.parse(Api.absolute(rel)))
+        val req = DownloadManager.Request(Uri.parse(Api.savedAbsolute(rel))) // systemet laddar ner: den sparade adressen, som nås även utanför hemmet
             .setTitle(item.title).setDescription(ctx.getString(R.string.app_name))
             .setDestinationUri(Uri.fromFile(target))
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)

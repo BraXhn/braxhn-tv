@@ -2,7 +2,15 @@
 <!-- Tillåt http mot servern på hemnätet (använd https utanför hemmet, t.ex. Let's Encrypt eller BraXhn Relay).
      https kräver ett certifikat som enheten litar på: systemets certifikat, eller ett eget (självsignerat) certifikat/CA
      som användaren själv installerat under Inställningar → Säkerhet → Kryptering och användaruppgifter. Certifikat-
-     kontrollen stängs aldrig av. -->
+     kontrollen stängs aldrig av.
+
+     Varför klartext är tillåtet överallt och inte bara för privata adresser: domain-config tar bara värdnamn, inte
+     IP-intervall (192.168.0.0/16 m.fl. går inte att skriva), och användarna sparar servern med en IP-adress eller ett
+     namn vi inte känner till. Begränsningen görs i koden i stället:
+     - Hemadressen (Hemma.kt, LocalPick.kt) provas bara med http när den är en adress i hemnätet (privat IP,
+       .local/.lan/.home, namn utan punkt), och provet skickas utan inloggning och utan omdirigeringar.
+     - Inloggningen och bildtoken skickas bara till den sparade adressen eller till en hemadress som bevisat med
+       serverns id och proof (HMAC, bara på hemnätet) att den är just den här servern. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

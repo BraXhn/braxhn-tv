@@ -176,12 +176,13 @@ object Media {
      */
     const val TIMEOUT_MS = 60_000
 
+    /** Hemadressen (Hemma.kt): gamla adresser skrivs om, och nätverksfel mot hemadressen går tillbaka till den sparade */
     @OptIn(UnstableApi::class)
-    fun http(): DefaultHttpDataSource.Factory = DefaultHttpDataSource.Factory()
+    fun http(): androidx.media3.datasource.DataSource.Factory = Home.dataSource(DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(true)
         .setUserAgent("BraXhnTV-Android")
         .setConnectTimeoutMs(TIMEOUT_MS)
-        .setReadTimeoutMs(TIMEOUT_MS)
+        .setReadTimeoutMs(TIMEOUT_MS))
 }
 
 /**

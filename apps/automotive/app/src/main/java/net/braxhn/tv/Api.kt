@@ -27,7 +27,7 @@ import java.net.URL
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        Strings.init(this); Api.init(this)
+        Strings.init(this); Api.init(this); Home.init(this)
         Downloads.init(this)
     }
 }
@@ -116,7 +116,10 @@ object Api {
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
     private val prefs get() = ctx.getSharedPreferences("braxhn", Context.MODE_PRIVATE)
 
+    /** Adressen som används just nu: den sparade, eller serverns hemadress när appen är hemma (Hemma.kt) */
     val server = MutableStateFlow("")
+    /** Adressen som användaren sparade (inloggningen) – ändras inte av hemadressen */
+    @Volatile var saved = ""
     val token = MutableStateFlow<String?>(null)
     /** Kortlivad token som bara gäller bilder – kontots token skickas aldrig i URL:er. */
     val imageToken = MutableStateFlow<String?>(null)
@@ -155,7 +158,7 @@ object Api {
 
     fun init(c: Context) {
         ctx = c.applicationContext
-        server.value = prefs.getString("server", "") ?: ""
+        server.value = prefs.getString("server", "") ?: ""; saved = server.value
         token.value = prefs.getString("token", null)
     }
 
@@ -167,24 +170,29 @@ object Api {
         return serverAddress(input)
     }
 
-    fun url(path: String, query: Map<String, String?> = emptyMap()): String {
-        val b = Uri.parse(server.value + path).buildUpon()
+    fun url(path: String, query: Map<String, String?> = emptyMap(), base: String = server.value): String {
+        val b = Uri.parse(base + path).buildUpon()
         query.forEach { (k, v) -> if (v != null) b.appendQueryParameter(k, v) }
         return b.build().toString()
     }
 
     fun absolute(relative: String) = server.value + relative
+    /** Med den sparade adressen: för adresser som lämnas till systemet (nedladdningar, Fortsätt titta, bilens mediaspelare) */
+    fun savedAbsolute(relative: String) = saved + relative
 
-    fun imageUrl(item: MediaItem, landscape: Boolean = false): String? {
+    fun imageUrl(item: MediaItem, landscape: Boolean = false, base: String = server.value): String? {
         val type = if (landscape) when { item.thumb -> "thumb"; item.backdrop -> "backdrop"; item.poster -> "poster"; else -> null }
                    else when { item.poster -> "poster"; item.thumb -> "thumb"; else -> null }
         val t = imageToken.value ?: return null
-        return type?.let { url("/api/image/${item.id}/$it", mapOf("t" to t)) }
+        return type?.let { url("/api/image/${item.id}/$it", mapOf("t" to t), base) }
     }
 
-    private suspend fun request(path: String, method: String = "GET", query: Map<String, String?> = emptyMap(), body: JsonObject? = null): String =
+    // base: en bestämd adress (provet mot den sparade); utan base används adressen som gäller nu, med ett nytt försök
+    // via den sparade adressen när hemadressen inte svarar
+    private suspend fun request(path: String, method: String = "GET", query: Map<String, String?> = emptyMap(), body: JsonObject? = null, base: String? = null): String =
         withContext(Dispatchers.IO) {
-            val c = URL(url(path, query)).openConnection() as HttpURLConnection
+            val from = base ?: Home.base()
+            val c = URL(url(path, query, from)).openConnection() as HttpURLConnection
             try {
                 c.requestMethod = method
                 c.connectTimeout = 15000; c.readTimeout = 30000
@@ -204,7 +212,12 @@ object Api {
                     throw ApiException(msg ?: httpErrorText(code), need2fa, obj?.get("needPassword")?.jsonPrimitive?.content == "true", code)
                 }
                 text
-            } catch (e: IOException) { throw if (e is ApiException) e else netError(e) } finally { c.disconnect() }
+            } catch (e: IOException) {
+                if (e is ApiException) throw e
+                // Hemadressen svarar inte längre (t.ex. utanför hemmet nu): tillbaka till den sparade och ett nytt försök
+                if (base == null && Home.failed(from)) return@withContext request(path, method, query, body)
+                throw netError(e)
+            } finally { c.disconnect() }
         }
 
     suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T =
@@ -215,17 +228,20 @@ object Api {
     // Publik wrapper så att inline-funktionen ovan kan anropa den privata
     suspend fun requestPublic(path: String, method: String, query: Map<String, String?>, body: JsonObject?) = request(path, method, query, body)
 
+    /** GET /api/local från den sparade adressen: hemadresserna och provet (Hemma.kt) */
+    suspend fun localInfo(base: String): LocalInfo = json.decodeFromString(request("/api/local", base = base))
+
     suspend fun login(serverInput: String, name: String, password: String, code: String? = null) {
-        server.value = normalize(serverInput)
+        Home.reset(); server.value = normalize(serverInput)
         val st: ServerStatus = get("/api/status")
         if (st.needsSetup) throw ApiException(str(R.string.err_not_setup))
         val r: LoginResponse = json.decodeFromString(request("/api/login", "POST", body = buildJsonObject {
             put("name", name); put("password", password); put("app", true)
             if (!code.isNullOrBlank()) put("code", code.trim())
         }))
-        prefs.edit().putString("server", server.value).putString("token", r.token).apply()
+        prefs.edit().putString("server", server.value).putString("token", r.token).apply(); saved = server.value
         token.value = r.token
-        refreshImageToken(force = true); Session.refresh()
+        refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
     }
 
     /** Hämtar ny bildtoken (gäller 7 dygn) om den saknas eller är äldre än ett dygn. */
@@ -238,7 +254,7 @@ object Api {
     }
 
     fun clearLogin() {
-        prefs.edit().remove("token").apply(); Session.reset()
+        prefs.edit().remove("token").apply(); Session.reset(); Home.leave(); Home.reset()
         token.value = null
         imageToken.value = null
     }
@@ -283,7 +299,7 @@ object Api {
 
     /** Startar inloggning med kod: servern ger en sexsiffrig kod som godkänns från en inloggad telefon eller dator. */
     suspend fun startQuickConnect(serverInput: String): QuickConnectStart {
-        server.value = normalize(serverInput)
+        Home.reset(); server.value = normalize(serverInput)
         val st: ServerStatus = get("/api/status")
         if (st.needsSetup) throw ApiException(str(R.string.err_not_setup))
         val pm = ctx.packageManager
@@ -302,9 +318,9 @@ object Api {
         val r: QuickConnectPoll = get("/api/quickconnect/$secret")
         val t = r.token
         if (r.status == "approved" && t != null) {
-            prefs.edit().putString("server", server.value).putString("token", t).apply()
+            prefs.edit().putString("server", server.value).putString("token", t).apply(); saved = server.value
             token.value = t
-            refreshImageToken(force = true); Session.refresh()
+            refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
         }
         return r.status
     }

@@ -253,7 +253,7 @@ class MusicService : MediaLibraryService() {
     private fun trackUri(id: Int) = Uri.parse(Api.absolute("/api/music/tracks/$id/stream?a=$audioCaps&br=256"))
     private fun coverUri(albumId: Int?, has: Boolean): Uri? {
         val t = Api.imageToken.value ?: return null
-        return if (albumId != null && has) Uri.parse(Api.url("/api/music/cover/$albumId", mapOf("t" to t))) else null
+        return if (albumId != null && has) Uri.parse(Api.url("/api/music/cover/$albumId", mapOf("t" to t), Api.saved)) else null
     }
     private fun folder(id: String, title: String, sub: String? = null, art: Uri? = null, type: Int = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED) =
         MediaItem.Builder().setMediaId(id).setMediaMetadata(
@@ -282,7 +282,7 @@ class MusicService : MediaLibraryService() {
     }
     private suspend fun lib(): Int? { loadLibs(); return libId }
 
-    private fun img(path: String): Uri? { val t = Api.imageToken.value ?: return null; return Uri.parse(Api.url(path, mapOf("t" to t))) }
+    private fun img(path: String): Uri? { val t = Api.imageToken.value ?: return null; return Uri.parse(Api.url(path, mapOf("t" to t), Api.saved)) } // bilden hämtas av bilens/telefonens mediaspelare: den sparade adressen
     private fun playable(id: String, title: String, sub: String?, art: Uri?, type: Int) = MediaItem.Builder().setMediaId(id).setMediaMetadata(
         MediaMetadata.Builder().setTitle(title).setSubtitle(sub).setArtist(sub).setArtworkUri(art).setIsBrowsable(false).setIsPlayable(true).setMediaType(type).build()).build()
     private fun bookItem(b: BBook) = playable("b:${b.id}", b.title, listOfNotNull(b.author, if (b.position > 30 && !b.finished) getString(R.string.car_started) else null).joinToString(" · "),

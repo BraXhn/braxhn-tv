@@ -73,8 +73,8 @@ sealed class Screen {
 class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
-        // Automatisk offline-synk när appen öppnas eller kommer tillbaka till förgrunden
-        Downloads.autoSync()
+        // Automatisk offline-synk när appen öppnas eller kommer tillbaka till förgrunden, och provet av hemadressen
+        Downloads.autoSync(); Home.check()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -390,6 +390,7 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     var frameRate by remember { mutableStateOf(TvOutput.frameRateMode(ctx)) }
     val output = remember { if (tv) TvOutput.describe(ctx) else null }
     val donate by Session.donateUrl.collectAsState()
+    val homeVia by Home.via.collectAsState()
     val kid by Session.kid.collectAsState()
     LaunchedEffect(Unit) {
         Session.refresh()
@@ -404,7 +405,8 @@ fun SettingsScreen(push: (Screen) -> Unit) {
     }
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text(tr(R.string.nav_settings), fontSize = 26.sp, fontWeight = FontWeight.Bold) }
-        item { Text(tr(R.string.settings_server, Api.server.value), color = Color.Gray) }
+        item { Text(tr(R.string.settings_server, Api.saved), color = Color.Gray) }
+        homeVia?.let { h -> item { Text(tr(R.string.settings_home_direct, h.substringAfter("://")), color = Color.Gray, fontSize = 14.sp) } }
         item {
             OutlinedButton(onClick = { push(Screen.Profiles) }, modifier = Modifier.height(52.dp)) {
                 Icon(Icons.Filled.People, null); Spacer(Modifier.width(8.dp)); Text(tr(R.string.switch_profile), fontSize = 17.sp)

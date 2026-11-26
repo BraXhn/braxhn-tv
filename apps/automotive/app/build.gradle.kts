@@ -63,4 +63,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.8.1")
+    // Enhetstester på JVM (app/src/test): gradle testReleaseUnitTest
+    testImplementation("junit:junit:4.13.2")
 }

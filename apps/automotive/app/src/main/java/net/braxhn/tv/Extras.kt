@@ -370,7 +370,7 @@ object WatchNext {
             it.episode?.let { e -> b.setEpisodeNumber(e) }
         }
         it.overview?.let { o -> b.setDescription(o) }
-        Api.imageUrl(it, landscape = true)?.let { u -> b.setPosterArtUri(Uri.parse(u)) }
+        Api.imageUrl(it, landscape = true, base = Api.saved)?.let { u -> b.setPosterArtUri(Uri.parse(u)) } // sparas i TV:ns startsida: den sparade adressen
         val dur = it.duration
         if (dur != null && dur > 0) b.setDurationMillis((dur * 1000).toInt())
         it.position?.let { p -> if (p > 0) b.setLastPlaybackPositionMillis((p * 1000).toInt()) }

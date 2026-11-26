@@ -78,17 +78,16 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 - **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
 - **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
 
-### 6. Hemma via den publika adressen i iOS/tvOS- och Android-appen
+### 6. Hemma via den publika adressen i iOS/tvOS-appen
 
-- **Vad:** samma som Expo-appen gör (`apps/expo/src/localpick.ts`, `goHomeIfHere` i `api.ts`, docs/api.md *Hemma via
-  den publika adressen*): hämta `/api/local` från den sparade adressen, prova `addrs` med `/api/local/ping?n=` (800 ms,
+- **Vad:** samma som Expo-appen (`apps/expo/src/localpick.ts`, `goHomeIfHere` i `api.ts`) och Android-appen
+  (`apps/automotive/…/LocalPick.kt`, `Hemma.kt`) gör, docs/api.md *Hemma via den publika adressen*: hämta `/api/local` från den sparade adressen, prova `addrs` med `/api/local/ping?n=` (800 ms,
   ingen inloggning), använd hemadressen när `id` och `proof` stämmer, och gå tillbaka till den sparade vid nätverksfel.
-- **Varför:** servern och Expo-appen är klara (se *Klart*), men Google TV-appen och Apple TV-appen står oftast hemma och
-  är just de som sparats med reläets adress.
-- **Filer:** `apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt` (`server`), `apps/apple/Shared/AppModel.swift`
-  (`server`). Android byggs i GitHub Actions, Apple bara med Xcode – kontrollera först att klartext-http till en privat
-  adress är tillåten (Androids `network_security_config`, Apples ATS `NSAllowsLocalNetworking`).
-- **Klart när:** en Google TV hemma med reläets adress spelar med `remote: false` i `/api/status`, och tillbaka via reläet
+- **Varför:** servern, Expo- och Android-appen är klara (se *Klart*), men Apple TV-appen står oftast hemma och är just den
+  som sparats med reläets adress.
+- **Filer:** `apps/apple/Shared/AppModel.swift` (`server`). Apple byggs bara med Xcode – kontrollera först att klartext-http
+  till en privat adress är tillåten (ATS `NSAllowsLocalNetworking`).
+- **Klart när:** en Apple TV hemma med reläets adress spelar med `remote: false` i `/api/status`, och tillbaka via reläet
   när hemadressen inte svarar.
 
 ## Idéer
@@ -170,6 +169,15 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-26: Hemma via den publika adressen i Android-appen (telefon, Google TV, bil; punkt 6 för Android), gren
+  `team/android-hemma-2026-11-26`. Samma regler som Expo-appen: `/api/local` från den sparade adressen, alla hemadresser
+  provas samtidigt (800 ms, utan inloggning, utan omdirigeringar), används bara när `id` och `proof` stämmer exakt.
+  Provet görs när servern öppnas, i förgrunden (högst var 30:e s) och när nätet byts; hemadressen slutar gälla när
+  enhetens nät inte är det där den bekräftades. Nätverksfel → den sparade adressen och nytt försök (API, Media3 via en
+  egen DataSource, Coil). http provas bara mot adresser i hemnätet. Inställningar visar *Hemma: direkt via …*.
+  `app/src/test/…/LocalPickTest.kt` (10 fall, körda på JVM här; körs inte i workflowet). Inte provat: kompilering av hela
+  appen (ingen Android SDK – `LocalPick.kt` och `Hemma.kt` kompilerade mot Media3 1.4.1, Coil 2.7.0 och Android 14:s
+  klasser), riktig telefon, Google TV och bil, riktigt hemnät med relä.
 - 2026-11-25: Hemma via den publika adressen (förut punkt 1, ärende #2), gren `team/hemma-2026-11-25`. Servern ger
   inloggade sina hemadresser och ett prov som bara besvaras på hemnätet (`/api/local*`, `server/localaddr.js`); Expo-appen
   går direkt till hemadressen när den svarar rätt, webben har *Mitt konto → Snabbare hemma* (byte till hemadressen med

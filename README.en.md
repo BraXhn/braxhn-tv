@@ -194,11 +194,11 @@ Three ways, which can be combined:
 
 **At home but using the public address:** if you've saved the public address (the relay or your domain), traffic goes
 out to the internet and back even at home, and the server counts you as away (lower start quality, paced audiobooks).
-The **Expo app** handles this itself: it asks the server for its home-network address, tries it (at most 0.8 s) and, if
-it answers correctly, sends streams, images and API calls straight there. The **web app** can't do it automatically (an
+The **Expo app** and the **Android app** (phone, Google TV, car) handle this themselves: they ask the server for its home-network address, try it (at most 0.8 s) and, if
+it answers correctly, send streams, images and API calls straight there. The **web app** can't do it automatically (an
 https page may not fetch from an http address on the home network), so **My account → Faster at home** has an *Open the
 home address* button that switches to the server's home address and signs you in there with a one-time code. The iOS/tvOS
-and Android apps don't do this yet – save the home IP address as a separate server there. Nothing is needed in the router:
+app doesn't do this yet – save the home IP address as a separate server there. Nothing is needed in the router:
 the server learns its home address when an administrator opens it on its IP address at home, or you enter it under
 **Administration → Home address** (or `LOCAL_URL`); in Docker with bridge networking the server can't see its own
 address. This doesn't make anyone count as at home – that's still decided by the network each request comes from, and

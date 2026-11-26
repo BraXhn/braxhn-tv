@@ -57,6 +57,7 @@
     <string name="lines_indexing">Undertexterna läses in – försök igen om en stund.</string>
     <string name="lines_none">Ingen replik hittades.</string>
     <string name="settings_server">Server: %1$s</string>
+    <string name="settings_home_direct">Hemma: direkt via %1$s</string>
     <string name="settings_quality">Kvalitet</string>
     <string name="quality_auto">Automatisk</string>
     <string name="quality_original">Original</string>
