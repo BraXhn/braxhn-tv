@@ -164,6 +164,15 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   diagnostikpaketet. `test/hwprobe.test.js` (felrader från NVENC, VAAPI och QSV, rutten, riktigt prov med processorn).
   Inte provat: riktig NVENC, VAAPI eller QSV – felraderna utan hårdvara är fångade här, övriga är kända rader ur ffmpeg
   och felrapporter, och hastighetsmätningen med grafikkort är inte körd (se *Bara Anton kan göra*).
+- 2026-11-26: Expo-appen: nedladdning för offline (förut punkt 4), gren `team/expo-offline-2026-11-26`. Film, avsnitt,
+  hel säsong och ljudbok med kvalitet (480p–full upplösning, uppskattad storlek), förlopp, paus, fortsätt, avbryt och
+  försök igen; hemadressen används när den är bekräftad. *Nedladdat* (Konto) fungerar utan nät och öppnas direkt när
+  servern inte svarar vid start. Spelaren spelar den lokala filen med nedladdade textundertexter ritade ovanpå
+  (inte i telefonens helskärm). Positioner utan nät skickas med `at`; skärmtiden följer senaste status och räknar tiden
+  utan nät i telefonen. Per server och profil, tas bort vid utloggning (frågar först); titlar som profilen inte får se
+  längre tas bort när servern svarar. Nytt paket `expo-file-system`. `test/expo-offline.test.js` (18 fall, logiken och
+  `offline.ts` med låtsat filsystem och server). **Inte provat:** riktig telefon, flygplansläge, bakgrundsnedladdning i
+  Expo Go och eget bygge – *Klart när* (film i flygplansläge, positionen syns på servern efteråt) väntar på Anton.
 - 2026-11-26: Hemma via den publika adressen i Android-appen (telefon, Google TV, bil; punkt 6 för Android), gren
   `team/android-hemma-2026-11-26`. Samma regler som Expo-appen: `/api/local` från den sparade adressen, alla hemadresser
   provas samtidigt (800 ms, utan inloggning, utan omdirigeringar), används bara när `id` och `proof` stämmer exakt.
@@ -238,6 +247,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - **Gör paketet publikt** (containerimagen på GitHub).
 - **Slå på Private vulnerability reporting** i repots inställningar på GitHub.
 - **Prova Expo-appen i Expo Go** på en riktig iPhone och Android-telefon (`apps/expo/README.md`).
+- **Prova nedladdning i Expo-appen** på iPhone och Android: ladda ner en film (480p) och en ljudbok, slå på
+  flygplansläget, starta om appen (den ska öppna *Nedladdat*), titta en stund, slå av flygplansläget och kontrollera att
+  positionen syns i webben. Prova också att låsa skärmen under en nedladdning i några minuter.
 - **Prova Snabbare hemma** hemma med reläets adress: *Mitt konto → Öppna hemadressen* i webben, och Expo-appen (Konto
   visar *Hemma: direkt via …*). Står det ingen hemadress: öppna servern en gång på dess IP-adress eller ange den under
   *Administration → Hemadressen*.

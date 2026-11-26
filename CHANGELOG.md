@@ -25,6 +25,13 @@
   NVIDIA_VISIBLE_DEVICES=all*, */dev/dri saknas*, fel grupp på /dev/dri, för gammal drivrutin, format som hårdvaran
   inte klarar), och ffmpegs felrad finns i en utfällbar ruta. Provet körs med lägsta prioritet och vägrar starta när
   två eller fler strömmar omkodas. Senaste resultatet visas med datum och följer med i diagnostikpaketet.
+- **Nedladdning i Expo-appen** (backloggens punkt 4). Ladda ner filmer, avsnitt, en hel säsong och ljudböcker till
+  telefonen och titta eller lyssna utan nät. Välj kvalitet (480p räcker på telefonen) och se förlopp, pausa, fortsätt
+  och avbryt. Hemma hämtas filen direkt från servern. *Nedladdat* under Konto fungerar helt utan nät och öppnas direkt
+  när servern inte svarar. Undertexter följer med. Var du är sparas i telefonen utan nät och skickas när nätet är
+  tillbaka. Servern bestämmer vad en profil får ladda ner; skärmtiden följs utan nät så gott det går (se
+  `apps/expo/README.md`). Nedladdningarna gäller en profil och tas bort när du loggar ut. Inte provat på en riktig
+  telefon.
 - **Sök efter uppdatering i Windows-appen** (ärende #5). *Sök efter uppdatering …* i appens meny och i *Om BraXhn TV*
   visar din version och den senaste, eller *Du har den senaste versionen*; går GitHub inte att nå finns *Försök igen*.
   *Hämta och installera* laddar ner installationsfilen med förlopp och *Avbryt*, kontrollerar storleken mot GitHubs

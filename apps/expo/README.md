@@ -66,6 +66,7 @@ och sedan `npx expo install --fix`.
 - Spelaren: telefonens egen spelare med helskärm och bild-i-bild. Den fortsätter där du slutade, skickar framsteg
   till servern, hoppar över intro och går vidare till nästa avsnitt.
 - Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
+- Nedladdning av filmer, avsnitt och ljudböcker som spelas utan nät (se *Nedladdat* nedan).
 
 ## Musik, ljudböcker och poddar
 
@@ -115,6 +116,73 @@ mediakontroller). Det här vet vi från Expos dokumentation för SDK 58:
   ungefär tre minuter i bakgrunden.
 - Insticksmodulen är inställd utan mikrofon (`microphonePermission: false`, `recordAudioAndroid: false`).
 
+## Nedladdat (utan nät)
+
+Ladda ner filmer, avsnitt och ljudböcker till telefonen och titta eller lyssna utan nät – på resan eller i flygplanet.
+Kräver att kontot och profilen får ladda ner (rätten ställs in i webbgränssnittet). Utan den visas ingen knapp.
+
+- **Ladda ner** finns på titelsidan för filmer och avsnitt, som *Ladda ner säsong N* för en hel säsong, och som en liten
+  knapp på varje avsnitt (i senast valda kvalitet). Boksidan har *Ladda ner boken*.
+- **Kvalitet:** 480p (minst, räcker på telefonen), 720p, 1080p eller full upplösning, med ungefärlig storlek och hur mycket
+  plats som finns kvar. Servern gör en mobilanpassad MP4 (H.264/AAC) – *Servern förbereder filen 40 %* syns medan den
+  arbetar, sedan *Laddar ner 300 MB av 1,2 GB*. En ljudbok laddas ner i ett ljudformat telefonen spelar.
+- **Pausa, Fortsätt, Avbryt och Försök igen** på titelsidan och i Nedladdat. Försvinner nätet väntar nedladdningen och
+  fortsätter av sig själv.
+- **Hemma går det fortare:** när appen har bekräftat serverns hemadress (se *Servrar*) hämtas filen därifrån. Lämnar
+  du hemmet mitt i fortsätter den från den sparade adressen.
+- **Nedladdat** (under **Konto → Visa Nedladdat**) fungerar helt utan nät: filmer, serier (per serie och säsong) och
+  ljudböcker med omslag, var du är, storlek, *Ta bort* och *Ta bort allt*, och hur mycket plats det tar och hur mycket
+  som är ledigt. Startar appen utan kontakt med servern öppnas Nedladdat direkt, med *Försök igen*.
+- **Spelaren** spelar den nedladdade filen även när du har nät (sparar data). Undertexter som fanns som text på servern
+  laddas ner med filmen och visas ovanpå bilden; knappen uppe till höger byter spår eller stänger av. Undertexterna syns
+  inte i telefonens egen helskärm eller i bild-i-bild (expo-video kan inte lägga till egna undertextfiler). Utan nät går
+  spelaren vidare till nästa *nedladdade* avsnitt.
+- **Var du är:** med nät skickas positionen till servern som vanligt. Utan nät sparas den i telefonen och skickas med
+  tidpunkten (`at`) när servern svarar igen – en senare position från en annan enhet vinner. Nedladdat visar hur många
+  som väntar.
+- **Per server och profil:** varje profil har sina egna nedladdningar. Byter du profil syns den profilens. **Logga ut**
+  frågar först och tar sedan bort allt som laddats ner från servern; att ta bort servern ur listan gör samma sak.
+
+### Barnprofiler, skärmtid och familjefiltret
+
+Servern bestämmer, som för allt annat. Det här gäller:
+
+- **Vad som får laddas ner** kontrolleras av servern när du trycker: rätten att ladda ner, åldersgränsen, biblioteken
+  och familjefiltret (en titel med tystade svordomar laddas inte ner när filtret är påtvingat – den kan bara strömmas).
+  Appen visar serverns förklaring.
+- **När servern svarar igen** kontrollerar appen de nedladdade titlarna (högst var sjätte timme): en titel som profilen
+  inte längre får se tas bort, och får kontot inte ladda ner längre tas allt bort. Nedladdat säger vad som togs bort.
+- **Skärmtid med nät:** som vanlig uppspelning – servern räknar tiden och kan säga stopp, även för en nedladdad fil.
+- **Skärmtid utan nät:** appen använder den senaste statusen från servern (tid kvar i dag och klockslagen) och räknar
+  själv tiden som spelas utan nät. När tiden är slut eller klockslaget passerat pausar spelaren med en förklaring, och
+  filmen startar inte.
+
+Det här **kan inte** upprätthållas utan nät:
+
+- Tiden som spelats utan nät räknas bara i telefonen. Servern räknar inte framsteg som skickas i efterhand (med `at`),
+  så den tiden syns inte i föräldraöversikten och minskar inte tiden kvar på andra enheter.
+- En ny dag utan nät gäller samma dagliga gräns och klockslag som senast, utan extra tid – veckodagarnas egna regler och
+  ändringar som en vuxen gjort efteråt känner appen inte till förrän den har nät igen.
+- En vuxen kan inte stoppa uppspelningen på distans, och en åldersgräns som sänkts gäller nedladdade titlar först när
+  servern svarar.
+- Telefonens klocka går att ställa om.
+- Startar appen utan nät visas nedladdningarna för den profil som senast var inloggad – byta profil kräver servern.
+
+### Bakgrund: Expo Go mot eget bygge
+
+Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Expos dokumentation för SDK 58 – **inget av det
+är provat på en riktig telefon**:
+
+- **iPhone:** nedladdningen körs i en bakgrundssession (`sessionType: 'background'`, standard), så filen ska laddas
+  vidare när appen ligger i bakgrunden. I ett eget bygge är det appens egen session; om det fungerar likadant inuti Expo
+  Go är inte kontrollerat. Stängs appen helt (eller av systemet) kommer appen inte
+  åt den pågående nedladdningen igen; den börjar om, om den inte pausats (då sparas iPhones läge och den fortsätter).
+- **Android:** filen hämtas av appen själv (OkHttp) och fortsätter så länge appen lever. Android kan stoppa appen en
+  stund efter att den hamnat i bakgrunden – det finns ingen förgrundstjänst för nedladdningar, varken i Expo Go eller i ett
+  eget bygge med den här koden. Nästa gång appen öppnas fortsätter filen där den slutade (Range från filens längd, med en
+  ny länk från servern).
+- Länken till filen gäller ett dygn. Har en pausad nedladdning legat längre börjar den om med en ny länk.
+
 ## Snabb start
 
 - Appen skickar startpositionen till servern, så att strömmen förbereds på rätt ställe (korta segment där).
@@ -125,7 +193,8 @@ mediakontroller). Det här vet vi från Expos dokumentation för SDK 58:
 - Expo Go spelar video med telefonens egen spelare. MKV, DTS och liknande kan den inte spela direkt, så servern
   packar om eller kodar om dem – precis som för webbappen. För att spela allt direkt krävs en egen spelare, och en
   sådan går inte att ladda i Expo Go.
-- Live-TV och nedladdning finns inte i den här appen än. Musik, ljudböcker och poddar finns (se ovan), men utan
+- Live-TV finns inte i den här appen än. Nedladdning finns (se *Nedladdat*), men utan automatisk synk av följda serier
+  (`/api/offline/sync`, som Android-appen har) och utan musikalbum. Musik, ljudböcker och poddar finns (se ovan), men utan
   nästa/föregående på låsskärmen, utan helt glapplösa låtbyten och utan jämn ljudnivå (ReplayGain), övertoning,
   sovtimer, låttexter, bokmärken och redigering av spellistor – det finns i webben.
 - Undertexter och val av ljudspår sköts av telefonens spelare, för de spår som strömmen innehåller.
@@ -140,8 +209,15 @@ mediakontroller). Det här vet vi från Expos dokumentation för SDK 58:
   *Vem tittar?*). Ljudet: `src/music.ts` (spelarna, kön mot `/api/me/queue`, böckernas och poddarnas position –
   utanför React), `src/components/audio.tsx` (omslag, låtrader, minispelaren), `src/screens/Music.tsx` (fliken Musik,
   album, artist, spellista), `src/screens/Books.tsx` (ljudböcker och poddar) och `src/screens/NowPlaying.tsx`
-  (helskärmsspelaren).
-- Paket utöver mallen: `expo-audio` (ljudspelaren, låsskärmen och bakgrundsljudet). Lägg till paket med
+  (helskärmsspelaren). Nedladdat: `src/offlinecore.ts` (logiken utan filsystem: poster, kö, väntande positioner,
+  undertexter, skärmtid utan nät – inga importer), `src/offline.ts` (filerna, `DownloadTask`, serveranropen),
+  `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat).
+- Testerna för nedladdningen ligger i repots `test/expo-offline.test.js` och körs med Node (22.18 eller senare läser
+  TypeScript): `node --test test/expo-offline.test.js` i repots rot. `offlinecore.ts` testas direkt, `offline.ts` med ett
+  låtsat filsystem och en låtsad server (`test/helpers/expo-loader.mjs`, `expo-fakes.mjs`) – telefonens riktiga filsystem
+  och nedladdning provas inte där.
+- Paket utöver mallen: `expo-audio` (ljudspelaren, låsskärmen och bakgrundsljudet) och `expo-file-system` (filerna i
+  Nedladdat och nedladdningen med paus, fortsätt och förlopp – ingår i Expo Go). Lägg till paket med
   `npx expo install`, så att versionen passar Expo SDK.
 - I webbläget (`npx expo start --web` eller exporten) måste appen och servern ha samma adress, eftersom servern inte
   tillåter anrop från andra webbplatser till `/api/`. Lägg exporten bakom en enkel proxy som skickar `/api/` vidare
