@@ -29,9 +29,11 @@ concurrency:
 jobs:
   build:
     # Efter Docker-flödet: bara när det gav ut en version (Run workflow) och lyckades
+    # Utgåvor som inte är appens (libmpv-* från flödet libmpv) hoppas över
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'workflow_dispatch')
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'workflow_dispatch')) &&
+      (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
     runs-on: windows-latest
     defaults:
       run:
@@ -56,7 +58,7 @@ jobs:
             workflow_run)
               # Utgåvan som Docker-flödet nyss skapade för den här commiten (versionen kan ha -beta.N)
               for i in $(seq 1 10); do
-                TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" --jq ".[] | select(.target_commitish == \"$RUN_SHA\") | .tag_name" | head -1)
+                TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" --jq ".[] | select(.target_commitish == \"$RUN_SHA\" and (.tag_name | startswith(\"v\"))) | .tag_name" | head -1)
                 [ -n "$TAG" ] && break; sleep 15
               done
               [ -n "$TAG" ] || { echo "::error::Hittade ingen utgåva för $RUN_SHA."; exit 1; } ;;
@@ -75,28 +77,35 @@ jobs:
         run: >
           dotnet publish apps/windows/BraXhnTV/BraXhnTV.csproj -c Release -r win-x64 --self-contained
           -p:PublishSingleFile=true -p:Version=${{ steps.v.outputs.version }} -o apps/windows/ut/app
-      # Den inbyggda spelaren (mpv): libmpv-2.dll läggs bara med när ägaren valt en LGPL-byggnad med fast adress och
-      # kontrollsumma (repo-variablerna LIBMPV_URL och LIBMPV_SHA256, se apps/windows/README.md). Annars spelar
-      # webbspelaren, och mpv kan läggas till för hand i %LOCALAPPDATA%\BraXhnTV\mpv.
-      - name: libmpv (bara om LIBMPV_URL och LIBMPV_SHA256 är satta)
-        if: vars.LIBMPV_URL != '' && vars.LIBMPV_SHA256 != ''
+      # Den inbyggda spelaren (mpv): libmpv-2.dll från vår egen förhandsutgåva (flödet libmpv bygger den som LGPL).
+      # Taggen och zip-filens SHA-256 står i apps/windows/libmpv.json. Är de tomma byggs installationsfilen utan mpv
+      # (då spelar webbspelaren, och mpv kan läggas till för hand i %LOCALAPPDATA%\BraXhnTV\mpv).
+      - name: libmpv (LGPL, från utgåvan i apps/windows/libmpv.json)
         shell: pwsh
-        env:
-          URL: ${{ vars.LIBMPV_URL }}
-          SHA: ${{ vars.LIBMPV_SHA256 }}
         run: |
-          $f = Join-Path $env:RUNNER_TEMP 'libmpv.7z'
-          Invoke-WebRequest -Uri $env:URL -OutFile $f
+          $j = Get-Content apps\windows\libmpv.json -Raw | ConvertFrom-Json
+          if (-not $j.tagg -or -not $j.fil -or -not $j.sha256) {
+            Write-Output "::warning::apps/windows/libmpv.json saknar tagg, fil eller sha256 – installationsfilen byggs utan den inbyggda spelaren."
+            exit 0
+          }
+          if ($j.tagg -notmatch '^libmpv-[0-9A-Za-z.-]+$' -or $j.fil -notmatch '^[0-9A-Za-z._-]+\.zip$' -or $j.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "Konstiga värden i apps/windows/libmpv.json" }
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$($j.tagg)/$($j.fil)"
+          $f = Join-Path $env:RUNNER_TEMP $j.fil
+          Invoke-WebRequest -Uri $url -OutFile $f
           $h = (Get-FileHash $f -Algorithm SHA256).Hash
-          if ($h -ne $env:SHA.Trim().ToUpper()) { throw "Kontrollsumman för libmpv stämmer inte: $h (väntade $($env:SHA))" }
+          if ($h -ne $j.sha256.Trim().ToUpper()) { throw "Kontrollsumman för libmpv stämmer inte: $h (väntade $($j.sha256))" }
+          $x = Join-Path $env:RUNNER_TEMP 'libmpv'
+          Expand-Archive $f -DestinationPath $x -Force
+          $dll = Get-ChildItem $x -Recurse -Filter libmpv-2.dll | Select-Object -First 1
+          if (-not $dll) { throw "libmpv-2.dll fanns inte i arkivet" }
           $out = 'apps\windows\ut\mpv'
           New-Item -ItemType Directory -Force $out | Out-Null
-          7z e $f libmpv-2.dll -r "-o$out" -y | Out-Host
-          if (-not (Test-Path "$out\libmpv-2.dll")) { throw "libmpv-2.dll fanns inte i arkivet" }
-          # Licenstexterna (LGPL 2.1 och 3, GPL 3 som LGPL 3 bygger på) följer med installationen
-          foreach ($l in 'lgpl-2.1', 'lgpl-3.0', 'gpl-3.0') { Invoke-WebRequest -Uri "https://www.gnu.org/licenses/$l.txt" -OutFile "$out\$l.txt" }
-          Copy-Item apps\windows\installer\mpv-licens.txt "$out\mpv-licens.txt"
-          Add-Content "$out\mpv-licens.txt" "`nArkiv: $($env:URL)`nSHA-256: $h"
+          # libmpv-2.dll, licenstexterna (LGPL 2.1 och 3, GPL 3 som LGPL 3 bygger på), KALLOR.txt och mpv-licens.txt,
+          # och mappen licenser med varje inbyggt biblioteks licens
+          Copy-Item "$($dll.DirectoryName)\*" $out -Recurse -Exclude include
+          Copy-Item apps\windows\installer\mpv-licens.txt "$out\mpv-licens.txt" -Force
+          Add-Content "$out\mpv-licens.txt" "`n$url`nSHA-256: $h"
+          Get-ChildItem $out -Recurse | Format-Table FullName, Length
       - name: Microsofts installerare för WebView2 (används bara om WebView2 saknas)
         shell: pwsh
         run: |

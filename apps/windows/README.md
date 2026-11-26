@@ -140,8 +140,17 @@ Windows felmeddelande / laddad), om processorn saknar AVX2, och var loggen ligge
 en `libmpv-2.dll` i en egen process innan den laddas, så att en `-v3`-fil inte kan krascha appen. *Kopiera felsökningsinformation* lägger allt detta och slutet av loggen i
 urklipp, så att det kan klistras in i *Feedback* i webbappen. Loggen är `%LOCALAPPDATA%\BraXhnTV\logg.txt` (högst
 256 kB; strömlänkar och token skrivs aldrig dit).
+### mpv i installationsfilen
 
-### Licensen (för den som ger ut appen)
+`libmpv-2.dll` följer med installationsfilen när `apps/windows/libmpv.json` pekar på en färdig byggnad (se *Bygga om
+libmpv* nedan). Annars byggs installationsfilen utan den, och webbspelaren spelar allt som förut. *Om den inbyggda
+spelaren …* i fönstermenyn visar om mpv finns.
+
+Du kan också lägga en egen `libmpv-2.dll` i `%LOCALAPPDATA%\BraXhnTV\mpv\` (skriv adressen i Utforskarens
+adressfält; skapa mappen `mpv` om den saknas – *Om den inbyggda spelaren …* har en knapp som öppnar mappen) och starta
+om appen. Appen tar i första hand filen i sin egen mapp (den som följde med installationen) och annars din.
+
+### Licensen
 
 - Appen packar upp mpv-arkivet med [SharpCompress](https://github.com/adamhathcock/sharpcompress) (7z, MIT-licens,
   inbyggd i `BraXhnTV.exe`) och .NET:s egen `System.IO.Compression` (zip). SharpCompress licenstext:
@@ -154,16 +163,55 @@ urklipp, så att det kan klistras in i *Feedback* i webbappen. Loggen är `%LOCA
 - **GPL-byggnaderna får inte läggas i installationsfilen.** shinchiro/mpv-winbuild-cmake (reserven på SourceForge ovan)
   bygger FFmpeg med `--enable-gpl` (x264, x265 m.fl.) och mpv utan `-Dgpl=false`, alltså GPL. Att ladda ner den själv
   för egen användning är fritt; att sprida den tillsammans med en MIT-app är det inte utan att hela appen följer GPL.
-- **LGPL-byggnaden finns:** zhongfly/mpv-winbuild ger ut `mpv-dev-lgpl-x86_64-…7z` (mpv LGPL 2.1+ med FFmpeg LGPL 3
-  inbyggt). Men byggaren skriver själv att han inte kan garantera att allt som inte är LGPL är avstängt, och
-  utgåvorna sparas bara i 30 dagar – en fast adress med kontrollsumma slutar då fungera inom en månad.
-- **Vad som krävs för att lägga den i installationsfilen:** (1) att ägaren godtar zhongflys LGPL-byggnad (eller
-  bygger en egen med `-Dgpl=false` och FFmpeg utan `--enable-gpl`), (2) en kopia av arkivet på en plats som finns kvar,
-  t.ex. en egen utgåva i det här repot, (3) att källkoden för exakt den byggnaden (mpv, FFmpeg och de inbyggda
-  biblioteken i de versioner arkivet anger) hålls tillgänglig så länge filen sprids (LGPL 3 / GPL 3 avsnitt 6), och
-  (4) repo-variablerna `LIBMPV_URL` (arkivets adress) och `LIBMPV_SHA256` (dess SHA-256) under *Settings → Secrets
-  and variables → Actions → Variables*. Då lägger flödet `libmpv-2.dll`, licenstexterna (LGPL 2.1, LGPL 3, GPL 3) och
-  `mpv-licens.txt` i installationen (mappen `mpv-licens`). Utan variablerna byggs installationsfilen utan mpv.
+- BraXhn TV är MIT. `libmpv-2.dll` laddas som en egen fil när appen kör (dynamisk länkning) och kan bytas ut av
+  användaren – det är det LGPL kräver av ett program som använder ett LGPL-bibliotek.
+- **Vi bygger libmpv själva som LGPL** (flödet *libmpv*, `apps/windows/libmpv/bygg.sh`): mpv med `-Dgpl=false`, FFmpeg
+  utan `--enable-gpl` och `--enable-nonfree`, och bara bibliotek med LGPL-förenliga licenser:
+
+  | Del | Licens | Varför |
+  |---|---|---|
+  | mpv | LGPL 2.1+ | spelaren (bara libmpv, inte mpv.exe) |
+  | FFmpeg | LGPL 2.1+ | avkodning, D3D11VA/DXVA2 (grafikkortet), https (Schannel) |
+  | libplacebo | LGPL 2.1+ | bildbehandlingen (`vo=gpu-next`), HDR och Dolby Vision |
+  | GNU FriBidi | LGPL 2.1+ | höger-till-vänster-text i undertexter |
+  | libass | ISC | ASS/SSA-undertexter (typsnitt via DirectWrite) |
+  | FreeType, HarfBuzz | FTL, MIT | typsnitt för undertexterna |
+  | dav1d | BSD 2 | AV1 |
+  | Little CMS | MIT | färghantering (ICC-profiler) |
+  | Lua 5.2 | MIT | mpv:s reglage (OSC) |
+  | shaderc, SPIRV-Tools, SPIRV-Cross, glslang, SPIRV-Headers | Apache 2.0, BSD 3, MIT | Direct3D 11-utritningen |
+  | zlib | zlib | komprimerade MKV-spår |
+
+  Inget av x264, x265, libpostproc, GPL-filter, fdk-aac, DVD/Blu-ray eller rubberband är med. Eftersom delar under
+  Apache 2.0 är inbyggda sprids filen som helhet under **LGPL 3** (mpv och FFmpeg tillåter "2.1 eller senare").
+- **Flödet faller om något GPL kommit med:** FFmpegs `configure` måste säga `License: LGPL version 2.1 or later`
+  (`CONFIG_GPL 0`, `CONFIG_NONFREE 0`, inget GPL-bibliotek påslaget), mpv måste ha `gpl=false` (`HAVE_GPL 0`), och i den
+  färdiga `libmpv-2.dll` ska varje FFmpeg-del säga `license: LGPL version 2.1 or later` och mpv:s byggrad innehålla
+  `-Dgpl=false`. Filen får inte behöva några andra DLL-filer än Windows egna.
+- **Källkoden** ligger i samma utgåva som filen (`libmpv-<version>-<datum>-kallkod.tar`: varje källa som oförändrat
+  arkiv plus byggskripten), och `KALLOR.txt` i zip-filen listar exakta versioner med sha256/commit. Utgåvan tas inte
+  bort, så källkoden finns kvar så länge filen sprids (LGPL 3 / GPL 3 avsnitt 6).
+- Installationsfilen visar licenssidan (`installer/licens.txt`: MIT för appen, LGPL för spelaren) och lägger
+  `libmpv-2.dll` i appens mapp och licenstexterna (LGPL 2.1, LGPL 3, GPL 3), `mpv-licens.txt`, `KALLOR.txt` och varje
+  biblioteks licens (`licenser\`) i mappen `mpv-licens`.
+- GPL-byggnaderna (shinchiro/mpv-winbuild-cmake på SourceForge) får inte läggas i installationsfilen – att ladda ner dem
+  för egen del är fritt.
+
+### Bygga om libmpv (ny mpv-version)
+
+1. På GitHub: *Actions* → **libmpv** → *Run workflow*. Lämna *mpv-version* tom för versionen i
+   `apps/windows/libmpv/kallor.txt`. För en annan version: skriv versionen (t.ex. `0.43.0`) och taggens commit
+   (`git ls-remote https://github.com/mpv-player/mpv 'refs/tags/v0.43.0^{}'`) – eller, bättre, ändra raden i
+   `kallor.txt` så att den versionen gäller framöver.
+2. Första gången tar det en till två timmar (beroendena cachas till nästa gång). Flödet skapar förhandsutgåvan
+   `libmpv-<version>-<datum>` med zip-filen, källkodsarkivet och `…-SHA256SUMS.txt`. Den blir aldrig *Latest*, så
+   serverns och appens uppdateringskoll ser den inte.
+3. Öppna körningens sammanfattning och kopiera raderna till `apps/windows/libmpv.json` (`tagg`, `fil`, `sha256`).
+   Checka in. Nästa installationsfil (flödet *Windows-app*) hämtar filen därifrån och kontrollerar SHA-256.
+4. Ta inte bort äldre libmpv-utgåvor så länge någon installationsfil som använder dem finns kvar – källkoden ligger där.
+
+Andra beroenden byts på samma sätt: ändra version, adress och sha256 (eller commit) i `kallor.txt` och kör flödet.
+Bygget går också att köra lokalt på Ubuntu 24.04 med samma paket som i flödet: `apps/windows/libmpv/bygg.sh <mapp>`.
 
 ## Var sparas vad?
 
@@ -175,6 +223,7 @@ urklipp, så att det kan klistras in i *Feedback* i webbappen. Loggen är `%LOCA
 - `mpv\` – `libmpv-2.dll` som appen hämtat (eller du lagt där), `kalla.json` (vilket arkiv och när), `licens\`,
   och `input.conf` (den inbyggda spelarens tangenter för appen).
 - `logg.txt` – vad den inbyggda spelaren och serverkontrollen gjorde (högst 256 kB).
+- `mpv\` – `libmpv-2.dll` om du lagt den där själv, och `input.conf` (den inbyggda spelarens tangenter för appen).
 
 *Starta med Windows* är en rad i `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (av som standard).
 
@@ -202,6 +251,10 @@ testad, men **ingenting är provat på en riktig Windows-dator**. Särskilt:
 - **Hämtningen av mpv i Windows:** dialogrutorna, förloppet, omdirigeringen från GitHub/SourceForge till filen, att
   den hämtade DLL:en laddas utan omstart och bytet vid nästa start. Valet i SourceForge-listan, kontrollen av
   arkiven, uppackningen (även av ett riktigt arkiv från SourceForge), PE-kontrollen och loggen är testade på Linux.
+- **Vår egen libmpv-2.dll** (flödet *libmpv*): bygget och LGPL-kontrollerna är körda lokalt på Ubuntu 24.04 med samma
+  skript (mpv 0.42.0, FFmpeg 9.0.2; filen blir ungefär 50 MB, zip-filen 21 MB), men filen är inte provad i Windows,
+  och flödet är inte kört på GitHub. Windows medieruta från mpv (`media-controls`, SMTC) är inte med: den kräver
+  C++/WinRT-huvuden som Ubuntus MinGW saknar – appens egen medieruta via WebView2 påverkas inte.
 
 Hittar du fel: *Ladda ner diagnostik* i webbappen fungerar som vanligt, och *Om BraXhn TV* i fönstermenyn visar
 appens och WebView2:s version.
@@ -263,4 +316,10 @@ the same look and features as the web app, with hardware video decoding and HEVC
   ↑/↓, F/F11, Esc, Q, M, N, S, A, I and media keys. mpv's own OSC is off.
 - **Right-click** shows the app menu instead of the browser menu (text fields keep cut/copy/paste); DevTools are off
   unless `"DevTools": true` in `installningar.json` or `BRAXHN_DEVTOOLS=1`.
+  and Watch together use the web player. Settings in the window menu: *Use the built-in player* (on), *Send audio
+  untouched to the receiver*, *Match the display refresh rate*. libmpv is **built by us as LGPL** (workflow
+  *libmpv*: mpv `-Dgpl=false`, FFmpeg without `--enable-gpl`/`--enable-nonfree`, only LGPL-compatible libraries; the
+  workflow fails if anything GPL slips in) and published with its full source in a `libmpv-<version>-<date>`
+  pre-release. `apps/windows/libmpv.json` names the release and SHA-256 the installer uses; rebuild with *Actions →
+  libmpv → Run workflow* and copy the values from the run summary.
 - **Not yet tested on real Windows** – it compiles and its logic tests pass, but everything that needs Windows is untried.

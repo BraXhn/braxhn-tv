@@ -46,7 +46,7 @@ public static class MpvSource
     public static string DownloadUrl(string name) => FilesPage + Uri.EscapeDataString(name) + "/download";
 
     /// <summary>
-    /// Den egna byggnaden ur libmpv.json: { "tag": "libmpv-…", "zip": "&lt;filnamn eller adress&gt;", "sha256": "…" }.
+    /// Den egna byggnaden ur libmpv.json: { "tagg": "libmpv-…", "fil": "&lt;filnamn&gt;", "sha256": "…" } (även "tag"/"zip" godtas).
     /// null om filen saknas eller inte ser rätt ut (då används reserven). En adress måste peka på en utgåva i
     /// BraXhn/braxhn-tv; ett filnamn blir en adress i utgåvan med taggen.
     /// </summary>
@@ -59,7 +59,8 @@ public static class MpvSource
             var r = doc.RootElement;
             if (r.ValueKind != JsonValueKind.Object) return null;
             string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "").Trim() : "";
-            var tag = S("tag"); var zip = S("zip"); var sha = S("sha256").ToLowerInvariant();
+            // båda stavningarna godtas (flödet skriver tagg/fil)
+            var tag = S("tag"); if (tag == "") tag = S("tagg"); var zip = S("zip"); if (zip == "") zip = S("fil"); var sha = S("sha256").ToLowerInvariant();
             if (!Regex.IsMatch(tag, @"^libmpv-[0-9A-Za-z.\-]+$") || !Regex.IsMatch(sha, "^[0-9a-f]{64}$")) return null;
             string url, name;
             if (zip.StartsWith("https://", StringComparison.Ordinal))

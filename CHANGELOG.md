@@ -41,6 +41,14 @@
   den sparade adressen igen och anropet görs om. Inloggningen skickas aldrig till en hemadress som inte bevisat att den är
   just den här servern, http provas bara mot adresser i hemnätet, och byts nätet slutar appen använda hemadressen direkt.
   Nedladdningar, *Fortsätt titta* på Google TV och bilens mediaspelare använder alltid den sparade adressen.
+- **Windows-appen: mpv kan följa med i installationsfilen.** Vi bygger libmpv själva som LGPL i ett eget flöde
+  (*Actions → libmpv → Run workflow*): mpv med `-Dgpl=false`, FFmpeg utan `--enable-gpl` och `--enable-nonfree` och
+  bara LGPL-förenliga bibliotek (libplacebo, libass, FreeType, HarfBuzz, FriBidi, dav1d, Little CMS, Lua, shaderc och
+  SPIRV-Cross för Direct3D 11), med hårdvaruavkodning (D3D11VA/DXVA2). Flödet faller om något GPL kommit med, och
+  lägger `libmpv-2.dll`, licenstexterna, en lista med exakta källversioner och hela källkoden i en egen förhandsutgåva
+  (`libmpv-<version>-<datum>`) som inte blir *Latest* och inte syns i uppdateringskollen. Windows-flödet hämtar filen
+  därifrån (tagg och SHA-256 i `apps/windows/libmpv.json`, i stället för repo-variablerna `LIBMPV_URL`/`LIBMPV_SHA256`)
+  och installationsfilen har en licenssida. Windows-flödet hoppar nu över libmpv-utgåvorna. Se `apps/windows/README.md`.
 
 ## 1.4.1 – 2026-11-26
 - **Hemma men via den publika adressen: direkt till servern.** Den som sparat den publika adressen (reläet eller en

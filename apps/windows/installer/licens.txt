@@ -1,0 +1,36 @@
+﻿BraXhn TV för Windows / BraXhn TV for Windows
+=============================================
+
+BraXhn TV är fri programvara under MIT-licensen nedan. Du behöver inte godkänna något för att använda appen;
+sidan visar villkoren för att sprida den vidare.
+BraXhn TV is free software under the MIT licence below.
+
+Den inbyggda spelaren (libmpv-2.dll), när den följer med, är mpv med FFmpeg byggd som LGPL-variant (inga
+GPL-delar) och sprids under GNU Lesser General Public License version 3. Den är en egen fil som du får byta ut.
+Licenstexterna, varje inbyggt biblioteks licens och var källkoden finns hamnar i mappen mpv-licens i appens mapp
+(mpv-licens.txt).
+The built-in player (libmpv-2.dll), when included, is mpv with FFmpeg built as the LGPL variant (no GPL parts),
+distributed under the GNU LGPL version 3 as a separate, replaceable file. Licence texts and where to get the
+source code are installed in the mpv-licens folder (mpv-licens.txt).
+
+MIT License
+
+Copyright (c) 2026 BraXhn TV contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

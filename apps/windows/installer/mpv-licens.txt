@@ -1,21 +1,40 @@
 Den inbyggda spelaren i BraXhn TV för Windows / The built-in player in BraXhn TV for Windows
 ===========================================================================================
 
-libmpv-2.dll är mpv (https://mpv.io), byggd som LGPL-variant: mpv under GNU Lesser General Public License 2.1
-eller senare, med FFmpeg (https://ffmpeg.org) under LGPL 3 inbyggt. Licenstexterna ligger i den här mappen
-(lgpl-2.1.txt, lgpl-3.0.txt och gpl-3.0.txt, som LGPL 3 bygger på).
+libmpv-2.dll är mpv (https://mpv.io) med FFmpeg (https://ffmpeg.org) och några bibliotek inbyggda. Vi bygger den
+själva som LGPL-variant: mpv med -Dgpl=false och FFmpeg utan --enable-gpl och --enable-nonfree, så inga GPL-delar
+är med. Bygget görs av GitHub Actions (flödet libmpv i https://github.com/BraXhn/braxhn-tv) med skriptet
+apps/windows/libmpv/bygg.sh.
 
-BraXhn TV (MIT-licens) använder libmpv-2.dll som en separat fil som laddas när appen kör. Du får byta ut filen mot
-en egen byggnad av libmpv: lägg den i appens mapp (%LOCALAPPDATA%\Programs\BraXhn TV) eller i
+Licensen
+- mpv: GNU Lesser General Public License (LGPL) version 2.1 eller senare.
+- FFmpeg och libplacebo: LGPL version 2.1 eller senare. GNU FriBidi: LGPL version 2.1 eller senare.
+- Inbyggda bibliotek under friare licenser: libass (ISC), FreeType (FreeType License), HarfBuzz (MIT), dav1d
+  (BSD 2), Little CMS (MIT), Lua (MIT), zlib (zlib), shaderc, SPIRV-Tools och SPIRV-Cross (Apache 2.0), glslang
+  (BSD 3 m.fl.), SPIRV-Headers (MIT) och körtidsdelarna från MinGW-w64/GCC.
+- Eftersom delar under Apache 2.0 är inbyggda sprids libmpv-2.dll som helhet under LGPL version 3 (mpv och FFmpeg
+  tillåter "version 2.1 eller senare"). Licenstexterna ligger i den här mappen: lgpl-3.0.txt, lgpl-2.1.txt och
+  gpl-3.0.txt (som LGPL 3 bygger på). Varje biblioteks egen licens ligger i mappen licenser, och exakt vilka
+  versioner som är med står i KALLOR.txt.
+
+Dina rättigheter
+BraXhn TV (MIT-licens) använder libmpv-2.dll som en separat fil som laddas när appen startar. Du får byta ut filen
+mot en egen eller ändrad byggnad av libmpv: lägg den i appens mapp (%LOCALAPPDATA%\Programs\BraXhn TV) eller i
 %LOCALAPPDATA%\BraXhnTV\mpv och starta om appen.
 
-Källkoden: mpv https://github.com/mpv-player/mpv och FFmpeg https://git.ffmpeg.org/ffmpeg.git, i de versioner som
-arkivets namn anger (git-hash), byggda med skripten som anges nedan. Hör av dig via
-https://github.com/BraXhn/braxhn-tv/issues om du vill ha källkoden för exakt den här filen.
+Källkoden
+Hela källkoden till exakt den här filen ligger i samma GitHub-utgåva som filen (adressen står sist i den här
+filen): libmpv-<version>-<datum>-kallkod.tar, med alla källor som oförändrade arkiv och byggskripten. Alla utgåvor
+med libmpv: https://github.com/BraXhn/braxhn-tv/releases (taggar som börjar med libmpv-). Hittar du den inte, hör
+av dig via https://github.com/BraXhn/braxhn-tv/issues så skickar vi den.
 
-libmpv-2.dll is mpv (https://mpv.io) built as the LGPL variant: mpv under the GNU Lesser General Public License 2.1
-or later, with FFmpeg (https://ffmpeg.org) under LGPL 3 built in. The licence texts are in this folder. BraXhn TV
-(MIT licence) loads libmpv-2.dll as a separate file at run time; you may replace it with your own build of libmpv.
-Source code: see above, or ask via https://github.com/BraXhn/braxhn-tv/issues for the source of this exact file.
+English
+libmpv-2.dll is mpv (LGPL 2.1 or later) with FFmpeg (LGPL 2.1 or later) and the libraries listed above built in.
+We build it ourselves as the LGPL variant (mpv -Dgpl=false, FFmpeg without --enable-gpl/--enable-nonfree) with
+GitHub Actions. Because Apache-2.0 parts are built in, the file as a whole is distributed under the LGPL version 3.
+The licence texts are in this folder, each library's licence in the licenser folder and the exact source versions
+in KALLOR.txt. BraXhn TV (MIT licence) loads libmpv-2.dll as a separate file at run time; you may replace it with
+your own or a modified build. The complete source for this exact file (libmpv-<version>-<date>-kallkod.tar) is in
+the same GitHub release as the file (address below), or ask via https://github.com/BraXhn/braxhn-tv/issues.
 
 Den här filen kom från / This file came from:

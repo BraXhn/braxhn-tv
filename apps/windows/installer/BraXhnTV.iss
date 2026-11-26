@@ -47,6 +47,9 @@ UninstallDisplayName=BraXhn TV
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Licenssidan: MIT för appen och LGPL för den inbyggda spelaren. En informationssida (inget "Jag godkänner"):
+; varken MIT eller LGPL kräver att användaren godkänner något för att använda programmet.
+InfoBeforeFile=licens.txt
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=no
@@ -81,9 +84,11 @@ Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterin
 #endif
 
 #if HasMpv
-; Den inbyggda spelaren: libmpv (LGPL) som egen fil, så att den kan bytas ut, och licenstexterna
+; Den inbyggda spelaren: libmpv (LGPL) som egen fil, så att den kan bytas ut, licenstexterna, KALLOR.txt (exakta
+; källversioner) och varje inbyggt biblioteks licens (mappen licenser)
 Source: "{#MpvDir}\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MpvDir}\*.txt"; DestDir: "{app}\mpv-licens"; Flags: ignoreversion
+Source: "{#MpvDir}\licenser\*"; DestDir: "{app}\mpv-licens\licenser"; Flags: ignoreversion skipifsourcedoesntexist
 #endif
 
 [Icons]
