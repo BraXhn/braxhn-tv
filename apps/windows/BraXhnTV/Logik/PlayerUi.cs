@@ -7,11 +7,17 @@ public enum PlayerAction
 {
     None, TogglePause, Back10, Forward10, VolumeUp, VolumeDown, Mute, Fullscreen, Escape, Close, Next,
     ToggleSubs, CycleAudio, Stats, Stop,
+    /// <summary>Enter/OK: hoppa över introt eller starta nästa avsnitt när knappen eller kortet visas, annars spela/paus</summary>
+    Confirm,
+    /// <summary>C: panelen med ljud och undertexter</summary>
+    Tracks,
+    /// <summary>Menytangenten (eller Skift+F10): samma meny som högerklick på bilden</summary>
+    Menu,
 }
 
 /// <summary>
 /// Den inbyggda spelarens reglage utan Windows: tidsformat, klick på tidslinjen, tangentkartan och när raderna syns.
-/// Testas i BraXhnTV.Tests (PlayerUiTest). Själva raden ritas av Spelare/ControlBar.cs.
+/// Testas i BraXhnTV.Tests (PlayerUiTest). Raderna ritas av Spelare/Reglage.cs; resten av logiken finns i Spelarrad.cs.
 /// </summary>
 public static class PlayerUi
 {
@@ -44,16 +50,18 @@ public static class PlayerUi
 
     // Windows virtuella tangentkoder (samma som System.Windows.Forms.Keys)
     public const int VkSpace = 0x20, VkLeft = 0x25, VkUp = 0x26, VkRight = 0x27, VkDown = 0x28, VkEscape = 0x1B,
-        VkF11 = 0x7A, VkMediaNext = 0xB0, VkMediaStop = 0xB2, VkMediaPlayPause = 0xB3, VkVolumeMute = 0xAD;
+        VkF11 = 0x7A, VkReturn = 0x0D, VkApps = 0x5D, VkF10 = 0x79, VkMediaNext = 0xB0, VkMediaStop = 0xB2, VkMediaPlayPause = 0xB3, VkVolumeMute = 0xAD;
 
     /// <summary>
     /// Tangentkartan: mellanslag/K paus, ←/→ och J/L 10 s, ↑/↓ volym, F/F11 helskärm, Esc ur helskärm (sedan tillbaka),
-    /// Q tillbaka, M ljud av, N nästa avsnitt, S undertext av/på, A byt ljudspår, I statistik, medietangenterna.
+    /// Q tillbaka, M ljud av, N nästa avsnitt, S undertext av/på, A byt ljudspår, I statistik, C ljud och undertexter,
+    /// Enter hoppa över/nästa avsnitt (annars paus), menytangenten eller Skift+F10 menyn, medietangenterna.
     /// Med Ctrl eller Alt nedtryckt: ingenting (Alt+F4, Ctrl+…).
     /// </summary>
     public static PlayerAction ForKey(int vk, bool shift = false, bool ctrl = false, bool alt = false)
     {
         if (ctrl || alt) return PlayerAction.None;
+        if (vk == VkF10) return shift ? PlayerAction.Menu : PlayerAction.None;
         return vk switch
         {
             VkSpace or 'K' or VkMediaPlayPause => PlayerAction.TogglePause,
@@ -70,11 +78,17 @@ public static class PlayerUi
             'A' => PlayerAction.CycleAudio,
             'I' => PlayerAction.Stats,
             VkMediaStop => PlayerAction.Stop,
+            VkReturn => PlayerAction.Confirm,
+            'C' => PlayerAction.Tracks,
+            VkApps => PlayerAction.Menu,
             _ => PlayerAction.None,
         };
     }
 
-    /// <summary>Raderna (överst och nederst) syns när musen nyss rörde sig, när den är över en rad, vid paus och före starten</summary>
+    /// <summary>
+    /// Raderna (överst och nederst) syns när musen nyss rörde sig inom spelaren (Spelarrad.MouseWakes) eller en tangent
+    /// trycktes, när musen är över en rad, vid paus, när en meny är öppen och före starten
+    /// </summary>
     public static bool ShowBars(double idleSeconds, bool overBar, bool paused, bool started, bool menuOpen) =>
         overBar || menuOpen || !started || paused || idleSeconds < 3;
 

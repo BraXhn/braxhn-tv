@@ -67,7 +67,10 @@ public class PlayerUiTest
     [InlineData('I', PlayerAction.Stats)]
     [InlineData(0xB2, PlayerAction.Stop)]
     [InlineData('X', PlayerAction.None)]
-    [InlineData(0x0D, PlayerAction.None)]           // Enter
+    [InlineData(0x0D, PlayerAction.Confirm)]        // Enter: hoppa över intro / nästa avsnitt, annars paus
+    [InlineData('C', PlayerAction.Tracks)]
+    [InlineData(0x5D, PlayerAction.Menu)]           // menytangenten
+    [InlineData(0x79, PlayerAction.None)]           // F10 utan Skift
     public void Tangentkartan(int vk, PlayerAction expected) => Assert.Equal(expected, PlayerUi.ForKey(vk));
 
     [Fact]
@@ -76,6 +79,7 @@ public class PlayerUiTest
         Assert.Equal(PlayerAction.None, PlayerUi.ForKey('F', ctrl: true));
         Assert.Equal(PlayerAction.None, PlayerUi.ForKey(0x73, alt: true)); // Alt+F4
         Assert.Equal(PlayerAction.Next, PlayerUi.ForKey('N', shift: true));
+        Assert.Equal(PlayerAction.Menu, PlayerUi.ForKey(0x79, shift: true)); // Skift+F10
     }
 
     [Fact]
