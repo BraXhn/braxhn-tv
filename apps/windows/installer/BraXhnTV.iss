@@ -104,6 +104,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "{cm:WebView2}"; Flags: waituntilterminated; Check: NeedsWebView2
 #endif
 Filename: "{app}\BraXhnTV.exe"; Description: "{cm:Launch}"; Flags: nowait postinstall skipifsilent
+; Hämta och installera i appen kör installationsfilen tyst med /STARTAPP: då startas appen igen efteråt (posten ovan
+; hoppas över i tyst läge). En tyst installation utan /STARTAPP startar ingenting.
+Filename: "{app}\BraXhnTV.exe"; Flags: nowait skipifnotsilent; Check: StartAfterUpdate
 
 [Code]
 const
@@ -122,6 +125,17 @@ begin
   Result := not (HasVersion(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
     or HasVersion(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
     or HasVersion(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2Id));
+end;
+
+{ /STARTAPP på kommandoraden: appen bad om uppdateringen och ska startas igen när den är klar }
+function StartAfterUpdate(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/STARTAPP') = 0 then
+      Result := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

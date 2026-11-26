@@ -54,7 +54,7 @@ sealed partial class MainForm : Form
         else if (cfg.Servers.Count == 0) await ShowLocal("add");
         else await ShowLocal("pick");
         await Task.Delay(3000);
-        await Updater.CheckAsync(this, cfg, manual: false);
+        await Updater.AutoAsync(this, cfg);
     }
 
     public void ShowFromOutside()
@@ -421,7 +421,7 @@ sealed partial class MainForm : Form
         Native.AppendMenu(menu, Native.MF_STRING, MenuReload, L.T("Ladda om", "Reload"));
         Native.AppendMenu(menu, Native.MF_SEPARATOR, 0, null);
         Native.AppendMenu(menu, Native.MF_STRING | (Autostart ? Native.MF_CHECKED : 0), MenuAutostart, L.T("Starta med Windows", "Start with Windows"));
-        Native.AppendMenu(menu, Native.MF_STRING, MenuUpdates, L.T("Sök efter uppdateringar …", "Check for updates …"));
+        Native.AppendMenu(menu, Native.MF_STRING, MenuUpdates, L.T("Sök efter uppdatering …", "Check for updates …"));
         Native.AppendMenu(menu, Native.MF_STRING, MenuAbout, L.T("Om BraXhn TV", "About BraXhn TV"));
         AddPlayerMenu(menu);
     }
@@ -445,7 +445,7 @@ sealed partial class MainForm : Form
                 Autostart = !Autostart;
                 Native.CheckMenuItem(Native.GetSystemMenu(Handle, false), MenuAutostart, Native.MF_BYCOMMAND | (Autostart ? Native.MF_CHECKED : Native.MF_UNCHECKED));
                 return true;
-            case MenuUpdates: _ = Updater.CheckAsync(this, cfg, manual: true); return true;
+            case MenuUpdates: _ = Updater.ManualAsync(this, cfg); return true;
             case MenuAbout: About(); return true;
         }
         return false;
@@ -486,20 +486,51 @@ sealed partial class MainForm : Form
         AddPlayerItems(Add);
         Sep();
         Add(MenuAutostart, L.T("Starta med Windows", "Start with Windows"), Autostart);
-        Add(MenuUpdates, L.T("Sök efter uppdateringar …", "Check for updates …"));
+        Add(MenuUpdates, L.T("Sök efter uppdatering …", "Check for updates …"));
         Add(MenuAbout, L.T("Om BraXhn TV", "About BraXhn TV"));
     }
 
     void About()
     {
-        TaskDialog.ShowDialog(this, new TaskDialogPage
+        var check = new TaskDialogButton(L.T("Sök efter uppdatering …", "Check for updates …"));
+        var answer = TaskDialog.ShowDialog(this, new TaskDialogPage
         {
             Caption = AppInfo.Name,
             Heading = $"{AppInfo.Name} {AppInfo.Version}",
             Text = L.T("Windows-appen för BraXhn TV. Inställningar och inloggningar sparas i ", "The Windows app for BraXhn TV. Settings and sign-ins are stored in ")
                    + AppSettings.Dir + (web?.CoreWebView2 != null ? "\n\nWebView2 " + web.CoreWebView2.Environment.BrowserVersionString : ""),
-            Buttons = { TaskDialogButton.OK },
+            Buttons = { check, TaskDialogButton.OK },
+            DefaultButton = TaskDialogButton.OK,
         });
+        if (answer == check) _ = Updater.ManualAsync(this, cfg);
+    }
+
+    // ---------- uppdatering (Updater.cs) ----------
+    /// <summary>Spelas en film just nu? (den inbyggda spelaren eller video i webbspelaren)</summary>
+    internal bool PlayingFilm => player != null || webAwake == "video";
+
+    /// <summary>
+    /// Före en uppdatering: stoppar den inbyggda spelaren och lämnar serverns sida, så att webben sparar var filmen
+    /// eller ljudet var (native-closed och pagehide skickar positionen) innan appen stängs.
+    /// </summary>
+    internal async Task StopPlaybackForUpdateAsync()
+    {
+        var playing = PlayingFilm || webAwake != "none";
+        if (player != null)
+        {
+            var gone = new TaskCompletionSource();
+            player.Gone += () => gone.TrySetResult();
+            ClosePlayer();
+            await Task.WhenAny(gone.Task, Task.Delay(3000));
+            await Task.Delay(1000);
+        }
+        // Även en pausad film i webbspelaren sparar sin position när sidan lämnas
+        if (web?.CoreWebView2 != null && current != null)
+        {
+            web.CoreWebView2.Navigate("about:blank");
+            await Task.Delay(playing ? 1500 : 500);
+        }
+        if (playing) Logg.Write("uppdatering: uppspelningen stoppad");
     }
 
     // ---------- start med Windows ----------

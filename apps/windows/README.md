@@ -36,11 +36,11 @@ installationsfilen den från Microsoft.
   loggar du in som vanligt i webbappen; inloggningen sparas till nästa gång.
 - **En server:** den öppnas direkt. **Flera:** appen frågar vilken vid start.
 - **Appens meny:** högerklicka i fönstret (där webbappen inte har en egen meny) – *Ladda om, Byt server, Lägg till
-  server*, den inbyggda spelarens val, *Starta med Windows, Sök efter uppdateringar, Om BraXhn TV*. Samma meny finns
+  server*, den inbyggda spelarens val, *Starta med Windows, Sök efter uppdatering, Om BraXhn TV*. Samma meny finns
   på titelraden (högerklick eller **Alt + mellanslag**). I textfält ger högerklick klipp ut/kopiera/klistra in.
   Webbläsarens egen meny och utvecklarverktygen (Granska) är avstängda; för felsökning slås verktygen på med
   `"DevTools": true` i `installningar.json` eller miljövariabeln `BRAXHN_DEVTOOLS=1`.
-- **Byt server, Lägg till server, Starta med Windows, Sök efter uppdateringar** finns i appens meny. Ta bort en server i *Byt server* (klicka *Ta bort* två gånger).
+- **Byt server, Lägg till server, Starta med Windows, Sök efter uppdatering** finns i appens meny. Ta bort en server i *Byt server* (klicka *Ta bort* två gånger).
 - **Helskärm:** **F11**, eller dubbelklicka på videon / helskärmsknappen i spelaren. **Esc** går ur helskärm.
 - **Medietangenter och Windows medieruta** (spela/paus på tangentbordet, rutan vid volymen): appen slår på Edge-motorns
   stöd för det, så det som spelas visas där som i Edge.
@@ -49,8 +49,18 @@ installationsfilen den från Microsoft.
 - **Ladda ner** (filmer, export) frågar var filen ska sparas; *Hämtade filer* föreslås.
 - Länkar till andra webbplatser (TMDB, IMDb …) öppnas i din vanliga webbläsare.
 - **Uppdateringar:** vid start, högst en gång per dygn, frågar appen GitHub om det finns en nyare utgåva med
-  Windows-installationsfil. Finns det får du frågan *Ladda ner och installera*, *Inte nu* eller *Hoppa över den här
+  Windows-installationsfil. Finns det får du frågan *Hämta och installera*, *Inte nu* eller *Hoppa över den här
   versionen*. Inget laddas ner utan att du klickar.
+- **Sök efter uppdatering …** (appens meny och *Om BraXhn TV*) frågar GitHub direkt och visar din version och den
+  senaste. Finns en nyare: *Hämta och installera*. Annars *Du har den senaste versionen (1.4.2).* Går det inte att nå
+  GitHub säger appen det och erbjuder *Försök igen*. Bara stabila utgåvor (taggar `v1.2.3`) erbjuds, aldrig
+  förhandsutgåvor som `libmpv-…` eller betor.
+- **Hämta och installera:** appen laddar ner `BraXhnTV-Setup-<version>.exe` från utgåvan (med förlopp och *Avbryt*),
+  kontrollerar att storleken stämmer med GitHubs uppgift, att det är ett Windows-program och – när utgåvan har
+  `BraXhnTV-Setup-<version>.exe.sha256` – kontrollsumman. Sedan körs installationen utan frågor (bara ett
+  förloppsfönster), appen stängs och startar igen av sig själv när installationen är klar. Spelas en film frågar
+  appen först (*Filmen stoppas och appen startas om – fortsätta?*) och positionen sparas, så att du fortsätter där du
+  var. Vad installationen gjorde står i `%LOCALAPPDATA%\BraXhnTV\installation.txt`.
 - Texterna i appen är på svenska om Windows är på svenska, annars engelska. Webbappens språk väljs i webbappen.
 
 ## Den inbyggda spelaren (mpv)
@@ -241,6 +251,9 @@ testad, men **ingenting är provat på en riktig Windows-dator**. Särskilt:
 - medietangenterna och Windows medieruta (Edge-flaggan `HardwareMediaKeyHandling`),
 - fönstermenyn, mörk titelrad, helskärm och att fönstrets läge sparas,
 - Inno Setup-installationen och WebView2-installeraren, uppdateringsrutan och avinstallationen.
+- **Hämta och installera i Windows:** dialogrutorna, förloppet, den tysta installationen (`/SILENT … /STARTAPP`), att
+  appen stängs och startar igen efteråt, och att filmens position sparas innan. Valet av fil i utgåvan, versionerna,
+  kontrollen av storlek, SHA-256 och PE-huvud och installationsfilens argument är testade (`UppdateringTest`).
 - **Den inbyggda spelarens kontrollrad i Windows:** utseendet, att muslagret (ett nästan genomskinligt fönster) tar
   emot klick, hjul och högerklick över mpv-bilden utan att stjäla tangenterna, att muspekaren göms i helskärm, och de
   mörka menyerna. Spåren, längden, volymen och spolningen är provade mot riktig libmpv på Linux.
@@ -266,6 +279,8 @@ appens och WebView2:s version.
   video eller ljud spelas (viloläget) och fångar F11/Esc.
 - `BraXhnTV/MpvSetup.cs` – hämtningen av mpv (dialogerna); `Logik/MpvSource.cs` – källorna (`libmpv.json`, SourceForge),
   kontrollen och uppackningen; `Logik/ServerInfo.cs` – serverns version; `Logik/Logg.cs` – loggfilen.
+- `BraXhnTV/Updater.cs` – uppdateringarna (dialogerna); `Logik/Versions.cs` – versioner och GitHub-svaret,
+  `Logik/Uppdatering.cs` – kontrollen av installationsfilen och dess argument (testas i `UppdateringTest`).
 - `BraXhnTV/Spelare/ControlBar.cs` – kontrollraden och muslagret över bilden; `Logik/PlayerUi.cs` – tidsformat,
   tidslinjen, tangentkartan och när raderna syns (testas i `PlayerUiTest`).
 - `BraXhnTV/Spelare/` – den inbyggda spelaren: `Libmpv.cs` (C-API:t, laddas dynamiskt, rapporterar varje plats), `MpvPlayer.cs` (en
@@ -294,6 +309,10 @@ the same look and features as the web app, with hardware video decoding and HEVC
   menu (right-click the title bar or press **Alt+Space**). **F11** or double-clicking the video for full screen.
   Media keys and the Windows media overlay are enabled through the Edge engine. The PC doesn't sleep while video plays.
 - **Updates:** at most once a day the app checks GitHub releases and asks before downloading anything.
+  *Check for updates …* (app menu and *About*) shows your version and the latest one; *Download and install* downloads
+  the installer, checks its size, that it is a Windows program and its SHA-256 (when the release has a `.sha256` file),
+  installs it silently and restarts the app. A playing video is stopped (after asking) and its position saved.
+  Only stable releases (`v1.2.3` tags) are offered.
 - **Data:** `%LOCALAPPDATA%\BraXhnTV` (one WebView2 profile per server). Uninstall from *Settings → Apps*.
 - **Built-in player (mpv):** like Jellyfin Media Player, movies and episodes the server can send untouched play in
   mpv inside the app window (4K HDR, DTS/TrueHD, image subtitles); the web app keeps handling Continue watching,

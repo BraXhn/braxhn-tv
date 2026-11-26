@@ -1,6 +1,14 @@
 # Ändringar
 
 ## Ej utgiven
+- **Sök efter uppdatering i Windows-appen** (ärende #5). *Sök efter uppdatering …* i appens meny och i *Om BraXhn TV*
+  visar din version och den senaste, eller *Du har den senaste versionen*; går GitHub inte att nå finns *Försök igen*.
+  *Hämta och installera* laddar ner installationsfilen med förlopp och *Avbryt*, kontrollerar storleken mot GitHubs
+  uppgift, att det är ett Windows-program och kontrollsumman (flödet lägger nu `BraXhnTV-Setup-<version>.exe.sha256`
+  i utgåvan), installerar utan frågor och startar om appen (installationsfilen startar appen igen med `/STARTAPP`).
+  Spelas en film frågar appen först och sparar positionen. Den dagliga kollen använder samma kod. Bara stabila
+  utgåvor med taggen `v1.2.3` erbjuds, och filen väljs efter utgåvans version – förut togs den första
+  `BraXhnTV-Setup-*.exe` i listan, även en gammal som låg kvar.
 
 ## 1.4.2 – 2026-11-26
 - **Den inbyggda spelaren följer med Windows-appen.** mpv (libmpv 0.42.0) byggs nu av oss själva som LGPL i GitHub Actions och
