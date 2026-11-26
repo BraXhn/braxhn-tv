@@ -1,0 +1,110 @@
+name: libmpv
+# Bygger libmpv-2.dll (mpv för Windows x64, den inbyggda spelaren i Windows-appen) som LGPL och lägger den i en egen
+# förhandsutgåva (pre-release) med taggen libmpv-<mpv-version>-<datum>, tillsammans med källkoden och SHA-256.
+#  - Run workflow (Actions → libmpv): tar en till två timmar första gången, sedan cachas beroendena.
+#  - Bygget: apps/windows/libmpv/bygg.sh, källorna med fasta versioner och kontrollsummor i kallor.txt.
+#  - Flödet faller om FFmpeg eller mpv inte är LGPL, eller om ett GPL-bibliotek kommit med.
+#  - Utgåvan är en förhandsutgåva som aldrig blir "Latest", så serverns och appens uppdateringskoll (releases/latest)
+#    ser den inte. Den skapas med GITHUB_TOKEN och startar därför inga andra flöden.
+#  - Efteråt: skriv taggen och zip-filens SHA-256 i apps/windows/libmpv.json (raden står i körningens sammanfattning).
+on:
+  workflow_dispatch:
+    inputs:
+      mpv:
+        description: 'mpv-version, t.ex. 0.42.0. Tomt = versionen i apps/windows/libmpv/kallor.txt.'
+        type: string
+        default: ''
+      mpv_commit:
+        description: 'Bara för en annan mpv-version än kallor.txt: taggens commit (40 tecken).'
+        type: string
+        default: ''
+      publicera:
+        description: 'Lägg arkiven i en egen förhandsutgåva (annars bara under Artifacts)'
+        type: boolean
+        default: true
+permissions:
+  contents: write        # skapa förhandsutgåvan
+concurrency:
+  group: libmpv
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verktyg (MinGW-w64, nasm, meson)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
+            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev nasm ninja-build pkg-config autoconf automake libtool \
+            cmake zip python3-pip
+          pip install --user --break-system-packages meson==1.9.1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache för beroendena
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            bygg/prefix
+            bygg/kallor
+          key: libmpv-u2404-${{ hashFiles('apps/windows/libmpv/kallor.txt', 'apps/windows/libmpv/bygg.sh') }}-${{ github.run_id }}
+          restore-keys: libmpv-u2404-${{ hashFiles('apps/windows/libmpv/kallor.txt', 'apps/windows/libmpv/bygg.sh') }}-
+      - name: Bygg libmpv (LGPL)
+        id: bygg
+        env:
+          MPV_VERSION: ${{ inputs.mpv }}
+          MPV_COMMIT: ${{ inputs.mpv_commit }}
+        run: |
+          apps/windows/libmpv/bygg.sh "$PWD/bygg"
+          cat bygg/ut/resultat.env >> "$GITHUB_OUTPUT"
+      - name: Spara cachen (även om bygget föll, så att färdiga delar inte byggs om)
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            bygg/prefix
+            bygg/kallor
+          key: libmpv-u2404-${{ hashFiles('apps/windows/libmpv/kallor.txt', 'apps/windows/libmpv/bygg.sh') }}-${{ github.run_id }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bygg.outputs.namn }}
+          path: |
+            ${{ steps.bygg.outputs.zip }}
+            ${{ steps.bygg.outputs.sums }}
+          if-no-files-found: error
+      - name: Lägg arkiven i en egen förhandsutgåva
+        if: inputs.publicera
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAMN: ${{ steps.bygg.outputs.namn }}
+          ZIP: ${{ steps.bygg.outputs.zip }}
+          KALLKOD: ${{ steps.bygg.outputs.kallkod }}
+          SUMS: ${{ steps.bygg.outputs.sums }}
+        run: |
+          TAG="$NAMN"   # libmpv-<mpv-version>-<datum>, börjar aldrig med v (serverns och appens utgåvor är v*)
+          [[ "$TAG" =~ ^libmpv-[0-9][0-9A-Za-z.-]*-[0-9]{8}$ ]] || { echo "::error::Konstig tagg: $TAG"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Utgåvan $TAG finns redan. Ta bort den under Releases (och taggen) eller kör igen i morgon."; exit 1
+          fi
+          ZIPSHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          {
+            echo "libmpv-2.dll för BraXhn TV:s Windows-app (den inbyggda spelaren). **Inte en version av BraXhn TV.**"
+            echo
+            echo "mpv byggd med \`-Dgpl=false\` och FFmpeg utan \`--enable-gpl\`/\`--enable-nonfree\`: LGPL. Byggd av"
+            echo "[flödet libmpv]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) från commit $GITHUB_SHA."
+            echo
+            echo "- \`$(basename "$ZIP")\`: libmpv-2.dll, licenstexterna och KALLOR.txt (exakta källversioner)."
+            echo "- \`$(basename "$KALLKOD")\`: hela källkoden (oförändrade arkiv) och byggskripten."
+            echo "- \`$(basename "$SUMS")\`: SHA-256 för båda."
+            echo
+            echo '```'; sed -n '/^namn /,/^$/p' "$(dirname "$ZIP")/$NAMN/KALLOR.txt"; echo '```'
+          } > notes.md
+          gh release create "$TAG" --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "libmpv ${NAMN#libmpv-} (LGPL) för Windows-appen" --notes-file notes.md "$ZIP" "$KALLKOD" "$SUMS"
+          {
+            echo "### libmpv $TAG"
+            echo "Utgåvan är skapad som förhandsutgåva. Skriv in den i \`apps/windows/libmpv.json\`:"
+            echo '```json'
+            printf '{\n  "tagg": "%s",\n  "fil": "%s",\n  "sha256": "%s"\n}\n' "$TAG" "$(basename "$ZIP")" "$ZIPSHA"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
