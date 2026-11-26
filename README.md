@@ -116,7 +116,7 @@ Uppgraderingen är skyddad:
 | `ghcr.io/braxhn/braxhn-tv:latest` | Stabila utgåvor (standard). Uppdateras bara när en version ges ut. |
 | `:beta` | Förhandsversioner inför nästa utgåva. |
 | `:edge` | Varje ändring direkt – nytt först, men det är du som testar. |
-| `:1.4.1` / `:sha-…` | En bestämd version, för att gå tillbaka. |
+| `:1.4.2` / `:sha-…` | En bestämd version, för att gå tillbaka. |
 
 ## Funktioner
 

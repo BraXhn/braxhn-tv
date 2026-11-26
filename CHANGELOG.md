@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.2 – 2026-11-26
 - **Kontrollrad i Windows-appens inbyggda spelare.** I mpv syntes inga reglage och musen gjorde ingenting – bara
   tangentbordet fungerade (ärende #4). Nu har spelaren en egen rad i webbspelarens stil: tidslinje som går att klicka
   och dra i med tiden vid muspekaren, −10 s, spela/paus, +10 s, nästa avsnitt, stopp, sovtimer, ljudspår, undertexter
