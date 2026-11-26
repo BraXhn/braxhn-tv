@@ -1,6 +1,20 @@
 # Ändringar
 
 ## Ej utgiven
+- **Spelarraden i Windows-appens inbyggda spelare visades så fort musen rördes – var som helst på skärmen.** Appen
+  läste muspekarens läge fem gånger i sekunden och räknade varje ändring, även utanför fönstret och när ett annat
+  program var aktivt. Nu räknas bara rörelser inom spelaren, över appens fönster och längre än några bildpunkter
+  (`Logik/Spelarrad.cs` `MouseWakes`, testad).
+- **Ny spelarrad i Windows-appen, mer lik Plex.** Inga massiva balkar utan mjuka tonade gradienter över bilden
+  (genomskinliga fönster ovanpå mpv). Överst tillbakapil, titel med säsong och avsnitt och inställningar; nederst en
+  tidslinje över hela bredden som blir tjockare med musen över, med tydlig punkt, tid och kapitel vid pekaren och
+  förhandsbilder från servern, förfluten tid och tid kvar eller *slutar 22:41* (klick växlar), stora knappar i mitten
+  (−10 s, spela/paus, +30 s, nästa avsnitt) och ljud och undertexter i en gemensam panel, volym som fälls ut och
+  helskärm till höger. Paus visar en stor ikon som tonar bort och raderna ligger kvar. *Hoppa över intro* och *Hoppa
+  över sammanfattning* nere till höger, och när eftertexterna börjar ett kort med nästa avsnitt, *Spela nu* och
+  *Avbryt*, som räknar ner när kontot har *spela nästa avsnitt automatiskt* på. Muspekaren göms även i fönster.
+  Allt skalas med skärmens DPI och på en stor tv. Nya tangenter: Enter (hoppa över / spela nu), C (ljud och
+  undertexter), menytangenten eller Skift+F10 (menyn).
 - **Sök efter uppdatering i Windows-appen** (ärende #5). *Sök efter uppdatering …* i appens meny och i *Om BraXhn TV*
   visar din version och den senaste, eller *Du har den senaste versionen*; går GitHub inte att nå finns *Försök igen*.
   *Hämta och installera* laddar ner installationsfilen med förlopp och *Avbryt*, kontrollerar storleken mot GitHubs

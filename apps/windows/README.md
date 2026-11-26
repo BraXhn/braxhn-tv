@@ -81,21 +81,51 @@ en lägre kvalitet, när filformatet inte kan skickas direkt, vid trailers före
 tillsammans*. Åldersgränser och skärmtid sköter servern som vanligt – skärmtiden stoppar också mpv. Går något fel
 i mpv (filen saknas, kan inte spela) tar webbspelaren över där filmen var.
 
-**Reglage:** appens egen kontrollrad längst ner, i webbspelarens stil: tidslinje (klicka eller dra; tiden visas vid
-muspekaren, det buffrade syns ljusare), titel och tid till vänster; −10 s, spela/paus, +10 s, *Nästa avsnitt* och stopp
-i mitten; sovtimer (15–90 min eller *när avsnittet är slut*), inställningar (ljudspår, undertexter, undertextstorlek,
-undertextens tid och hastighet), volym och helskärm till höger. Överst: *← Tillbaka*, titeln och *Nästa avsnitt*.
-Raderna tonas bort efter 3 sekunder utan musrörelse och kommer tillbaka när musen rör sig; i helskärm göms även
-muspekaren. mpv:s egna reglage (OSC) och tangenter är avstängda, så att inget dubbleras.
+**Spelarraden** (i stil med Plex spelare, i appens färger): inga massiva balkar, utan en mjuk tonad gradient längst
+upp och längst ner, så att bilden syns hela tiden.
+
+- **Överst:** tillbakapil, titeln (serien eller filmen, och under den *S1 · E3 · avsnittets namn*) och till höger
+  inställningar (kugghjulet: hastighet, undertextstorlek och -tid, sovtimer, *Spela den här filmen i webbspelaren*).
+  En påslagen sovtimer syns som minuter kvar bredvid kugghjulet.
+- **Nederst:** tidslinjen över hela bredden – tunn i vila, tjockare med musen över, en tydlig punkt för positionen och
+  det buffrade ljusare. Vid muspekaren visas tiden (och kapitlet), och en förhandsbild när servern har gjort
+  förhandsbilder för filmen. Förfluten tid till vänster; till höger tid kvar (*−29:36*) eller när filmen slutar
+  (*slutar 22:41*, med hastigheten inräknad) – klicka för att växla, valet sparas. Under linjen: −10 s, spela/paus,
+  +30 s och *Nästa avsnitt* i mitten; ljud och undertexter (en gemensam panel med ljudspåren, undertexterna,
+  storlek och tid), volym (reglaget fälls ut när musen är över högtalaren) och helskärm till höger.
+- **Paus:** en stor paus-ikon i mitten som tonar bort (och spela-ikonen när filmen fortsätter). Raderna ligger kvar
+  så länge filmen är pausad.
+- **Hoppa över intro / sammanfattning:** en knapp nere till höger medan introt (eller "tidigare i serien") pågår,
+  även när raderna är borta. Har kontot valt att hoppa över automatiskt görs det en gång per avsnitt.
+- **Nästa avsnitt:** när eftertexterna börjar (eller de sista 30 sekunderna om servern inte hittat eftertexterna) visas
+  ett kort med nästa avsnitts namn, *Spela nu* och *Avbryt*. Med kontots *spela nästa avsnitt automatiskt* räknar
+  kortet ner (kontots nedräkning, 8 s som standard) från eftertexternas början och startar nästa avsnitt; utan
+  eftertexter startar det när avsnittet tar slut, som förut. Utan automatiken räknar kortet inte ner. *Avbryt* låter
+  eftertexterna gå klart och går sedan tillbaka till sidan. Sovtimern *när avsnittet är slut* stoppar nedräkningen.
+- Raderna tonas bort efter 3 sekunder utan aktivitet (inte under paus eller när en meny är öppen) och muspekaren göms,
+  i helskärm och i fönster. **Bara musrörelser inom spelaren räknas:** pekaren ska vara över appens fönster (inte ett
+  annat fönster som ligger över bilden) och flyttas mer än några bildpunkter (skalat med skärmen). Rörelser någon
+  annanstans på skärmen visar ingenting, och i 1.4.2 gjorde de det.
+- Allt skalas efter skärmens DPI och, i helskärm på en stor skärm, minst som på en 1080p-tv (en 4K-tv med 100 % får
+  dubbelt så stora reglage), så att det går att läsa från soffan.
+
+Intro, eftertexter, förhandsbilder, kontots val och nästa avsnitts namn hämtar appen från servern när filmen startar
+(`/api/items/<id>`, `/api/me/playback-prefs`, `/api/items/<id>/trickplay`) med webbvyns inloggning – bara från
+servern som är öppen. Går det inte visas raden ändå, utan knappen och kortet. mpv:s egna reglage (OSC) och tangenter
+är avstängda, så att inget dubbleras.
 
 **Musen på bilden:** klick = spela/paus, dubbelklick = helskärm, hjulet = volym, högerklick = meny (ljudspår,
 undertexter, ljud till förstärkaren, uppdateringsfrekvens, *Använd den inbyggda spelaren*, *Om den inbyggda spelaren*,
-*Spela den här filmen i webbspelaren*, *Tillbaka*). Musen fångas av ett osynligt lager över bilden, eftersom mpv:s
-fönster körs i en egen tråd.
+*Spela den här filmen i webbspelaren*, *Tillbaka*). Klick på gradienten utanför knapparna gör samma sak. Musen fångas
+av ett osynligt lager över bilden, eftersom mpv:s fönster körs i en egen tråd; raderna är egna genomskinliga fönster
+över det.
 
 **Tangenter:** mellanslag eller **K** = paus, **←/→** eller **J/L** = 10 s, **↑/↓** = volym, **F** eller **F11** =
-helskärm, **Esc** = ur helskärm (och sedan tillbaka), **Q** = tillbaka, **M** = ljud av, **N** = nästa avsnitt,
-**S** = undertext av/på, **A** = byt ljudspår, **I** = mpv:s statistik, och medietangenterna. Bild-i-bild finns inte än.
+helskärm, **Enter** = *Hoppa över intro* eller *Spela nu* när de visas (annars paus), **Esc** = bort med kortet med
+nästa avsnitt, sedan ur helskärm och sedan tillbaka, **Q** = tillbaka, **M** = ljud av, **N** = nästa avsnitt,
+**C** = panelen med ljud och undertexter, **S** = undertext av/på, **A** = byt ljudspår, **I** = mpv:s statistik,
+**menytangenten** eller **Skift+F10** = menyn, och medietangenterna. Menyerna styrs med pilarna och Enter. En tangent
+visar raderna. Bild-i-bild finns inte än.
 
 **Inställningar** i appens meny (högerklick i fönstret eller på titelraden):
 - *Använd den inbyggda spelaren* – på som standard. Stäng av den om något krånglar; då spelar webbspelaren allt.
@@ -254,9 +284,12 @@ testad, men **ingenting är provat på en riktig Windows-dator**. Särskilt:
 - **Hämta och installera i Windows:** dialogrutorna, förloppet, den tysta installationen (`/SILENT … /STARTAPP`), att
   appen stängs och startar igen efteråt, och att filmens position sparas innan. Valet av fil i utgåvan, versionerna,
   kontrollen av storlek, SHA-256 och PE-huvud och installationsfilens argument är testade (`UppdateringTest`).
-- **Den inbyggda spelarens kontrollrad i Windows:** utseendet, att muslagret (ett nästan genomskinligt fönster) tar
-  emot klick, hjul och högerklick över mpv-bilden utan att stjäla tangenterna, att muspekaren göms i helskärm, och de
-  mörka menyerna. Spåren, längden, volymen och spolningen är provade mot riktig libmpv på Linux.
+- **Den inbyggda spelarens rad i Windows:** utseendet (gradienterna, ikonerna, storleken på en tv), att raderna som
+  genomskinliga fönster (`UpdateLayeredWindow`) ritas rätt över mpv-bilden och tonas, att muslagret och raderna tar
+  emot klick, hjul och högerklick utan att stjäla tangenterna, att muspekaren göms, förhandsbilderna, kortet med nästa
+  avsnitt och de mörka menyerna. Regeln för när musen visar raderna, tider, sluttid, intro-/eftertextfönstren,
+  nedräkningen, förhandsbildernas rutor och tolkningen av serverns svar är testade (`SpelarradTest`); spåren,
+  längden, volymen och spolningen är provade mot riktig libmpv på Linux.
 - **Den inbyggda spelaren i Windows:** att mpv ritar i appens fönster (`wid`), raden överst ovanpå bilden, helskärm,
   bitström till förstärkaren, byte av skärmens frekvens och mpv:s medieruta. Spelardelen (laddning av libmpv,
   spårval, start mitt i filmen, tangenterna, slut, fel och stängning) är provad mot en riktig libmpv 0.37 på Linux,
@@ -281,8 +314,11 @@ appens och WebView2:s version.
   kontrollen och uppackningen; `Logik/ServerInfo.cs` – serverns version; `Logik/Logg.cs` – loggfilen.
 - `BraXhnTV/Updater.cs` – uppdateringarna (dialogerna); `Logik/Versions.cs` – versioner och GitHub-svaret,
   `Logik/Uppdatering.cs` – kontrollen av installationsfilen och dess argument (testas i `UppdateringTest`).
-- `BraXhnTV/Spelare/ControlBar.cs` – kontrollraden och muslagret över bilden; `Logik/PlayerUi.cs` – tidsformat,
-  tidslinjen, tangentkartan och när raderna syns (testas i `PlayerUiTest`).
+- `BraXhnTV/Spelare/Reglage.cs` – spelarraden (`PlayerChrome`: raden överst och nederst, hörnet med *Hoppa över* och
+  nästa avsnitt, paus-ikonen) och muslagret över bilden; `Spelare/Lager.cs` – genomskinliga fönster
+  (`UpdateLayeredWindow`, GDI+ i en DIB). `Logik/Spelarrad.cs` – när musen visar raderna, skalan, tid kvar och sluttid,
+  titeln, intro/eftertexter, nedräkningen, förhandsbilderna och serverns svar (testas i `SpelarradTest`);
+  `Logik/PlayerUi.cs` – tidsformat, tidslinjen och tangentkartan (testas i `PlayerUiTest`).
 - `BraXhnTV/Spelare/` – den inbyggda spelaren: `Libmpv.cs` (C-API:t, laddas dynamiskt, rapporterar varje plats), `MpvPlayer.cs` (en
   uppspelning), `Display.cs` (skärmens frekvens). `MainForm.Spelare.cs` tar emot webbens `native-*`-meddelanden;
   webbens sida är `web/js/player/native.js` och `nativeplan.js`.
@@ -329,10 +365,17 @@ the same look and features as the web app, with hardware video decoding and HEVC
   why the web player was used for a video; the log is `%LOCALAPPDATA%\BraXhnTV\logg.txt`. 7z unpacking uses SharpCompress (MIT).
 - **Away from home** (public address) with Auto, mpv gets the original file when the measured connection fits it with a
   10% margin, or when it could not be measured (`buf=1`; the resolution cap still applies).
-- **Player controls:** the app's own control bar (timeline with drag and hover time, −10 s/play/+10 s/next/stop,
-  sleep timer, audio/subtitle/speed settings, volume, full screen), fading after 3 s; click = pause, double-click =
-  full screen, wheel = volume, right-click = menu (incl. *Play this video in the web player*); keys space/K, ←/→, J/L,
-  ↑/↓, F/F11, Esc, Q, M, N, S, A, I and media keys. mpv's own OSC is off.
+- **Player controls** (Plex-like, in the app's colours): soft gradients at the top and bottom instead of solid bars.
+  Top: back arrow, title (show, *S1 · E3 · episode name*), settings (speed, subtitle size/timing, sleep timer, web
+  player). Bottom: full-width timeline (thin at rest, thicker on hover, position dot, buffered part lighter, hover time
+  with chapter and a trickplay thumbnail when the server has them), elapsed time left and time left or "ends 10:41 PM"
+  right (click to switch), −10 s/play/+30 s/next in the middle, audio & subtitles panel, volume with a slide-out
+  slider and full screen on the right. A large pause icon fades out on pause and the bars stay while paused. *Skip
+  intro*/*Skip recap* bottom right; at the credits (or the last 30 s) a next-episode card with *Play now*/*Cancel* that
+  counts down when the account has autoplay on. Bars and cursor fade after 3 s; only pointer movement inside the
+  player (over the app, more than a few pixels) shows them. Scales with DPI and with a large full-screen display. Click
+  = pause, double-click = full screen, wheel = volume, right-click = menu; keys space/K, ←/→, J/L, ↑/↓, F/F11,
+  Enter (skip/play now), Esc, Q, M, N, C (audio & subtitles), S, A, I, menu key/Shift+F10 and media keys.
 - **Right-click** shows the app menu instead of the browser menu (text fields keep cut/copy/paste); DevTools are off
   unless `"DevTools": true` in `installningar.json` or `BRAXHN_DEVTOOLS=1`.
   and Watch together use the web player. Settings in the window menu: *Use the built-in player* (on), *Send audio

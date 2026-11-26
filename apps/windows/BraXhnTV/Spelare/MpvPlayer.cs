@@ -12,6 +12,10 @@ sealed class PlayRequest
     public int? Audio;                       // ffmpeg-index för ljudspåret
     public List<SubTrack> Subs = new();
     public long? NextId;
+    /// <summary>Kontots "spela nästa avsnitt automatiskt"</summary>
+    public bool AutoNext;
+    /// <summary>Kapitlen (start i sekunder, titel) – visas vid muspekaren på tidslinjen</summary>
+    public List<(double Start, string Title)> Chapters = new();
 }
 sealed class SubTrack { public string Id = "", Label = "", Lang = ""; public int? Index; public string? Url; }
 
@@ -62,8 +66,8 @@ unsafe sealed class MpvPlayer
     {
         h = mpv.Create();
         if (h == IntPtr.Zero) throw new InvalidOperationException("mpv_create misslyckades");
-        // Före initialize: fönstret. Reglagen, musen och tangenterna sköter appen själv (Spelare/ControlBar.cs,
-        // MouseLayer.cs, PlayerUi.ForKey) – mpv:s egna (OSC, standardtangenter, mus i fönstret) är avstängda, så att
+        // Före initialize: fönstret. Reglagen, musen och tangenterna sköter appen själv (Spelare/Reglage.cs,
+        // PlayerUi.ForKey) – mpv:s egna (OSC, standardtangenter, mus i fönstret) är avstängda, så att
         // inget dubbleras och raden ser ut som resten av appen. input.conf finns kvar för script-message (bx-…).
         if (wid != 0) Opt("wid", wid.ToString(CultureInfo.InvariantCulture));
         Opt("config", "no");

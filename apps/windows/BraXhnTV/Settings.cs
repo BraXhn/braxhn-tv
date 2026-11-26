@@ -28,6 +28,8 @@ public sealed class AppSettings
     public bool Passthrough { get; set; }
     /// <summary>Byt skärmens uppdateringsfrekvens efter filmen</summary>
     public bool MatchRefresh { get; set; }
+    /// <summary>Spelarraden visar när filmen slutar ("slutar 22:41") i stället för tid kvar</summary>
+    public bool ShowEndTime { get; set; }
     /// <summary>Den inbyggda spelarens volym (0–100)</summary>
     public int Volume { get; set; } = 100;
     /// <summary>Frågan "Hämta den inbyggda spelaren?" har visats av sig själv (en gång; sedan bara i fönstermenyn)</summary>
