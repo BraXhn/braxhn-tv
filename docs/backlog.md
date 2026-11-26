@@ -156,6 +156,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-26: Android-appen: positioner och skärmtid utan nät (samma regler som Expo-appen), gren
+  `team/android-offline-2026-11-26`. Fel: `PlayerScreen.report` gjorde inget när `/api/items/:id` inte svarade (nedladdad
+  titel utan nät), och `Api.reportProgress` släppte positionen vid nätfel; skärmtiden kollades bara i serverns svar.
+  Nu: kö per server och profil (`OfflineSync.kt`), skickas i ordning med `at` när nätet kommer tillbaka
+  (`registerDefaultNetworkCallback`), i `onResume`, efter `Session.refresh` och efter ett lyckat framsteg; senaste
+  skärmtidsstatusen (`GET /api/screentime`, `screenTime` i framstegssvaret) och tiden utan nät räknas i appen och
+  stoppar med serverns besked. Nedladdat börjar där man slutade. `OfflineCoreTest.kt` (16 fall på JVM) körs nu i
+  `android-automotive.yml` (`testReleaseUnitTest`). Ljudböcker och poddar kan inte laddas ner i Android-appen, så de
+  berörs inte. Inte provat: kompilering av hela appen (`OfflineSync.kt` kompilerad mot Android 14:s klasser, inte
+  `PlayerScreen.kt`), riktig enhet i flygplansläge.
 - 2026-11-26: Hårdvaruomkodning – provet i Administration (förut punkt 2), gren `team/hwprov-2026-11-26`.
   *Administration → Hårdvaruomkodning → Prova omkodningen* (`server/hwprobe.js`, `web/js/views/admin-hwprobe.js`,
   `/api/admin/hwprobe`): genererad testbild, H.264/HEVC/HEVC 10 bitar i 1080p och 4K med `HWACCEL` och med processorn,
@@ -247,6 +257,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - **Gör paketet publikt** (containerimagen på GitHub).
 - **Slå på Private vulnerability reporting** i repots inställningar på GitHub.
 - **Prova Expo-appen i Expo Go** på en riktig iPhone och Android-telefon (`apps/expo/README.md`).
+- **Prova Android-appen utan nät:** ladda ner en film, slå på flygplansläget, spela en stund från *Inställningar →
+  Nedladdat för offline*, stäng och spela igen (ska fortsätta där du var), slå av flygplansläget och kontrollera att
+  positionen syns i webben. Med en barnprofil med lite tid kvar: filmen ska stoppa med serverns besked utan nät.
 - **Prova nedladdning i Expo-appen** på iPhone och Android: ladda ner en film (480p) och en ljudbok, slå på
   flygplansläget, starta om appen (den ska öppna *Nedladdat*), titta en stund, slå av flygplansläget och kontrollera att
   positionen syns i webben. Prova också att låsa skärmen under en nedladdning i några minuter.

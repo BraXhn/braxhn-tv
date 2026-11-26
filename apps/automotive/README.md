@@ -42,7 +42,36 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 
 Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning. Spelaren väntar upp till 60 s på servern, så en omkodning med grafikkort som tar några sekunder att komma igång startas inte om.
 
-**Barnprofiler:** poddar visas inte (servern stänger dem för barn), och när en vuxen trycker *Stoppa* i Föräldraöversikten stannar filmen inom ungefär tio sekunder med beskedet *En vuxen stoppade uppspelningen*. Samma sak när skärmtiden tar slut, med serverns förklaring.
+**Barnprofiler:** poddar visas inte (servern stänger dem för barn), och när en vuxen trycker *Stoppa* i Föräldraöversikten stannar filmen inom ungefär tio sekunder med beskedet *En vuxen stoppade uppspelningen*. Samma sak när skärmtiden tar slut, med serverns förklaring – även utan nät för en nedladdad titel (se *Nedladdat och utan nät*).
+
+## Nedladdat och utan nät
+
+Nedladdade filmer och avsnitt spelas från filen under *Inställningar → Nedladdat för offline*, även helt utan nät.
+
+- **Var du är:** med nät skickas positionen till servern som vanligt. Svarar servern inte sparas positionen i appen,
+  per server och profil, med tidpunkten (`at`), och skickas i ordning när nätet är tillbaka, när appen öppnas och efter
+  nästa lyckade anrop. En senare position från en annan enhet vinner, och en position som redan kommit fram räknas inte
+  två gånger. *Spela* där börjar där du slutade. Ljudböcker och poddar går inte att ladda ner i
+  Android-appen än, så de spelas bara med nät.
+- **Skärmtid med nät:** som vanlig uppspelning – servern räknar tiden och kan säga stopp, även för en nedladdad fil.
+- **Skärmtid utan nät:** appen använder den senaste statusen från servern (tid kvar i dag och klockslagen, hämtas när
+  startsidan öppnas och var tionde sekund under uppspelning) och räknar själv tiden som spelas utan nät. När tiden är
+  slut eller klockslaget passerat stoppar spelaren med samma besked som servern ger, och filmen startar inte.
+
+Det här **kan inte** upprätthållas utan nät:
+
+- Tiden som spelats utan nät räknas bara i appen. Servern räknar inte framsteg som skickas i efterhand (med `at`),
+  så den tiden syns inte i föräldraöversikten och minskar inte tiden kvar på andra enheter.
+- En ny dag utan nät gäller samma dagliga gräns och klockslag som senast, utan extra tid – veckodagarnas egna regler och
+  ändringar som en vuxen gjort efteråt känner appen inte till förrän den har nät igen.
+- En vuxen kan inte stoppa uppspelningen på distans, och en åldersgräns som sänkts gäller nedladdade titlar först när
+  servern svarar.
+- Enhetens klocka går att ställa om. Dagen och klockslagen följer enhetens tidszon (servern använder sin egen).
+- Startar appen utan nät gäller den profil som senast var inloggad – byta profil kräver servern.
+
+Logiken ligger i `OfflineCore.kt` (ingen Android, testad på JVM i `OfflineCoreTest.kt`: kön, `at`, ordning, ny dag,
+sommartid och vintertid, fönster över midnatt), lagringen och anropen i `OfflineSync.kt`. Samma regler som Expo-appen
+(`apps/expo/src/offlinecore.ts`).
 
 ## Serveradress, https och BraXhn Relay
 
@@ -94,6 +123,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`, valet av hemadress): `gradle testReleaseUnitTest` – körs inte av workflowet än. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress och uppspelning utan nät): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
 **Inte provat på riktig enhet (appversion 0.7.0):** att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Android-appen glömde var du var när en nedladdad film spelades utan nät, och skärmtiden gällde inte där.**
+  Positionen skickades bara till servern; svarade den inte försvann den, och utan svar på titelns uppgifter skickades
+  ingenting alls. *Spela* under Nedladdat för offline började dessutom alltid från början. Nu sparas positionen i appen
+  (per server och profil) och skickas med tidpunkten när nätet är tillbaka, när appen öppnas och efter nästa lyckade
+  anrop – en senare position från en annan enhet vinner, och inget räknas två gånger om svaret tappades. Nedladdade
+  titlar börjar där du slutade. Utan nät följer skärmtiden senaste kända regler (tid kvar i dag och klockslagen) och
+  räknar tiden i appen; spelaren stoppar med samma besked som servern. Vad som inte går att upprätthålla utan nät står
+  i `apps/automotive/README.md`. Logiken i `OfflineCore.kt` med JVM-tester (sommartid, ny dag, fönster över midnatt),
+  som nu körs i Android-bygget. Inte provat på riktig telefon, TV eller bil.
 
 ## 1.4.4 – 2026-11-26
 - **Prova hårdvaruomkodningen under Administration.** *Administration → Hårdvaruomkodning → Prova omkodningen* kodar
