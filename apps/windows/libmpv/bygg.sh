@@ -97,6 +97,7 @@ ar = '$AR'
 strip = '$STRIP'
 windres = '$WINDRES'
 nm = '$NM'
+dlltool = '$HOST-dlltool'
 pkg-config = 'pkg-config'
 nasm = 'nasm'
 [properties]
