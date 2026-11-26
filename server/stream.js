@@ -785,8 +785,9 @@ export function decide(it, o) {
   const burn = sub?.bitmap ? sub.id : '';
   const Q = QUALITIES[o.q];
   const srcKbps = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
-  // Sänk även om bithastigheten är för hög för vald kvalitet (t.ex. 4K-remux utanför hemmet)
-  const scale = !!(Q.h && ((v?.height && v.height > Q.h) || (Q.br && srcKbps > Q.br * 1.3)));
+  // Sänk även om bithastigheten är för hög för vald kvalitet (t.ex. 4K-remux utanför hemmet) – utom när klienten
+  // buffrar själv och den uppmätta bandbredden rymmer filen (o.bwFits, routes/playback.js)
+  const scale = !!(Q.h && ((v?.height && v.height > Q.h) || (Q.br && srcKbps > Q.br * 1.3 && !o.bwFits)));
   let tonemap = !!(it.hdr && !hdrShown(it.hdr, o));
   const ext = CONTAINER[path.extname(it.path).toLowerCase()];
   const reasons = [];

@@ -9,11 +9,12 @@ export function inWindowsApp(ua = globalThis.navigator?.userAgent || '', w = glo
 // mpv spelar i stort sett allt: originalfilen skickas direkt så länge servern inte behöver ändra något (familjefilter,
 // inbränd undertext, lägre kvalitet). Ljudspåret väljer spelaren själv i filen (atrack=1) och ljudet går orört vidare.
 // cast=1: strömlänken får en egen kortlivad token, eftersom mpv inte har webbvyns inloggningskaka.
+// buf=1: mpv buffrar själv – utanför hemmet räcker det att den uppmätta bandbredden rymmer filen (routes/playback.js).
 export const NATIVE_CAPS = {
   c: 'mp4,mkv,webm',
   v: 'h264,hevc,av1,vp9,vp8,mpeg2video,mpeg4,vc1,wmv3,msmpeg4v3',
   a: 'aac,mp3,mp2,ac3,eac3,dts,truehd,mlp,flac,alac,opus,vorbis,wmav2,pcm_s16le,pcm_s24le,pcm_s32le,pcm_bluray,pcm_dvd',
-  atrack: '1', hdr: '1', dv: '1', cast: '1'
+  atrack: '1', hdr: '1', dv: '1', cast: '1', buf: '1'
 };
 
 /**
@@ -67,6 +68,15 @@ export function nativePlan(it, pb, { start = 0, origin, sub = '' } = {}) {
       chapters: (pb.chapters || []).map(c => ({ start: +c.start || 0, title: c.title || '' }))
     }
   };
+}
+
+/**
+ * Varför webbspelaren spelar i stället för mpv – skickas till appen (native-skip), som visar det i "Om den inbyggda
+ * spelaren" och i loggen. Äldre appar bryr sig inte om meddelandet.
+ */
+export function skipMessage(it, pb, plan, bw = 0) {
+  return { t: 'native-skip', id: it?.id ?? 0, why: plan?.why || 'okänt', mode: pb?.mode || '',
+    reasons: (pb?.reasons || []).slice(0, 6).map(String), remote: !!pb?.remote, bw: Math.max(0, Math.round(+bw || 0)) };
 }
 
 /** Framstegets kropp till POST /api/items/:id/progress (samma som webbspelaren skickar) */

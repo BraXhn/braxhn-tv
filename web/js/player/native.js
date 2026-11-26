@@ -6,7 +6,7 @@ import { api, status, t, toast, toastErr } from '../core.js';
 import { lastBandwidth, measureBandwidth, saveData } from './caps.js';
 import { screenBadge, timeUp } from '../screentime.js';
 import { route } from '../router.js';
-import { inWindowsApp, nativePlan, nativeQuery, progressBody } from './nativeplan.js';
+import { inWindowsApp, nativePlan, nativeQuery, progressBody, skipMessage } from './nativeplan.js';
 
 let N = null;          // { id, it, nextId, autoNext, onNext } – det mpv spelar just nu
 let waiters = [];      // svar från appen som väntas på: { type, resolve }
@@ -58,10 +58,12 @@ export async function playNative(it, o = {}) {
   try { pb = await api(`/items/${it.id}/playback?${nativeQuery(q)}`, { bg: true }); }
   catch (e) {
     if (e.code === 'screen_time') { timeUp(); return true; }
+    send(skipMessage(it, { reasons: [String(e.message || e)] }, { why: 'fel' }));
     return false; // webbspelaren frågar igen och visar felet
   }
   const plan = nativePlan(it, pb, { start: o.start, origin: location.origin, sub: o.sub });
-  if (!plan.use) return false;
+  // Appen får veta varför (Om den inbyggda spelaren), t.ex. att servern valde omkodning utanför hemmet
+  if (!plan.use) { send(skipMessage(it, pb, plan, q.bw)); return false; }
   send(plan.msg);
   const r = await reply('native-started', 20000, 'native-failed'); // mpv svarar när första bilden visas (via reläet kan det ta en stund)
   if (r?.t !== 'native-started' || r.id !== it.id) {

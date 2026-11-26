@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
 import { freePort } from './helpers/port.js';
+import { NATIVE_CAPS } from '../web/js/player/nativeplan.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-ver-'));
@@ -260,6 +261,22 @@ t('utanför hemmet med Auto: uppmätt bandbredd väljer var uppspelningen börja
   // Hemma påverkar bw ingenting
   const home = (await req(`/api/items/${film.id}/playback?version=${hi.id}&bw=150`)).data;
   assert.notEqual(home.mode, 'transcode');
+});
+
+// Ärende #4: Windows-appens inbyggda spelare (mpv) utanför hemmet får originalfilen (direct) när uppkopplingen räcker –
+// servern kodar bara om när den uppmätta bandbredden inte räcker för filen (då spelar webbspelaren)
+t('utanför hemmet med Auto: mpv:s förmågor ger direktuppspelning av MKV när bandbredden räcker, annars omkodning', async () => {
+  const hi = film.versions.find(v => v.height === 720);
+  const R = { headers: { 'x-forwarded-for': '81.2.3.4' } };
+  const caps = new URLSearchParams(NATIVE_CAPS).toString();
+  const fast = (await req(`/api/items/${film.id}/playback?version=${hi.id}&${caps}&bw=50000`, R)).data;
+  assert.equal(fast.remote, true, 'räknas som utanför hemmet');
+  assert.equal(fast.mode, 'direct', 'originalfilen till mpv');
+  assert.ok(fast.token, 'strömlänken har en egen token (cast=1)');
+  const none = (await req(`/api/items/${film.id}/playback?version=${hi.id}&${caps}`, R)).data;
+  assert.equal(none.mode, 'direct', 'ingen mätning: originalfilen');
+  const slow = (await req(`/api/items/${film.id}/playback?version=${hi.id}&${caps}&bw=150`, R)).data;
+  assert.equal(slow.mode, 'transcode', 'för långsam uppkoppling: servern kodar om');
 });
 
 t('huvudfilen försvinner: en kvarvarande version tar över med framsteg kvar', async () => {

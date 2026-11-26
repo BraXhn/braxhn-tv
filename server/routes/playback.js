@@ -184,10 +184,17 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     if (c.q.get('ffc') !== '1' || family.enforced(c.user.id)) o.mute = fmute;
     if (!family.indexed(it)) sublines.kick(5000); // undertexterna har inte lästs än – nästa uppspelning har planen
   }
+  // buf=1: klienten buffrar själv mycket (Windows-appens mpv). Utanför hemmet med Auto räcker det då att den uppmätta
+  // bandbredden rymmer filens snittbithastighet med 10 % marginal – webbspelarens marginaler (75 % av mätningen, +15 %)
+  // och kvalitetstakets bithastighet (1080p ≈ 10 Mbit/s) behövs inte. Utan mätning antas den räcka (mpv buffrar och
+  // går att stoppa; omkodning kan mpv:s klient inte välja själv). Upplösningstaket gäller fortfarande (ärende #4).
+  const srcKb = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
+  const bufFits = c.q.get('buf') === '1' && auto && remote && (!bw || (srcKb > 0 && srcKb * 1.1 + 128 <= bw));
+  if (bufFits) o.bwFits = true;
   let d = st.decide(it, o);
   // Remux och direktuppspelning har inga lägre steg att växla till. Ryms filen inte i den uppmätta bandbredden
   // kodas den om i stället – med alla steg upp till taket, så att kvaliteten kan gå upp igen.
-  if (auto && remote && bw && d.mode !== 'transcode' && fitQ !== o.q) {
+  if (auto && remote && bw && !bufFits && d.mode !== 'transcode' && fitQ !== o.q) {
     const kb = it.size && it.duration ? it.size * 8 / it.duration / 1000 : 0;
     if (!kb || kb * 1.15 + 128 > bw * 0.75) { o.force = 'transcode'; d = st.decide(it, o); }
   }

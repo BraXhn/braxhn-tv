@@ -10,7 +10,7 @@ import path from 'node:path';
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-native-'));
 process.env.TRANSCODE_DIR = path.join(process.env.CONFIG_DIR, 'tc');
 const st = await import('../server/stream.js');
-const { NATIVE_CAPS, inWindowsApp, nativePlan, nativeQuery, progressBody } = await import('../web/js/player/nativeplan.js');
+const { NATIVE_CAPS, inWindowsApp, nativePlan, nativeQuery, progressBody, skipMessage } = await import('../web/js/player/nativeplan.js');
 
 const WIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0 BraXhnTV-Windows/1.4.0';
 const webview = { chrome: { webview: { postMessage() {} } } };
@@ -114,4 +114,20 @@ test('webbspelaren frågar bara den inbyggda spelaren i Windows-appen och inte i
   assert.match(hook, /playNative\(/);
   const sw = fs.readFileSync(new URL('../web/sw.js', import.meta.url), 'utf8');
   assert.ok(sw.includes("'player/native.js'") && sw.includes("'player/nativeplan.js'"), 'modulerna finns i MODULES');
+});
+
+test('webbspelaren spelar: appen får veta varför (native-skip) – omkodning utanför hemmet, familjefilter', () => {
+  const it = { id: 6502, kind: 'episode', showTitle: 'The Mentalist', season: 6, episode: 19 };
+  const pb = { mode: 'transcode', remote: true, reasons: ['sänkt kvalitet till 1080p', 'bilden kodas som HEVC (libx265)'], token: 'x', url: '/a' };
+  const plan = nativePlan(it, pb, { origin: 'https://tv.example' });
+  assert.equal(plan.use, false);
+  assert.deepEqual(skipMessage(it, pb, plan, 8400.4), { t: 'native-skip', id: 6502, why: 'mode:transcode', mode: 'transcode',
+    reasons: ['sänkt kvalitet till 1080p', 'bilden kodas som HEVC (libx265)'], remote: true, bw: 8400 });
+  const fam = { mode: 'direct', filter: { mode: 'mute' }, token: 'x', url: '/a' };
+  assert.equal(skipMessage(it, fam, nativePlan(it, fam, { origin: 'https://tv.example' })).why, 'familjefilter');
+  // Fel i svaret: inga undefined till appen
+  const e = skipMessage(it, { reasons: ['nätverksfel'] }, { why: 'fel' });
+  assert.equal(e.mode, ''); assert.equal(e.bw, 0); assert.deepEqual(e.reasons, ['nätverksfel']);
+  // mpv säger att den buffrar själv (servern: buf=1)
+  assert.equal(new URLSearchParams(nativeQuery({})).get('buf'), '1');
 });
