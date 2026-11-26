@@ -1,6 +1,38 @@
 # Ändringar
 
 ## Ej utgiven
+- **Kontrollrad i Windows-appens inbyggda spelare.** I mpv syntes inga reglage och musen gjorde ingenting – bara
+  tangentbordet fungerade (ärende #4). Nu har spelaren en egen rad i webbspelarens stil: tidslinje som går att klicka
+  och dra i med tiden vid muspekaren, −10 s, spela/paus, +10 s, nästa avsnitt, stopp, sovtimer, ljudspår, undertexter
+  (storlek och tid), hastighet, volym och helskärm. Raderna tonas bort efter 3 sekunder (och muspekaren i helskärm).
+  Klick på bilden pausar, dubbelklick ger helskärm, hjulet ändrar volymen och högerklick ger en meny – bland annat
+  *Spela den här filmen i webbspelaren*. Tangenter: mellanslag/K, ←/→, J/L, ↑/↓, F/F11, Esc, Q, M, N, S, A, I och
+  medietangenterna.
+- **Windows-appens inbyggda spelare utanför hemmet** (ärende #4). Via den publika adressen – även hemifrån – kodade
+  servern om filmer vars bithastighet låg över kvalitetstakets (1080p ≈ 10 Mbit/s) eller som inte rymdes i 75 % av den
+  uppmätta uppkopplingen, och då spelade webbspelaren i stället för mpv. mpv buffrar själv (`buf=1`): nu räcker det att
+  uppkopplingen rymmer filen med 10 % marginal, och utan mätning antas den räcka. Upplösningstaket gäller som förut,
+  och webbspelaren och de andra apparna påverkas inte.
+- **Windows-appen säger varför webbspelaren används** – en gång nere i fönstret och i *Om den inbyggda spelaren*:
+  omkodning (med serverns skäl och uppmätt hastighet), familjefilter, trailers, avstängd eller mpv som inte kunde laddas.
+- **Windows-appens meny vid högerklick.** Webbläsarens meny (Bakåt, Spara som, Skriv ut, Granska …) visas inte längre;
+  högerklick i fönstret ger appens meny med *Ladda om*, serverval, den inbyggda spelarens val och *Om*. Textfält
+  behåller klipp ut/kopiera/klistra in, och webbappens egna högerklick fungerar som förut. Utvecklarverktygen är av
+  (för felsökning: `"DevTools": true` i `installningar.json` eller `BRAXHN_DEVTOOLS=1`).
+- **Windows-appen hämtar den inbyggda spelaren själv** (ärende #4). I stället för att ladda ner och packa upp
+  `libmpv-2.dll` för hand: första gången en film hade kunnat spelas i mpv frågar appen *Hämta den inbyggda spelaren
+  (mpv, ca 30 MB)?*, och *Hämta/Uppdatera den inbyggda spelaren* finns i fönstermenyn – aldrig utan klick. Appen tar
+  BraXhn TV:s egen LGPL-byggnad (adress och SHA-256 i `apps/windows/libmpv.json`) och annars mpv-projektets
+  Windows-bygge från SourceForge (varianten x86_64, inte -v3 som kräver AVX2), kontrollerar och packar upp den och
+  använder den direkt utan omstart. Följer mpv med installationen erbjuds ingen hämtning. Förut sparade appen ett
+  misslyckat försök att ladda mpv till nästa start, så en fil som lades dit medan appen var öppen användes inte.
+- **Windows-appen säger till när servern är för gammal för den inbyggda spelaren.** Det är webbappen från servern som
+  lämnar över filmer till mpv, och det gör den först från 1.4.1 – med en äldre server spelade webbspelaren allt utan
+  förklaring. Appen läser serverns version och säger det en gång nere i fönstret och i *Om den inbyggda spelaren*,
+  som nu också visar varje plats som provades, om filen gick att ladda (fel arkitektur, Windows felmeddelande),
+  mpv:s version, om filen kräver AVX2 (varianten x86_64-v3 – provas i en egen process när processorn saknar AVX2, så
+  att appen inte kraschar) och när mpv används utanför hemmet. Har servern bytt version laddar appen om sidan en gång. *Kopiera felsökningsinformation*
+  tar med slutet av den nya loggen `%LOCALAPPDATA%\BraXhnTV\logg.txt` (högst 256 kB).
 
 - **Android-appen går direkt till servern hemma** (telefon, Google TV och bil), som Expo-appen sedan 1.4.1. Är appen
   sparad med den publika adressen (reläet eller en domän) provar den serverns hemadress i bakgrunden när servern öppnas,
