@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.4.3 – 2026-11-26
 - **Spelarraden i Windows-appens inbyggda spelare visades så fort musen rördes – var som helst på skärmen.** Appen
   läste muspekarens läge fem gånger i sekunden och räknade varje ändring, även utanför fönstret och när ett annat
   program var aktivt. Nu räknas bara rörelser inom spelaren, över appens fönster och längre än några bildpunkter
