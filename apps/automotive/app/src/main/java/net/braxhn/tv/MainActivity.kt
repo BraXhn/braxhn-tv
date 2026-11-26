@@ -73,8 +73,8 @@ sealed class Screen {
 class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
-        // Automatisk offline-synk när appen öppnas eller kommer tillbaka till förgrunden, och provet av hemadressen
-        Downloads.autoSync(); Home.check()
+        // Offline-synk, provet av hemadressen och positioner som spelats utan nät när appen öppnas eller kommer tillbaka
+        Downloads.autoSync(); Home.check(); OfflineSync.flush()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -649,7 +649,7 @@ fun DownloadsList(push: (Screen) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text(r.title, fontWeight = FontWeight.SemiBold); Text("${r.subtitle} · ${r.size / 1_000_000} MB", color = Color.Gray, fontSize = 13.sp) }
                 // Spelas direkt från filen – fungerar utan nät (titelsidan kräver servern)
-                TextButton(onClick = { push(Screen.Play(r.id, 0.0, null, null)) }) { Text(tr(R.string.play)) }
+                TextButton(onClick = { push(Screen.Play(r.id, OfflineSync.resumeAt(r.id), null, null)) }) { Text(tr(R.string.play)) }
                 TextButton(onClick = { Downloads.remove(r.id) }) { Text(tr(R.string.remove)) }
             }
         }

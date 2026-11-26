@@ -29,8 +29,8 @@ import javax.net.ssl.SSLHandshakeException
 
 // ---------- modeller ----------
 
-/** Skärmtiden i svaret på framstegsanropet (barnprofiler med regler): message är serverns förklaring */
-@Serializable data class ScreenTimeState(val allowed: Boolean = true, val message: String? = null)
+/** Skärmtiden (GET /api/screentime, screenTime i framstegssvaret): message är serverns förklaring, resten används utan nät (OfflineSync) */
+@Serializable data class ScreenTimeState(val allowed: Boolean = true, val message: String? = null, val limited: Boolean = true, val day: String? = null, val daily: Int? = null, val used: Double = 0.0, val extra: Int = 0, val remaining: Double? = null, val from: String? = null, val until: String? = null, val audio: Boolean = false)
 /** POST /api/items/:id/progress – stop = en vuxen/administratören stoppade uppspelningen eller skärmtiden är slut */
 @Serializable data class ProgressResult(val watched: Boolean = false, val stop: Boolean = false, val screenTime: ScreenTimeState? = null)
 
@@ -51,6 +51,10 @@ object Session {
         val u = st.user ?: return
         kid.value = u.kid
         canDownload.value = u.canDownload
+        // Utan nät: positioner sparas per profil och skärmtiden följer senaste statusen (OfflineSync)
+        OfflineSync.rememberUser(u.id)
+        runCatching { Api.get<ScreenTimeState>("/api/screentime") }.getOrNull()?.let { OfflineSync.noteScreen(it) }
+        OfflineSync.flush()
     }
 
     /** Glöm profilens läge (utloggning, profilbyte) tills nästa refresh() */

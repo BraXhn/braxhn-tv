@@ -152,8 +152,10 @@
       "required": { "id": "integer", "name": "string" },
       "optional": { "is_admin": "integer", "kid": "boolean", "canDownload": "boolean" } },
     "ProgressResult.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:33-35",
-      "optional": { "watched": "boolean", "stop": "boolean",
-        "screenTime": { "optional": { "allowed": "boolean", "message": "string" } } } },
+      "optional": { "watched": "boolean", "stop": "boolean", "screenTime": "@ScreenTimeState.android" } },
+    "ScreenTimeState.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:33 (utan nät: OfflineSync.kt, OfflineCore.kt)",
+      "optional": { "allowed": "boolean", "message": "string", "limited": "boolean", "day": "string", "daily": "integer", "used": "number",
+        "extra": "integer", "remaining": "number", "from": "string", "until": "string", "audio": "boolean" } },
     "ServerStatus.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:38",
       "optional": { "needsSetup": "boolean", "version": "string", "user": "@UserInfo.android", "donateUrl": "string" } },
     "LoginResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:39",
@@ -413,14 +415,14 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:361", "query": { "q": "$sök" }, "svar": ["@MediaItem.android"] } },
     "GET /api/items/:id": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:70, Player.swift:142, :162", "svar": "@MediaItem.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:511, PlayerScreen.kt:139, :150", "svar": "@MediaItem.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:511, PlayerScreen.kt:159, :172", "svar": "@MediaItem.android" } },
     "GET /api/items/:id/playback": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:176 (förmågor: AppModel.swift:154-172, nattläge/dialog: AppModel.swift:291-296, cinema=1 bara när GET /api/me/cinema säger på: Player.swift:237-241; tvOS skickar inte nhls)",
         "query": [{ "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "night": "1", "dialog": "1", "cinema": "1" }],
         "svar": "@Playback.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:143, :159 (förmågor: Api.kt:259-273 och TvOutput.kt (bitström, HDR), nattläge/dialog: Api.kt:338, bio-läge cinema=1: :155; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: sista varianten; :143 skickar info=1)",
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:165, :181 (förmågor: Api.kt:259-273 och TvOutput.kt (bitström, HDR), nattläge/dialog: Api.kt:338, bio-läge cinema=1: :177; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: sista varianten; :165 skickar info=1)",
         "query": [{ "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0" },
                   { "c": "mp4,mkv,webm", "v": "h264", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0" },
                   { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0", "info": "1" },
@@ -429,19 +431,21 @@
         "svar": "@Playback.android" } },
     "GET /api/stream/:id/direct": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge direct)", "svar": { "media": "^video/" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:174 (Playback.url, läge direct)", "svar": { "media": "^video/" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:196 (Playback.url, läge direct)", "svar": { "media": "^video/" } } },
     "GET /api/stream/:id/hls/master.m3u8": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:174 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:196 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } } },
     "GET /api/stream/:id/subs/:sid": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:409 (PlaybackSubtitle.url), :412 (Bearer, för nedladdade filer)", "svar": { "media": "^text/vtt" } },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:167 (PlaybackSubtitle.url)", "svar": { "media": "^text/vtt" } } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:189 (PlaybackSubtitle.url)", "svar": { "media": "^text/vtt" } } },
     "GET /api/image/:id/:type": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:50-61 (bildtoken i ?t=)", "svar": { "media": "^image/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:183-188 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
     "POST /api/items/:id/progress": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:198", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressReply.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:292, PlayerScreen.kt:113-129", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressResult.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:292, PlayerScreen.kt:123-149 (utan svar: OfflineSync.kt, skickas senare med at)", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressResult.android" } },
+    "GET /api/screentime": {
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:56 (sparas för uppspelning utan nät, OfflineSync.kt)", "svar": "@ScreenTimeState.android" } },
     "POST /api/items/:id/watched": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:137", "body": { "watched": false }, "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:295", "body": { "watched": false }, "svar": null } },
@@ -574,7 +578,7 @@
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:254-268 (401 med needPin/needPassword loggar inte ut: AppModel.swift:76, :80)", "body": { "id": "$profil" }, "svar": "@ProfileSwitch.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:331-340 (vy: Extras.kt:246)", "body": { "id": "$profil" }, "svar": "@LoginResponse.android" } },
     "GET /api/me/cinema": {
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:156", "svar": "@CinemaPrefs.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:178", "svar": "@CinemaPrefs.android" } },
 
 
     "PUT /api/items/:id/rating": {
@@ -610,7 +614,7 @@
 
     "POST /api/stream/:id/stop": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:179, :481", "svar": null },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:196 (StreamGate, från PlayerScreen.kt:128)", "svar": null } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:196 (StreamGate, från PlayerScreen.kt:148)", "svar": null } },
     "POST /api/logout": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:140-143", "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:263", "svar": null } }

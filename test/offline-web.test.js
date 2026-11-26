@@ -149,6 +149,8 @@ t('tittarposition med at: ett senare framsteg från en annan enhet skrivs inte �
   // Nyare offline-position vinner över den äldre
   await req(`/api/items/${S.e2}/progress`, { method: 'POST', body: { position: 3, at: now - 3600 } });
   assert.equal(await pos(), 3);
+  // Samma post igen (svaret tappades och appen skickar om den): stale, inget räknas två gånger
+  assert.equal((await req(`/api/items/${S.e2}/progress`, { method: 'POST', body: { position: 3, at: now - 3600 } })).data.stale, true);
   // Äldre än det som finns: stale, ingen ändring
   const r = (await req(`/api/items/${S.e2}/progress`, { method: 'POST', body: { position: 1, at: now - 5000 } })).data;
   assert.equal(r.stale, true); assert.equal(await pos(), 3);

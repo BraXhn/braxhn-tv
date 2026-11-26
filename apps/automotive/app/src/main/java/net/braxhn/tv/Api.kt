@@ -28,7 +28,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Strings.init(this); Api.init(this); Home.init(this)
-        Downloads.init(this)
+        Downloads.init(this); OfflineSync.init(this)
     }
 }
 

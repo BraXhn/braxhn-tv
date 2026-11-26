@@ -204,6 +204,19 @@
     <string name="player_comfort">Ljudkomfort</string>
     <string name="player_night">Nattläge (jämnare ljudnivå)</string>
     <string name="player_stopped">Uppspelningen stoppades</string>
+    <!-- Skärmtid utan nät (OfflineSync.message): samma besked som servern (server/screentime.js) -->
+    <string name="offline_screen_limit">Tiden är slut för idag – du har tittat %1$d av %2$d minuter. Fråga en vuxen om du behöver mer tid.</string>
+    <string name="offline_screen_window">Det går inte att titta just nu. På %1$s går det att titta %2$s.</string>
+    <string name="offline_screen_between">mellan %1$s och %2$s</string>
+    <string name="offline_screen_from">från %1$s</string>
+    <string name="offline_screen_until">fram till %1$s</string>
+    <string name="offline_day_sun">söndagar</string>
+    <string name="offline_day_mon">måndagar</string>
+    <string name="offline_day_tue">tisdagar</string>
+    <string name="offline_day_wed">onsdagar</string>
+    <string name="offline_day_thu">torsdagar</string>
+    <string name="offline_day_fri">fredagar</string>
+    <string name="offline_day_sat">lördagar</string>
     <string name="player_failed">Kunde inte spela</string>
     <string name="sleep_timer">Sovtimer</string>
     <string name="sleep_timer_min">Sovtimer: %1$d min</string>

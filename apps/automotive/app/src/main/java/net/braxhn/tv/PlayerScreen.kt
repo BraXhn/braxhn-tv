@@ -82,6 +82,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var stopped by remember(req) { mutableStateOf<String?>(null) }
     // Slutrapport och stopp av strömmen skickas en gång per uppspelning (Stäng + att vyn stängs gav dubbla anrop)
     val finalSent = remember(req) { booleanArrayOf(false) }
+    // Tid som spelats sedan förra rapporten (ms) och förra varvet i bevakningen – räknas som skärmtid utan nät
+    val played = remember(req) { longArrayOf(0L, 0L) }
     val closeFocus = remember { FocusRequester() }
 
     val player = remember {
@@ -110,20 +112,38 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                   else context.getString(R.string.player_stopped_by_admin)
     }
 
+    /** Skärmtiden är slut enligt appens egen räkning (nedladdad titel utan nät): stoppa med serverns besked */
+    fun stoppedOffline(g: ScreenGate) {
+        if (stopped != null || g.allowed) return
+        player.pause()
+        player.stop()
+        stopped = OfflineSync.message(g)
+    }
+
     fun report(final: Boolean = false) {
-        val it = item ?: return
+        // En nedladdad titel spelas även när servern inte svarade på /api/items/:id (item saknas då)
+        val id = item?.id ?: (if (offline) req.id else return)
         if (final) { if (finalSent[0]) return; finalSent[0] = true }
-        val id = it.id
         val pos = player.currentPosition / 1000.0
-        val dur = pb?.duration ?: it.duration ?: 0.0
-        // Under trailers/förfilm finns inget framsteg att spara. Positionen sparas bara på servern (ingen egen lokal
-        // position) – servern ger 0 för det som setts under 2 minuter, så appen erbjuder då ingen Fortsätt.
+        val dur = pb?.duration ?: item?.duration ?: player.duration.takeIf { d -> d > 0 }?.let { d -> d / 1000.0 } ?: 0.0
+        val secs = played[0] / 1000.0; played[0] = 0L
+        // Under trailers/förfilm finns inget framsteg att spara. Kommer framsteget inte fram sparas positionen i appen
+        // och skickas med at när nätet är tillbaka (OfflineSync); för en nedladdad titel räknas då skärmtiden i appen.
+        // Servern ger 0 för det som setts under 2 minuter, så appen erbjuder då ingen Fortsätt.
         if (pos > 1 && player.currentMediaItemIndex >= mainIndex) {
-            if (final) Api.appScope.launch { Api.reportProgress(id, pos, dur) }
-            else if (stopped == null) scope.launch {
+            if (offline) OfflineSync.notePlayed(id, pos, dur)
+            val send: suspend () -> Unit = {
                 val r: ProgressResult? = Api.reportProgress(id, pos, dur)
-                if (r != null && r.stop && item?.id == id) stoppedByServer(r)
+                if (r != null) {
+                    OfflineSync.noteScreen(r.screenTime); OfflineSync.flush()
+                    if (!final && r.stop && item?.id == id) stoppedByServer(r)
+                } else {
+                    OfflineSync.savePosition(id, pos, dur)
+                    if (offline) { val g = OfflineSync.playedOffline(secs); if (!final && req.id == id) stoppedOffline(g) }
+                }
             }
+            if (final) Api.appScope.launch { send() }
+            else if (stopped == null) scope.launch { send() }
         }
         if (final && !offline) StreamGate.stop(id)
     }
@@ -137,6 +157,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             player.setMediaItem(M3Item.fromUri(Uri.fromFile(f)), (req.start * 1000).toLong())
             player.prepare(); player.playWhenReady = true
             item = runCatching { Api.get<MediaItem>("/api/items/${req.id}") }.getOrNull()
+            // Servern svarar inte: skärmtiden enligt senaste kända regler och tiden som räknats i appen
+            if (item == null) stoppedOffline(OfflineSync.gateNow())
             // info=1: bara intro/eftertexter – räknas inte som en strömning på servern
             pb = runCatching {
                 val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(req.audio, null) }
@@ -198,6 +220,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         while (true) {
             delay(500)
             val t = player.currentPosition / 1000.0
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            if (player.isPlaying && played[1] > 0) played[0] += nowMs - played[1]
+            played[1] = nowMs
             val p = pb
             val idx = player.currentMediaItemIndex
             prerollLabel = if (idx < mainIndex) prerolls.getOrNull(idx)?.let { e -> if (e.kind == "preroll") context.getString(R.string.player_preroll) else context.getString(R.string.player_trailer_title, e.title ?: "") } else null

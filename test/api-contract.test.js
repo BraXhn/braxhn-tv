@@ -425,6 +425,14 @@ const CASES = {
   'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
   'GET /api/me/cinema': () => [{}],
+  // Skärmtid (Android sparar den för uppspelning utan nät): huvudkontot utan regler och en barnprofil med regler
+  'GET /api/screentime': async () => {
+    const own = ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token;
+    ok(await call('android', 'POST', '/api/profiles', { body: { name: 'Skärmtid', maxAge: 11 }, token: own }), 'profil');
+    const kid = ok(await call('android', 'GET', '/api/profiles', { token: own }), 'profiler').profiles.find(x => x.name === 'Skärmtid');
+    ok(await call('android', 'PUT', `/api/screentime/${kid.id}`, { body: { daily: 600, from: '00:00', until: '23:59' }, token: own }), 'skärmtid');
+    return [{}, { token: ok(await call('android', 'POST', '/api/profiles/switch', { body: { id: kid.id }, token: own }), 'profilbyte').token }];
+  },
   // Android: betyg, temamusik, extramaterial, repliksökning och undertextsynk
   'PUT /api/items/:id/rating': () => [{ p: { id: S.film } }],
   'GET /api/items/:id/theme': () => [{ p: { id: S.show } }],
