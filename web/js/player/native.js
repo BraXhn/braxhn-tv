@@ -118,10 +118,10 @@ function onHost(m) {
     // replaced: en annan titel startades i den inbyggda spelaren – sidan ritas inte om
     case 'native-closed': finish(pos); if (!m.replaced) route(); break;
     case 'native-failed': {
-      // mpv kunde inte spela filen efter starten: webbspelaren tar över där den var
+      // mpv kunde inte spela filen efter starten – eller användaren valde webbspelaren (user): den tar över där den var
       const { it } = N;
       finish(pos);
-      toast(t('Den inbyggda spelaren kunde inte spela filmen – webbspelaren tar över'));
+      if (!m.user) toast(t('Den inbyggda spelaren kunde inte spela filmen – webbspelaren tar över'));
       import('./video.js').then(v => v.play(it.id, pos, { noNative: true, noCinema: true })).catch(toastErr);
       break;
     }

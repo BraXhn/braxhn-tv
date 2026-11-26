@@ -351,6 +351,8 @@ sealed partial class MainForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        // Den inbyggda spelaren: tangentkartan i Logik/PlayerUi.cs (mellanslag, pilar, F, M, N, S, A, I …)
+        if (PlayerKey(keyData)) return true;
         if (keyData == Keys.F11) { ToggleFullScreen(); return true; }
         if (keyData == Keys.Escape && fullScreen && web?.CoreWebView2?.ContainsFullScreenElement != true) { SetFullScreen(false); return true; }
         return base.ProcessCmdKey(ref msg, keyData);

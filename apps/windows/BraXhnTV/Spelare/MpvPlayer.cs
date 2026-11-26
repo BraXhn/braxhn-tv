@@ -44,7 +44,11 @@ unsafe sealed class MpvPlayer
     public event Action? PauseChanged;
     public event Action? Gone;               // mpv är helt stängd (panelen får tas bort)
 
-    const ulong PropTime = 1, PropPause = 2, PropVolume = 3;
+    const ulong PropTime = 1, PropPause = 2, PropVolume = 3, PropDuration = 4, PropMute = 5, PropCache = 6;
+    public double Duration { get; private set; }
+    public bool Muted { get; private set; }
+    /// <summary>Hur långt filen är buffrad (sekunder i filen), 0 = okänt</summary>
+    public double CachedUntil { get; private set; }
 
     /// <summary>wid: fönstret mpv ritar i (0 = inget, i testerna). ui: kör en händelse på UI-tråden.</summary>
     public MpvPlayer(Libmpv mpv, long wid, Action<Action> ui, PlayRequest req)
@@ -58,20 +62,23 @@ unsafe sealed class MpvPlayer
     {
         h = mpv.Create();
         if (h == IntPtr.Zero) throw new InvalidOperationException("mpv_create misslyckades");
-        // Före initialize: fönstret, reglagen (mpv:s egna, OSC) och tangenterna
+        // Före initialize: fönstret. Reglagen, musen och tangenterna sköter appen själv (Spelare/ControlBar.cs,
+        // MouseLayer.cs, PlayerUi.ForKey) – mpv:s egna (OSC, standardtangenter, mus i fönstret) är avstängda, så att
+        // inget dubbleras och raden ser ut som resten av appen. input.conf finns kvar för script-message (bx-…).
         if (wid != 0) Opt("wid", wid.ToString(CultureInfo.InvariantCulture));
         Opt("config", "no");
         Opt("terminal", "no");
-        Opt("input-default-bindings", "yes");
-        Opt("input-vo-keyboard", "yes");
+        Opt("input-default-bindings", "no");
+        Opt("input-vo-keyboard", "no");
+        Opt("input-cursor", "no");
         Opt("input-conf", InputConf(o.ConfigDir));
-        Opt("osc", "yes");
+        Opt("osc", "no");
         Opt("load-scripts", "no");
         Opt("ytdl", "no");
         Opt("idle", "yes");
         Opt("keep-open", "no");
         Opt("force-window", "yes");
-        Opt("cursor-autohide", "1500");
+        Opt("cursor-autohide", "no");
         Opt("osd-bar", "yes");
         Opt("force-media-title", Request.Title);
         // Bilden: hårdvaruavkodning när den är säker, libplacebo; HDR till skärmen när Windows HDR är på, annars tonmappning
@@ -102,6 +109,9 @@ unsafe sealed class MpvPlayer
         mpv.Observe(h, PropTime, "time-pos", Libmpv.FmtDouble);
         mpv.Observe(h, PropPause, "pause", Libmpv.FmtFlag);
         mpv.Observe(h, PropVolume, "volume", Libmpv.FmtDouble);
+        mpv.Observe(h, PropDuration, "duration", Libmpv.FmtDouble);
+        mpv.Observe(h, PropMute, "mute", Libmpv.FmtFlag);
+        mpv.Observe(h, PropCache, "demuxer-cache-time", Libmpv.FmtDouble);
         loop = new Thread(EventLoop) { IsBackground = true, Name = "mpv" };
         loop.Start();
         err = mpv.Command(h, "loadfile", Request.Url, "replace");
@@ -135,6 +145,33 @@ unsafe sealed class MpvPlayer
     public void Send(params string[] args) { if (h != IntPtr.Zero && !stopping) mpv.Command(h, args); }
 
     public void TogglePause() { if (h != IntPtr.Zero && !stopping) mpv.Command(h, "cycle", "pause"); }
+    /// <summary>Sätter en egenskap (aid, sid, volume, speed, sub-scale …)</summary>
+    public void Set(string name, string value) { if (h != IntPtr.Zero && !stopping) mpv.SetProperty(h, name, value); }
+    static string N(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+    /// <summary>Spolar till en position. exact = på bildrutan (när man släpper tidslinjen), annars närmaste nyckelbild.</summary>
+    public void SeekTo(double sec, bool exact = true) => Send("seek", N(Math.Max(0, sec)), exact ? "absolute+exact" : "absolute+keyframes");
+    public void SeekBy(double sec) => Send("seek", N(sec), "relative");
+    public void SetVolume(int v) => Set("volume", Math.Clamp(v, 0, 100).ToString(CultureInfo.InvariantCulture));
+    /// <summary>En kort text i bilden (mpv:s OSD), t.ex. volymen efter scrollhjulet</summary>
+    public void ShowText(string text, int ms = 1200) => Send("show-text", text, ms.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Ett spår i filen (ljud eller undertext) för menyerna</summary>
+    public sealed record Track(int Id, string Type, string? Title, string? Lang, string? Codec, int? Channels, bool Selected, bool External);
+
+    /// <summary>Spåren i filen av en sort ("audio" eller "sub")</summary>
+    public List<Track> Tracks(string type)
+    {
+        var list = new List<Track>();
+        if (h == IntPtr.Zero || stopping) return list;
+        var count = int.TryParse(mpv.GetString(h, "track-list/count"), out var n) ? n : 0;
+        for (var i = 0; i < count; i++)
+        {
+            string? G(string k) => mpv.GetString(h, $"track-list/{i}/{k}");
+            if (G("type") != type || !int.TryParse(G("id"), out var id)) continue;
+            list.Add(new Track(id, type, G("title"), G("lang"), G("codec"), int.TryParse(G("demux-channel-count"), out var ch) ? ch : null, G("selected") == "yes", G("external") == "yes"));
+        }
+        return list;
+    }
 
     /// <summary>Stänger mpv. Gone kommer när allt är stängt.</summary>
     public void Stop()
@@ -199,6 +236,9 @@ unsafe sealed class MpvPlayer
                 if (p == null || p->Data == IntPtr.Zero) break;
                 if (e->ReplyUserdata == PropTime && p->Format == Libmpv.FmtDouble) Position = *(double*)p->Data;
                 else if (e->ReplyUserdata == PropVolume && p->Format == Libmpv.FmtDouble) Volume = (int)Math.Round(*(double*)p->Data);
+                else if (e->ReplyUserdata == PropDuration && p->Format == Libmpv.FmtDouble) Duration = *(double*)p->Data;
+                else if (e->ReplyUserdata == PropMute && p->Format == Libmpv.FmtFlag) Muted = *(int*)p->Data != 0;
+                else if (e->ReplyUserdata == PropCache && p->Format == Libmpv.FmtDouble) CachedUntil = *(double*)p->Data;
                 else if (e->ReplyUserdata == PropPause && p->Format == Libmpv.FmtFlag)
                 {
                     var paused = *(int*)p->Data != 0;

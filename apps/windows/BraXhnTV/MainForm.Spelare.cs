@@ -127,7 +127,13 @@ sealed partial class MainForm
                 PostNative(new { t = "native-failed", id = req.Id, pos = playerStarted ? p.Position : req.Start, error = why });
                 ClosePlayer(notify: false);
             };
-            p.Ended += () => { if (player == p) PostNative(new { t = "native-ended", id = req.Id, pos = p.Position }); };
+            p.Ended += () =>
+            {
+                if (player != p) return;
+                // Sovtimern "när avsnittet är slut": tillbaka till sidan i stället för nästa avsnitt
+                if (sleepAfter) { sleepAfter = false; Logg.Write("sovtimern: titeln slut"); ClosePlayer(); return; }
+                PostNative(new { t = "native-ended", id = req.Id, pos = p.Position });
+            };
             p.PauseChanged += () => { if (player == p) { SendProgress(); UpdateAwake(); } };
             p.Command += (c) =>
             {
@@ -245,12 +251,20 @@ sealed partial class MainForm
         playerPanel.Focus();
     }
 
-    // ---------- raden överst: Tillbaka, titeln och Nästa avsnitt (visas när musen rör sig) ----------
+    // ---------- reglagen: raden överst (Tillbaka, titeln, Nästa avsnitt), kontrollraden nederst och musen över bilden ----------
+    ControlBar? controls;
+    MouseLayer? mouseLayer;
+    ContextMenuStrip? openMenu;
+    bool barsShown = true;
+    DateTime? sleepAt;
+    bool sleepAfter;
+    int lastSid = -1;
+
     void EnsureBar(PlayRequest req)
     {
         if (playerBar == null)
         {
-            playerBar = new Panel { Height = 52, BackColor = Color.FromArgb(0x14, 0x15, 0x17), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Padding = new Padding(10, 8, 10, 8) };
+            playerBar = new Panel { Height = 52, BackColor = Color.FromArgb(0x14, 0x15, 0x17), Padding = new Padding(10, 8, 10, 8) };
             var back = BarButton(L.T("← Tillbaka", "← Back"));
             back.Dock = DockStyle.Left;
             back.Click += (_, _) => ClosePlayer();
@@ -262,17 +276,65 @@ sealed partial class MainForm
             playerBar.Controls.Add(back);
             playerBar.Controls.Add(nextButton);
             Controls.Add(playerBar);
-            barTimer = new System.Windows.Forms.Timer { Interval = 300 };
+            barTimer = new System.Windows.Forms.Timer { Interval = 200 };
             barTimer.Tick += (_, _) => BarTick();
         }
-        playerBar.Bounds = new Rectangle(0, 0, ClientSize.Width, playerBar.Height);
+        if (controls == null)
+        {
+            controls = new ControlBar();
+            controls.Clicked += OnControlClick;
+            controls.Seek += (s, final) => player?.SeekTo(s, exact: final);
+            controls.VolumeSet += (v) => { player?.SetVolume(v); if (player?.Muted == true) player.Set("mute", "no"); };
+            Controls.Add(controls);
+        }
+        if (mouseLayer == null || mouseLayer.IsDisposed)
+        {
+            mouseLayer = new MouseLayer();
+            mouseLayer.Click1 += () => DoAction(PlayerAction.TogglePause);
+            mouseLayer.DoubleClick1 += () => DoAction(PlayerAction.Fullscreen);
+            mouseLayer.Wheel += (d) => DoAction(d > 0 ? PlayerAction.VolumeUp : PlayerAction.VolumeDown);
+            mouseLayer.RightClick += () => ShowMenu(VideoMenu(), Cursor.Position);
+            mouseLayer.Moved += () => mouseMoved = DateTime.UtcNow;
+        }
         barTitle!.Text = req.Title;
         nextButton!.Visible = req.NextId != null;
-        playerBar.Visible = true;
-        playerBar.BringToFront();
+        controls.Title = req.Title;
+        controls.HasNext = req.NextId != null;
+        controls.Position = req.Start;
+        controls.Duration = req.Duration;
+        sleepAfter = false; // sovtimern "när avsnittet är slut" gäller en titel; en tid gäller över nästa avsnitt
         mouseMoved = DateTime.UtcNow;
         lastMouse = Cursor.Position;
+        SetBars(true);
+        if (!mouseLayer.Visible) mouseLayer.Show(this);
+        LayoutPlayer();
         barTimer!.Start();
+    }
+
+    /// <summary>Raderna och muslagret efter fönstrets storlek; muslagret täcker bara bilden mellan raderna</summary>
+    void LayoutPlayer()
+    {
+        if (playerBar == null || controls == null) return;
+        var w = ClientSize.Width; var h = ClientSize.Height;
+        playerBar.Bounds = new Rectangle(0, 0, w, playerBar.Height);
+        controls.Bounds = new Rectangle(0, h - ControlBar.BarHeight, w, ControlBar.BarHeight);
+        if (mouseLayer is { IsDisposed: false } && player != null && WindowState != FormWindowState.Minimized)
+        {
+            var top = barsShown ? playerBar.Height : 0;
+            var bottom = barsShown ? h - ControlBar.BarHeight : h;
+            var r = RectangleToScreen(new Rectangle(0, top, w, Math.Max(1, bottom - top)));
+            mouseLayer.Bounds = r;
+        }
+    }
+
+    void SetBars(bool show)
+    {
+        barsShown = show;
+        if (playerBar != null) { playerBar.Visible = show; if (show) playerBar.BringToFront(); }
+        if (controls != null) { controls.Visible = show; if (show) controls.BringToFront(); }
+        if (show) mouseLayer?.ShowCursor();
+        else if (fullScreen) mouseLayer?.HideCursor();
+        LayoutPlayer();
     }
 
     static Button BarButton(string text) => new()
@@ -284,19 +346,263 @@ sealed partial class MainForm
 
     void BarTick()
     {
-        if (playerBar == null || player == null) return;
+        if (playerBar == null || controls == null || player == null) return;
+        var p = player;
         var pos = Cursor.Position;
         if (pos != lastMouse) { lastMouse = pos; mouseMoved = DateTime.UtcNow; }
-        var over = playerBar.Visible && playerBar.RectangleToScreen(playerBar.ClientRectangle).Contains(pos);
-        var show = over || (DateTime.UtcNow - mouseMoved).TotalSeconds < 3 || !playerStarted || player.Paused;
-        if (show != playerBar.Visible) { playerBar.Visible = show; if (show) playerBar.BringToFront(); }
-        playerBar.Width = ClientSize.Width;
+        bool Over(Control c) => c.Visible && c.RectangleToScreen(c.ClientRectangle).Contains(pos);
+        var show = PlayerUi.ShowBars((DateTime.UtcNow - mouseMoved).TotalSeconds, Over(playerBar) || Over(controls) || controls.Dragging, p.Paused, playerStarted, openMenu?.Visible == true);
+        if (show != barsShown) SetBars(show);
+        // Värdena i kontrollraden
+        if (!controls.Dragging) controls.Position = p.Position;
+        if (p.Duration > 0) controls.Duration = p.Duration;
+        controls.CachedUntil = p.CachedUntil;
+        controls.Paused = p.Paused;
+        if (p.Volume >= 0) controls.Volume = p.Volume;
+        controls.Muted = p.Muted;
+        controls.FullScreen = fullScreen;
+        controls.SleepLabel = sleepAfter ? L.T("efter avsnittet", "after this one") : sleepAt is DateTime at ? $"{Math.Max(1, (int)Math.Ceiling((at - DateTime.Now).TotalMinutes))} min" : "";
+        if (barsShown) controls.Invalidate();
+        // Sovtimern: pausar när tiden är ute
+        if (sleepAt is DateTime t && DateTime.Now >= t)
+        {
+            sleepAt = null;
+            if (!p.Paused) p.TogglePause();
+            p.ShowText(L.T("Sovtimern pausade filmen", "The sleep timer paused the video"), 4000);
+            Logg.Write("sovtimern pausade");
+        }
+        // Tangenterna ska till appen: har mpv:s fönster tagit fokus läggs det tillbaka på panelen
+        if (ActiveForm == this && openMenu?.Visible != true)
+        {
+            var f = Native.GetFocus();
+            if (f != IntPtr.Zero && FromHandle(f) == null) playerPanel?.Focus();
+        }
     }
 
     void RemoveBar()
     {
         barTimer?.Stop();
         if (playerBar != null) playerBar.Visible = false;
+        if (controls != null) controls.Visible = false;
+        openMenu?.Close();
+        if (mouseLayer is { IsDisposed: false }) { mouseLayer.ShowCursor(); mouseLayer.Hide(); }
+    }
+
+    /// <summary>Tangenterna medan den inbyggda spelaren visas (MainForm.ProcessCmdKey)</summary>
+    bool PlayerKey(Keys keyData)
+    {
+        if (player == null) return false;
+        var a = PlayerUi.ForKey((int)(keyData & Keys.KeyCode), keyData.HasFlag(Keys.Shift), keyData.HasFlag(Keys.Control), keyData.HasFlag(Keys.Alt));
+        if (a == PlayerAction.None) return false;
+        mouseMoved = DateTime.UtcNow - TimeSpan.FromSeconds(a is PlayerAction.TogglePause or PlayerAction.Back10 or PlayerAction.Forward10 ? 0 : 10);
+        DoAction(a);
+        return true;
+    }
+
+    void DoAction(PlayerAction a)
+    {
+        var p = player;
+        if (p == null) return;
+        switch (a)
+        {
+            case PlayerAction.TogglePause: p.TogglePause(); break;
+            case PlayerAction.Back10: p.SeekBy(-10); break;
+            case PlayerAction.Forward10: p.SeekBy(10); break;
+            case PlayerAction.VolumeUp or PlayerAction.VolumeDown:
+            {
+                var v = PlayerUi.Volume(p.Muted ? 0 : Math.Max(0, p.Volume), a == PlayerAction.VolumeUp ? 5 : -5);
+                p.SetVolume(v);
+                if (p.Muted) p.Set("mute", "no");
+                p.ShowText(L.T($"Volym {v} %", $"Volume {v}%"));
+                break;
+            }
+            case PlayerAction.Mute: p.Send("cycle", "mute"); p.ShowText(p.Muted ? L.T("Ljud på", "Sound on") : L.T("Ljud av", "Muted")); break;
+            case PlayerAction.Fullscreen: SetFullScreen(!fullScreen); break;
+            case PlayerAction.Escape: if (fullScreen) SetFullScreen(false); else ClosePlayer(); break;
+            case PlayerAction.Close or PlayerAction.Stop: ClosePlayer(); break;
+            case PlayerAction.Next: Next(); break;
+            case PlayerAction.CycleAudio: p.Send("cycle", "audio"); p.Send("show-text", "${track-list/${current-tracks/audio/id}/lang:}  ${current-tracks/audio/title:}", "2000"); break;
+            case PlayerAction.ToggleSubs:
+            {
+                var subs = p.Tracks("sub");
+                var sel = subs.FirstOrDefault(s => s.Selected);
+                if (sel != null) { lastSid = sel.Id; p.Set("sid", "no"); p.ShowText(L.T("Undertexter av", "Subtitles off")); }
+                else if (subs.Count > 0)
+                {
+                    var t = subs.FirstOrDefault(s => s.Id == lastSid) ?? subs[0];
+                    p.Set("sid", t.Id.ToString(CultureInfo.InvariantCulture));
+                    p.ShowText(L.T("Undertext: ", "Subtitles: ") + PlayerUi.TrackLabel(t.Title, t.Lang, null, null, t.Id));
+                }
+                else p.ShowText(L.T("Inga undertexter", "No subtitles"));
+                break;
+            }
+            case PlayerAction.Stats: p.Send("script-binding", "stats/display-stats-toggle"); break;
+        }
+        BarTick();
+    }
+
+    void OnControlClick(string id, Point at)
+    {
+        switch (id)
+        {
+            case "back10": DoAction(PlayerAction.Back10); break;
+            case "fwd10": DoAction(PlayerAction.Forward10); break;
+            case "toggle": DoAction(PlayerAction.TogglePause); break;
+            case "next": Next(); break;
+            case "stop": ClosePlayer(); break;
+            case "mute": DoAction(PlayerAction.Mute); break;
+            case "fullscreen": SetFullScreen(!fullScreen); break;
+            case "settings": ShowMenu(SettingsMenu(), at, above: true); break;
+            case "sleep": ShowMenu(SleepMenu(), at, above: true); break;
+        }
+    }
+
+    // ---------- menyerna (mörka, som resten av spelaren) ----------
+    void ShowMenu(ContextMenuStrip m, Point at, bool above = false)
+    {
+        openMenu?.Close();
+        openMenu = m;
+        m.Closed += (_, _) => { BeginInvoke(() => { m.Dispose(); if (openMenu == m) openMenu = null; }); };
+        if (above) m.Show(at, ToolStripDropDownDirection.AboveRight);
+        else m.Show(at);
+    }
+
+    static ContextMenuStrip DarkMenu() => new()
+    {
+        Renderer = new ToolStripProfessionalRenderer(new DarkColors()) { RoundedEdges = false },
+        ForeColor = Color.FromArgb(0xEC, 0xEC, 0xEC), BackColor = Color.FromArgb(0x1E, 0x1F, 0x22), ShowImageMargin = false, ShowCheckMargin = true,
+        Font = new Font("Segoe UI", 10f),
+    };
+
+    static ToolStripMenuItem Item(string text, Action? click = null, bool check = false, bool enabled = true)
+    {
+        var i = new ToolStripMenuItem(text) { Checked = check, Enabled = enabled, ForeColor = Color.FromArgb(0xEC, 0xEC, 0xEC) };
+        if (click != null) i.Click += (_, _) => click();
+        return i;
+    }
+
+    static void Dark(ToolStripMenuItem parent)
+    {
+        if (parent.DropDown is ToolStripDropDownMenu d) { d.ShowImageMargin = false; d.ShowCheckMargin = true; d.BackColor = Color.FromArgb(0x1E, 0x1F, 0x22); d.ForeColor = Color.FromArgb(0xEC, 0xEC, 0xEC); d.Renderer = new ToolStripProfessionalRenderer(new DarkColors()); }
+    }
+
+    ToolStripMenuItem AudioItems()
+    {
+        var root = Item(L.T("Ljudspår", "Audio track"));
+        foreach (var t in player?.Tracks("audio") ?? [])
+        {
+            var id = t.Id;
+            root.DropDownItems.Add(Item(PlayerUi.TrackLabel(t.Title, t.Lang, t.Codec, t.Channels, t.Id), () => player?.Set("aid", id.ToString(CultureInfo.InvariantCulture)), t.Selected));
+        }
+        if (root.DropDownItems.Count == 0) root.Enabled = false;
+        Dark(root);
+        return root;
+    }
+
+    ToolStripMenuItem SubItems()
+    {
+        var root = Item(L.T("Undertexter", "Subtitles"));
+        var subs = player?.Tracks("sub") ?? [];
+        root.DropDownItems.Add(Item(L.T("Av", "Off"), () => player?.Set("sid", "no"), !subs.Any(s => s.Selected)));
+        foreach (var t in subs)
+        {
+            var id = t.Id;
+            root.DropDownItems.Add(Item(PlayerUi.TrackLabel(t.Title, t.Lang, null, null, t.Id), () => { lastSid = id; player?.Set("sid", id.ToString(CultureInfo.InvariantCulture)); }, t.Selected));
+        }
+        Dark(root);
+        return root;
+    }
+
+    ContextMenuStrip SettingsMenu()
+    {
+        var m = DarkMenu();
+        m.Items.Add(AudioItems());
+        m.Items.Add(SubItems());
+        var p = player;
+        double D(string name, double def) => double.TryParse(p?.Get(name), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : def;
+        var size = Item(L.T("Undertextstorlek", "Subtitle size"));
+        var scale = D("sub-scale", 1);
+        foreach (var f in PlayerUi.SubScales) { var v = f; size.DropDownItems.Add(Item(PlayerUi.Factor(f, CultureInfo.CurrentCulture), () => player?.Set("sub-scale", v.ToString(CultureInfo.InvariantCulture)), Math.Abs(scale - f) < 0.01)); }
+        Dark(size);
+        m.Items.Add(size);
+        var delay = D("sub-delay", 0);
+        var sync = Item(L.T($"Undertextens tid ({delay:+0.0;−0.0;0} s)", $"Subtitle timing ({delay:+0.0;−0.0;0} s)"));
+        sync.DropDownItems.Add(Item(L.T("Tidigare (−0,1 s)", "Earlier (−0.1 s)"), () => { player?.Send("add", "sub-delay", "-0.1"); player?.Send("show-text", "${sub-delay}"); }));
+        sync.DropDownItems.Add(Item(L.T("Senare (+0,1 s)", "Later (+0.1 s)"), () => { player?.Send("add", "sub-delay", "0.1"); player?.Send("show-text", "${sub-delay}"); }));
+        sync.DropDownItems.Add(Item(L.T("Återställ", "Reset"), () => player?.Set("sub-delay", "0"), enabled: delay != 0));
+        Dark(sync);
+        m.Items.Add(sync);
+        var speedNow = D("speed", 1);
+        var speed = Item(L.T("Hastighet", "Speed"));
+        foreach (var f in PlayerUi.Speeds) { var v = f; speed.DropDownItems.Add(Item(PlayerUi.Factor(f, CultureInfo.CurrentCulture), () => player?.Set("speed", v.ToString(CultureInfo.InvariantCulture)), Math.Abs(speedNow - f) < 0.01)); }
+        Dark(speed);
+        m.Items.Add(speed);
+        return m;
+    }
+
+    ContextMenuStrip SleepMenu()
+    {
+        var m = DarkMenu();
+        foreach (var min in PlayerUi.SleepMinutes)
+        {
+            var v = min;
+            var text = v == 0 ? L.T("Av", "Off") : v < 0 ? L.T("När avsnittet eller filmen är slut", "When this episode or film ends") : $"{v} min";
+            var on = v == 0 ? sleepAt == null && !sleepAfter : v < 0 ? sleepAfter : false;
+            m.Items.Add(Item(text, () =>
+            {
+                sleepAt = v > 0 ? DateTime.Now.AddMinutes(v) : null;
+                sleepAfter = v < 0;
+                Logg.Write("sovtimer: " + (v == 0 ? "av" : v < 0 ? "efter titeln" : v + " min"));
+            }, on));
+        }
+        return m;
+    }
+
+    /// <summary>Högerklick på bilden: spår, spelarens val och vägen tillbaka till webbspelaren</summary>
+    ContextMenuStrip VideoMenu()
+    {
+        var m = DarkMenu();
+        m.Items.Add(Item(player?.Paused == true ? L.T("Spela", "Play") : L.T("Paus", "Pause"), () => DoAction(PlayerAction.TogglePause)));
+        m.Items.Add(AudioItems());
+        m.Items.Add(SubItems());
+        m.Items.Add(new ToolStripSeparator());
+        m.Items.Add(Item(L.T("Ljud orört till förstärkaren (från nästa film)", "Send audio untouched to the receiver (from the next video)"), () => PlayerMenu(MenuPassthrough), cfg.Passthrough));
+        m.Items.Add(Item(L.T("Byt skärmens uppdateringsfrekvens efter filmen", "Match the display refresh rate to the video"), () => PlayerMenu(MenuRefresh), cfg.MatchRefresh));
+        m.Items.Add(Item(L.T("Använd den inbyggda spelaren", "Use the built-in player"), () => PlayerMenu(MenuPlayer), cfg.UseBuiltInPlayer));
+        m.Items.Add(Item(L.T("Om den inbyggda spelaren …", "About the built-in player …"), MpvInfo));
+        m.Items.Add(new ToolStripSeparator());
+        m.Items.Add(Item(L.T("Spela den här filmen i webbspelaren", "Play this video in the web player"), ToWebPlayer));
+        m.Items.Add(Item(L.T("Tillbaka (Q)", "Back (Q)"), () => ClosePlayer()));
+        return m;
+    }
+
+    /// <summary>Webbspelaren tar över där filmen är (webben: native-failed med user, utan felmeddelande)</summary>
+    void ToWebPlayer()
+    {
+        var p = player;
+        if (p == null) return;
+        Logg.Write($"titel {p.Request.Id}: tillbaka till webbspelaren på {p.Position:0} s");
+        PostNative(new { t = "native-failed", id = p.Request.Id, pos = playerStarted ? p.Position : p.Request.Start, user = true });
+        ClosePlayer(notify: false);
+    }
+
+    sealed class DarkColors : ProfessionalColorTable
+    {
+        static readonly Color Bg = Color.FromArgb(0x1E, 0x1F, 0x22), Sel = Color.FromArgb(0x33, 0x35, 0x3A), Line = Color.FromArgb(0x38, 0x39, 0x3E);
+        public override Color ToolStripDropDownBackground => Bg;
+        public override Color ImageMarginGradientBegin => Bg;
+        public override Color ImageMarginGradientMiddle => Bg;
+        public override Color ImageMarginGradientEnd => Bg;
+        public override Color MenuBorder => Line;
+        public override Color MenuItemBorder => Sel;
+        public override Color MenuItemSelected => Sel;
+        public override Color MenuItemSelectedGradientBegin => Sel;
+        public override Color MenuItemSelectedGradientEnd => Sel;
+        public override Color SeparatorDark => Line;
+        public override Color SeparatorLight => Bg;
+        public override Color CheckBackground => Sel;
+        public override Color CheckSelectedBackground => Sel;
+        public override Color CheckPressedBackground => Sel;
     }
 
     // ---------- viloläge: webbsidan och spelaren var för sig ----------
@@ -517,6 +823,12 @@ sealed partial class MainForm
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        if (playerBar != null) playerBar.Width = ClientSize.Width;
+        LayoutPlayer();
+    }
+
+    protected override void OnMove(EventArgs e)
+    {
+        base.OnMove(e);
+        LayoutPlayer();
     }
 }

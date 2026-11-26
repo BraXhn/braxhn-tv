@@ -28,6 +28,8 @@ static partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool AppendMenu(IntPtr menu, uint flags, nuint id, string? text);
     [LibraryImport("user32.dll")]
+    public static partial IntPtr GetFocus();
+    [LibraryImport("user32.dll")]
     public static partial uint CheckMenuItem(IntPtr menu, uint id, uint check);
     [LibraryImport("user32.dll", EntryPoint = "ModifyMenuW", StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]

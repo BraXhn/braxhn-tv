@@ -114,3 +114,15 @@ test('vanlig Edge utan appen: ingen fråga till någon värdapp', { skip }, asyn
   assert.equal((await p.evaluate(() => window.__sent.length)), 0);
   await close();
 });
+
+test('Spela i webbspelaren (appens meny): webbspelaren tar över på positionen utan felmeddelande', { skip }, async () => {
+  const { p, close } = await appPage();
+  await p.evaluate((id) => window.__L.play(id, 0), film.id);
+  await waitSent(p, 'native-play');
+  await p.waitForTimeout(300);
+  await p.evaluate((id) => window.__toWeb({ t: 'native-failed', id, pos: 9, user: true }), film.id);
+  await p.waitForFunction(() => document.querySelector('#vid')?.src || window.__V?.P?.hls, null, { timeout: 30000 });
+  const toast = await p.evaluate(() => [...document.querySelectorAll('.toast, #toast, [role=status]')].map(x => x.textContent).join(' '));
+  assert.doesNotMatch(toast, /kunde inte spela/, 'inget felmeddelande: ' + toast);
+  await close();
+});

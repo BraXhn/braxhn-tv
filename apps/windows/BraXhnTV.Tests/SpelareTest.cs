@@ -61,6 +61,18 @@ public class SpelareTest
             Assert.Equal("1", p.Get("sid"));          // undertexten (ffmpeg-index 3)
             Assert.True(double.Parse(p.Get("time-pos") ?? "0", System.Globalization.CultureInfo.InvariantCulture) >= 0.9, "började vid 1 s");
             Assert.Equal("50.000000", p.Get("volume"));
+            // Kontrollradens uppgifter: spåren (menyerna), längden och volymen
+            var audio = p.Tracks("audio");
+            Assert.Equal(2, audio.Count);
+            Assert.Equal("swe", audio.Single(t => t.Selected).Lang);
+            Assert.Single(p.Tracks("sub"));
+            var sw0 = Stopwatch.StartNew();
+            while (p.Duration <= 0 && sw0.ElapsedMilliseconds < 3000) if (q.TryTake(out var a0, 50)) a0();
+            Assert.InRange(p.Duration, 3.5, 4.5);
+            p.SetVolume(130);
+            Assert.Equal("100.000000", p.Get("volume"));
+            p.SetVolume(50);
+            Assert.Equal("no", p.Get("osc") ?? "no");
             p.Send("script-message", "bx-next");
             Assert.True(Until("bx-next", 3000), string.Join(",", log));
             Assert.True(Until("slut", 10000), string.Join(",", log));

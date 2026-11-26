@@ -71,10 +71,21 @@ en lägre kvalitet, när filformatet inte kan skickas direkt, vid trailers före
 tillsammans*. Åldersgränser och skärmtid sköter servern som vanligt – skärmtiden stoppar också mpv. Går något fel
 i mpv (filen saknas, kan inte spela) tar webbspelaren över där filmen var.
 
-**Reglage:** mpv:s egna (för musen till nederkanten): spela/paus, tidslinje, ljudspår, undertexter (även
-bildundertexter), volym. Överst: *← Tillbaka* och *Nästa avsnitt*. Tangenter: mellanslag = paus, ←/→ = spola,
-9/0 = volym, # = byt ljudspår, j = byt undertext, **f**, **F11** eller dubbelklick = helskärm, **Esc** = ur helskärm
-(och sedan tillbaka), **q** = tillbaka, **N** = nästa avsnitt.
+**Reglage:** appens egen kontrollrad längst ner, i webbspelarens stil: tidslinje (klicka eller dra; tiden visas vid
+muspekaren, det buffrade syns ljusare), titel och tid till vänster; −10 s, spela/paus, +10 s, *Nästa avsnitt* och stopp
+i mitten; sovtimer (15–90 min eller *när avsnittet är slut*), inställningar (ljudspår, undertexter, undertextstorlek,
+undertextens tid och hastighet), volym och helskärm till höger. Överst: *← Tillbaka*, titeln och *Nästa avsnitt*.
+Raderna tonas bort efter 3 sekunder utan musrörelse och kommer tillbaka när musen rör sig; i helskärm göms även
+muspekaren. mpv:s egna reglage (OSC) och tangenter är avstängda, så att inget dubbleras.
+
+**Musen på bilden:** klick = spela/paus, dubbelklick = helskärm, hjulet = volym, högerklick = meny (ljudspår,
+undertexter, ljud till förstärkaren, uppdateringsfrekvens, *Använd den inbyggda spelaren*, *Om den inbyggda spelaren*,
+*Spela den här filmen i webbspelaren*, *Tillbaka*). Musen fångas av ett osynligt lager över bilden, eftersom mpv:s
+fönster körs i en egen tråd.
+
+**Tangenter:** mellanslag eller **K** = paus, **←/→** eller **J/L** = 10 s, **↑/↓** = volym, **F** eller **F11** =
+helskärm, **Esc** = ur helskärm (och sedan tillbaka), **Q** = tillbaka, **M** = ljud av, **N** = nästa avsnitt,
+**S** = undertext av/på, **A** = byt ljudspår, **I** = mpv:s statistik, och medietangenterna. Bild-i-bild finns inte än.
 
 **Inställningar** i appens meny (högerklick i fönstret eller på titelraden):
 - *Använd den inbyggda spelaren* – på som standard. Stäng av den om något krånglar; då spelar webbspelaren allt.
@@ -181,6 +192,9 @@ testad, men **ingenting är provat på en riktig Windows-dator**. Särskilt:
 - medietangenterna och Windows medieruta (Edge-flaggan `HardwareMediaKeyHandling`),
 - fönstermenyn, mörk titelrad, helskärm och att fönstrets läge sparas,
 - Inno Setup-installationen och WebView2-installeraren, uppdateringsrutan och avinstallationen.
+- **Den inbyggda spelarens kontrollrad i Windows:** utseendet, att muslagret (ett nästan genomskinligt fönster) tar
+  emot klick, hjul och högerklick över mpv-bilden utan att stjäla tangenterna, att muspekaren göms i helskärm, och de
+  mörka menyerna. Spåren, längden, volymen och spolningen är provade mot riktig libmpv på Linux.
 - **Den inbyggda spelaren i Windows:** att mpv ritar i appens fönster (`wid`), raden överst ovanpå bilden, helskärm,
   bitström till förstärkaren, byte av skärmens frekvens och mpv:s medieruta. Spelardelen (laddning av libmpv,
   spårval, start mitt i filmen, tangenterna, slut, fel och stängning) är provad mot en riktig libmpv 0.37 på Linux,
@@ -199,6 +213,8 @@ appens och WebView2:s version.
   video eller ljud spelas (viloläget) och fångar F11/Esc.
 - `BraXhnTV/MpvSetup.cs` – hämtningen av mpv (dialogerna); `Logik/MpvSource.cs` – källorna (`libmpv.json`, SourceForge),
   kontrollen och uppackningen; `Logik/ServerInfo.cs` – serverns version; `Logik/Logg.cs` – loggfilen.
+- `BraXhnTV/Spelare/ControlBar.cs` – kontrollraden och muslagret över bilden; `Logik/PlayerUi.cs` – tidsformat,
+  tidslinjen, tangentkartan och när raderna syns (testas i `PlayerUiTest`).
 - `BraXhnTV/Spelare/` – den inbyggda spelaren: `Libmpv.cs` (C-API:t, laddas dynamiskt, rapporterar varje plats), `MpvPlayer.cs` (en
   uppspelning), `Display.cs` (skärmens frekvens). `MainForm.Spelare.cs` tar emot webbens `native-*`-meddelanden;
   webbens sida är `web/js/player/native.js` och `nativeplan.js`.
@@ -241,6 +257,10 @@ the same look and features as the web app, with hardware video decoding and HEVC
   why the web player was used for a video; the log is `%LOCALAPPDATA%\BraXhnTV\logg.txt`. 7z unpacking uses SharpCompress (MIT).
 - **Away from home** (public address) with Auto, mpv gets the original file when the measured connection fits it with a
   10% margin, or when it could not be measured (`buf=1`; the resolution cap still applies).
+- **Player controls:** the app's own control bar (timeline with drag and hover time, −10 s/play/+10 s/next/stop,
+  sleep timer, audio/subtitle/speed settings, volume, full screen), fading after 3 s; click = pause, double-click =
+  full screen, wheel = volume, right-click = menu (incl. *Play this video in the web player*); keys space/K, ←/→, J/L,
+  ↑/↓, F/F11, Esc, Q, M, N, S, A, I and media keys. mpv's own OSC is off.
 - **Right-click** shows the app menu instead of the browser menu (text fields keep cut/copy/paste); DevTools are off
   unless `"DevTools": true` in `installningar.json` or `BRAXHN_DEVTOOLS=1`.
 - **Not yet tested on real Windows** – it compiles and its logic tests pass, but everything that needs Windows is untried.
