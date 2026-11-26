@@ -75,7 +75,7 @@ export function nativePlan(it, pb, { start = 0, origin, sub = '' } = {}) {
  * spelaren" och i loggen. Äldre appar bryr sig inte om meddelandet.
  */
 export function skipMessage(it, pb, plan, bw = 0) {
-  return { t: 'native-skip', id: it?.id ?? 0, why: plan?.why || 'okänt', mode: pb?.mode || '',
+  return { t: 'native-skip', id: it?.id ?? 0, why: plan?.why || 'unknown', mode: pb?.mode || '',
     reasons: (pb?.reasons || []).slice(0, 6).map(String), remote: !!pb?.remote, bw: Math.max(0, Math.round(+bw || 0)) };
 }
 
