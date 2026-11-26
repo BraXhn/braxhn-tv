@@ -1,6 +1,21 @@
 # Ändringar
 
 ## Ej utgiven
+- **Prova hårdvaruomkodningen under Administration.** *Administration → Hårdvaruomkodning → Prova omkodningen* kodar
+  en genererad testbild i några sekunder per format – H.264, HEVC och 10-bitars HEVC, i 1080p och 4K – med det
+  grafikkort som `HWACCEL` pekar på och med processorn som jämförelse. Varje rad säger *Grafikkortet används*,
+  *Processorn används* eller *Fungerar inte*, med bildrutor per sekund och gånger realtid. När det inte går står det
+  vad man ska göra (t.ex. *Grafikkortet syns inte i containern – lägg till --runtime=nvidia och
+  NVIDIA_VISIBLE_DEVICES=all*, */dev/dri saknas*, fel grupp på /dev/dri, för gammal drivrutin, format som hårdvaran
+  inte klarar), och ffmpegs felrad finns i en utfällbar ruta. Provet körs med lägsta prioritet och vägrar starta när
+  två eller fler strömmar omkodas. Senaste resultatet visas med datum och följer med i diagnostikpaketet.
+- **Nedladdning i Expo-appen** (backloggens punkt 4). Ladda ner filmer, avsnitt, en hel säsong och ljudböcker till
+  telefonen och titta eller lyssna utan nät. Välj kvalitet (480p räcker på telefonen) och se förlopp, pausa, fortsätt
+  och avbryt. Hemma hämtas filen direkt från servern. *Nedladdat* under Konto fungerar helt utan nät och öppnas direkt
+  när servern inte svarar. Undertexter följer med. Var du är sparas i telefonen utan nät och skickas när nätet är
+  tillbaka. Servern bestämmer vad en profil får ladda ner; skärmtiden följs utan nät så gott det går (se
+  `apps/expo/README.md`). Nedladdningarna gäller en profil och tas bort när du loggar ut. Inte provat på en riktig
+  telefon.
 
 ## 1.4.3 – 2026-11-26
 - **Spelarraden i Windows-appens inbyggda spelare visades så fort musen rördes – var som helst på skärmen.** Appen
@@ -17,21 +32,6 @@
   *Avbryt*, som räknar ner när kontot har *spela nästa avsnitt automatiskt* på. Muspekaren göms även i fönster.
   Allt skalas med skärmens DPI och på en stor tv. Nya tangenter: Enter (hoppa över / spela nu), C (ljud och
   undertexter), menytangenten eller Skift+F10 (menyn).
-- **Prova hårdvaruomkodningen under Administration.** *Administration → Hårdvaruomkodning → Prova omkodningen* kodar
-  en genererad testbild i några sekunder per format – H.264, HEVC och 10-bitars HEVC, i 1080p och 4K – med det
-  grafikkort som `HWACCEL` pekar på och med processorn som jämförelse. Varje rad säger *Grafikkortet används*,
-  *Processorn används* eller *Fungerar inte*, med bildrutor per sekund och gånger realtid. När det inte går står det
-  vad man ska göra (t.ex. *Grafikkortet syns inte i containern – lägg till --runtime=nvidia och
-  NVIDIA_VISIBLE_DEVICES=all*, */dev/dri saknas*, fel grupp på /dev/dri, för gammal drivrutin, format som hårdvaran
-  inte klarar), och ffmpegs felrad finns i en utfällbar ruta. Provet körs med lägsta prioritet och vägrar starta när
-  två eller fler strömmar omkodas. Senaste resultatet visas med datum och följer med i diagnostikpaketet.
-- **Nedladdning i Expo-appen** (backloggens punkt 4). Ladda ner filmer, avsnitt, en hel säsong och ljudböcker till
-  telefonen och titta eller lyssna utan nät. Välj kvalitet (480p räcker på telefonen) och se förlopp, pausa, fortsätt
-  och avbryt. Hemma hämtas filen direkt från servern. *Nedladdat* under Konto fungerar helt utan nät och öppnas direkt
-  när servern inte svarar. Undertexter följer med. Var du är sparas i telefonen utan nät och skickas när nätet är
-  tillbaka. Servern bestämmer vad en profil får ladda ner; skärmtiden följs utan nät så gott det går (se
-  `apps/expo/README.md`). Nedladdningarna gäller en profil och tas bort när du loggar ut. Inte provat på en riktig
-  telefon.
 - **Sök efter uppdatering i Windows-appen** (ärende #5). *Sök efter uppdatering …* i appens meny och i *Om BraXhn TV*
   visar din version och den senaste, eller *Du har den senaste versionen*; går GitHub inte att nå finns *Försök igen*.
   *Hämta och installera* laddar ner installationsfilen med förlopp och *Avbryt*, kontrollerar storleken mot GitHubs
