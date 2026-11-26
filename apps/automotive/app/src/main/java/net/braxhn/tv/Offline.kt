@@ -15,50 +15,153 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Serializable data class OfflineStatus(val status: String, val progress: Int? = null, val url: String? = null, val size: Long? = null, val error: String? = null)
-@Serializable data class DownloadRecord(val id: Int, val title: String, val subtitle: String, val file: String, val size: Long = 0)
 /** Serverns plan för automatisk offline-synk (GET /api/offline/sync) */
 @Serializable data class SyncPlan(val enabled: Boolean = false, val quality: String = "720", val wifiOnly: Boolean = true,
     val items: List<MediaItem> = emptyList(), val remove: List<Int> = emptyList())
-/** Nedladdning som lämnats till DownloadManager – sparas så att bevakningen kan fortsätta efter omstart av appen */
-@Serializable data class PendingDownload(val id: Int, val dlId: Long, val title: String, val subtitle: String, val file: String)
+/** Nedladdning som lämnats till DownloadManager – sparas så att bevakningen kan fortsätta efter omstart av appen.
+ *  file = sökvägen under offline/, scope = profilens mapp ("" = påbörjad före profilerna, i offline/ direkt) */
+@Serializable data class PendingDownload(val id: Int, val dlId: Long, val title: String, val subtitle: String, val file: String, val scope: String = "")
 
-/** Offline-nedladdningar – bra för långresor utan täckning (spelas när bilen står parkerad). */
+/**
+ * Offline-nedladdningar – bra för långresor utan täckning (spelas när bilen står parkerad). Gäller en server och profil
+ * (offline/<server>-<profil>/ och listan list.<server>-<profil>), som i Expo-appen: en barnprofil ser inte vad en vuxen
+ * laddat ner. Reglerna (vem som ser vad, flytten från före profilerna, kontrollen mot servern) står i DownloadCore.kt.
+ */
 object Downloads {
     private lateinit var ctx: Context
+    /** Det som profilen som är inloggad nu har laddat ner */
     val records = MutableStateFlow<List<DownloadRecord>>(emptyList())
     val active = MutableStateFlow<Map<Int, Float>>(emptyMap())
     /** Senaste fel per titel (visas i detaljvyn) */
     val errors = MutableStateFlow<Map<Int, String>>(emptyMap())
+    /** Besked i Nedladdat, t.ex. att titlar togs bort för att profilen inte får se dem längre */
+    val notice = MutableStateFlow<String?>(null)
     private val pending = MutableStateFlow<List<PendingDownload>>(emptyList())
     private val prefs get() = ctx.getSharedPreferences("braxhn-dl", Context.MODE_PRIVATE)
-    private val dir get() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "offline").apply { mkdirs() }
+    private val root get() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "offline").apply { mkdirs() }
+    /** Profilens mapp; "" = de gamla nedladdningarna från före profilerna (offline/ direkt) */
+    private fun dirOf(sc: String) = if (sc.isEmpty()) root else File(root, sc).apply { mkdirs() }
     private val dm get() = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    private val lock = Any()
+    /** Profilen vars nedladdningar visas (null = utloggad, eller profilen är inte känd än) */
+    @Volatile private var scope: String? = null
+    /** De gamla nedladdningarna som visas just nu (samma inloggning som vid uppdateringen, profilen inte känd än) */
+    @Volatile private var legacyIds: Set<Int> = emptySet()
+    /** Senaste kontrollen mot servern per profil (ms) */
+    private val checked = HashMap<String, Long>()
+    private val checking = AtomicBoolean(false)
 
     fun init(c: Context) {
         ctx = c.applicationContext
-        records.value = runCatching { Api.json.decodeFromString<List<DownloadRecord>>(prefs.getString("list", "[]") ?: "[]") }.getOrDefault(emptyList())
-            .filter { File(dir, it.file).exists() }
         pending.value = runCatching { Api.json.decodeFromString<List<PendingDownload>>(prefs.getString("pending", "[]") ?: "[]") }.getOrDefault(emptyList())
+        // Från appversion 0.7.0 och äldre: en gemensam lista ("list") – den hör till inloggningen som gäller nu
+        if (prefs.getString("legacy", null) == null && (prefs.contains("list") || pending.value.any { it.scope.isEmpty() })) {
+            if (loadList("").isNotEmpty() || pending.value.any { it.scope.isEmpty() })
+                prefs.edit().putString("legacy", Api.json.encodeToString(LegacyDownloads(Api.saved, OfflineSync.currentFp() ?: ""))).apply()
+            else prefs.edit().remove("list").remove("auto").apply()
+        }
+        open()
         // Fortsätt bevaka nedladdningar som pågick när appen stängdes
         pending.value.forEach { p ->
             active.update { it + (p.id to 0.5f) }
             launchTracked(p.id) { poll(p) }
         }
     }
-    private fun save() { prefs.edit().putString("list", Api.json.encodeToString(records.value)).apply() }
-    private fun savePending() { prefs.edit().putString("pending", Api.json.encodeToString(pending.value)).apply() }
 
-    fun localFile(id: Int): File? = records.value.firstOrNull { it.id == id }?.let { File(dir, it.file) }?.takeIf { it.exists() }
+    // ---------- lagring per profil ----------
+    private fun listKey(sc: String) = if (sc.isEmpty()) "list" else "list.$sc"
+    private fun autoKey(sc: String) = if (sc.isEmpty()) "auto" else "auto.$sc"
+    private fun loadList(sc: String): List<DownloadRecord> =
+        runCatching { Api.json.decodeFromString<List<DownloadRecord>>(prefs.getString(listKey(sc), "[]") ?: "[]") }.getOrDefault(emptyList())
+            .filter { File(dirOf(sc), it.file).exists() }
+    private fun saveList(sc: String, list: List<DownloadRecord>) {
+        if (list.isEmpty()) prefs.edit().remove(listKey(sc)).apply()
+        else prefs.edit().putString(listKey(sc), Api.json.encodeToString(list)).apply()
+    }
+    private fun savePending() { prefs.edit().putString("pending", Api.json.encodeToString(pending.value)).apply() }
+    private fun legacy(): LegacyDownloads? =
+        runCatching { prefs.getString("legacy", null)?.let { Api.json.decodeFromString<LegacyDownloads>(it) } }.getOrNull()
+    private fun ownerOf(server: String): Int? = prefs.getInt("owner." + DownloadScope.clean(server), -1).takeIf { it >= 0 }
+
+    /**
+     * Läser in nedladdningarna för profilen som är inloggad nu: när appen startar, när inloggningen byts och när
+     * servern har sagt vilken profil inloggningen hör till (Session.refresh). Flyttar då också de gamla nedladdningarna.
+     */
+    fun open() {
+        if (!::ctx.isInitialized) return
+        synchronized(lock) {
+            var showLegacy = false
+            legacy()?.let { l ->
+                val (nl, fate) = DownloadMigration.fate(l, Api.saved, OfflineSync.currentFp(), OfflineSync::uidFor, ownerOf(l.server))
+                if (nl != l) prefs.edit().putString("legacy", Api.json.encodeToString(nl)).apply()
+                when (fate) {
+                    is LegacyFate.Assign -> migrate(DownloadScope.of(l.server, fate.uid))
+                    LegacyFate.ShowHere -> showLegacy = true
+                    LegacyFate.Hidden -> {}
+                }
+            }
+            val sc = OfflineSync.scope()
+            if (sc != scope) notice.value = null
+            scope = sc
+            val own = sc?.let { loadList(it) } ?: emptyList()
+            val old = if (showLegacy) loadList("").filter { l -> own.none { it.id == l.id } } else emptyList()
+            legacyIds = old.map { it.id }.toSet()
+            records.value = own + old
+        }
+    }
+
+    /** De gamla nedladdningarna flyttas till profilens mapp och lista (filer som inte gick att flytta väntar till nästa gång) */
+    private fun migrate(target: String) {
+        val old = loadList("")
+        val (merged, move) = DownloadMigration.merge(loadList(target), old)
+        val dir = dirOf(target)
+        val failed = move.filter { r -> !moveFile(File(root, r.file), File(dir, r.file)) }
+        saveList(target, merged.filter { it !in failed })
+        // Samma titel fanns redan i profilens mapp: den gamla filen behövs inte
+        old.filter { o -> move.none { it.id == o.id } }.forEach { File(root, it.file).delete() }
+        val auto = autoIds("") + autoIds(target)
+        saveAutoIds(target, auto)
+        // Nedladdningar som pågick före uppdateringen blir klara i profilens lista
+        pending.update { list -> list.map { if (it.scope.isEmpty()) it.copy(scope = target) else it } }
+        savePending()
+        if (failed.isEmpty()) prefs.edit().remove("list").remove("auto").remove("legacy").apply()
+        else saveList("", failed)
+    }
+
+    private fun moveFile(from: File, to: File): Boolean {
+        if (!from.exists()) return to.exists()
+        if (from.renameTo(to)) return true
+        return runCatching { from.copyTo(to, overwrite = true); from.delete(); true }.getOrDefault(false)
+    }
+
+    /** Huvudkontot behövs för de gamla nedladdningarna (det gick inte att veta vem som laddade ner dem) */
+    fun needsOwner(): Boolean = ::ctx.isInitialized && legacy()?.let { it.ownerOnly && DownloadScope.sameServer(it.server, Api.saved) } == true
+
+    /** Huvudkontot på servern (owner i /api/profiles) – de gamla nedladdningarna flyttas dit */
+    fun learnOwner(uid: Int) {
+        if (!::ctx.isInitialized) return
+        prefs.edit().putInt("owner." + DownloadScope.clean(Api.saved), uid).apply()
+        open()
+    }
+
+    /** Var filen ligger, för profilen som är inloggad nu */
+    fun localFile(id: Int): File? {
+        val r = records.value.firstOrNull { it.id == id } ?: return null
+        val dir = if (id in legacyIds) root else dirOf(scope ?: return null)
+        return File(dir, r.file).takeIf { it.exists() }
+    }
 
     /** Startar en nedladdning i appens livslånga scope – fortsätter även när användaren lämnar vyn. */
     fun start(item: MediaItem, quality: String) {
         if (active.value.containsKey(item.id) || localFile(item.id) != null) return
+        val sc = scope ?: run { errors.update { it + (item.id to str(R.string.dl_need_server)) }; return }
         active.update { it + (item.id to 0f) }
         errors.update { it - item.id }
-        launchTracked(item.id) { download(item, quality) }
+        launchTracked(item.id) { download(item, quality, sc) }
     }
 
     private fun launchTracked(id: Int, block: suspend () -> Unit) {
@@ -70,7 +173,7 @@ object Downloads {
         }
     }
 
-    private suspend fun download(item: MediaItem, quality: String) {
+    private suspend fun download(item: MediaItem, quality: String, sc: String) {
         Api.post("/api/items/${item.id}/offline", buildJsonObject { put("q", quality) })
         var st: OfflineStatus
         do {
@@ -82,15 +185,15 @@ object Downloads {
         } while (st.status != "ready")
         val rel = st.url ?: throw ApiException(str(R.string.dl_no_link))
         val name = "${item.id}.mp4"
-        val target = File(dir, name).also { it.delete() }
+        val target = File(dirOf(sc), name).also { it.delete() }
         val req = DownloadManager.Request(Uri.parse(Api.savedAbsolute(rel))) // systemet laddar ner: den sparade adressen, som nås även utanför hemmet
             .setTitle(item.title).setDescription(ctx.getString(R.string.app_name))
             .setDestinationUri(Uri.fromFile(target))
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
         val dlId = dm.enqueue(req)
         val p = PendingDownload(item.id, dlId, if (item.isEpisode) "${item.showTitle ?: ""} – ${item.title}" else item.title,
-            if (item.isEpisode) item.sxe else item.year?.toString() ?: "", name)
-        pending.update { list -> list.filter { it.id != item.id } + p }
+            if (item.isEpisode) item.sxe else item.year?.toString() ?: "", "$sc/$name", sc)
+        pending.update { list -> list.filter { it.id != item.id || it.scope != sc } + p }
         savePending()
         poll(p)
     }
@@ -114,9 +217,7 @@ object Downloads {
                     status == DownloadManager.STATUS_SUCCESSFUL
                 }
                 if (done) {
-                    val target = File(dir, p.file)
-                    records.update { list -> list.filter { it.id != p.id } + DownloadRecord(p.id, p.title, p.subtitle, p.file, target.length()) }
-                    save()
+                    finished(p)
                     completed = true
                     return
                 }
@@ -124,22 +225,118 @@ object Downloads {
         } finally {
             // Avbruten (även korutinen) eller misslyckad: städa bort den halvfärdiga nedladdningen
             if (!completed) runCatching { dm.remove(p.dlId) }
-            pending.update { list -> list.filter { it.id != p.id } }
+            pending.update { list -> list.filter { it.dlId != p.dlId } }
             savePending()
         }
     }
 
+    /** Filen är klar: in i listan för profilen som startade nedladdningen (den kan ha flyttats från före profilerna) */
+    private fun finished(p: PendingDownload) {
+        synchronized(lock) {
+            val sc = pending.value.firstOrNull { it.dlId == p.dlId }?.scope ?: p.scope
+            val name = "${p.id}.mp4"
+            val file = File(root, p.file)
+            val dest = File(dirOf(sc), name)
+            if (file.absolutePath != dest.absolutePath) moveFile(file, dest)
+            if (sc.isEmpty() && legacy() == null) return // ska inte hända: flytten byter profil på pågående, utloggningen avbryter dem
+            saveList(sc, loadList(sc).filter { it.id != p.id } + DownloadRecord(p.id, p.title, p.subtitle, name, dest.length()))
+        }
+        open()
+    }
+
     fun remove(id: Int) {
-        localFile(id)?.delete()
-        records.update { list -> list.filter { it.id != id } }
-        save()
+        synchronized(lock) {
+            val sc = if (id in legacyIds) "" else scope ?: return
+            removeFrom(sc, id)
+        }
+        open()
+    }
+
+    private fun removeFrom(sc: String, id: Int) {
+        val list = loadList(sc)
+        list.filter { it.id == id }.forEach { File(dirOf(sc), it.file).delete() }
+        saveList(sc, list.filter { it.id != id })
+    }
+
+    // ---------- utloggning och behörighet ----------
+
+    /** Finns något nedladdat (eller på väg) från servern på enheten, för någon av dess profiler? */
+    fun hasServerDownloads(server: String): Boolean {
+        if (!::ctx.isInitialized) return false
+        if (pending.value.any { DownloadScope.ofServer(it.scope, server) }) return true
+        if (legacy()?.let { DownloadScope.sameServer(it.server, server) } == true && loadList("").isNotEmpty()) return true
+        return (root.listFiles() ?: emptyArray()).any { d -> d.isDirectory && DownloadScope.ofServer(d.name, server) && (d.listFiles()?.isNotEmpty() == true) }
+    }
+
+    /** Utloggning: allt som laddats ner från servern tas bort (alla dess profiler), pågående nedladdningar avbryts */
+    fun removeServer(server: String) {
+        if (!::ctx.isInitialized) return
+        synchronized(lock) {
+            val l = legacy()?.takeIf { DownloadScope.sameServer(it.server, server) }
+            pending.value.filter { DownloadScope.ofServer(it.scope, server) || (l != null && it.scope.isEmpty()) }
+                .forEach { runCatching { dm.remove(it.dlId) } } // bevakningen märker det och städar
+            (root.listFiles() ?: emptyArray()).filter { it.isDirectory && DownloadScope.ofServer(it.name, server) }.forEach { it.deleteRecursively() }
+            val e = prefs.edit()
+            prefs.all.keys.filter { k -> (k.startsWith("list.") || k.startsWith("auto.")) && DownloadScope.ofServer(k.substringAfter('.'), server) }.forEach { e.remove(it) }
+            e.remove("owner." + DownloadScope.clean(server))
+            if (l != null) {
+                loadList("").forEach { File(root, it.file).delete() }
+                e.remove("list").remove("auto").remove("legacy")
+            }
+            e.apply()
+            checked.keys.removeAll { DownloadScope.ofServer(it, server) }
+        }
+        open()
+    }
+
+    /**
+     * Servern svarar (Session.refresh): får kontot inte ladda ner längre tas allt som profilen laddat ner bort, och
+     * nedladdade titlar som profilen inte får se längre eller som inte finns kvar (403/404) tas bort – högst var
+     * sjätte timme. Som Expo-appens online().
+     */
+    suspend fun online(canDownload: Boolean) {
+        if (!::ctx.isInitialized) return
+        val sc = scope ?: return
+        if (DownloadAccess.removeAll(canDownload, records.value.size)) {
+            synchronized(lock) {
+                if (scope != sc) return
+                pending.value.filter { it.scope == sc }.forEach { runCatching { dm.remove(it.dlId) } }
+                loadList(sc).forEach { File(dirOf(sc), it.file).delete() }
+                saveList(sc, emptyList())
+                prefs.edit().remove(autoKey(sc)).apply()
+            }
+            open()
+            notice.value = str(R.string.downloads_removed_no_right)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (!DownloadAccess.due(synchronized(lock) { checked[sc] }, now) || !checking.compareAndSet(false, true)) return
+        try {
+            synchronized(lock) { checked[sc] = now }
+            val gone = mutableListOf<String>()
+            for (r in synchronized(lock) { loadList(sc) }) {
+                if (scope != sc) return
+                val status = try { Api.requestPublic("/api/items/${r.id}", "GET", emptyMap(), null); 200 }
+                    catch (e: ApiException) { e.code } // 0 = inget svar eller utloggad
+                    catch (e: IOException) { 0 }
+                when (DownloadAccess.verdict(status)) {
+                    DownloadAccess.Verdict.STOP -> { synchronized(lock) { checked.remove(sc) }; break } // inget nät: igen nästa gång
+                    DownloadAccess.Verdict.REMOVE -> { synchronized(lock) { if (scope == sc) removeFrom(sc, r.id) }; gone += r.title }
+                    DownloadAccess.Verdict.KEEP -> {}
+                }
+            }
+            if (gone.isNotEmpty() && scope == sc) {
+                open()
+                notice.value = str(R.string.downloads_removed_access, gone.joinToString(", "))
+            }
+        } finally { checking.set(false) }
     }
 
     // ---------- automatisk synk ----------
     private val syncing = AtomicBoolean(false)
-    /** Avsnitt som synken själv laddat ner – bara de tas bort automatiskt */
-    private fun autoIds(): MutableSet<Int> = (prefs.getStringSet("auto", emptySet()) ?: emptySet()).mapNotNull { it.toIntOrNull() }.toMutableSet()
-    private fun saveAutoIds(ids: Set<Int>) { prefs.edit().putStringSet("auto", ids.map { it.toString() }.toSet()).apply() }
+    /** Avsnitt som synken själv laddat ner – bara de tas bort automatiskt (per profil) */
+    private fun autoIds(sc: String): MutableSet<Int> = (prefs.getStringSet(autoKey(sc), emptySet()) ?: emptySet()).mapNotNull { it.toIntOrNull() }.toMutableSet()
+    private fun saveAutoIds(sc: String, ids: Set<Int>) { prefs.edit().putStringSet(autoKey(sc), ids.map { it.toString() }.toSet()).apply() }
 
     private fun unmetered(): Boolean {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -160,17 +357,19 @@ object Downloads {
     }
 
     private suspend fun syncNow() {
+        val sc = scope ?: return
         // Glöm avsnitt som inte längre finns (borttagna för hand eller misslyckade) – de kan laddas ner igen
-        val auto = autoIds().filter { localFile(it) != null || active.value.containsKey(it) }.toMutableSet()
+        val auto = autoIds(sc).filter { localFile(it) != null || active.value.containsKey(it) }.toMutableSet()
         val plan: SyncPlan = Api.get("/api/offline/sync", mapOf("have" to auto.sorted().joinToString(",")))
+        if (scope != sc) return // profilen byttes under tiden
         for (id in plan.remove) if (id in auto && localFile(id) != null) { remove(id); auto.remove(id) }
-        saveAutoIds(auto)
+        saveAutoIds(sc, auto)
         if (!plan.enabled || plan.items.isEmpty()) return
         if (plan.wifiOnly && !unmetered()) return
         for (item in plan.items) {
             if (localFile(item.id) != null || active.value.containsKey(item.id)) continue
             auto.add(item.id)
-            saveAutoIds(auto)
+            saveAutoIds(sc, auto)
             start(item, plan.quality)
         }
     }

@@ -230,11 +230,29 @@ class MusicService : MediaLibraryService() {
                 val bookId = p.getOrNull(1)?.toIntOrNull() ?: return
                 val b = currentBook?.takeIf { it.id == bookId } ?: return
                 val f = b.files.getOrNull(p.getOrNull(2)?.toIntOrNull() ?: return) ?: return
-                Api.appScope.launch { runCatching { Api.post("/api/audiobooks/book/$bookId/progress", buildJsonObject { put("position", f.offset + pos) }) } }
+                Api.appScope.launch { sendSpoken(ProgressQueue.BOOK, bookId, f.offset + pos) }
             }
-            "pe" -> { val epId = p.getOrNull(1) ?: return
-                Api.appScope.launch { runCatching { Api.post("/api/podcasts/episodes/$epId/progress", buildJsonObject { put("position", pos) }) } } }
+            "pe" -> { val epId = p.getOrNull(1)?.toIntOrNull() ?: return
+                Api.appScope.launch { sendSpoken(ProgressQueue.POD, epId, pos) } }
         }
+    }
+
+    /** Ett anrop åt gången: utan nät tar varje försök upp till 15 s, och positionen sparas var 15:e sekund */
+    private val spokenBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Skickar bokens/avsnittets position. Kommer den inte fram sparas den i kön och skickas med at senare (OfflineSync).
+     * Pågår ett anrop redan sparas positionen direkt i kön (den senaste per titel gäller och skickas i ordning).
+     */
+    private suspend fun sendSpoken(kind: String, id: Int, position: Double) {
+        if (!spokenBusy.compareAndSet(false, true)) { OfflineSync.savePosition(id, position, 0.0, kind); return }
+        val started = System.currentTimeMillis()
+        val now = PendingProgress(id, Math.round(position.coerceAtLeast(0.0)), 0.0, 0L, kind)
+        val status = try { Api.post(ProgressQueue.path(now), buildJsonObject { put("position", position) }); 200 }
+            catch (e: ApiException) { e.code } // 0 = inget svar (eller utloggad: då finns ingen profil att spara för)
+            catch (e: java.io.IOException) { 0 }
+            finally { spokenBusy.set(false) }
+        if (ProgressQueue.finished(status)) OfflineSync.flush() else OfflineSync.savePosition(id, position, 0.0, kind, started)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session

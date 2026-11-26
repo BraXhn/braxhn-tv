@@ -36,6 +36,31 @@ class OfflineCoreTest {
         assertEquals(listOf(t0 / 1000 + 10, t0 / 1000 + 20), q.map { it.at })
     }
 
+    @Test fun ljudbokerOchPoddarIKon() {
+        // Bok och podd med samma id som en film är olika poster, var och en med sin adress och sin at
+        var q = ProgressQueue.record(emptyList(), 7, 100.0, 5400.0, t0)
+        q = ProgressQueue.record(q, 7, 3725.6, 0.0, t0 + 1000, ProgressQueue.BOOK)
+        q = ProgressQueue.record(q, 7, 61.0, 0.0, t0 + 2000, ProgressQueue.POD)
+        assertEquals(3, q.size)
+        assertEquals(listOf("/api/items/7/progress", "/api/audiobooks/book/7/progress", "/api/podcasts/episodes/7/progress"), q.map { ProgressQueue.path(it) })
+        assertEquals(mapOf("position" to 3726L, "at" to t0 / 1000 + 1), ProgressQueue.body(q[1])) // boken: position i hela boken
+        assertEquals(mapOf("position" to 61L, "at" to t0 / 1000 + 2), ProgressQueue.body(q[2]))
+        // En ny position i boken ersätter bara bokens post
+        q = ProgressQueue.record(q, 7, 3800.0, 0.0, t0 + 3000, ProgressQueue.BOOK)
+        assertEquals(listOf(ProgressQueue.ITEM to 100L, ProgressQueue.POD to 61L, ProgressQueue.BOOK to 3800L), q.map { it.kind to it.position })
+        // Barnprofil och podd (403) eller borttaget avsnitt (404): posten släpps
+        assertEquals(2, ProgressQueue.ack(q, q[1], 403).size)
+    }
+
+    @Test fun ettAnropSomStartadeForeEnNyarePositionErsatterDenInte() {
+        // Anropet startade t0 och fick inget svar förrän efter att en nyare position (t0 + 10 s) sparats i kön
+        val q = ProgressQueue.record(emptyList(), 5, 600.0, 0.0, t0 + 10_000, ProgressQueue.BOOK)
+        val after = ProgressQueue.record(q, 5, 590.0, 0.0, t0, ProgressQueue.BOOK)
+        assertEquals(q, after)
+        // Samma sekund eller senare: den senast sparade gäller
+        assertEquals(620L, ProgressQueue.record(q, 5, 620.0, 0.0, t0 + 10_000, ProgressQueue.BOOK).single().position)
+    }
+
     @Test fun svaretAvgorOmPostenSlapps() {
         val q = ProgressQueue.record(emptyList(), 7, 1234.0, 5400.0, t0)
         val p = q[0]

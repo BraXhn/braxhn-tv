@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * när appen öppnas och efter ett lyckat framstegsanrop.
  */
 object OfflineSync {
-    @Serializable private data class PendingJson(val id: Int, val pos: Long, val dur: Double = 0.0, val at: Long)
+    @Serializable private data class PendingJson(val id: Int, val pos: Long, val dur: Double = 0.0, val at: Long, val k: String = ProgressQueue.ITEM)
     @Serializable private data class PosJson(val id: Int, val pos: Double, val dur: Double = 0.0)
     @Serializable private data class ScreenJson(val status: ScreenTimeState, val offDay: String? = null, val off: Double = 0.0)
 
@@ -43,7 +43,7 @@ object OfflineSync {
     // ---------- server och profil ----------
 
     /** Kort fingeravtryck av kontots token (själva token sparas inte här) */
-    private fun fp(token: String): String =
+    fun fp(token: String): String =
         MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
 
     /** Profilen som hör till token som används nu – från /api/status (Session.refresh) */
@@ -54,32 +54,35 @@ object OfflineSync {
         if (prefs.getInt(k, -1) != uid) prefs.edit().putInt(k, uid).apply()
     }
 
-    /** "server-profil", null innan profilen är känd (inloggning utan svar från /api/status) */
-    private fun scope(): String? {
-        if (!::ctx.isInitialized) return null
-        val t = Api.token.value ?: return null
-        val uid = prefs.getInt("uid." + fp(t), -1).takeIf { it >= 0 } ?: return null
-        val server = Api.saved.replace(Regex("[^A-Za-z0-9]"), "").take(60)
-        return "$server-$uid"
+    /** Profilen för en inloggning (fingeravtrycket), om servern har sagt den */
+    fun uidFor(fp: String): Int? = if (!::ctx.isInitialized) null else prefs.getInt("uid.$fp", -1).takeIf { it >= 0 }
+
+    /** Fingeravtrycket av inloggningen som används nu (null = utloggad) */
+    fun currentFp(): String? = Api.token.value?.let { fp(it) }
+
+    /** "server-profil", null innan profilen är känd (inloggning utan svar från /api/status). Samma för nedladdningarna. */
+    fun scope(): String? {
+        val uid = uidFor(currentFp() ?: return null) ?: return null
+        return DownloadScope.of(Api.saved, uid)
     }
 
     // ---------- positioner ----------
 
     private fun load(scope: String): List<PendingProgress> =
         runCatching { Api.json.decodeFromString<List<PendingJson>>(prefs.getString("pending.$scope", "[]") ?: "[]") }.getOrDefault(emptyList())
-            .map { PendingProgress(it.id, it.pos, it.dur, it.at) }
+            .map { PendingProgress(it.id, it.pos, it.dur, it.at, it.k) }
 
     private fun save(scope: String, list: List<PendingProgress>) {
         val e = prefs.edit()
         if (list.isEmpty()) e.remove("pending.$scope")
-        else e.putString("pending.$scope", Api.json.encodeToString(list.map { PendingJson(it.id, it.position, it.duration, it.at) }))
+        else e.putString("pending.$scope", Api.json.encodeToString(list.map { PendingJson(it.id, it.position, it.duration, it.at, it.kind) }))
         e.apply()
     }
 
-    /** Framsteget kom inte fram: spara positionen och när den sparades */
-    fun savePosition(id: Int, position: Double, duration: Double) {
+    /** Framsteget kom inte fram: spara positionen och när den sparades (kind: film/avsnitt, ljudbok eller podd) */
+    fun savePosition(id: Int, position: Double, duration: Double, kind: String = ProgressQueue.ITEM, atMs: Long = System.currentTimeMillis()) {
         val sc = scope() ?: return
-        synchronized(lock) { save(sc, ProgressQueue.record(load(sc), id, position, duration, System.currentTimeMillis())) }
+        synchronized(lock) { save(sc, ProgressQueue.record(load(sc), id, position, duration, atMs, kind)) }
     }
 
     /** Skickar väntande positioner i ordning (i bakgrunden; stannar vid första anropet utan svar) */
@@ -89,6 +92,13 @@ object OfflineSync {
         Api.appScope.launch {
             try { flushNow(sc) } finally { sending.set(false) }
         }
+    }
+
+    /** Skickar kön nu och väntar på svaret (före utloggningen, medan inloggningen gäller) */
+    suspend fun flushAwait() {
+        val sc = scope() ?: return
+        if (!sending.compareAndSet(false, true)) return
+        try { flushNow(sc) } finally { sending.set(false) }
     }
 
     private suspend fun flushNow(sc: String) {

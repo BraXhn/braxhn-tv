@@ -48,11 +48,28 @@ Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan
 
 Nedladdade filmer och avsnitt spelas från filen under *Inställningar → Nedladdat för offline*, även helt utan nät.
 
+- **Per profil:** det nedladdade gäller den server och profil som laddade ner det (en mapp per server och profil), som
+  i Expo-appen. En barnprofil på samma telefon ser inte vad en vuxen laddat ner, och tvärtom.
+- **Utloggning:** *Logga ut* frågar först när något är nedladdat från servern, och tar sedan bort allt nedladdat från
+  servern (alla profiler) – det går att ladda ner igen efter inloggningen. Väntande positioner skickas innan.
+  Blir inloggningen ogiltig (servern svarar 401) tas inget bort; det syns igen när samma profil loggar in.
+- **När servern svarar igen:** får kontot inte ladda ner längre tas allt som profilen laddat ner bort. Nedladdade
+  titlar som profilen inte får se längre eller som inte finns kvar (servern svarar 403 eller 404) tas bort, högst var
+  sjätte timme. *Nedladdat för offline* säger vad som togs bort.
+- **Nedladdningar från appversion 0.7.0 och äldre** (en gemensam lista) flyttas vid uppdateringen till den profil som
+  var inloggad – så fort servern har sagt vilken profil det är. Till dess visas de som förut för samma inloggning, även
+  utan nät. Var ingen inloggad, eller byttes inloggningen innan servern hann svara, får huvudkontot dem (`owner` i
+  `/api/profiles`) när någon i hushållet loggar in. Inga filer tas bort vid uppdateringen.
+
 - **Var du är:** med nät skickas positionen till servern som vanligt. Svarar servern inte sparas positionen i appen,
   per server och profil, med tidpunkten (`at`), och skickas i ordning när nätet är tillbaka, när appen öppnas och efter
   nästa lyckade anrop. En senare position från en annan enhet vinner, och en position som redan kommit fram räknas inte
-  två gånger. *Spela* där börjar där du slutade. Ljudböcker och poddar går inte att ladda ner i
-  Android-appen än, så de spelas bara med nät.
+  två gånger. *Spela* där börjar där du slutade.
+- **Ljudböcker och poddar** går inte att ladda ner i Android-appen än, så de spelas bara med nät. Kommer positionen
+  inte fram (tunnel, dålig täckning i bilen) läggs den i samma kö och skickas med tidpunkten senare. Poddarnas framsteg
+  tar inte emot tidpunkten på servern än, så för ett poddavsnitt gäller den position som kommer fram sist.
+- **Ett anrop åt gången:** utan nät tar varje försök upp till 15 s. Spelaren startar inget nytt framstegsanrop medan
+  ett pågår (tiden räknas med i nästa), och ljudspelaren lägger positionen direkt i kön då.
 - **Skärmtid med nät:** som vanlig uppspelning – servern räknar tiden och kan säga stopp, även för en nedladdad fil.
 - **Skärmtid utan nät:** appen använder den senaste statusen från servern (tid kvar i dag och klockslagen, hämtas när
   startsidan öppnas och var tionde sekund under uppspelning) och räknar själv tiden som spelas utan nät. När tiden är
@@ -69,9 +86,10 @@ Det här **kan inte** upprätthållas utan nät:
 - Enhetens klocka går att ställa om. Dagen och klockslagen följer enhetens tidszon (servern använder sin egen).
 - Startar appen utan nät gäller den profil som senast var inloggad – byta profil kräver servern.
 
-Logiken ligger i `OfflineCore.kt` (ingen Android, testad på JVM i `OfflineCoreTest.kt`: kön, `at`, ordning, ny dag,
-sommartid och vintertid, fönster över midnatt), lagringen och anropen i `OfflineSync.kt`. Samma regler som Expo-appen
-(`apps/expo/src/offlinecore.ts`).
+Logiken ligger i `OfflineCore.kt` (ingen Android, testad på JVM i `OfflineCoreTest.kt`: kön med filmer, ljudböcker och
+poddar, `at`, ordning, ny dag, sommartid och vintertid, fönster över midnatt) och `DownloadCore.kt` (vem som ser vad,
+flytten från 0.7.0, borttagning vid 403/404, testad i `DownloadCoreTest.kt`), lagringen och anropen i `OfflineSync.kt`
+och `Offline.kt`. Samma regler som Expo-appen (`apps/expo/src/offlinecore.ts`, `offline.ts`).
 
 ## Serveradress, https och BraXhn Relay
 
@@ -123,6 +141,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress och uppspelning utan nät): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät och nedladdningar per profil): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
 **Inte provat på riktig enhet (appversion 0.7.0):** att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

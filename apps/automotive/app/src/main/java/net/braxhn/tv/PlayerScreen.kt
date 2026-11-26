@@ -82,6 +82,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var stopped by remember(req) { mutableStateOf<String?>(null) }
     // Slutrapport och stopp av strömmen skickas en gång per uppspelning (Stäng + att vyn stängs gav dubbla anrop)
     val finalSent = remember(req) { booleanArrayOf(false) }
+    // Ett framstegsanrop åt gången: report körs var tionde sekund, men utan nät tar ett anrop upp till 15 s (tidsgränsen)
+    val reporting = remember(req) { booleanArrayOf(false) }
     // Tid som spelats sedan förra rapporten (ms) och förra varvet i bevakningen – räknas som skärmtid utan nät
     val played = remember(req) { longArrayOf(0L, 0L) }
     val closeFocus = remember { FocusRequester() }
@@ -123,10 +125,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     fun report(final: Boolean = false) {
         // En nedladdad titel spelas även när servern inte svarade på /api/items/:id (item saknas då)
         val id = item?.id ?: (if (offline) req.id else return)
-        if (final) { if (finalSent[0]) return; finalSent[0] = true }
+        // Pågår förra anropet hoppas den här rapporten över; tiden räknas med i nästa
+        if (final) { if (finalSent[0]) return; finalSent[0] = true } else if (reporting[0]) return
         val pos = player.currentPosition / 1000.0
         val dur = pb?.duration ?: item?.duration ?: player.duration.takeIf { d -> d > 0 }?.let { d -> d / 1000.0 } ?: 0.0
-        val secs = played[0] / 1000.0; played[0] = 0L
+        val secs = played[0] / 1000.0; played[0] = 0L; val started = System.currentTimeMillis()
         // Under trailers/förfilm finns inget framsteg att spara. Kommer framsteget inte fram sparas positionen i appen
         // och skickas med at när nätet är tillbaka (OfflineSync); för en nedladdad titel räknas då skärmtiden i appen.
         // Servern ger 0 för det som setts under 2 minuter, så appen erbjuder då ingen Fortsätt.
@@ -138,12 +141,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     OfflineSync.noteScreen(r.screenTime); OfflineSync.flush()
                     if (!final && r.stop && item?.id == id) stoppedByServer(r)
                 } else {
-                    OfflineSync.savePosition(id, pos, dur)
+                    OfflineSync.savePosition(id, pos, dur, atMs = started) // en senare sparad position vinner
                     if (offline) { val g = OfflineSync.playedOffline(secs); if (!final && req.id == id) stoppedOffline(g) }
                 }
             }
             if (final) Api.appScope.launch { send() }
-            else if (stopped == null) scope.launch { send() }
+            else if (stopped == null) { reporting[0] = true; scope.launch { try { send() } finally { reporting[0] = false } } }
         }
         if (final && !offline) StreamGate.stop(id)
     }

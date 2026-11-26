@@ -141,6 +141,11 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 **Småfel**
 - Inspelningens datum i filens metadata (`server/dvr.js`) och datumet i filnamnen för exporter (Min historik,
   ordlistan, Mina uppgifter) räknas i UTC – mellan midnatt och kl. 01–02 blir det gårdagens datum.
+- Poddavsnittens framsteg (`POST /api/podcasts/episodes/:eid/progress`, `server/podcasts.js` `saveProgress`) tar inte
+  emot `at`: en position som Android-appen skickar i efterhand kan skriva över en nyare från en annan enhet. Böcker och
+  filmer har regeln redan.
+- Android-appen: förloppet och felen för nedladdningar (`Downloads.active`/`errors`) gäller titeln, inte profilen – en
+  annan profil på samma enhet ser förloppsraden för en nedladdning som pågår och kan inte starta samma titel samtidigt.
 
 ## Klart
 
@@ -150,6 +155,19 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   nedladdade) in som `mov_text` med språk, namn, kontots förval och familjefiltrets maskning; grundfilen kodas en gång
   och varianterna muxas utan omkodning. Bildundertexter följer inte med. `test/offline-subs.test.js` (6 fall med
   ffprobe). **Inte provat:** att iPhone/Android/AirPlay/Chromecast faktiskt visar spåren från en nedladdad fil.
+- 2026-11-26: Android-appen: nedladdningar per server och profil, borttagning vid utloggning och vid 403/404, och
+  ljudböckers och poddars positioner i kön utan nät, gren `team/android-profil-2026-11-26`. Fel: `Offline.kt` hade en
+  gemensam lista och mapp (`DownloadRecord` utan profil), så en barnprofil såg en vuxens nedladdningar, och allt låg kvar
+  efter utloggning; `MusicService.saveSpoken` släppte positionen när anropet inte kom fram (`runCatching`).
+  `PlayerScreen.report` startade ett nytt framstegsanrop var tionde sekund även när förra (15 s tidsgräns) pågick.
+  Nu: `offline/<server>-<profil>/` och `list.<server>-<profil>` (reglerna i `DownloadCore.kt`), flytten av nedladdningar
+  från 0.7.0 till profilen som var inloggad (eller huvudkontot), fråga vid *Logga ut*, `Downloads.online` efter
+  `Session.refresh` (allt bort när `canDownload` är falskt, 403/404 var sjätte timme), kön med `kind` (film, bok, podd)
+  och ett anrop åt gången i spelaren och ljudspelaren. `DownloadCoreTest.kt` (9 fall) och två nya i
+  `OfflineCoreTest.kt`. Inte provat: kompilering av `Api.kt`, `MainActivity.kt`, `MusicService.kt` och
+  `PlayerScreen.kt` (`Offline.kt`, `OfflineSync.kt` och `Net.kt` kompilerade mot Android 14:s klasser), uppdatering
+  från 0.7.0 på riktig enhet.
+
 - 2026-11-26: Android-appen: positioner och skärmtid utan nät (samma regler som Expo-appen), gren
   `team/android-offline-2026-11-26`. Fel: `PlayerScreen.report` gjorde inget när `/api/items/:id` inte svarade (nedladdad
   titel utan nät), och `Api.reportProgress` släppte positionen vid nätfel; skärmtiden kollades bara i serverns svar.
@@ -264,6 +282,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - **Prova Android-appen utan nät:** ladda ner en film, slå på flygplansläget, spela en stund från *Inställningar →
   Nedladdat för offline*, stäng och spela igen (ska fortsätta där du var), slå av flygplansläget och kontrollera att
   positionen syns i webben. Med en barnprofil med lite tid kvar: filmen ska stoppa med serverns besked utan nät.
+- **Prova Android-appens nedladdningar per profil:** installera den nya versionen över 0.7.0 med en nedladdad film
+  (filmen ska finnas kvar för samma profil), byt till en barnprofil (ska inte se den), logga ut (frågan, sedan borta),
+  och lyssna på en ljudbok i bilen genom en tunnel (positionen ska synas i webben efteråt).
 - **Prova nedladdning i Expo-appen** på iPhone och Android: ladda ner en film (480p) och en ljudbok, slå på
   flygplansläget, starta om appen (den ska öppna *Nedladdat*), titta en stund, slå av flygplansläget och kontrollera att
   positionen syns i webben. Prova också att låsa skärmen under en nedladdning i några minuter.

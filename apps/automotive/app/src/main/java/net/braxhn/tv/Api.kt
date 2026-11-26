@@ -28,7 +28,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Strings.init(this); Api.init(this); Home.init(this)
-        Downloads.init(this); OfflineSync.init(this)
+        OfflineSync.init(this); Downloads.init(this) // nedladdningarna behöver profilen ur OfflineSync
     }
 }
 
@@ -240,7 +240,7 @@ object Api {
             if (!code.isNullOrBlank()) put("code", code.trim())
         }))
         prefs.edit().putString("server", server.value).putString("token", r.token).apply(); saved = server.value
-        token.value = r.token
+        token.value = r.token; Downloads.open() // ny inloggning: dess profil visas när /api/status svarat
         refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
     }
 
@@ -255,12 +255,12 @@ object Api {
 
     fun clearLogin() {
         prefs.edit().remove("token").apply(); Session.reset(); Home.leave(); Home.reset()
-        token.value = null
+        token.value = null; Downloads.open() // nedladdningarna ligger kvar och syns igen när profilen loggar in
         imageToken.value = null
     }
 
-    suspend fun logout() {
-        runCatching { post("/api/logout") }
+    suspend fun logout() { // nedladdningarna hör till inloggningen: positioner skickas först, sedan tas allt nedladdat bort
+        runCatching { OfflineSync.flushAwait() }; runCatching { post("/api/logout") }; Downloads.removeServer(saved)
         clearLogin()
     }
 
@@ -319,7 +319,7 @@ object Api {
         val t = r.token
         if (r.status == "approved" && t != null) {
             prefs.edit().putString("server", server.value).putString("token", t).apply(); saved = server.value
-            token.value = t
+            token.value = t; Downloads.open()
             refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
         }
         return r.status
@@ -335,7 +335,7 @@ object Api {
             if (!password.isNullOrBlank()) put("password", password)
         }))
         prefs.edit().putString("token", r.token).apply()
-        token.value = r.token
+        token.value = r.token; Downloads.open() // den nya profilen har sina egna nedladdningar
         refreshImageToken(force = true); Session.refresh()
     }
 

@@ -15,33 +15,49 @@ import kotlin.math.roundToLong
 
 // ---------- positioner som väntar på nätet ----------
 
-/** Position som sparats utan kontakt med servern. at = när den sparades (Unix-sekunder), skickas med till servern. */
-data class PendingProgress(val id: Int, val position: Long, val duration: Double, val at: Long)
+/**
+ * Position som sparats utan kontakt med servern. at = när den sparades (Unix-sekunder), skickas med till servern.
+ * kind: ProgressQueue.ITEM (film, avsnitt), BOOK (ljudbok, position i hela boken) eller POD (poddavsnitt).
+ */
+data class PendingProgress(val id: Int, val position: Long, val duration: Double, val at: Long, val kind: String = ProgressQueue.ITEM)
 
 object ProgressQueue {
+    const val ITEM = "item"
+    const val BOOK = "book"
+    const val POD = "pod"
     /** Fler väntande titlar än så sparas inte (de äldsta släpps) */
     const val MAX = 200
     /** Äldre än så skickas inte längre (60 dygn) */
     const val MAX_AGE_S = 60L * 86400
 
     /**
-     * Sparar positionen i kön: en post per titel, den senaste gäller. Kön står i den ordning positionerna sparades
-     * och skickas i den ordningen.
+     * Sparar positionen i kön: en post per titel (och slag), den senaste gäller. Kön står i den ordning positionerna
+     * sparades och skickas i den ordningen. nowMs = när positionen gällde: ett anrop som startade före en position som
+     * redan sparats (och sedan inte kom fram) ersätter inte den nyare.
      */
-    fun record(list: List<PendingProgress>, id: Int, position: Double, duration: Double, nowMs: Long): List<PendingProgress> {
-        val p = PendingProgress(id, max(0.0, position).roundToLong(), if (duration > 0) duration else 0.0, nowMs / 1000)
-        return prune(list.filter { it.id != id } + p, nowMs)
+    fun record(list: List<PendingProgress>, id: Int, position: Double, duration: Double, nowMs: Long, kind: String = ITEM): List<PendingProgress> {
+        val p = PendingProgress(id, max(0.0, position).roundToLong(), if (duration > 0) duration else 0.0, nowMs / 1000, kind)
+        val old = list.firstOrNull { it.id == id && it.kind == kind }
+        if (old != null && old.at > p.at) return prune(list, nowMs)
+        return prune(list.filter { it.id != id || it.kind != kind } + p, nowMs)
     }
 
     /** Ordning (äldst först), högst MAX poster och inga som är för gamla */
     fun prune(list: List<PendingProgress>, nowMs: Long): List<PendingProgress> =
         list.filter { nowMs / 1000 - it.at <= MAX_AGE_S }.sortedBy { it.at }.takeLast(MAX)
 
-    fun path(p: PendingProgress) = "/api/items/${p.id}/progress"
+    fun path(p: PendingProgress) = when (p.kind) {
+        BOOK -> "/api/audiobooks/book/${p.id}/progress"
+        POD -> "/api/podcasts/episodes/${p.id}/progress"
+        else -> "/api/items/${p.id}/progress"
+    }
 
-    /** Kroppen i POST /api/items/:id/progress. Servern behåller ett senare framsteg från en annan enhet (at). */
+    /**
+     * Kroppen i POST …/progress. Servern behåller ett senare framsteg från en annan enhet (at) för filmer, avsnitt och
+     * ljudböcker; poddavsnittens framsteg tar inte emot at än (server/podcasts.js) – där gäller den som kommer fram sist.
+     */
     fun body(p: PendingProgress): Map<String, Number> =
-        if (p.duration > 0) mapOf("position" to p.position, "duration" to p.duration, "at" to p.at)
+        if (p.kind == ITEM && p.duration > 0) mapOf("position" to p.position, "duration" to p.duration, "at" to p.at)
         else mapOf("position" to p.position, "at" to p.at)
 
     /** Klart med posten: servern tog emot den (även som för gammal), eller titeln finns inte / får inte ses längre */

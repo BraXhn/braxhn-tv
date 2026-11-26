@@ -52,9 +52,14 @@ object Session {
         kid.value = u.kid
         canDownload.value = u.canDownload
         // Utan nät: positioner sparas per profil och skärmtiden följer senaste statusen (OfflineSync)
-        OfflineSync.rememberUser(u.id)
+        OfflineSync.rememberUser(u.id); Downloads.open() // nedladdningarna gäller profilen (Offline.kt)
         runCatching { Api.get<ScreenTimeState>("/api/screentime") }.getOrNull()?.let { OfflineSync.noteScreen(it) }
         OfflineSync.flush()
+        // Nedladdningar från före profilerna som ingen profil kunde knytas till: huvudkontot får dem
+        if (Downloads.needsOwner()) runCatching { Api.get<ProfileList>("/api/profiles") }.getOrNull()
+            ?.profiles?.firstOrNull { it.owner }?.let { Downloads.learnOwner(it.id) }
+        // Får kontot inte ladda ner längre, eller profilen inte se en nedladdad titel, tas den bort (i bakgrunden)
+        Api.appScope.launch { runCatching { Downloads.online(u.canDownload) } }
     }
 
     /** Glöm profilens läge (utloggning, profilbyte) tills nästa refresh() */

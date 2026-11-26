@@ -9,6 +9,16 @@
   blandas aldrig ihop). Bildundertexter (PGS/VobSub) kan inte göras om till text och följer inte med. Redan nedladdade
   filmer i telefonen ändras inte; servern bygger filen på nytt nästa gång den laddas ner (bilden kodas inte om när den
   förra filen finns kvar). Inte provat på en riktig iPhone eller Android-telefon.
+- **Android-appen visade en vuxens nedladdade filmer för barnprofilen, och de låg kvar efter utloggning.** Nedladdningarna
+  hade en gemensam lista för alla profiler. Nu gäller de en server och profil, som i Expo-appen: *Logga ut* frågar och
+  tar sedan bort det som laddats ner från servern, allt tas bort när kontot inte får ladda ner längre, och en titel som
+  profilen inte får se längre eller som inte finns kvar tas bort när servern svarar igen (*Nedladdat för offline* säger
+  vad). Det som laddats ner med en äldre version flyttas till profilen som var inloggad, eller till huvudkontot när det
+  inte går att veta – inga filer tas bort vid uppdateringen.
+- **Android-appen glömde var du var i en ljudbok eller ett poddavsnitt när positionen inte kom fram** (tunnel, dålig
+  täckning i bilen). Nu läggs den i samma kö som filmerna och skickas med tidpunkten när nätet är tillbaka (poddarnas
+  framsteg tar inte emot tidpunkten på servern än). Spelaren startar inte heller ett nytt framstegsanrop medan förra
+  väntar på svar. Inte provat på riktig telefon, TV eller bil.
 - **Android-appen glömde var du var när en nedladdad film spelades utan nät, och skärmtiden gällde inte där.**
   Positionen skickades bara till servern; svarade den inte försvann den, och utan svar på titelns uppgifter skickades
   ingenting alls. *Spela* under Nedladdat för offline började dessutom alltid från början. Nu sparas positionen i appen

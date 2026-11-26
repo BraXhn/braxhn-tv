@@ -473,8 +473,15 @@ fun SettingsScreen(push: (Screen) -> Unit) {
                 color = if (listenError != null) Color(0xFFFF5D6C) else Color.Gray, fontSize = 13.sp)
         }
         item {
-            Button(onClick = { scope.launch { Api.logout() } }, colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Color(0xFFFF5D6C)),
+            // Nedladdningarna hör till inloggningen och tas bort vid utloggning – fråga först (som Expo-appen)
+            var confirmLogout by remember { mutableStateOf(false) }
+            Button(onClick = { if (Downloads.hasServerDownloads(Api.saved)) confirmLogout = true else scope.launch { Api.logout() } },
+                colors = ButtonDefaults.buttonColors(containerColor = Surface2, contentColor = Color(0xFFFF5D6C)),
                 modifier = Modifier.padding(top = 24.dp).height(52.dp)) { Text(tr(R.string.logout)) }
+            if (confirmLogout) AlertDialog(onDismissRequest = { confirmLogout = false },
+                title = { Text(tr(R.string.logout_confirm_title)) }, text = { Text(tr(R.string.logout_confirm_text)) },
+                confirmButton = { TextButton(onClick = { confirmLogout = false; scope.launch { Api.logout() } }) { Text(tr(R.string.logout_confirm_button)) } },
+                dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text(tr(R.string.cancel)) } })
         }
         item { Text(tr(R.string.settings_downloads), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
         item { DownloadsList(push) }
@@ -643,7 +650,15 @@ fun DownloadRow(item: MediaItem) {
 @Composable
 fun DownloadsList(push: (Screen) -> Unit) {
     val records by Downloads.records.collectAsState()
+    val notice by Downloads.notice.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // T.ex. att titlar togs bort för att profilen inte får se dem längre
+        notice?.let { n ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(n, color = Color(0xFFFFB454), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = { Downloads.notice.value = null }) { Text(tr(R.string.close)) }
+            }
+        }
         if (records.isEmpty()) Text(tr(R.string.downloads_empty), color = Color.Gray)
         records.forEach { r ->
             Row(verticalAlignment = Alignment.CenterVertically) {

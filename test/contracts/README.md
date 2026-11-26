@@ -54,7 +54,7 @@ Varje typ och endpoint har `källa` med fil och rad i appen. Översikt:
 | Uppspelning, undertexter, strömmar | `Player.swift:142-182, 409-412, 481`, förmågor `AppModel.swift:154-172` (nattläge/dialog `:291-296`, bio-läge `Player.swift:237-241`), typer i `Models.swift:195-226`, `Home.swift:66` | `PlayerScreen.kt:152-212`, förmågor `Api.kt:275-289`, typer i `Api.kt:97-104` |
 | Framsteg och sedd | `AppModel.swift:175`, `DetailView.swift:137` | `Api.kt:291-296` (svaret: `Net.kt:33-35`, stopp: `PlayerScreen.kt:104-149`, skärmtid `GET /api/screentime`: `Net.kt:56`, utan nät: `OfflineSync.kt`) |
 | Bilder (`?t=` bildtoken) | `AppModel.swift:50-61` | `Api.kt:183-188` |
-| Offline och offline-synk | `Offline.swift:5-29, 140-148, 233` | `Offline.kt:20-25, 74-90, 165` |
+| Offline och offline-synk | `Offline.swift:5-29, 140-148, 233` | `Offline.kt:21-27, 177-193, 363` (per profil: `DownloadCore.kt`) |
 | Lyssningsinställningar | `Listening.swift:6-55` | `Api.kt:25, 145-154` |
 | Musik | `Music.swift:7-60, 129-149, 203, 223, 316-378` | `MusicService.kt:42-62, 143, 253-256, 277, 314-366, 490, 517-584` |
 | Ljudböcker | `Listen.swift:7-33, 154-155, 209, 257, 360-362, 505, 566` | `MusicService.kt:50-53, 233, 289, 296-304, 336, 488` |

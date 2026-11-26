@@ -247,6 +247,12 @@
     <string name="dl_no_link">Servern skickade ingen nedladdningslänk</string>
     <string name="dl_cancelled">Nedladdningen avbröts</string>
     <string name="dl_failed">Nedladdningen misslyckades</string>
+    <string name="dl_need_server">Servern svarar inte – försök igen när appen har kontakt med servern.</string>
+    <string name="downloads_removed_no_right">Nedladdningarna togs bort: kontot får inte ladda ner längre.</string>
+    <string name="downloads_removed_access">Togs bort från Nedladdat: %1$s. Profilen får inte se dem längre, eller så finns de inte kvar på servern.</string>
+    <string name="logout_confirm_title">Logga ut?</string>
+    <string name="logout_confirm_text">Allt som laddats ner från den här servern tas bort från enheten. Du kan ladda ner det igen när du loggat in.</string>
+    <string name="logout_confirm_button">Logga ut och ta bort</string>
     <string name="err_logged_out">Du har loggats ut</string>
     <string name="err_not_setup">Servern är inte konfigurerad – öppna den i en webbläsare först.</string>
     <string name="err_http_401">Inloggningen gäller inte längre – logga in igen.</string>

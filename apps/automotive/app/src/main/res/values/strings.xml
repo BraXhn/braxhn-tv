@@ -249,6 +249,12 @@
     <string name="dl_no_link">The server sent no download link</string>
     <string name="dl_cancelled">The download was cancelled</string>
     <string name="dl_failed">The download failed</string>
+    <string name="dl_need_server">Can\'t reach the server – try again when the app is connected.</string>
+    <string name="downloads_removed_no_right">Your downloads were removed: this account isn\'t allowed to download anymore.</string>
+    <string name="downloads_removed_access">Removed from Downloaded: %1$s. This profile can\'t watch them anymore, or they\'re no longer on the server.</string>
+    <string name="logout_confirm_title">Sign out?</string>
+    <string name="logout_confirm_text">Everything downloaded from this server is removed from this device. You can download it again after signing in.</string>
+    <string name="logout_confirm_button">Sign out and remove</string>
     <string name="err_logged_out">You have been signed out</string>
     <string name="err_not_setup">The server is not set up – open it in a web browser first.</string>
     <string name="err_http_401">The sign-in is no longer valid – sign in again.</string>
