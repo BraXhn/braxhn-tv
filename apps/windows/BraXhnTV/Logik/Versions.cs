@@ -3,8 +3,14 @@ using System.Text.RegularExpressions;
 
 namespace BraXhnTV;
 
-/// <summary>En utgåva på GitHub med installationsfil för Windows</summary>
-public sealed record Release(string Version, string SetupUrl, string SetupName, string PageUrl);
+/// <summary>
+/// En utgåva på GitHub. SetupUrl är null när utgåvan ännu saknar installationsfil för Windows (den läggs dit en stund
+/// efter att utgåvan skapats). ShaUrl är kontrollsummefilen (BraXhnTV-Setup-&lt;version&gt;.exe.sha256) när den finns.
+/// </summary>
+public sealed record Release(string Version, string PageUrl, string? SetupName = null, string? SetupUrl = null, long SetupSize = 0, string? ShaUrl = null)
+{
+    public bool HasSetup => SetupUrl != null && SetupName != null && SetupSize > 0;
+}
 
 public static class Versions
 {
@@ -42,8 +48,10 @@ public static class Versions
     }
 
     /// <summary>
-    /// Läser svaret från GitHub (releases/latest). null om utgåvan saknar installationsfil för Windows
-    /// (BraXhnTV-Setup-&lt;version&gt;.exe), är ett utkast eller en förhandsversion.
+    /// Läser svaret från GitHub (releases/latest). null om det inte är en stabil utgåva av appen: utkast,
+    /// förhandsversioner och taggar som inte är v&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt; (t.ex. libmpv-…, v1.5.0-beta.3)
+    /// erbjuds aldrig. Installationsfilen är den som heter exakt BraXhnTV-Setup-&lt;utgåvans version&gt;.exe och ligger
+    /// på GitHub; finns den inte (än) har utgåvan ingen SetupUrl.
     /// </summary>
     public static Release? FromGitHub(string json)
     {
@@ -51,19 +59,27 @@ public static class Versions
         var r = doc.RootElement;
         if (r.ValueKind != JsonValueKind.Object) return null;
         if (Bool(r, "draft") || Bool(r, "prerelease")) return null;
-        var tag = r.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
-        if (!Regex.IsMatch(tag, @"^v?\d+\.\d+\.\d+")) return null;
-        var page = r.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "";
-        if (!r.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return null;
+        var tag = Str(r, "tag_name");
+        if (!Regex.IsMatch(tag, @"^v\d{1,6}\.\d{1,6}\.\d{1,6}$")) return null;
+        var version = tag[1..];
+        var rel = new Release(version, Str(r, "html_url"));
+        if (!r.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return rel;
+        var setupName = $"BraXhnTV-Setup-{version}.exe";
+        string? setupUrl = null, shaUrl = null;
+        long size = 0;
         foreach (var a in assets.EnumerateArray())
         {
-            var name = a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-            var url = a.TryGetProperty("browser_download_url", out var u) ? u.GetString() ?? "" : "";
-            if (Regex.IsMatch(name, @"^BraXhnTV-Setup-[0-9A-Za-z.\-]+\.exe$") && url.StartsWith("https://github.com/", StringComparison.Ordinal))
-                return new Release(tag.TrimStart('v'), url, name, page);
+            if (a.ValueKind != JsonValueKind.Object) continue;
+            var name = Str(a, "name");
+            var url = Str(a, "browser_download_url");
+            if (!url.StartsWith("https://github.com/", StringComparison.Ordinal)) continue;
+            if (name == setupName && a.TryGetProperty("size", out var sz) && sz.TryGetInt64(out var n) && n > 0) { setupUrl = url; size = n; }
+            else if (name == setupName + ".sha256") shaUrl = url;
         }
-        return null;
+        return setupUrl == null ? rel : rel with { SetupName = setupName, SetupUrl = setupUrl, SetupSize = size, ShaUrl = shaUrl };
     }
+
+    static string Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
     static bool Bool(JsonElement r, string name) => r.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
 }

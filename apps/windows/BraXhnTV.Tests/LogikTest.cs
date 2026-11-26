@@ -61,7 +61,7 @@ public class VersionTest
     { "tag_name": "v1.5.0", "html_url": "https://github.com/BraXhn/braxhn-tv/releases/tag/v1.5.0", "draft": false, "prerelease": false,
       "assets": [
         { "name": "notes.txt", "browser_download_url": "https://github.com/BraXhn/braxhn-tv/releases/download/v1.5.0/notes.txt" },
-        { "name": "BraXhnTV-Setup-1.5.0.exe", "browser_download_url": "https://github.com/BraXhn/braxhn-tv/releases/download/v1.5.0/BraXhnTV-Setup-1.5.0.exe" } ] }
+        { "name": "BraXhnTV-Setup-1.5.0.exe", "size": 5000000, "browser_download_url": "https://github.com/BraXhn/braxhn-tv/releases/download/v1.5.0/BraXhnTV-Setup-1.5.0.exe" } ] }
     """;
 
     [Fact]
@@ -76,10 +76,10 @@ public class VersionTest
     [Fact]
     public void Utan_windowsfil_ingen_uppdatering()
     {
-        Assert.Null(Versions.FromGitHub("""{ "tag_name": "v1.5.0", "assets": [] }"""));
+        Assert.False(Versions.FromGitHub("""{ "tag_name": "v1.5.0", "assets": [] }""")!.HasSetup);
         Assert.Null(Versions.FromGitHub(Release.Replace("\"prerelease\": false", "\"prerelease\": true")));
         // Filen måste komma från GitHub
-        Assert.Null(Versions.FromGitHub(Release.Replace("https://github.com/BraXhn/braxhn-tv/releases/download/v1.5.0/BraXhnTV", "https://example.com/BraXhnTV")));
+        Assert.False(Versions.FromGitHub(Release.Replace("https://github.com/BraXhn/braxhn-tv/releases/download/v1.5.0/BraXhnTV", "https://example.com/BraXhnTV"))!.HasSetup);
     }
 }
 
