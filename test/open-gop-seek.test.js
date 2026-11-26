@@ -32,6 +32,11 @@ for (const [file, x264] of [[FLAT, 'keyint=48:min-keyint=4:open-gop=1:b-pyramid=
   if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '40',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '2', '-x264-params', x264, '-pix_fmt', 'yuv420p', '-c:a', 'ac3', file]);
 
+// Omkodning med spolning långt fram (stängd GOP, 720p så att omkodningen tar en märkbar stund): se sista testet
+const LONG = path.join(MEDIA, 'Filmer', 'Lang Spolning (2023).mkv');
+if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=12', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '120',
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '24', '-pix_fmt', 'yuv420p', '-c:a', 'aac', LONG]);
+
 const D = await import('../server/db.js');
 const sc = await import('../server/scanner.js');
 const auth = await import('../server/auth.js');
@@ -280,4 +285,62 @@ t('webbspelaren (mse=1): öppen GOP som inte går att börja mitt i remuxas frå
   assert.equal(await st.probeGop(open, { at: 21 }), null);
   assert.equal(st.gopOf(open), 'ra');
   assert.equal((await info(open, 'mse=1')).mode, 'remux');
+});
+
+// ---------- omkodning: spolning långt fram medan förra segmentet fortfarande väntar ----------
+// Uppspelningsvakten fastnade i GitHub Actions (oppen-tc, "spola framåt utanför bufferten"): bilden kom aldrig på
+// 200 s. hls.js avbryter segmentet den väntar på och ber om segmentet vid målet; servern startar då om omkodningen
+// där. Blev det gamla segmentet klart precis före omstarten men innan dess väntande begäran hann titta (var 50:e ms),
+// skickades det ändå – och throttle() räknade försprånget från det gamla segmentet (> 15 segment före) och pausade
+// den NYA omkodningen (SIGSTOP). Ingen väckte den igen: begäran vid målet väntade tills hls.js gav upp efter 60 s.
+// Här görs ordningen säker: den gamla omkodningen hålls stilla (SIGSTOP från testet), det gamla segmentet dyker upp
+// först när den nya har startat, och den gamla begäran är avbruten (som hls.js gör) eller fortfarande öppen.
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** Pid för strömmens ffmpeg som börjar på segment n (serverns barnprocess) */
+function streamFfmpeg(file, n) {
+  const ps = spawnSync('ps', ['-o', 'pid=,args=', '--ppid', String(process.pid)]).stdout.toString().split('\n');
+  const l = ps.find(x => x.includes(file) && x.includes(`-segment_start_number ${n} `));
+  return l ? +l.trim().split(/\s+/)[0] : null;
+}
+async function waitFor(fn, ms = 10000) { const t0 = Date.now(); let v; while (!(v = fn()) && Date.now() - t0 < ms) await sleep(5); return v; }
+
+test('omkodning: spolning långt fram fastnar inte när förra segmentets begäran blir klar samtidigt', { timeout: 120000, skip: !hasFfmpeg && 'ffmpeg saknas' }, async () => {
+  const row = rowOf(LONG);
+  assert.ok(row?.duration > 110, 'filmen finns i biblioteket');
+  const TC = process.env.TRANSCODE_DIR;
+  for (const abort of [true, false]) {
+    // Ny uppspelning (egen pid i adressen) = egen session och egen omkodning. info=1: ingen förstart av ffmpeg
+    const pb = await (await fetch(`${B}/api/items/${row.id}/playback?force=transcode&q=360&info=1`, { headers: A() })).json();
+    assert.equal(pb.mode, 'transcode');
+    const pid = new URL(pb.url, B).searchParams.get('pid');
+    assert.match(pid, /^[0-9a-f]{8}$/);
+    const idx = new URL(pb.url.replace('master.m3u8', 'index.m3u8'), B);
+    const segs = [...(await (await fetch(idx, { headers: A() })).text()).matchAll(/#EXTINF:([\d.]+),\n(\S+)/g)].map(m => new URL(m[2], idx));
+    const OLD = 2, FAR = segs.length - 2;
+    assert.ok(FAR - OLD > 17, `${segs.length} segment – målet ska ligga mer än 15 segment före det gamla`);
+    // Begäran som väntar på ett segment medan omkodningen står still (spelaren buffrar framåt)
+    const ac = new AbortController();
+    const old = fetch(segs[OLD], { headers: A(), signal: ac.signal }).then(r => r.status, () => 'avbruten');
+    const p1 = await waitFor(() => streamFfmpeg(LONG, OLD));
+    assert.ok(p1, 'omkodningen startade');
+    process.kill(p1, 'SIGSTOP');
+    await sleep(300);
+    const dir = fs.readdirSync(TC).filter(x => x.includes(`-${row.id}-transcode-`) && x.endsWith('-' + pid) && !x.includes('.gone')).map(x => path.join(TC, x))[0];
+    assert.ok(dir, 'sessionens mapp');
+    const seg = (n) => path.join(dir, `seg_${String(n).padStart(5, '0')}.ts`);
+    assert.ok(!fs.existsSync(seg(OLD + 1)), 'det gamla segmentet är inte klart');
+    // Spolning långt fram: servern startar om omkodningen vid målet
+    const t0 = Date.now();
+    const far = fetch(segs[FAR], { headers: A() }).then(async r => ({ status: r.status, ms: Date.now() - t0, len: (await r.arrayBuffer()).byteLength }));
+    assert.ok(await waitFor(() => streamFfmpeg(LONG, FAR)), 'omkodningen startade om vid målet');
+    // Det gamla segmentet blir klart nu – innan dess begäran hunnit titta efter det
+    if (abort) ac.abort();
+    fs.writeFileSync(seg(OLD), fs.readFileSync(LONG).subarray(0, 188 * 10));
+    const oldRes = await old;
+    const res = await Promise.race([far, sleep(25000).then(() => null)]);
+    assert.ok(res, `segmentet vid målet kom inte inom 25 s (gamla begäran: ${oldRes}) – den nya omkodningen står pausad`);
+    assert.equal(res.status, 200);
+    assert.ok(res.len > 1000, `${res.len} byte`);
+    try { process.kill(p1, 'SIGCONT'); } catch {}
+  }
 });

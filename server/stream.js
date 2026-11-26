@@ -1689,10 +1689,16 @@ async function awaitSegment(req, res, it, s, n, userId) {
       startFfmpeg(s, it, n); starts++;
     }
     const t0 = Date.now();
-    while (!complete(s, n)) {
+    // Avbruten begäran först: hls.js avbryter segmentet den väntar på när man spolar förbi det. Blev segmentet klart
+    // under tiden skickades det förut ändå, och throttle() räknade försprånget från det gamla segmentet och pausade
+    // omkodningen som just startats om vid spolningens mål – ingen väckte den (uppspelningsvakten fastnade på 200 s)
+    while (req.destroyed || !complete(s, n)) {
       if (Date.now() - t0 > 90000 || req.destroyed) return fail(res, 504, 'Omkodningen hann inte med');
       // Långsam omkodning (4K-tonmappning): städningen får inte döda ffmpeg medan någon väntar
       s.last = Date.now();
+      // Någon väntar på ett segment: ffmpeg får inte stå pausad. En annan begäran (ett äldre segment som blev klart)
+      // kan ha pausat den efter att den här började vänta
+      if (s.paused) resume(s);
       if (!s.proc && !complete(s, n)) {
         if (++starts > 3) return fail(res, 500, 'ffmpeg misslyckades – se serverloggen');
         if (!ensureCapacity(s, userId)) return fail(res, 503, 'Servern har för många samtidiga omkodningar just nu');
