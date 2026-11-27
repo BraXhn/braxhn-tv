@@ -38,18 +38,8 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i riktig Chrome (som `test/web-chrome-playback.test.js`) är tiden från *Spela nu*/nedräkningens slut
   till första bild i nästa avsnitt mätt före och efter, för remux och omkodning, och vakten är grön.
 
-### 2. Stoppa omkodningen när fliken eller TV-webbläsaren stängs
 
-- **Vad:** skicka `/api/stream/:id/stop?pid=` med `navigator.sendBeacon` vid `pagehide` i webbspelaren. I dag skickas
-  bara framsteget där (`pagehide` → `sendProgress(true)` i `video.js`); stoppet görs bara av `closePlayer`.
-- **Varför:** stängs fliken mitt i en omkodning fortsätter ffmpeg tills den ligger 15 segment före (`AHEAD_TRANSCODE`)
-  eller varit utan förfrågningar i 60 s (`server/stream.js`), och under tiden räknas den som "någon tittar" – så nästa
-  start på en annan enhet får dela processorn och förvärms inte (`warm`).
-- **Filer:** `web/js/player/video.js`, `server/routes/playback.js` (`/api/stream/:id/stop`; `sameOrigin` i
-  `server/http/router.js` släpper igenom en beacon från samma sida – kontrollera först).
-- **Klart när:** ett test stänger sidan under en omkodning och visar att ffmpeg-processen är borta inom 2 s.
-
-### 3. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
+### 2. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
 
 - **Vad:** Safaris egen HLS (`nativeHls` i `web/js/player/caps.js`) spolar fortfarande inom den gamla spellistan och
   väntar på ett helt 6 s-segment. `seekRestarts` i `web/js/player/video.js` körs bara med hls.js. Gör som iOS-appen:
@@ -61,7 +51,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** testet visar en ny ström med `xs` vid målet för `nhls=1`, och Anton har provat på en riktig iPhone
   (se *Bara Anton kan göra*).
 
-### 4. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 3. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -72,7 +62,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 5. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
+### 4. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
 
 - **Vad:** appen gissar fortfarande ur bufferten (`readyGuess` i `apps/apple/Shared/SeekCore.swift`) och väntar 0,6 s
   på nästa steg vid varje spolning, även med reglaget på iPhone. Fråga `/api/stream/:id/hls/ready` medan strömmen
@@ -84,7 +74,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
   `apple.yml` går igenom.
 
-### 6. Utanför hemmet: förstarta omkodningen redan vid /playback
+### 5. Utanför hemmet: förstarta omkodningen redan vid /playback
 
 - **Vad:** med automatisk kvalitet utanför hemmet (`d.abr` i `server/routes/playback.js`) startas ingen ffmpeg förrän
   spelaren valt steg och bett om ett segment – `st.prewarm` hoppas över när `d.abr` är sant. Förstarta steget som
@@ -95,7 +85,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** tid till första segment utanför hemmet är mätt före och efter, och steget som förstartades används
   (inte en andra ffmpeg för ett annat steg).
 
-### 7. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 6. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 - **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
   fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
@@ -111,7 +101,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
   kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
 
-### 8. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+### 7. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
 - **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
   först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
@@ -124,7 +114,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
   nedräkningen; `test/expo-i18n.test.js` är grön.
 
-### 9. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 8. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -241,6 +231,14 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-27: Webbspelaren stoppar omkodningen när fliken eller TV-webbläsaren stängs (förut punkt 2), gren
+  `team/flik-stopp-2026-11-27`. `pagehide` utan `persisted` skickar `/api/stream/:id/stop?pid=&gone=1` med
+  `sendBeacon` (reserv: `fetch` med `keepalive`); inte vid bfcache, utan `pid` eller via AirPlay. `gone=1` gör att en
+  sen segmentbegäran från den stängda sidan får 409 i stället för att starta en ny ffmpeg (`noteDropped` i
+  `stream.js`). Service workern låter POST/PUT/DELETE gå direkt till nätet (`addRoutes`): utan det försvann stoppet
+  vid omladdning i 3 av 4 körningar. `test/web-leave-stop.test.js` (Chrome: stängd flik, omladdning, bfcache),
+  fall i `stream-smooth.test.js` och `relay.test.js`. Kvar: webbläsare utan statiska vägval (Safari, Firefox, äldre
+  TV-webbläsare) kan fortfarande tappa stoppet vid omladdning – då städar servern efter 60 s som förut.
 - 2026-11-27: iOS/tvOS-appen: nedladdningar per server och profil, och positioner utan nät, gren
   `team/apple-offline-2026-11-27`. Lista och mapp per profil (`Downloads/<server>-<profil>/`), profilen sparad per
   inloggning (fingeravtryck) så att rätt lista syns utan nät, flytt av de gamla nedladdningarna (Android-appens regler,

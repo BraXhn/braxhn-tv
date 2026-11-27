@@ -838,4 +838,14 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   musicSession();
   if (refresh) route();
 }
-window.addEventListener('pagehide', () => sendProgress(true));
+// Sidan stängs (fliken, webbläsaren, en annan adress): stoppa den egna strömmen direkt – annars kodar servern vidare
+// i upp till en minut och tar kraft från andra strömmar. Inte när sidan bara läggs undan (bfcache, e.persisted) och
+// kan komma tillbaka och spela vidare, inte utan pid (det skulle stoppa andra enheters sessioner, t.ex. Chromecast)
+// och inte när filmen spelas via AirPlay (mottagaren hämtar strömmen själv).
+window.addEventListener('pagehide', (e) => {
+  sendProgress(true);
+  const pid = pidOf(P?.pb), v = P && $('#vid', P.el);
+  if (e.persisted || !pid || v?.webkitCurrentPlaybackTargetIsWireless || v?.remote?.state === 'connected') return;
+  const url = `/api/stream/${P.it.id}/stop?pid=${pid}&gone=1`;
+  if (!navigator.sendBeacon?.(url)) fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+});

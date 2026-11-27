@@ -214,6 +214,13 @@ test('HLS: spellista och segment genom reläet', { skip: !hasFfmpeg && 'ffmpeg s
   assert.equal(rd.status, 200);
   assert.deepEqual(Object.keys(rd.data).sort(), ['encoding', 'from', 'mode', 'segs', 'to']);
   await req(R, `/api/stream/${FILM_ID}/stop`, { method: 'POST', body: {}, headers: { origin: R } });
+  // Webbspelarens stopp när fliken stängs (sendBeacon): POST utan innehåll, med Origin och kaka – via reläet som hemma
+  const q = `mode=transcode&q=360&pid=0000abce`;
+  assert.equal((await req(R, `/api/stream/${FILM_ID}/hls/seg-0.ts?${q}`, { raw: true })).status, 200);
+  const beacon = (origin) => req(R, `/api/stream/${FILM_ID}/stop?pid=0000abce&gone=1`, { method: 'POST', headers: { origin, 'sec-fetch-mode': 'no-cors', 'content-length': '0' } });
+  assert.equal((await beacon('https://annan.example')).status, 403, 'inte från en annan webbplats');
+  assert.equal((await beacon(R)).status, 200);
+  assert.equal((await req(R, `/api/stream/${FILM_ID}/hls/seg-3.ts?${q}`, { raw: true })).status, 409, 'den stoppade uppspelningen startar ingen ny omkodning');
 });
 
 test('SSE (Spela på…): händelser kommer fram direkt och strömmen hålls öppen', { timeout: 40000 }, async () => {

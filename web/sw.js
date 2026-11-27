@@ -25,6 +25,10 @@ const versioned = (p) => p.startsWith('/m/') || p.startsWith(V + '/');
 const confirmed = (res) => res.ok && /immutable/.test(res.headers.get('cache-control') || '');
 
 self.addEventListener('install', (e) => {
+  // Ändrande anrop (POST/PUT/DELETE) går aldrig genom service workern (se fetch nedan) – med Chromes statiska
+  // vägval går de direkt till nätet. Annars kunde ett stopp eller framsteg som skickas när sidan stängs eller laddas
+  // om (sendBeacon/keepalive vid pagehide) försvinna på vägen genom service workern, och servern kodade vidare.
+  try { e.addRoutes?.(['POST', 'PUT', 'DELETE'].map(m => ({ condition: { requestMethod: m }, source: 'network' })))?.catch?.(() => {}); } catch {}
   // Oförändrade filer (samma hash) kopieras från förra versionens cache i stället för att hämtas igen. En fil eller
   // sida från ett annat bygge stoppar installationen (den görs om vid nästa besök) i stället för att blandas in.
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(async (url) => {

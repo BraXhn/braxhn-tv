@@ -1,6 +1,13 @@
 # Ändringar
 
 ## Ej utgiven
+- **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
+  var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
+  nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot
+  en annan sida. Läggs sidan bara undan (du går tillbaka med Bakåt i webbläsaren) fortsätter filmen där den var. En
+  film som spelas på Chromecast eller via AirPlay stoppas inte, och Windows-appens inbyggda spelare påverkas inte.
+  Provat i Chrome; i webbläsare som inte kan låta stoppet gå förbi appens service worker (Safari, Firefox, äldre
+  TV-webbläsare) kan stoppet tappas vid omladdning, och då städar servern efter en minut som förut.
 - **En poddposition som skickas i efterhand skriver inte längre över en nyare.** Lyssnade du på ett poddavsnitt utan
   nät i Android-appen och fortsatte sedan på en annan enhet, kunde telefonen skicka sin äldre position när den fick nät
   igen och flytta tillbaka dig. Nu tar servern emot `at` (när positionen sparades) även för poddar, som för filmer och

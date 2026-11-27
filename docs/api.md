@@ -82,6 +82,11 @@ användaren utanför det som är buffrat startar klienten om strömmen vid måle
   uppspelningen slutade (ingen `media.stop`, ingen rad i aktiviteten). Använd det för en ström som ersattes innan den
   användes, till exempel när användaren spolade igen medan omstarten pågick. Utan `replaced=1` är det ett vanligt stopp
   (med `pid` bara den uppspelningen, utan `pid` alla användarens strömmar av titeln).
+- `POST /api/stream/:id/stop?pid=<pid>&gone=1`: sidan eller appen som spelade har stängts och uppspelningen används
+  aldrig igen (webbspelaren skickar det med `sendBeacon` vid `pagehide`). Ett vanligt stopp, och dessutom svarar
+  servern **409** på senare begäran till den strömmen i stället för att starta en ny omkodning (en begäran som var på
+  väg när sidan stängdes). Kräver `pid`. Fungerar som beacon: POST utan innehåll och utan innehållstyp, med kakan och
+  samma skydd mot andra webbplatser som andra anrop (även via reläet).
 - `GET /api/stream/:id/hls/ready?<strömmens frågesträng>` → `{ mode, from, to, encoding, segs }`: vad servern har
   klart för uppspelningen (`pid` i frågesträngen). `from`–`to` är sekunderna som de färdiga segmenten i den pågående
   körningen täcker, `segs` är samma segment som nummer `[från, till]` (samma som rubriken `X-Seg-Ready: från-till` på

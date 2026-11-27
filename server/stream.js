@@ -1802,8 +1802,12 @@ setInterval(() => {
 
 /** Stoppar användarens sessioner av titeln. Med pid bara den uppspelningen (t.ex. webbspelaren som stängs
  *  medan Chromecast fortsätter med en egen session); utan pid alla (appar och adminens stopp). */
-export function stopUserSessions(itemId, userId, pid = '') {
+/** gone: sidan som spelade har stängts (webbspelarens stopp vid pagehide) – uppspelningen (pid) används aldrig igen */
+export function stopUserSessions(itemId, userId, pid = '', { gone = false } = {}) {
   for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) { s.stoppedAt = Date.now(); stopProc(s); }
+  // En begäran från den stängda sidan som kommer fram efter stoppet (fliken stängdes medan ett segment hämtades) ska
+  // inte starta en ny ffmpeg, som annars kodade vidare tills städningen efter 60 s
+  if (pid && gone) noteDropped(userId, pid);
 }
 /** Spelaren har startat om uppspelningen på ett annat ställe (spolning i en omkodning, /playback med prev=pid): den
  *  förra strömmen behövs inte. ffmpeg stoppas direkt (annars kodade den vidare upp till 90 s före och tog processorn
@@ -1817,11 +1821,14 @@ export function dropPlayback(itemIds, userId, pid) {
     sessions.delete(k); rmLater(s.dir); n++;
   }
   // En begäran till den gamla strömmen som kommer fram efteråt ska inte starta en ny ffmpeg för den
-  if (dropped.size > 1000) dropped.clear();
-  dropped.set(`${userId}:${pid}`, Date.now());
+  noteDropped(userId, pid);
   return n;
 }
-const dropped = new Map(); // "användare:pid" → när uppspelningen startades om på ett annat ställe
+const dropped = new Map(); // "användare:pid" → när uppspelningen startades om på ett annat ställe eller stoppades
+function noteDropped(userId, pid) {
+  if (dropped.size > 1000) dropped.clear();
+  dropped.set(`${userId}:${pid}`, Date.now());
+}
 const wasDropped = (query, userId) => { const pid = query.get('pid'); return !!pid && dropped.has(`${userId}:${pid}`); };
 // Stoppad medan begäran väntade (spelaren stängdes; avbrottet av begäran kan komma fram efter /stop): starta inte om
 // ffmpeg för den – den kodade annars vidare tills städningen och tog processorn från nästa uppspelning

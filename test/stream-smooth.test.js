@@ -374,6 +374,44 @@ t('hack: spelarens rapport loggas med orsak och syns i aktiviteten', async () =>
   await req(`/api/stream/${id}/stop?pid=${pid}`, { method: 'POST' });
 });
 
+/** Serverns ffmpeg-processer som skriver strömsegment (seg_%05d) */
+function segmenters() {
+  const out = [];
+  for (const d of fs.existsSync('/proc') ? fs.readdirSync('/proc') : []) {
+    if (!/^\d+$/.test(d)) continue;
+    try {
+      const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
+      if (+st.slice(st.lastIndexOf(')') + 2).split(' ')[1] !== srv.pid) continue;
+      if (fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes('seg_%05d')) out.push(+d);
+    } catch {}
+  }
+  return out;
+}
+
+t('stopp när fliken stängs (sendBeacon: POST utan innehåll): ffmpeg stoppas, och ett segment som begärs efteråt startar ingen ny', { skip: !fs.existsSync('/proc/self/stat') && '/proc saknas' }, async () => {
+  const it = (await req('/api/libraries/1/items')).data.items.find(x => x.title.startsWith('Jämn'));
+  const pb = (await req(`/api/items/${it.id}/playback?c=mp4&v=h264&a=aac&hdr=0&q=480`)).data;
+  assert.equal(pb.mode, 'transcode');
+  const master = (await req(pb.url)).data.toString();
+  const vurl = new URL(master.split('\n').find(l => l && !l.startsWith('#')), B + pb.url);
+  const segs = (await req(vurl.pathname + vurl.search)).data.toString().split('\n').filter(l => l && !l.startsWith('#')).map(l => new URL(l, vurl));
+  const seg = (i) => fetch(segs[i], { headers: { cookie } });
+  assert.equal((await seg(0)).status, 200);
+  assert.ok(segmenters().length >= 1, 'förutsättning: ffmpeg kodar');
+  const id = /\/api\/stream\/(\d+)\//.exec(pb.url)[1], pid = new URL(B + pb.url).searchParams.get('pid');
+  // Som Chromes sendBeacon: inget innehåll och ingen innehållstyp, Origin och kaka med
+  const beacon = (origin) => fetch(`${B}/api/stream/${id}/stop?pid=${pid}&gone=1`, { method: 'POST', headers: { cookie, origin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'no-cors', 'content-length': '0' } });
+  assert.equal((await beacon('http://annan.example')).status, 403, 'samma skydd som andra anrop: inte från en annan webbplats');
+  assert.ok(segmenters().length >= 1);
+  assert.equal((await beacon(B)).status, 200);
+  for (let i = 0; i < 30 && segmenters().length; i++) await sleep(100);
+  assert.deepEqual(segmenters(), [], 'ffmpeg stoppas direkt');
+  // En begäran från den stängda sidan som kommer fram efter stoppet: förut startade den en ny ffmpeg (60 s till)
+  assert.equal((await seg(Math.min(6, segs.length - 1))).status, 409);
+  await sleep(300);
+  assert.deepEqual(segmenters(), [], 'ingen ny ffmpeg för den stoppade uppspelningen');
+});
+
 test('hastighetsprovet: takten räknas utan svarstid och uppstart', async () => {
   const { rateOf } = await import('../web/js/player/hlsconfig.js');
   // 50 Mbit/s efter en långsam start: 100 kB på de första 300 ms, sedan 6,25 kB/ms

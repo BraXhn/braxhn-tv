@@ -402,7 +402,9 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // pid (webbspelaren): bara den uppspelningen – en Chromecast eller annan enhet på samma konto fortsätter.
   // Utan pid (apparna) stoppas alla användarens sessioner av titeln som förut.
   const pid = /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
-  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid);
+  // gone=1: sidan stängdes (webbspelaren vid pagehide) – en sen begäran från den startar ingen ny omkodning
+  const gone = !!pid && c.q.get('gone') === '1';
+  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid, { gone });
   // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden. replaced=1 (webbspelaren): bara
   // en ström som ersatts av en nyare i samma uppspelning (flera spolningar i rad) – uppspelningen fortsätter
   if (row && !(pid && c.q.get('replaced') === '1')) act.clientStop(c.user.id, ver.mainOf(row).id);
