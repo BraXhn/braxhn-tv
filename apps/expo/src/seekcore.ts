@@ -6,9 +6,12 @@
 // (seekRestart i web/js/player/hlsconfig.js). Remux och direktuppspelning påverkas inte.
 //
 // Skillnaden mot webben: expo-video visar inte serverns svarshuvuden (X-Seg-Ready) och har ingen händelse före en
-// spolning. Appen ser spolningen som ett hopp i positionen (seekJump) och gissar vilka segment servern har klara ur
-// var strömmen startades och hur långt spelaren har buffrat (readyGuess) – försiktigt, så hellre en omstart för
-// mycket än en väntan på ett helt 6 s-segment.
+// spolning. Appen ser spolningen som ett hopp i positionen (seekJump). Vilka segment servern har klara frågar appen
+// i förväg med /api/stream/:id/hls/ready (samma svar som X-Seg-Ready, utan sidoeffekter) medan strömmen spelar och
+// använder det senaste svaret (readyFor). Saknas ett färskt svar gissar den ur var strömmen startades och hur långt
+// spelaren har buffrat (readyGuess) – försiktigt, så hellre en omstart för mycket än en väntan på ett 6 s-segment.
+// Frågan kan inte vänta till spolningen: då har spelaren redan bett om segmentet vid målet och servern har startat
+// om omkodningen där, så svaret skulle alltid säga att segmentet kodas.
 
 export type Frag = { start: number; duration: number };
 /** En mätning av spelaren (timeUpdate): position och buffertens slut i sekunder, när (ms), om den spelade */
@@ -60,6 +63,38 @@ export function readyGuess(frags: Frag[], runSeg: number, bufferedEnd: number): 
   return [Math.max(runSeg, hi - BEHIND + 1), hi];
 }
 
+/** Svaret från /api/stream/:id/hls/ready (readyInfo i server/stream.js): sekunder, och segmenten som i X-Seg-Ready */
+export type ReadyInfo = { mode?: string | null; from: number | null; to: number | null; encoding?: boolean; segs?: [number, number] | null };
+/** Serverns senaste svar: segmenten [från, till] i spellistan (null = inget klart) och när frågan skickades (ms) */
+export type Known = { range: [number, number] | null; at: number };
+
+/** Frågan om vad servern har klart för strömmen (samma frågesträng som mastern: pid och mediatoken följer med) */
+export const readyUrl = (master: string) => master.replace('/hls/master.m3u8', '/hls/ready');
+/** Hur ofta appen frågar medan strömmen spelar, och hur länge ett svar gäller */
+export const READY_EVERY_MS = 4000, READY_FRESH_MS = 8000;
+
+/** Serverns svar → segmenten [från, till] i spellistan, eller null (inget klart eller ett svar som inte passar listan) */
+export function readyFrom(frags: Frag[], r: ReadyInfo | null | undefined): [number, number] | null {
+  if (!r || !frags.length) return null;
+  const last = frags.length - 1, g = r.segs;
+  if (Array.isArray(g)) return Number.isInteger(g[0]) && Number.isInteger(g[1]) && g[0] >= 0 && g[0] <= g[1] && g[1] <= last ? [g[0], g[1]] : null;
+  if (typeof r.from === 'number' && typeof r.to === 'number' && Number.isFinite(r.from) && Number.isFinite(r.to) && r.to > r.from) {
+    const a = fragAt(frags, r.from + 0.05), b = fragAt(frags, r.to - 0.05);
+    if (a >= 0 && b >= a) return [a, b];
+  }
+  return null;
+}
+
+/**
+ * Vad servern har klart: dess senaste svar om det är färskt och frågades före spolningen (before = mätningen före
+ * hoppet), annars gissningen ur körningens start och bufferten. En fråga som skickades efter spolningen kan ha kommit
+ * fram efter spelarens begäran av segmentet vid målet – då har servern redan börjat koda där och svaret säger "klart".
+ */
+export function readyFor(frags: Frag[], runSeg: number, bufferedEnd: number, known: Known | null | undefined, now: number, before = now): [number, number] | null {
+  if (known && known.at <= before && now - known.at <= READY_FRESH_MS) return known.range;
+  return readyGuess(frags, runSeg, bufferedEnd);
+}
+
 /**
  * Ska spelaren starta om strömmen vid t i stället för att låta spelaren hämta segmentet? Nej när
  * - ingen bild har visats än (spelarens egna hopp vid starten),
@@ -94,19 +129,22 @@ export function seekJump(prev: Sample, now: Sample): boolean {
   return now.pos > prev.pos + ran + 2.5 || now.pos < prev.pos - 1.5;
 }
 
+/** Strömmen i appen: spellistans segment, segmentet där körningen på servern började, serverns senaste svar */
+type SeekState = { frags: Frag[]; runSeg: number; known?: Known | null };
 /**
  * Beslutet efter ett hopp från prev (före spolningen) till t: starta om, eller låta spelaren hämta segmentet.
  * Bufferten före spolningen är prev.pos–prev.buf (telefonens spelare sparar inte det som redan spelats).
+ * Vad servern har klart: serverns senaste svar (s.known, om färskt) eller gissningen.
  */
-export function decideSeek(prev: Sample, t: number, s: { frags: Frag[]; runSeg: number; started: boolean }): boolean {
-  const ready = readyGuess(s.frags, s.runSeg, prev.buf);
+export function decideSeek(prev: Sample, t: number, s: SeekState & { started: boolean }, now = Date.now()): boolean {
+  const ready = readyFor(s.frags, s.runSeg, prev.buf, s.known, now, prev.at);
   return seekRestart(prev.buf > prev.pos ? [[prev.pos, prev.buf]] : [], t, { frags: s.frags, ready, started: s.started });
 }
 
 /** Spolningen gav ingen omstart: var körningen på servern börjar nu. Låg målet utanför det servern hade startar den
  *  om omkodningen vid målet (spelaren bad om segmentet där). */
-export function runAfterSeek(prev: Sample, t: number, s: { frags: Frag[]; runSeg: number }): number {
-  const n = fragAt(s.frags, t), ready = readyGuess(s.frags, s.runSeg, prev.buf);
+export function runAfterSeek(prev: Sample, t: number, s: SeekState, now = Date.now()): number {
+  const n = fragAt(s.frags, t), ready = readyFor(s.frags, s.runSeg, prev.buf, s.known, now, prev.at);
   if (n < 0) return s.runSeg;
   return ready && n >= ready[0] && n <= ready[1] + 1 ? s.runSeg : n;
 }

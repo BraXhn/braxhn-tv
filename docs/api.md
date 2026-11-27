@@ -67,6 +67,32 @@ finns. Bara webben läser det; apparna ignorerar det.
 har korta segment där uppspelningen börjar, så första bilden kommer fortare. Klienten ska använda adressen som den är
 och börja spela vid samma position. Utan `start` är listan som förut. Apparna (iOS/tvOS och Android) skickar `start`.
 
+## Spolning i en omkodning: `prev`, `replaced=1` och `/hls/ready`
+
+Valfritt för klienter som vill spola fortare i en omkodad ström (webben, Expo- och Android-appen gör det). Spolar
+användaren utanför det som är buffrat startar klienten om strömmen vid målet i stället för att vänta på ett helt
+6 s-segment:
+
+- `GET /api/items/:id/playback?…&start=<sekunder>&prev=<pid>`: en ny ström som börjar vid `start` (korta segment där,
+  se ovan). `prev` är `pid` ur adressen till strömmen som spelades (åtta hextecken). Servern stoppar den omkodningen
+  direkt, tar bort dess segment och svarar **409** på senare begäran till den gamla strömmen i stället för att starta
+  en ny omkodning. Bara den egna användarens uppspelning med just det `pid` påverkas; andra enheter fortsätter.
+  Utan `prev` är svaret som förut.
+- `POST /api/stream/:id/stop?pid=<pid>&replaced=1`: stoppar bara den strömmen (med `pid`) och räknas inte som att
+  uppspelningen slutade (ingen `media.stop`, ingen rad i aktiviteten). Använd det för en ström som ersattes innan den
+  användes, till exempel när användaren spolade igen medan omstarten pågick. Utan `replaced=1` är det ett vanligt stopp
+  (med `pid` bara den uppspelningen, utan `pid` alla användarens strömmar av titeln).
+- `GET /api/stream/:id/hls/ready?<strömmens frågesträng>` → `{ mode, from, to, encoding, segs }`: vad servern har
+  klart för uppspelningen (`pid` i frågesträngen). `from`–`to` är sekunderna som de färdiga segmenten i den pågående
+  körningen täcker, `segs` är samma segment som nummer `[från, till]` (samma som rubriken `X-Seg-Ready: från-till` på
+  segmentsvaren), `encoding` är `true` när ffmpeg kör (segmentet efter `till` kodas då). `mode` är `transcode`, `remux`
+  eller `null`. Ingen session (fel `pid`, stoppad, ersatt med `prev` eller en annan användares) ger `null` i alla fält
+  utom `encoding: false`. Samma behörighet som strömmen: inloggning eller strömmens mediatoken (`t=`, bara för den
+  titeln); fungerar via reläet och hemadressen. Anropet startar aldrig ffmpeg, skapar ingen session och förlänger inte
+  strömmens liv, så det kan frågas ofta. Fråga **innan** användaren spolar: efter spolningen har spelaren redan bett om
+  segmentet vid målet och servern har börjat koda där. Regeln för omstart: inte när målets segment `n` har
+  `från ≤ n ≤ till + 1`. Expo-appen frågar var 4:e sekund medan strömmen spelar (`apps/expo/src/seekcore.ts`).
+
 ## Förvärmning: `warm=1` i `/api/items/:id/playback`
 
 Valfritt för klienter som vill starta fortare: skicka samma frågesträng som den kommande uppspelningen (utan `audio`

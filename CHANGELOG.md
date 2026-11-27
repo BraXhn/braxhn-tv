@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- **Expo-appen vet vad servern redan har kodat när du spolar.** Förut gissade appen ur det som var laddat i telefonen,
+  så en spolning dit servern redan hade kodat kunde starta om strömmen i onödan (och en spolning bakåt dit servern
+  hade städat bort stycken kunde vänta på ett helt sexsekundersstycke). Nu frågar appen servern var fjärde sekund
+  medan filmen spelar och följer samma regel som webbspelaren; svarar servern inte gissar den som förut. Det nya
+  anropet (`/api/stream/:id/hls/ready`) startar aldrig någon omkodning och kräver samma behörighet som strömmen.
+  `prev` och `replaced=1` för omstart vid spolning står nu också i `docs/api.md`. Inte provat på riktig telefon.
 
 ## 1.5.0 – 2026-11-27
 - **Feedback och felrapporter i appen för iPhone, iPad och Apple TV.** Under *Inställningar* finns nu *Skicka

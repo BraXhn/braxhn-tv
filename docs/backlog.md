@@ -118,9 +118,10 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
 - Safaris egen HLS (iPhone) och iOS/tvOS-appen spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan
   bilden kommer. De kunde göra som webben (ny `/playback` med `start=` och `prev=`).
-- Expo-appen ser inte `X-Seg-Ready` (expo-video visar inga svarshuvuden) och gissar vad servern har kodat ur bufferten –
-  en spolning dit servern redan kodat startar ibland om i onödan. Ett huvud på spellistan eller ett eget anrop utan
-  sidoeffekter (en `HEAD` på ett segment startar en omkodning) skulle ge appen samma svar som webben (`server/stream.js`).
+- Expo-appen frågar `/hls/ready` var 4:e sekund medan strömmen spelar och använder svaret i 8 s. En fråga som skickas
+  strax före en spolning kan i sällsynta fall komma fram till servern efter spelarens begäran av målets segment (olika
+  anslutningar) och då säga "kodas" – då väntar appen på 6 s-segmentet i stället för att starta om
+  (`apps/expo/src/seekcore.ts` `readyFor`). Inte mätt på riktig telefon.
 - Expo-appens webbläge spolar utan omstart: Chromes HLS-spelare hämtar segment 0 och 1 i varje ny ström innan den går
   till målet (bryr sig inte om `EXT-X-START` eller `#t=`), och servern startar då om ffmpeg vid 0. Med hls.js i
   webbläget gick det att göra som webbspelaren (`apps/expo/src/screens/Player.tsx`).

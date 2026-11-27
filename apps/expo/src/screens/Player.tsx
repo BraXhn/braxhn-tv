@@ -19,13 +19,17 @@ import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
 import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
-import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, restartsOn, runAfterSeek, seekJump, type Frag, type Sample } from '../seekcore';
+import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, READY_EVERY_MS, readyFrom, readyUrl, restartsOn, runAfterSeek, seekJump, type Frag, type Known, type Sample } from '../seekcore';
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
 import { t } from '../i18n';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
 const titleOf = (it: ItemDetail) => (it.kind === 'episode' ? `${it.showTitle || ''} – ${sxe(it)} ${it.title}` : it.title);
+
+// Omkodad ström: adressen, spellistans segment, segmentet där omkodningen på servern började, om bild har visats,
+// serverns senaste svar om vad den har klart (/hls/ready) och ett nummer som ändras när svaret blir inaktuellt
+type Stream = { url: string; frags: Frag[]; runSeg: number; started: boolean; known: Known | null; seq: number };
 
 export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const { id, start } = route.params;
@@ -46,8 +50,8 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const lastSent = useRef(0), closed = useRef(false), ended = useRef(false);
   // Var och om spelaren ska börja när källan är redo (start, och efter en omstart vid en spolning)
   const want = useRef<{ t: number; play: boolean } | null>({ t: start, play: true });
-  // Omkodad ström: adressen, spellistans segment, segmentet där omkodningen på servern började, om bild har visats
-  const stream = useRef<{ url: string; frags: Frag[]; runSeg: number; started: boolean } | null>(null);
+  // Omkodad ström (Stream ovan)
+  const stream = useRef<Stream | null>(null);
   const sample = useRef<Sample | null>(null);
   // Omstart vid spolning: pågår (nummer, så att en äldre som blir klar senare inte tar över), ljudspåret som skickas,
   // spåren i spelaren som väljs igen i den nya strömmen
@@ -136,7 +140,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
 
   /** Omkodad ström: spellistans segment (för beslutet vid en spolning). Hämtas bredvid spelaren, påverkar inte starten. */
   const watchStream = useCallback((url: string, from: number) => {
-    const s = { url, frags: [] as Frag[], runSeg: -1, started: false };
+    const s: Stream = { url, frags: [], runSeg: -1, started: false, known: null, seq: 0 };
     stream.current = s; sample.current = null;
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
     fetch(absolute(indexUrl(url)), { signal: ctl.signal }).then((r) => (r.ok ? r.text() : '')).then((txt) => {
@@ -196,9 +200,32 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     const now: Sample = { pos, buf: Number.isFinite(buf) ? buf : 0, at: Date.now(), playing: player.playing, rate: player.playbackRate };
     sample.current = now;
     if (!prev || !s.started || !seekJump(prev, now)) return;
-    if (decideSeek(prev, pos, s)) { restartAt(pos, prev.playing || player.playing); return; }
-    s.runSeg = runAfterSeek(prev, pos, s);
+    const at = Date.now();
+    if (decideSeek(prev, pos, s, at)) { restartAt(pos, prev.playing || player.playing); return; }
+    s.runSeg = runAfterSeek(prev, pos, s, at);
+    // Servern kan ha startat om omkodningen vid målet: svaret (och ett som är på väg) gäller inte längre
+    s.known = null; s.seq++;
   }, [player, restartAt]);
+
+  // Vad servern har klart frågas i förväg, var 4:e sekund medan en omkodad ström spelar (inte under en omstart, då är
+  // stream.current tom). Vid spolningen har spelaren redan bett om segmentet vid målet – då är det för sent att fråga.
+  // Misslyckas frågan (äldre server, inget nät) gäller gissningen i seekcore.ts.
+  useEffect(() => {
+    if (local) return;
+    let busy = false;
+    const iv = setInterval(async () => {
+      const s = stream.current;
+      if (busy || !s || !s.started || !s.frags.length || !player.playing) return;
+      busy = true;
+      const seq = s.seq, sent = Date.now(), ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 3000);
+      try {
+        const r = await fetch(absolute(readyUrl(s.url)), { headers: { Accept: 'application/json' }, signal: ctl.signal });
+        const j = r.ok ? await r.json() : null;
+        if (j && stream.current === s && s.seq === seq) s.known = { range: readyFrom(s.frags, j), at: sent };
+      } catch {} finally { clearTimeout(timer); busy = false; }
+    }, READY_EVERY_MS);
+    return () => clearInterval(iv);
+  }, [local, player]);
 
   const send = useCallback(async (force = false) => {
     const secs = player.currentTime || 0, d = player.duration || item?.duration || 0;

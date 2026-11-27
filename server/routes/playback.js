@@ -371,6 +371,13 @@ route('GET', '/api/stream/:id/hls/index.m3u8', media, (c) => { const it = mediaI
 route('GET', '/api/stream/:id/hls/init.mp4', media, async (c) => { const it = mediaItem(c); if (it) await st.serveInit(c.req, c.res, it, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/seg-:n.m4s', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
 route('GET', '/api/stream/:id/hls/seg-:n.ts', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSegment(c.req, c.res, it, +c.p.n, c.q, c.user.id); });
+// Vad servern har klart eller kodar just nu för uppspelningen (pid) – för appar som inte ser X-Seg-Ready på segmenten
+// (Expo). Samma behörighet som strömmen; startar aldrig ffmpeg och skapar ingen session (stream.js readyInfo).
+route('GET', '/api/stream/:id/hls/ready', media, (c) => {
+  const it = mediaItem(c); if (!it) return;
+  c.res.setHeader('Cache-Control', 'no-store');
+  send(c.res, 200, st.readyInfo(it.id, c.user.id, pidOf(c)));
+});
 route('GET', '/api/stream/:id/hls/subs-:sid.m3u8', media, (c) => { const it = mediaItem(c); if (it) st.serveSubPlaylist(c.res, it, c.p.sid, c.q); });
 route('GET', '/api/stream/:id/subs/:sid', media, async (c) => { const it = mediaItem(c); if (it) await st.serveSubtitle(c.req, c.res, it, c.p.sid.replace(/\.vtt$/, ''), c.q, (sub) => subsync.adjustment(it, sub), subMask(c)); });
 // Familjefiltret maskerar svordomar i undertexten efter profilens val (oavsett adress – ff=1 skiljer bara cachen åt)

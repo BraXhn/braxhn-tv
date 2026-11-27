@@ -208,6 +208,11 @@ test('HLS: spellista och segment genom reläet', { skip: !hasFfmpeg && 'ffmpeg s
   const seg = await req(R, `/api/stream/${FILM_ID}/hls/seg-0.ts?mode=transcode&q=360`, { raw: true });
   assert.equal(seg.status, 200, seg.data.toString().slice(0, 200));
   assert.ok(seg.data.length > 1000 && seg.data[0] === 0x47, 'MPEG-TS');
+  // Vad servern har klart (Expo, utan X-Seg-Ready): fungerar via reläet med strömmens mediatoken
+  const tok = auth.createSession(D.get("SELECT id FROM users WHERE name='bo'").id, 'media', { item: FILM_ID });
+  const rd = await req(R, `/api/stream/${FILM_ID}/hls/ready?mode=transcode&q=360&pid=0000abcd&t=${tok}`, { ck: false });
+  assert.equal(rd.status, 200);
+  assert.deepEqual(Object.keys(rd.data).sort(), ['encoding', 'from', 'mode', 'segs', 'to']);
   await req(R, `/api/stream/${FILM_ID}/stop`, { method: 'POST', body: {}, headers: { origin: R } });
 });
 

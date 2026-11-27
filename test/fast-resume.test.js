@@ -303,6 +303,62 @@ t('spolning i en omkodning: ny ström med korta segment vid målet, segmenten st
   for (const x of sessions()) st.stopUserSessions(it.id, x.user);
 });
 
+// Expo ser inte X-Seg-Ready: /hls/ready svarar samma sak utan att röra strömmen (ingen session, ingen ffmpeg)
+t('/hls/ready: samma segment som X-Seg-Ready, i sekunder, utan sidoeffekter och med strömmens behörighet', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const P = await playlist('force=transcode&q=480');
+  const pid = pidOf(P.pb.url);
+  // Strömmens adress utan dess egen mediatoken (t), så att behörigheten prövas med det som skickas här
+  const readyUrl = (u, t = '') => { const x = new URL(u.replace('/hls/master.m3u8', '/hls/ready'), B); x.searchParams.delete('t'); if (t) x.searchParams.set('t', t); return x; };
+  const ready = async (headers = A(), url = readyUrl(P.pb.url)) => { const r = await fetch(url, { headers }); return { status: r.status, body: r.status === 200 ? await r.json() : null }; };
+  const r1 = await fetch(P.segs[2].url, { headers: A() }); await r1.arrayBuffer();
+  const s = sessions().find(x => x.d.pid === pid);
+  assert.ok(s?.proc, 'strömmen kodar');
+  const live = await ready();
+  assert.equal(live.status, 200);
+  assert.equal(live.body.mode, 'transcode'); assert.equal(live.body.encoding, true);
+  assert.equal(live.body.segs[0], 0); assert.ok(live.body.segs[1] >= 2, JSON.stringify(live.body));
+  // Stoppad: tillståndet står still, så rubriken och svaret kan jämföras exakt
+  st.stopUserSessions(it.id, s.user, pid);
+  const r2 = await fetch(P.segs[0].url, { headers: A() }); await r2.arrayBuffer();
+  const hdr = r2.headers.get('x-seg-ready');
+  assert.match(hdr || '', /^0-\d+$/);
+  const nSess = sessions().length, last = s.last, reqAt = s.reqAt, dirs = fs.readdirSync(process.env.TRANSCODE_DIR).length;
+  const r = await ready();
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.segs, hdr.split('-').map(Number), 'samma segment som X-Seg-Ready');
+  const [lo, hi] = r.body.segs;
+  assert.equal(r.body.from, P.segs[lo].start);
+  assert.ok(Math.abs(r.body.to - (P.segs[hi].start + P.segs[hi].dur)) < 0.01, `till ${r.body.to}`);
+  assert.equal(r.body.encoding, false);
+  // Andra pid (ingen session, en annan uppspelning) och en spelare som frågar ofta: ingenting startas eller skapas
+  for (let i = 0; i < 5; i++) await ready(A(), readyUrl(P.pb.url.replace(`pid=${pid}`, 'pid=0badc0de')));
+  const none = await ready(A(), readyUrl(P.pb.url.replace(`pid=${pid}`, 'pid=0badc0de')));
+  assert.deepEqual(none.body, { mode: null, from: null, to: null, encoding: false, segs: null });
+  await sleep(300);
+  assert.ok(!s.proc, 'ingen ffmpeg startades');
+  assert.ok(!sessions().some(x => x.proc), 'ingen annan ffmpeg heller');
+  assert.equal(sessions().length, nSess, 'ingen ny session');
+  assert.equal(fs.readdirSync(process.env.TRANSCODE_DIR).length, dirs, 'ingen ny mapp');
+  assert.equal(s.last, last, 'sessionens liv förlängs inte'); assert.equal(s.reqAt, reqAt);
+  // Behörighet: utan inloggning 401, mediatoken för titeln går (som strömmens t=), för en annan titel 401
+  assert.equal((await ready({})).status, 401, 'utan inloggning');
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  const mine = auth.createSession(s.user, 'media', { item: it.id }), other = auth.createSession(s.user, 'media', { item: heavy.id });
+  const viaTok = await ready({}, readyUrl(P.pb.url, mine));
+  assert.equal(viaTok.status, 200); assert.deepEqual(viaTok.body.segs, r.body.segs);
+  assert.equal((await ready({}, readyUrl(P.pb.url, other))).status, 401, 'token för en annan titel');
+  // En annan användare med samma pid ser inte strömmen
+  const U2 = Number(D.run('INSERT INTO users(name,pass,is_admin,created) VALUES(?,?,1,0)', 'bertil', await auth.hashPw('Annan-anvandare-2026!')).lastInsertRowid);
+  const tok2 = auth.createSession(U2, 'app');
+  const foreign = await ready({ authorization: 'Bearer ' + tok2 });
+  assert.equal(foreign.status, 200); assert.equal(foreign.body.segs, null, 'en annan användares ström');
+  // Spolning med omstart (prev): den gamla strömmen finns inte längre
+  await playlist(`force=transcode&q=480&start=40&prev=${pid}`);
+  assert.equal((await ready()).body.segs, null, 'ersatt ström');
+  for (const x of sessions()) st.stopUserSessions(it.id, x.user);
+});
+
 t('första segmentet vid omkodning är 1 s och kommer fortare än med 2 s (tidsmått, omväxlande körningar)', async () => {
   const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
   assert.ok(heavy?.duration > 15, 'den tunga filen är inläst');

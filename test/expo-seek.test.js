@@ -115,3 +115,47 @@ test('beslutet efter en spolning i appen', { skip }, () => {
   assert.equal(c.runAfterSeek(at(700, 760), 640, st), st.runSeg, 'inom det servern har: samma körning');
   assert.equal(c.runAfterSeek(at(700, 760), 99999, st), st.runSeg, 'utanför filmen');
 });
+
+// Serverns svar (/api/stream/:id/hls/ready, readyInfo i server/stream.js) i stället för gissningen
+test('vad servern har klart: serverns svar, färskt och frågat före spolningen, annars gissningen', { skip }, () => {
+  const frags = fragsOf(3600, 600);
+  const n = (t) => c.fragAt(frags, t);
+  assert.equal(c.readyUrl('/api/stream/7/hls/master.m3u8?mode=transcode&pid=0a1b2c3d&t=x'), '/api/stream/7/hls/ready?mode=transcode&pid=0a1b2c3d&t=x');
+  // Segmenten som i X-Seg-Ready; sekunderna räcker när segs saknas
+  assert.deepEqual(c.readyFrom(frags, { from: frags[n(600)].start, to: 900, encoding: true, segs: [n(600), n(899)] }), [n(600), n(899)]);
+  assert.deepEqual(c.readyFrom(frags, { from: frags[n(600)].start, to: frags[n(899)].start + frags[n(899)].duration }), [n(600), n(899)]);
+  assert.equal(c.readyFrom(frags, { mode: null, from: null, to: null, encoding: false, segs: null }), null, 'ingen körning');
+  assert.equal(c.readyFrom(frags, { from: 0, to: 10, segs: [0, frags.length] }), null, 'segment utanför listan (fel ström)');
+  assert.equal(c.readyFrom([], { from: 0, to: 10, segs: [0, 1] }), null);
+  assert.equal(c.readyFrom(frags, null), null);
+  const guess = c.readyGuess(frags, n(600), 760);
+  const known = { range: [n(600), n(1500)], at: 10_000 };
+  assert.deepEqual(c.readyFor(frags, n(600), 760, known, 12_000, 11_000), known.range, 'färskt svar');
+  assert.deepEqual(c.readyFor(frags, n(600), 760, known, 10_000 + c.READY_FRESH_MS + 1, 18_500), guess, 'för gammalt: gissningen');
+  assert.deepEqual(c.readyFor(frags, n(600), 760, known, 12_000, 9_000), guess, 'frågat efter spolningen: gissningen');
+  assert.deepEqual(c.readyFor(frags, n(600), 760, null, 12_000), guess, 'inget svar (äldre server, inget nät): gissningen');
+  assert.equal(c.readyFor(frags, n(600), 760, { range: null, at: 10_000 }, 12_000, 11_000), null, 'servern har inget klart');
+});
+
+test('beslutet efter en spolning med serverns svar', { skip }, () => {
+  const frags = fragsOf(3600, 600);
+  const n = (t) => c.fragAt(frags, t);
+  const at = (pos, buf) => ({ pos, buf, at: 11_000, playing: true, rate: 1 });
+  const base = { frags, runSeg: n(600), started: true };
+  // Servern har kodat långt före bufferten (till 1500 s): gissningen hade startat om, serverns svar gör det inte
+  const far = { ...base, known: { range: [n(600), n(1500)], at: 10_000 } };
+  assert.equal(c.decideSeek(at(700, 760), 1200, base, 12_000), true, 'gissningen: utanför bufferten');
+  assert.equal(c.decideSeek(at(700, 760), 1200, far, 12_000), false, 'servern har segmentet klart');
+  assert.equal(c.decideSeek(at(700, 760), 1506, far, 12_000), false, 'segmentet efter det klara kodas just nu');
+  assert.equal(c.decideSeek(at(700, 760), 2000, far, 12_000), true, 'längre fram än servern kodat');
+  assert.equal(c.runAfterSeek(at(700, 760), 1200, far, 12_000), n(600), 'inom det servern har: samma körning');
+  // Servern har tagit bort början (trimmad) eller körningen är stoppad: omstart även där gissningen sa nej
+  const trimmed = { ...base, known: { range: [n(700), n(760)], at: 10_000 } };
+  assert.equal(c.decideSeek(at(730, 760), 640, base, 12_000), false, 'gissningen: inom körningen');
+  assert.equal(c.decideSeek(at(730, 760), 640, trimmed, 12_000), true, 'servern har inte segmentet längre');
+  const stopped = { ...base, known: { range: null, at: 10_000 } };
+  assert.equal(c.decideSeek(at(700, 760), 900, stopped, 12_000), true);
+  assert.equal(c.decideSeek(at(700, 760), 750, stopped, 12_000), false, 'inom bufferten gäller alltid');
+  // Gammalt svar: som förut
+  assert.equal(c.decideSeek(at(700, 760), 1200, { ...far, known: { ...far.known, at: 1_000 } }, 12_000), true);
+});

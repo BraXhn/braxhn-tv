@@ -1686,10 +1686,37 @@ export async function serveSegment(req, res, it, n, query, userId) {
   if (ra != null && d.mode === 'remux' && d.fmt === 'ts') return sendRandomAccess(req, res, file, waitMs, Math.max(0, Math.min(600, parseFloat(ra) || 0)));
   sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t', 0, waitMs, ready);
 }
-/** X-Seg-Ready: de färdiga segmenten i körningen (från ffmpegs start eller det första som inte städats bort) */
-function readyHeader(s) {
+/** De färdiga segmenten [från, till] i körningen (från ffmpegs start eller det första som inte städats bort), eller null */
+function readySegs(s) {
   const lo = Math.max(s.start, (s.trimmed ?? -1) + 1), hi = highestFile(s);
-  return lo >= 0 && hi >= lo ? { 'X-Seg-Ready': `${lo}-${hi}` } : null;
+  return lo >= 0 && hi >= lo ? [lo, hi] : null;
+}
+/** X-Seg-Ready: samma som readySegs, som rubrik på segmentsvaret */
+function readyHeader(s) {
+  const r = readySegs(s);
+  return r ? { 'X-Seg-Ready': `${r[0]}-${r[1]}` } : null;
+}
+/**
+ * Vad servern har klart och kodar just nu för en uppspelning (pid) – för spelare som inte ser svarshuvudena (Expo).
+ * Utan sidoeffekter: skapar ingen session, startar ingen ffmpeg, väcker ingen pausad och förlänger inte sessionens
+ * liv (s.last och reqAt rörs inte). Samma segment som X-Seg-Ready, plus tiderna i sekunder.
+ * Bara användarens egen session av titeln med just det pid (flera kvalitetssteg: det som kodar, annars det senaste).
+ */
+export function readyInfo(itemId, userId, pid) {
+  const none = { mode: null, from: null, to: null, encoding: false, segs: null };
+  if (!pid || dropped.has(`${userId}:${pid}`)) return none;
+  let s = null;
+  for (const x of sessions.values()) {
+    if (x.user !== userId || x.item !== itemId || x.d.pid !== pid) continue;
+    if (!s || (!!x.proc > !!s.proc) || (!!x.proc === !!s.proc && (x.reqAt || 0) > (s.reqAt || 0))) s = x;
+  }
+  if (!s) return none;
+  const encoding = !!s.proc;
+  if (s.d.mode !== 'transcode') return { ...none, mode: s.d.mode, encoding };
+  const r = readySegs(s), segs = s.segs;
+  if (!r || !segs?.[r[0]] || !segs[r[1]]) return { ...none, mode: s.d.mode, encoding };
+  const sec = (x) => Math.round(x * 1000) / 1000;
+  return { mode: s.d.mode, from: sec(segs[r[0]].start), to: sec(segs[r[1]].start + segs[r[1]].dur), encoding, segs: r };
 }
 /** TS-remux utan de bilder i början som behöver föregående segment (öppen GOP). Går något fel skickas filen som den är. */
 async function sendRandomAccess(req, res, file, waitMs, upTo) {
