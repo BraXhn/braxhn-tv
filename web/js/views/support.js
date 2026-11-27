@@ -48,6 +48,8 @@ export function contextHtml(c) {
   const rows = [];
   const add = (k, v) => { if (v != null && v !== '') rows.push(`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`); };
   add(t('Appversion'), c.version);
+  // Från Expo- eller Android-appen: appens namn, version och plattform
+  if (c.app) add(t('Skickat från appen'), [c.app.name, c.app.version, c.app.platform].filter(Boolean).join(' · '));
   add(t('Sida'), c.page);
   add(t('Webbläsare och enhet'), c.browser);
   add(t('Skärmstorlek'), c.screen);

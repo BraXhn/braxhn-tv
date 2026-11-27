@@ -392,3 +392,27 @@ test('gallring: åtgärdade och avslagna ärenden äldre än gränsen tas bort, 
   await req('/api/settings', { method: 'PUT', headers: H.admin, body: { supportDays: 180 } });
   for (const s of ['pending', 'approved', 'working', 'needinfo']) D.run('DELETE FROM support_tickets WHERE id=?', ids[s]);
 });
+
+test('apparna (Expo, Android): appens namn, version och plattform följer med – rensat, utan IP-adresser och token', async () => {
+  const bc = (client, kind = 'bug') => S.buildContext({ id: BO }, { client, route: 'Spelaren', screen: '1920×1080', lang: 'en', itemId: FILM, errors: ['Uppspelningen: Source error'] }, kind, () => true);
+  const c = bc({ name: 'Android', version: '0.8.0', platform: 'Android 14 · Google TV · Chromecast HD' });
+  assert.deepEqual(c.app, { name: 'Android', version: '0.8.0', platform: 'Android 14 · Google TV · Chromecast HD' });
+  assert.equal(c.page, 'Spelaren'); assert.equal(c.screen, '1920×1080'); assert.equal(c.lang, 'en'); assert.equal(c.title.id, FILM);
+  assert.deepEqual(c.pageErrors, ['Uppspelningen: Source error']);
+  assert.equal(c.version, VERSION, 'serverns version står kvar för sig');
+  // Fel form eller för långt: fältet tas bort (kapas aldrig till något som ser rätt ut)
+  assert.deepEqual(bc({ name: 'Expo', version: '0.1.0-beta.2+5', platform: 'ios 18.1 · iPhone' }).app, { name: 'Expo', version: '0.1.0-beta.2+5', platform: 'ios 18.1 · iPhone' });
+  assert.equal(bc({ name: '<script>', version: '1 2', platform: 'p'.repeat(200) }).app, undefined);
+  assert.equal(bc('Android 1.0').app, undefined); assert.equal(bc(['Android']).app, undefined); assert.equal(bc(null).app, undefined);
+  // IP-adresser, token och e-post i plattformen maskeras; versionen får inte vara en IP-adress
+  const m = bc({ name: 'Android', version: '192.168.1.20', platform: 'Android 14 192.168.1.20 anna@example.org token=abc123secret' }).app;
+  assert.equal(m.version, undefined);
+  assert.ok(!/192\.168|anna@|abc123secret/.test(JSON.stringify(m)), JSON.stringify(m));
+  // Hela vägen: förhandsvisningen och det sparade ärendet har samma app-fält
+  const ctx = { client: { name: 'Expo', version: '0.1.0', platform: 'android 14 · telefon' }, route: 'Konto', screen: '390×844 @3', lang: 'sv' };
+  const pv = (await post('/api/support/context', H.eva, { kind: 'idea', context: ctx })).data.context;
+  assert.deepEqual(pv.app, ctx.client);
+  const id = (await post('/api/support', H.eva, { kind: 'idea', area: 'appen', text: 'Från appen', tech: true, context: ctx })).data.id;
+  assert.deepEqual((await req('/api/support/' + id, { headers: H.eva })).data.context.app, ctx.client);
+  D.run('DELETE FROM support_tickets WHERE id=?', id);
+});

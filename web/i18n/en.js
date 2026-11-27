@@ -4345,6 +4345,7 @@ self.BX_I18N = {
   "Åtgärdat i version {v}": "Fixed in version {v}",
   "Ingen teknisk information bifogas.": "No technical information is attached.",
   "Appversion": "App version",
+  "Skickat från appen": "Sent from the app",
   "Sida": "Page",
   "Webbläsare och enhet": "Browser and device",
   "Skärmstorlek": "Screen size",

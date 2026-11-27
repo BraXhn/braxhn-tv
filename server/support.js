@@ -104,6 +104,15 @@ export function buildContext(user, input, kind, allowed, at = now()) {
   if (/^\d{2,5}×\d{2,5}( @[\d.]{1,4})?$/.test(String(c.screen ?? ''))) o.screen = String(c.screen);
   if (/^(sv|en)$/.test(String(c.lang ?? ''))) o.lang = c.lang;
   if (c.app === true) o.installed = true;
+  // Apparna (Expo, Android): appens namn, version och plattform. Fel form eller för långt tas bort, kapas aldrig.
+  const cl = c.client && typeof c.client === 'object' && !Array.isArray(c.client) ? c.client : null;
+  if (cl) {
+    const a = {}, name = String(cl.name ?? ''), ver = String(cl.version ?? ''), pf = String(cl.platform ?? '');
+    if (/^[\p{L}\d][\p{L}\d .-]{0,29}$/u.test(name)) a.name = name;
+    if (/^[\w.+-]{1,30}$/.test(ver) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(ver)) a.version = ver; // aldrig en IP-adress
+    if (pf.length <= 120 && tech(pf, 120)) a.platform = tech(pf, 120);
+    if (Object.keys(a).length) o.app = a;
+  }
   const t = titleInfo(parseInt(c.itemId), allowed);
   if (t) o.title = t;
   if (kind === 'bug') {
