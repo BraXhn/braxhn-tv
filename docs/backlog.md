@@ -109,7 +109,8 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
-- Feedback: Feedback-knapp i apparna (iOS, Android, Expo); knappens plats under riktig uppspelning och på TV är inte provad.
+- Feedback i iOS/tvOS-appen (Expo och Android har den sedan 2026-11-27). Expo- och Android-appens formulär är inte
+  provade på riktig telefon, TV eller bil (se *Klart* 2026-11-27).
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
 
@@ -149,6 +150,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
+- 2026-11-27: Feedback och Mina ärenden i Expo- och Android-appen, gren `team/app-feedback-2026-11-27`. Samma dialog
+  som webben (typ, *Gäller* förvalt efter skärmen man var på, meddelande, teknisk information med *Visa vad som skickas
+  med* från `POST /api/support/context`) och *Mina ärenden* med status, svar och svar på teamets fråga. Expo: under
+  *Konto* och *Rapportera felet* i spelaren när uppspelningen inte kunde startas (`src/feedback.ts`,
+  `src/screens/Feedback.tsx`). Android: under *Inställningar*, med fjärrkontroll på TV; i bilen bara *Mina ärenden* att
+  läsa; *Rapportera felet* i spelaren utom i bilen (`Feedback.kt`, `FeedbackCore.kt` med `FeedbackCoreTest.kt`, 6 fall
+  på JVM). Servern: `buildContext` tar emot `context.client` (appens namn, version och plattform) och sparar det som
+  `app` – fel form tas bort, versionen får inte vara en IP-adress (`test/support.test.js`, fall 12). Kontraktet har
+  Android-appens fem nya anrop. Expo i webbläget mot en egen server med Playwright (390×844). **Inte provat:** på riktig
+  telefon, Google TV eller bil; Android-appen är inte kompilerad här (ingen Android SDK).
 - 2026-11-26: Undertexter i offline-filen, gren `team/offline-undertext-2026-11-26`. Fel: `server/offline.js` kodade
   med `-sn`, så nedladdade filmer saknade undertexter i filen – apparna ritade egna ovanpå, som inte syns i telefonens
   helskärm, bild-i-bild eller AirPlay/Chromecast. Nu läggs textundertexterna (inbäddade, externa `.sv.srt` och

@@ -142,7 +142,9 @@ hämtar själv, och ser bara det en administratör har godkänt under *Administr
   `status: "reopened"` (från `admin`) betyder att administratören öppnat ett åtgärdat ärende igen; `text` är då
   förklaringen (kan vara tom).
 - `context`: teknisk information, eller `null` om användaren eller administratören valde bort den:
-  `version` (serverns), `page` (hash-rutten utan frågedel), `browser` (user agent), `screen`, `lang`, `installed`,
+  `version` (serverns), `page` (hash-rutten utan frågedel; i apparna skärmens namn), `browser` (user agent), `screen`,
+  `lang`, `installed`, `app: { name, version, platform }` (från Expo- och Android-appen, t.ex. `Android`, `0.8.0`,
+  `Android 14 (API 34) · TV · Chromecast HD`),
   `title: { id, kind, name, year, format }` om man stod på en titel, `lastPlayback: { item, name, format, mode,
   quality, position, duration, remote, minutesAgo }` (bara `bug`, senaste dygnet) och `pageErrors` (högst fem, bara
   `bug`). IP-adresser finns aldrig med, och token, nycklar och e-postadresser maskeras.
@@ -171,7 +173,7 @@ curl -H "X-Api-Key: bxtv_…" -H "Content-Type: application/json" \
 
 Finns teamet utanför hemmet måste nyckeln skapas utan *Bara från hemnätet*.
 
-**Webbens egna vägar** (vanlig inloggning, inte API-nyckel): `POST /api/support` (nytt ärende: `{ kind, area, text,
+**Webbens egna vägar** (vanlig inloggning, inte API-nyckel; Expo- och Android-appen använder samma): `POST /api/support` (nytt ärende: `{ kind, area, text,
 tech, context }`, högst 5 per timme för andra än administratörer), `POST /api/support/context` (förhandsvisning av
 det som bifogas), `GET /api/support` (mina ärenden), `GET /api/support/count`, `GET /api/support/:id` och
 `POST /api/support/:id/reply`. Man når bara sina egna ärenden; någon annans ger 404. Administratören (hemnätet):

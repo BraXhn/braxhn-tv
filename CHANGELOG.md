@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Feedback och felrapporter i Expo- och Android-appen.** Samma som knappen *Feedback* i webben: välj *Förslag eller
+  synpunkt* eller *Något fungerar inte*, vad det gäller (förvalt efter skärmen du var på) och skriv vad som hände. Med
+  krysset för teknisk information följer appens version, enhet, skärmstorlek och senaste uppspelningen med, och *Visa
+  vad som skickas med* visar exakt vad – aldrig inloggning eller adresser. *Mina ärenden* visar status och teamets svar,
+  och där kan du svara när teamet ber om mer information. En administratör läser ärendet innan det går vidare, precis
+  som i webben. I Expo-appen ligger det under *Konto*, i Android-appen under *Inställningar* (även med fjärrkontrollen på
+  Google TV). I bilen visas bara *Mina ärenden*, att läsa. Går en film inte att spela finns *Rapportera felet* i
+  spelaren (inte i bilen). Servern sparar appens namn, version och plattform som en egen rad i den tekniska
+  informationen (*Skickat från appen*). Inte provat på riktig telefon, TV eller bil.
 - **Undertexterna följer med i filmer som laddats ner för offline.** Filen som apparna laddar ner har nu filmens
   textundertexter inbyggda (även undertextfiler bredvid filmen, som `.sv.srt`, och nedladdade undertexter), med språk
   och namn. Telefonens egen spelare kan då visa dem i helskärm, i bild-i-bild och på AirPlay/Chromecast – förut syntes

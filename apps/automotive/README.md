@@ -37,6 +37,7 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - **bio-läge**: trailers och förfilm före filmen med *Hoppa över* när det är påslaget under *Mitt konto → Bio-läge* i webben
 - **nattläge och tydligare dialog** (Inställningar eller ljudmenyn i spelaren; servern filtrerar ljudet)
 - Android Auto (ljud) och Google TV:s *Fortsätt titta*, se ovan
+- **feedback och felrapporter** under *Inställningar* med *Mina ärenden* (se *Feedback* nedan)
 - **på Google TV: bitström till förstärkaren** (Dolby Digital, Dolby Digital Plus/Atmos, DTS/DTS-HD, Dolby TrueHD spelas orört när förstärkaren tar emot formatet), **HDR10/HDR10+/HLG/Dolby Vision** direkt när TV:n klarar det och **automatisk bildfrekvensväxling** (*Inställningar → Bild och ljud på TV:n*: Av / Bara bildfrekvens / Bildfrekvens och upplösning)
 - i bilens mediaspelare och Android Auto: flikarna Musik, Ljudböcker och Poddar, **Stationer** (låtradio och stationer från serverns ljudanalys), *Radio: artist* överst på varje artistsida, sökning i musik, ljudböcker och poddar och **röststyrning** ("Hey Google, spela … på BraXhn TV" spelar bästa träffen: låten med sitt album, ett album, en ljudbok eller poddens senaste avsnitt)
 
@@ -91,6 +92,25 @@ poddar, `at`, ordning, ny dag, sommartid och vintertid, fönster över midnatt) 
 flytten från 0.7.0, borttagning vid 403/404, testad i `DownloadCoreTest.kt`), lagringen och anropen i `OfflineSync.kt`
 och `Offline.kt`. Samma regler som Expo-appen (`apps/expo/src/offlinecore.ts`, `offline.ts`).
 
+## Feedback
+
+Under *Inställningar → Feedback* finns *Skicka feedback* och *Mina ärenden* – samma som knappen *Feedback* i webben och
+samma anrop (`/api/support`, i `test/contracts/apps.json`). Formuläret har typen, *Gäller* (förvalt efter skärmen du var
+på: titelsidan och biblioteket → Film och serier, spelaren → Uppspelning, live-TV och inspelningar → Live-TV), meddelandet
+och krysset för teknisk information med *Visa vad som skickas med* (servern visar exakt det som sparas). Appen skickar
+sitt namn (`Android`), versionen, plattformen (t.ex. `Android 14 (API 34) · TV · Chromecast HD`), skärmens namn, storlek
+och språk, titeln som senast spelades och spelarens senaste fel – inga token, adresser eller namn. En vanlig användare får
+*Ärendet är mottaget och väntar på granskning.*; en administratör läser ärendet innan det går till utvecklarna.
+*Mina ärenden* visar status och svar, och man kan svara när teamet ber om mer information. Går en titel inte att spela
+finns *Rapportera felet* i spelaren.
+
+- **Google TV:** allt nås med fjärrkontrollen (vit ram runt det som har fokus); texten skrivs med TV:ns tangentbord.
+- **I bilen:** bara *Mina ärenden*, att läsa – inget formulär, inga svar och ingen *Rapportera felet*. Bilen spärrar
+  dessutom hela appen när den rullar (se *Körning*), så listan syns bara när bilen står still.
+
+Reglerna utan Android (förvalet, bilen, plattformen och skärmen i serverns form) ligger i `FeedbackCore.kt`, testade på
+JVM i `FeedbackCoreTest.kt`; vyerna och anropen i `Feedback.kt`.
+
 ## Serveradress, https och BraXhn Relay
 
 - **Hemma:** IP-adressen eller datornamnet, t.ex. `192.168.1.10` – appen lägger till `http://` och port 8420.
@@ -141,6 +161,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät och nedladdningar per profil): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil och feedbackens regler): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
 **Inte provat på riktig enhet (appversion 0.7.0):** att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

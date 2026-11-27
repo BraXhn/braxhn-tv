@@ -67,6 +67,24 @@ och sedan `npx expo install --fix`.
   till servern, hoppar över intro och går vidare till nästa avsnitt.
 - Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
 - Nedladdning av filmer, avsnitt och ljudböcker som spelas utan nät (se *Nedladdat* nedan).
+- Feedback och felrapporter (se *Feedback* nedan).
+
+## Feedback
+
+Under *Konto* finns *Skicka feedback* och *Mina ärenden* – samma som knappen *Feedback* i webben och samma anrop
+(`/api/support`). Formuläret har typen (*Förslag eller synpunkt* / *Något fungerar inte*), *Gäller* (förvalt efter
+skärmen du var på innan du öppnade Konto: titelsidan → Film och serier, spelaren → Uppspelning, musik → Musik,
+ljudböcker och poddar → Ljudböcker och poddar), meddelandet och krysset för teknisk information. *Visa vad som skickas
+med* frågar servern (`POST /api/support/context`) och visar exakt det som sparas. Appen skickar sitt namn (`Expo`),
+versionen ur `app.json`, plattformen (t.ex. `android 14`), sidan, skärmstorleken, språket, titeln som senast spelades och
+det senaste uppspelningsfelet (en halvtimme) – inga token, adresser eller namn. Servern lägger till sin version och den
+senaste uppspelningen ur tittarhistoriken.
+
+En vanlig användares ärende får beskedet *Ärendet är mottaget och väntar på granskning.* – en administratör läser det
+innan det går till utvecklarna. *Mina ärenden* visar status och svar, och när teamet ber om mer information finns en ruta
+för svaret (som också granskas). Visar spelaren att en titel inte gick att spela finns *Rapportera felet*, som öppnar
+formuläret med *Något fungerar inte* och *Uppspelning* förvalt (inte när skärmtiden tog slut eller en vuxen stoppade).
+Servrar före 1.3.0 har inte feedback; appen säger det i stället för ett 404-fel.
 
 ## Musik, ljudböcker och poddar
 
@@ -211,7 +229,8 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   album, artist, spellista), `src/screens/Books.tsx` (ljudböcker och poddar) och `src/screens/NowPlaying.tsx`
   (helskärmsspelaren). Nedladdat: `src/offlinecore.ts` (logiken utan filsystem: poster, kö, väntande positioner,
   undertexter, skärmtid utan nät – inga importer), `src/offline.ts` (filerna, `DownloadTask`, serveranropen),
-  `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat).
+  `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat). Feedback: `src/feedback.ts`
+  (texter, var man är, senaste uppspelningen, anropen) och `src/screens/Feedback.tsx` (formuläret och Mina ärenden).
 - Testerna för nedladdningen ligger i repots `test/expo-offline.test.js` och körs med Node (22.18 eller senare läser
   TypeScript): `node --test test/expo-offline.test.js` i repots rot. `offlinecore.ts` testas direkt, `offline.ts` med ett
   låtsat filsystem och en låtsad server (`test/helpers/expo-loader.mjs`, `expo-fakes.mjs`) – telefonens riktiga filsystem
