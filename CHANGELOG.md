@@ -21,6 +21,10 @@
   bildtoken inte gäller längre (den kan knuffas ut av andra appar) hämtar appen nu en ny även från titelsidans
   bakgrund, musikens omslag, ljudböckernas och poddarnas bilder, kanallogorna och *Kommer snart* – förut bara från
   affischkorten.
+- **Jämförelsen med Plex, Jellyfin, Emby, Infuse, Plexamp och Audiobookshelf är skriven om efter läget i 1.5.0**
+  (`docs/jamforelse.md`): fjärråtkomst via eget relä och apparna finns nu, och det som saknas mest är appar i
+  butikerna, prov på riktiga enheter och nedladdning och musik i alla appar. Backloggen (`docs/backlog.md`) är
+  genomgången och har nya punkter för snabbare byte till nästa avsnitt och snabbare start i apparna.
 
 ## 1.5.0 – 2026-11-27
 - **Feedback och felrapporter i appen för iPhone, iPad och Apple TV.** Under *Inställningar* finns nu *Skicka

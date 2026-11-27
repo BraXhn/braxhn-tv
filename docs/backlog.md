@@ -16,7 +16,7 @@ Teamets arbetslista. Här står vad som pågår, vad som står näst på tur och
 Underlag: [jamforelse.md](jamforelse.md), [funktioner.md](funktioner.md), [testat.md](testat.md),
 [CHANGELOG.md](../CHANGELOG.md) och avsnittet *Testat och otestat* i [README.md](../README.md).
 
-Senast genomgången: 2026-11-24 (efter version 1.2.2).
+Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiven* i CHANGELOG).
 
 ## Pågår
 
@@ -24,46 +24,131 @@ Senast genomgången: 2026-11-24 (efter version 1.2.2).
 
 ## Näst på tur
 
-### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Nästa avsnitt startar direkt: förvärm det medan eftertexterna går
+
+- **Vad:** när webbspelaren visar *Hoppa över eftertexterna* med nedräkning (`startSkipCountdown`) eller kortet
+  *Nästa avsnitt om …* (`onEnded`), anropa `warmPlay(nextId, 0)` som Spela-knapparna redan gör, så att disken vaknar
+  och första segmentet är klart när nästa avsnitt startar. I dag går `goNext` → `play()` hela vägen från början.
+- **Varför:** barnen tittar mest på serier i följd, och bytet mellan avsnitt är den start som sker oftast. Plex och
+  Infuse byter avsnitt nästan utan väntan.
+- **Filer:** `web/js/player/video.js` (`markers`, `startSkipCountdown`, `onEnded`, `warmPlay`), `server/stream.js`
+  (`warm`). Kontrollera först: `warm()` vägrar förvärma en omkodning medan någon tittar på en omkodad ström (segment
+  de senaste 30 s) – och det gör ju den egna strömmen just då. Regeln behöver undanta samma profils ström som snart
+  slutar, utan att två omkodningar slåss om processorn.
+- **Klart när:** i riktig Chrome (som `test/web-chrome-playback.test.js`) är tiden från *Spela nu*/nedräkningens slut
+  till första bild i nästa avsnitt mätt före och efter, för remux och omkodning, och vakten är grön.
+
+### 2. Stoppa omkodningen när fliken eller TV-webbläsaren stängs
+
+- **Vad:** skicka `/api/stream/:id/stop?pid=` med `navigator.sendBeacon` vid `pagehide` i webbspelaren. I dag skickas
+  bara framsteget där (`pagehide` → `sendProgress(true)` i `video.js`); stoppet görs bara av `closePlayer`.
+- **Varför:** stängs fliken mitt i en omkodning fortsätter ffmpeg tills den ligger 15 segment före (`AHEAD_TRANSCODE`)
+  eller varit utan förfrågningar i 60 s (`server/stream.js`), och under tiden räknas den som "någon tittar" – så nästa
+  start på en annan enhet får dela processorn och förvärms inte (`warm`).
+- **Filer:** `web/js/player/video.js`, `server/routes/playback.js` (`/api/stream/:id/stop`; `sameOrigin` i
+  `server/http/router.js` släpper igenom en beacon från samma sida – kontrollera först).
+- **Klart när:** ett test stänger sidan under en omkodning och visar att ffmpeg-processen är borta inom 2 s.
+
+### 3. iOS/tvOS-appen: nedladdningar per server och profil, och positioner utan nät
+
+- **Vad:** appens nedladdningar har en gemensam lista och mapp för alla servrar och profiler (`DownloadRecord` utan
+  server och profil, `Downloads/index.json` i `apps/apple/Shared/Offline.swift`), och `logout()` i `AppModel.swift`
+  rör dem inte. Positionen skickas bara direkt (`reportProgress` med `try?`), så det som spelas utan nät försvinner.
+  Gör som Android-appen i 1.5.0 och Expo-appen: lista och mapp per server och profil, flytt av gamla nedladdningar
+  till profilen som är inloggad, fråga vid *Logga ut*, borttagning när kontot inte får ladda ner eller titeln inte
+  får ses längre, och en kö med `at` för positioner (filmer och böcker; poddar när servern tar emot `at`).
+- **Varför:** en barnprofil på familjens iPad ser och kan spela en vuxens nedladdade filmer utan nät – åldersgränsen
+  gäller inte där. Två servrar med samma titel-id blandas också ihop.
+- **Filer:** `apps/apple/Shared/Offline.swift`, `apps/apple/Shared/AppModel.swift`, `apps/apple/Shared/Player.swift`,
+  `apps/apple/Shared/Listen.swift`; reglerna kan följa `DownloadCore.kt` och `OfflineCore.kt` i Android-appen.
+- **Klart när:** reglerna är testade (statiskt som `test/apple-seek.test.js`, eller i ett Swift-test i `apple.yml`),
+  bygget går igenom, och provet på riktig iPad står under *Bara Anton kan göra*.
+
+### 4. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
+
+- **Vad:** Safaris egen HLS (`nativeHls` i `web/js/player/caps.js`) spolar fortfarande inom den gamla spellistan och
+  väntar på ett helt 6 s-segment. `seekRestarts` i `web/js/player/video.js` körs bara med hls.js. Gör som iOS-appen:
+  ny `/playback` med `start=` och `prev=` när spolningen landar utanför det som är kodat (`EXT-X-START` finns redan,
+  `startTag` i `server/stream.js`).
+- **Varför:** iPhone och iPad i webbläsaren är vanliga i familjen; spolning i en omkodad film tar där 3–4,5 s mot
+  ungefär 1 s i Chrome sedan 1.5.0.
+- **Filer:** `web/js/player/video.js`, `web/js/player/hlsconfig.js` (`seekRestart`), `test/fast-resume.test.js`.
+- **Klart när:** testet visar en ny ström med `xs` vid målet för `nhls=1`, och Anton har provat på en riktig iPhone
+  (se *Bara Anton kan göra*).
+
+### 5. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
-- **Varför:** rättningen i 1.2.1 för iPhone och iPad är inte provad på en riktig enhet. Att filmen fortsätter där
-  man slutade är grundläggande på telefon och surfplatta.
+- **Varför:** rättningen för iPhone och iPad (1.2.1) och Apple TV (*Ej utgiven*) är inte provad med Apples spelare.
+  Att filmen fortsätter där man slutade är grundläggande på telefon och surfplatta.
 - **Filer:** `test/media/AVPlayerCheck.swift`, `test/media/apple-check.mjs`, `.github/workflows/conformance.yml`,
   `server/stream.js` (bara om mätningen visar fel).
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
-  segment 0 hämtas först, och Anton har bekräftat på en riktig iPhone (se *Bara Anton kan göra*).
+  segment 0 hämtas först.
 
-### 2. Expo-appen: musik med låst skärm på riktig telefon, och nästa låt på låsskärmen
+### 6. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
 
-- **Vad:** musiken, ljudböckerna och poddarna finns i Expo-appen (se *Klart*), men bakgrundsljud och låsskärmen är
-  bara provade i webbläget. Prova i Expo Go och i ett eget bygge (`npx expo prebuild`) på iPhone och Android: spelar
-  musiken vidare med låst skärm i mer än tre minuter, fungerar hörlurarnas knappar, och visas omslaget? Lägg sedan
-  till nästa/föregående låt på låsskärmen – `expo-audio` ger de knapparna bara för `AudioPlaylist`, så kön behöver
-  matas in där (adresserna hämtas per låt med `/api/music/tracks/:tid/play`).
-- **Varför:** Spotify/Plexamp används mest med låst skärm och i hörlurar; utan nästa låt på låsskärmen och i
-  hörlurarna är appen sämre än dem just där det räknas.
-- **Filer:** `apps/expo/src/music.ts`, `apps/expo/app.json`, `apps/expo/README.md`.
-- **Klart när:** en timmes musik spelar med låst skärm på båda telefonerna, och nästa/föregående på låsskärmen och i
-  hörlurarna byter låt.
+- **Vad:** appen gissar fortfarande ur bufferten (`readyGuess` i `apps/apple/Shared/SeekCore.swift`) och väntar 0,6 s
+  på nästa steg vid varje spolning, även med reglaget på iPhone. Fråga `/api/stream/:id/hls/ready` medan strömmen
+  spelar, som Expo-appen gör (`readyFor` i `apps/expo/src/seekcore.ts`), och vänta bara på fler steg för
+  fjärrkontrollen.
+- **Varför:** onödiga omstarter och väntan vid spolning på iPhone, iPad och Apple TV.
+- **Filer:** `apps/apple/Shared/SeekCore.swift`, `apps/apple/Shared/Player.swift`, `test/apple-seek.test.js`,
+  `test/contracts/apps.json` (anropet för iOS).
+- **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
+  `apple.yml` går igenom.
 
-### 3. Expo-appen: nedladdning för offline
+### 7. Utanför hemmet: förstarta omkodningen redan vid /playback
 
-- **Vad:** ladda ner film, avsnitt och ljudböcker till telefonen (`/api/items/:id/offline`, kräver rätten att ladda
-  ner) och spela dem utan nät. Framsteg skickas när nätet är tillbaka (fältet `at` i `POST /api/items/:id/progress`).
-- **Varför:** bilresor och flyg med barn. Plex, Infuse och Audiobookshelf har det.
-- **Filer:** `apps/expo/src/*`, `apps/expo/README.md`.
-- **Klart när:** en nedladdad film spelas i flygplansläge och positionen syns på servern efteråt.
+- **Vad:** med automatisk kvalitet utanför hemmet (`d.abr` i `server/routes/playback.js`) startas ingen ffmpeg förrän
+  spelaren valt steg och bett om ett segment – `st.prewarm` hoppas över när `d.abr` är sant. Förstarta steget som
+  mastern listar först (det spelaren oftast börjar med).
+- **Varför:** utanför hemmet är varje rundresa dyr (relä, mobilnät); start av en omkodad film är den långsammaste
+  starten i dag. Kontrollera först hur mycket det ger med `test/fast-resume.test.js` och en strypt anslutning.
+- **Filer:** `server/routes/playback.js`, `server/stream.js` (`prewarm`), `web/js/player/hlsconfig.js` (startsteget).
+- **Klart när:** tid till första segment utanför hemmet är mätt före och efter, och steget som förstartades används
+  (inte en andra ffmpeg för ett annat steg).
 
-### 4. Skärmtid i Safari och apparna: paus och tiden kvar
+### 8. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
-- **Vad:** mät i Safari (direktuppspelning och Safaris egen HLS) att paus inte räknas, på samma sätt som i Chrome
-  (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`). Visa tiden kvar och varningen i spelaren i iOS-,
-  Android- och Expo-apparna (fältet `screenTime` finns i svaret på framstegsrapporten).
-- **Varför:** webben visar nu tiden kvar och paus räknas inte där; i apparna stoppas barnet fortfarande utan förvarning.
+- **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
+  fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
+  (2) Alla tre apparna väntar på titelns uppgifter (`/api/items/:id`, i Android också `/api/me/cinema`) innan de
+  skickar `/playback` – två eller tre rundresor i följd (`Player.tsx`, `PlayerScreen.kt` vid `Api.get<Playback>`,
+  `Player.swift` före `model.get("/api/items/\(itemId)/playback", …)`). Webben skickar dem samtidigt sedan 1.5.0
+  (`earlyPlayback`). Kontrollera först: apparna väljer förvald undertext ur titelns spårlista före `/playback`, och
+  det valet behöver då göras på servern eller efteråt.
+- **Varför:** på Google TV och Apple TV står fokus på Spela en stund innan man trycker OK, och via reläet eller
+  mobilnät kostar varje rundresa märkbart (kontrollera först med en mätning).
+- **Filer:** `apps/expo/src/screens/Player.tsx`, `apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt`,
+  `apps/apple/Shared/Player.swift`, `apps/apple/Shared/DetailView.swift`, `test/contracts/apps.json`.
+- **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
+  kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
+
+### 9. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+
+- **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
+  först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
+  nedräkning efter kontots val (`autoNext` i svaret från `/playback`), som webben (`web/js/player/autoskip.js`).
+  Android- och iOS/tvOS-appen har knapparna (`skip` i `PlayerScreen.kt` och `Player.swift`) men startar nästa avsnitt
+  direkt när filmen tar slut, utan nedräkning och utan att följa `autoNext` – samma regel kan tas med där.
+- **Varför:** serier i följd är det barnen tittar mest på; i dag går eftertexterna till slut i Expo-appen, och den
+  som stängt av *Spela nästa avsnitt automatiskt* får ändå nästa avsnitt i Android- och iOS-appen.
+- **Filer:** `apps/expo/src/screens/Player.tsx`, `apps/expo/src/i18n-en.ts`.
+- **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
+  nedräkningen; `test/expo-i18n.test.js` är grön.
+
+### 10. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+
+- **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
+  Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
+  (`Player.tsx`, `PlayerScreen.kt`, `AppModel.swift`). Mät också i Safari att paus inte räknas (skript: spela, pausa
+  60 s och 10 min, läs `/api/screentime`).
+- **Varför:** webben visar tiden kvar sedan 1.4.0; i apparna stoppas barnet fortfarande utan förvarning.
 - **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
-- **Klart när:** tio minuters paus ger högst en halv minut i Safari, och varningen syns i apparna.
+- **Klart när:** varningen syns i apparna (Expo i webbläget, de andra byggda i GitHub Actions), och tio minuters paus
+  ger högst en halv minut i Safari.
 
 ## Idéer
 
@@ -109,37 +194,44 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Fortsätt titta mitt i en fil med lång GOP: omkodningen börjar på en jämn sekund och ffmpeg avkodar från nyckelbilden
   före (upp till en hel GOP, ~0,1 s per sekund HEVC 1080p). Att lägga B på nyckelbilden före `hs` när nyckelbilderna är
   kända sparar det – kontrollera först med en riktig film (testfilerna har 2 s GOP).
-- Utanför hemmet (ABR) förstartas ingen ffmpeg vid `/playback` – den startar först när spelaren valt steg och bett om
-  segmentet (`d.abr` i `server/routes/playback.js`). Steget som mastern listar först kunde förstartas.
 - Spolning i en omkodning laddar om strömmen: under ~1 s visar tidslinjen 0:00 och "Förbereder…" (videoelementet kopplas
   om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
-- Safaris egen HLS (iPhone) spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan bilden kommer.
-  Den kunde göra som webben och apparna (ny `/playback` med `start=` och `prev=`).
 - Expo-appen frågar `/hls/ready` var 4:e sekund medan strömmen spelar och använder svaret i 8 s. En fråga som skickas
   strax före en spolning kan i sällsynta fall komma fram till servern efter spelarens begäran av målets segment (olika
   anslutningar) och då säga "kodas" – då väntar appen på 6 s-segmentet i stället för att starta om
   (`apps/expo/src/seekcore.ts` `readyFor`). Inte mätt på riktig telefon.
-- iOS/tvOS-appen gissar fortfarande vad servern har kodat (`readyGuess` i `Shared/SeekCore.swift`) och väntar 0,6 s
-  på nästa steg vid varje spolning, även med reglaget på iPhone. Den kunde fråga `/api/stream/:id/hls/ready` som Expo.
 - Expo-appens webbläge spolar utan omstart: Chromes HLS-spelare hämtar segment 0 och 1 i varje ny ström innan den går
   till målet (bryr sig inte om `EXT-X-START` eller `#t=`), och servern startar då om ffmpeg vid 0. Med hls.js i
   webbläget gick det att göra som webbspelaren (`apps/expo/src/screens/Player.tsx`).
 
+**Från genomgången 2026-11-27 (backlogg, sett i koden men inte gjort)**
+- Expo-appen hämtar hela serien (`/api/items/<serie>` med alla avsnitt) för att hitta nästa avsnitt, vid varje start
+  (och för nedladdade avsnitt när nästa inte är nedladdat; `apps/expo/src/screens/Player.tsx`). Svaret från
+  `/api/items/:id` har redan `nextId` (`server/routes/library.js`) – ett anrop mindre och mindre data på mobilnät.
+- Webbspelarens kort i slutet säger bara *Nästa avsnitt om N s* (`onEnded` i `web/js/player/video.js`), utan
+  avsnittets namn, nummer eller bild. Plex och Netflix visar vad som kommer, så att man kan välja att stanna.
+- Expo-appen: nästa och föregående låt på låsskärmen och i hörlurarna saknas – låsskärmen har bara spola ±10 s för musik
+  (`setActiveForLockScreen` i `apps/expo/src/music.ts`). `expo-audio` ger knapparna bara för `AudioPlaylist`
+  (kontrollera först i paketets version), så kön behöver matas in där. Förut punkt 2 i *Näst på tur*; provet med låst
+  skärm på riktig telefon står under *Bara Anton kan göra*.
+- Medietoken räknas per användare och de äldsta utöver 300 tas bort (`MEDIA_MAX` i `server/auth.js`); varje låt i Expo-
+  och Android-appen tar en ny (`/api/music/tracks/:tid/play`). En profil som lyssnar på många låtar samma dygn kan
+  knuffa ut en films token på en annan enhet, och strömmen svarar då 401 – kontrollera först hur många låtar som
+  behövs i praktiken och om spelarna hämtar en ny adress av sig själva.
+- Ljudböcker och poddar kan inte laddas ner i Android- eller iOS/tvOS-appen (bara filmer och avsnitt:
+  `Offline.kt`, `Offline.swift`; inget i `Listen.swift`), bara i Expo-appen. Audiobookshelf och Plexamp har det.
+- Låttexter finns i webben men inte i någon av apparna (inget om låttext i `apps/`); Plexamp visar synkade texter.
+
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
-- Feedback i apparna är inte provad på riktig telefon, Apple TV, Google TV eller bil, och iOS/tvOS-appens är inte
-  kompilerad där den skrevs (se *Klart* 2026-11-27).
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
 
 **Uppspelning och stabilitet**
-- `docs/jamforelse.md` är inaktuell: den säger att fjärråtkomst utan portöppning saknas (BraXhn Relay finns) och att
-  apparna är pausade. Skriv om den efter läget i 1.2.2.
 - Anpassningsbar kvalitet i Safari, AVPlayer, ExoPlayer och Chromecast är inte provad på riktigt – ta med i
   uppspelningsvakten där det går.
 - Kvarlämnade mappar `*.gone-*` i omkodningsmappen efter avstängning (töms vid nästa start) – städa innan processen
   avslutas.
-- Docker-imagen för arm64 byggs i GitHub Actions men är inte provad på en arm-maskin.
 
 **Säkerhet och integritet**
 - Skärmtiden kan fortfarande kringgås av den som hämtar hela originalfilen snabbt och tittar ur egen kopia. Överväg
@@ -151,10 +243,10 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 **Det som saknas jämfört med andra**
 - Egna appar för Samsung- och LG-TV, Roku och Fire TV (Plex, Jellyfin och Emby har dem). I dag: webbläsaren och DLNA.
 - Automatiska undertexter med tal till text. Går inte utan en modell – strider mot "inga beroenden".
-- CarPlay (kräver tillstånd från Apple, se *Bara Anton kan göra*).
 - Röststyrning (Alexa, Google Assistant). Webhooks och API-nycklar finns för Home Assistant.
 - Ansiktsigenkänning i foton (Plex har det). Låg nytta här.
-- Skicka e-bok till läsplatta med e-post (Audiobookshelf har det) – kontrollera först om det redan finns.
+- Skicka e-bok till läsplatta med e-post (Audiobookshelf har det). Inget sådant hittat i `server/` eller `web/js/`
+  (sökt på kindle, send-to och e-post för e-böcker).
 - Expo-appen: live-TV och TV-guide.
 - Expo-appen: `NSLocalNetworkUsageDescription` i `app.json` är bara på svenska; iOS visar den när appen ber om hemnätet.
   Ett eget bygge kan få en engelsk variant med `locales` i `app.json` (gäller inte Expo Go).
@@ -173,17 +265,14 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 ## Klart
 
-- 2026-11-27: Expo-appen på engelska, gren `team/expo-engelska-2026-11-27`. `src/i18n.ts` (`t`, `tn`, `fmtNum`,
-  språkval efter telefonen via `Intl` – svenska → sv, annars en – och *Konto → Språk*, sparat i telefonen) och
-  `src/i18n-en.ts` med 380 texter, varav 156 med exakt webbens engelska. `Accept-Language` till servern, datum och tal
-  efter språket, plural med `Intl.PluralRules`, smarta listornas namn efter id. `test/expo-i18n.test.js` (7 fall: ingen
-  svensk text utanför `t()` – 286 fynd på main –, katalogen mot koden och webben, språkval/plural/tal i Node);
-  `test/expo-offline.test.js` kör nu på svenska uttryckligen. Webbläget mot en egen server med Playwright (390×844,
-  Chrome på engelska): start, film, serie, musik, album, helskärmsspelare, Konto, Nedladdat (bara webbens besked – med
-  en tillfällig byggvariant, eftersom Nedladdat inte nås i webbläget), Feedback och Mina ärenden utan svensk text, byte
-  till svenska och tillbaka. **Inte provat:** Expo Go på en riktig telefon på engelska (att `Intl` ger telefonens språk
-  i Hermes på iPhone och Android), Nedladdat med riktiga nedladdningar på engelska.
+Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHANGELOG.md).
 
+### Ej utgiven
+
+- 2026-11-27: Expo-appen frågar servern vad som är kodat vid spolning (commit `8d49b54`). `/api/stream/:id/hls/ready`
+  (samma svar som `X-Seg-Ready`, startar aldrig någon omkodning) var 4:e sekund medan strömmen spelar; svaret används
+  i 8 s (`readyFor` i `apps/expo/src/seekcore.ts`), annars gissar appen som förut. `prev` och `replaced=1` står i
+  `docs/api.md`. **Inte provat:** riktig telefon.
 - 2026-11-27: Snabb spolning i en omkodning i iOS/tvOS-appen, gren `team/apple-spola-2026-11-27`. Reglerna i
   `Shared/SeekCore.swift` (bara Foundation, samma gränser som Expo/Android): ett hopp i positionen utanför bufferten
   startar om strömmen vid målet med `/playback?start=&prev=` efter 0,6 s utan nytt steg (`seekRestart` i
@@ -194,6 +283,19 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   ljudböcker, poddar, kanallogor och *Kommer snart*. `test/apple-seek.test.js` (2 statiska fall) jämför gränserna med
   Expo/Android; kontraktet har en variant med `start` och `prev` för iOS. **Inte provat:** appen är inte kompilerad
   här (ingen Xcode, ingen Swift) och inte körd på iPhone, iPad eller Apple TV.
+
+### 1.5.0
+
+- 2026-11-27: Expo-appen på engelska, gren `team/expo-engelska-2026-11-27`. `src/i18n.ts` (`t`, `tn`, `fmtNum`,
+  språkval efter telefonen via `Intl` – svenska → sv, annars en – och *Konto → Språk*, sparat i telefonen) och
+  `src/i18n-en.ts` med 380 texter, varav 156 med exakt webbens engelska. `Accept-Language` till servern, datum och tal
+  efter språket, plural med `Intl.PluralRules`, smarta listornas namn efter id. `test/expo-i18n.test.js` (7 fall: ingen
+  svensk text utanför `t()` – 286 fynd på main –, katalogen mot koden och webben, språkval/plural/tal i Node);
+  `test/expo-offline.test.js` kör nu på svenska uttryckligen. Webbläget mot en egen server med Playwright (390×844,
+  Chrome på engelska): start, film, serie, musik, album, helskärmsspelare, Konto, Nedladdat (bara webbens besked – med
+  en tillfällig byggvariant, eftersom Nedladdat inte nås i webbläget), Feedback och Mina ärenden utan svensk text, byte
+  till svenska och tillbaka. **Inte provat:** Expo Go på en riktig telefon på engelska (att `Intl` ger telefonens språk
+  i Hermes på iPhone och Android), Nedladdat med riktiga nedladdningar på engelska.
 - 2026-11-27: Feedback och Mina ärenden i iOS/tvOS-appen och sparad bildtoken, gren `team/apple-feedback-2026-11-27`.
   Samma formulär och *Mina ärenden* som Expo och Android, under *Inställningar* och som *Rapportera felet* i spelaren;
   på Apple TV med tvOS tangentbord (`Shared/Feedback.swift` med reglerna i `FeedbackCore`, `Shared/FeedbackViews.swift`;
@@ -239,7 +341,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   grafikkort). Prövat och inte behållet (siffror i `docs/arkitektur.md`): servering medan segmentet skrivs (hls.js
   lägger bara in hela segment, och lokalt tar överföringen 5–20 ms), `ultrafast`/`zerolatency` för början, mindre
   `-probesize`.
-
 - 2026-11-26: Undertexter i offline-filen, gren `team/offline-undertext-2026-11-26`. Fel: `server/offline.js` kodade
   med `-sn`, så nedladdade filmer saknade undertexter i filen – apparna ritade egna ovanpå, som inte syns i telefonens
   helskärm, bild-i-bild eller AirPlay/Chromecast. Nu läggs textundertexterna (inbäddade, externa `.sv.srt` och
@@ -258,7 +359,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `OfflineCoreTest.kt`. Inte provat: kompilering av `Api.kt`, `MainActivity.kt`, `MusicService.kt` och
   `PlayerScreen.kt` (`Offline.kt`, `OfflineSync.kt` och `Net.kt` kompilerade mot Android 14:s klasser), uppdatering
   från 0.7.0 på riktig enhet.
-
 - 2026-11-26: Android-appen: positioner och skärmtid utan nät (samma regler som Expo-appen), gren
   `team/android-offline-2026-11-26`. Fel: `PlayerScreen.report` gjorde inget när `/api/items/:id` inte svarade (nedladdad
   titel utan nät), och `Api.reportProgress` släppte positionen vid nätfel; skärmtiden kollades bara i serverns svar.
@@ -279,6 +379,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   med flit inte till (den stänger av `NSAllowsArbitraryLoads`). **Inte provat:** kompilering (ingen Xcode här – bygg med
   `apple.yml`), riktig iPhone/Apple TV, frågan om lokalt nätverk, *Klart när* (Apple TV hemma med reläets adress spelar
   med `remote: false`).
+
+### 1.4.4
+
 - 2026-11-26: Hårdvaruomkodning – provet i Administration (förut punkt 2), gren `team/hwprov-2026-11-26`.
   *Administration → Hårdvaruomkodning → Prova omkodningen* (`server/hwprobe.js`, `web/js/views/admin-hwprobe.js`,
   `/api/admin/hwprobe`): genererad testbild, H.264/HEVC/HEVC 10 bitar i 1080p och 4K med `HWACCEL` och med processorn,
@@ -296,6 +399,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   längre tas bort när servern svarar. Nytt paket `expo-file-system`. `test/expo-offline.test.js` (18 fall, logiken och
   `offline.ts` med låtsat filsystem och server). **Inte provat:** riktig telefon, flygplansläge, bakgrundsnedladdning i
   Expo Go och eget bygge – *Klart när* (film i flygplansläge, positionen syns på servern efteråt) väntar på Anton.
+
+### 1.4.2
+
 - 2026-11-26: Hemma via den publika adressen i Android-appen (telefon, Google TV, bil; punkt 6 för Android), gren
   `team/android-hemma-2026-11-26`. Samma regler som Expo-appen: `/api/local` från den sparade adressen, alla hemadresser
   provas samtidigt (800 ms, utan inloggning, utan omdirigeringar), används bara när `id` och `proof` stämmer exakt.
@@ -305,6 +411,9 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `app/src/test/…/LocalPickTest.kt` (10 fall, körda på JVM här; körs inte i workflowet). Inte provat: kompilering av hela
   appen (ingen Android SDK – `LocalPick.kt` och `Hemma.kt` kompilerade mot Media3 1.4.1, Coil 2.7.0 och Android 14:s
   klasser), riktig telefon, Google TV och bil, riktigt hemnät med relä.
+
+### 1.4.1
+
 - 2026-11-25: Hemma via den publika adressen (förut punkt 1, ärende #2), gren `team/hemma-2026-11-25`. Servern ger
   inloggade sina hemadresser och ett prov som bara besvaras på hemnätet (`/api/local*`, `server/localaddr.js`); Expo-appen
   går direkt till hemadressen när den svarar rätt, webben har *Mitt konto → Snabbare hemma* (byte till hemadressen med
@@ -319,15 +428,18 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - 2026-11-25: Kön i reläets tunnel (`server/tunnelq.js`, ärende #2): små svar väntade 2–6 s bakom en film, ljudbok eller
   hastighetsprovet (4 MB per ström i en enda TCP-anslutning). Nu ~0,2 s kö; bara servern ändrad, reläet behöver inte
   byggas om. Mätt med strypt tunnel på loopback, inte på en riktig VPS.
+- 2026-11-25: Uppspelningsvakt i riktig Chrome (`npm run vakt`, `test/vakt.mjs`) – sex filer × elva fall (start, Fortsätt
+  titta, paus, spolning inom och utanför bufferten, kvalitet, ljud, undertext) med tid till bild, avkodningsfel och
+  tappade bildrutor; körs före varje stabil utgåva och stoppar den vid fel. Siffrorna i `docs/testat.md`.
+
+### 1.4.0
+
 - 2026-11-25: Sovtimer i videospelaren (15/30/45/60 min eller *När avsnittet tar slut*, nedtoning, paus som sparar
   positionen, följer med till nästa avsnitt, fjärrkontroll) och skärmtiden i webbspelaren (*X min kvar idag*, varning de
   sista fem minuterna). Paus räknades som skärmtid: vid direktuppspelning upp till 20 s per paus (Chrome: 6 s
   uppspelning + 60 s paus = 20 s räknat, nu 7 s; `streamMeter`), och en paus under 45 s helt när filmen startade igen
   (rapport vid start, `heartbeat`). Pilarna i dialoger från spelaren fungerar (`router.js`). Inte gjort: Safari och
-  apparna (se *Näst på tur* 5).
-- 2026-11-25: Uppspelningsvakt i riktig Chrome (`npm run vakt`, `test/vakt.mjs`) – sex filer × elva fall (start, Fortsätt
-  titta, paus, spolning inom och utanför bufferten, kvalitet, ljud, undertext) med tid till bild, avkodningsfel och
-  tappade bildrutor; körs före varje stabil utgåva och stoppar den vid fel. Siffrorna i `docs/testat.md`.
+  apparna (se *Näst på tur* 10).
 - 2026-11-25: Feedback – notis till administratören när något väntar (utan text och namn, högst en i timmen),
   *Öppna igen* för avslutade ärenden, gallring efter 180 dagar; API-nycklar går att ändra.
 - 2026-11-25: Engelska i serverns texter – felmeddelanden, skärmtid,
@@ -337,7 +449,7 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - 2026-11-25: Expo-appen – musik, ljudböcker och poddar: fliken *Musik* (översikt, album, artister, spellistor,
   sökning, ljudböcker, poddar), albumsida, minispelare och helskärmsspelare med `expo-audio`; kön delas med webben via
   `/api/me/queue` och visas pausad efter omstart; ljudböcker och avsnitt fortsätter där man slutade. Visat i
-  webbläget (Chrome 390×844); bakgrundsljud och låsskärm inte provade på riktig telefon (punkt 4).
+  webbläget (Chrome 390×844); bakgrundsljud och låsskärm inte provade på riktig telefon (se *Bara Anton kan göra*).
 - 2026-11-25: Expo-appen – *Vem tittar?* efter inloggningen och *Byt profil* under
   Konto, med PIN och huvudkontots lösenord som i webben; barnprofiler ser bara det de får se. Bildtoken sparas per
   server och profil och förnyas bara när den snart går ut eller servern svarar 401.
@@ -353,42 +465,66 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   spolning vid låtbyte rättade; musikfältet med ikoner som ryms på telefon.
 - 2026-11-25: Öppen GOP känns igen på servern (remux från början, omkodning vid Fortsätt titta och spolning);
   kvalitetsmenyn efter källans upplösning; spårens namn efter språket i spelaren, Chromecast och fjärrstyrningen.
-- 2026-11-24 (efter 1.2.2, i `:edge`): Feedback och felrapporter i appen med granskning under Administration → Support.
-- 2026-11-24: Öppen GOP i webben – Fortsätt titta och spolning fastnar inte längre på avkodningsfel.
-- 2026-11-24: Fjärde granskningen av servern (skärmtid räknas från strömmen, skanningens status, sortering).
-- 2026-11-24: Webben på TV och telefon (fjärrkontroll i spelarens inställningar, större reglage, undertexternas namn).
-- 2026-11-24: Musikspelaren (minnesläcka vid glapplöst, avbrutna hämtningar, nätavbrott, växande början).
+
+### Äldre än 1.4.0
+
+- 1.3.0 (2026-11-24): backloggen, feedback och felrapporter med granskning under *Administration → Support*, öppen GOP
+  i webben (Fortsätt titta och spolning fastnar inte), fjärde granskningen av servern, webben på TV och telefon och
+  musikspelarens minne, hopp i kön och dåligt nät.
+- 1.2.2 och tidigare: se [CHANGELOG.md](../CHANGELOG.md).
 
 ## Bara Anton kan göra
 
-- Ge teamet serverns adress utifrån och en API-nyckel med behörigheten *Support* (utan *Bara från hemnätet*), så att godkända ärenden kan hämtas.
-- Läs den nya formuleringen i `PRIVACY.md` om feedback och felrapporter.
+**Konton, GitHub och beslut**
 
+- Ge teamet serverns adress utifrån och en API-nyckel med behörigheten *Support* (utan *Bara från hemnätet*), så att
+  godkända ärenden kan hämtas.
+- Läs den nya formuleringen i `PRIVACY.md` om feedback och felrapporter.
 - **Supporttråd på Unraid-forumet:** skapa tråden och skicka länken, så att `<Support>` i `braxhn-tv.xml` och
   `braxhn-tv-nvidia.xml` kan peka dit (i dag pekar den på GitHub-ärenden).
 - **Skicka in mallen till Community Applications.**
 - **Gör paketet publikt** (containerimagen på GitHub).
 - **Slå på Private vulnerability reporting** i repots inställningar på GitHub.
-- **Prova Expo-appen i Expo Go** på en riktig iPhone och Android-telefon (`apps/expo/README.md`).
-- **Prova Android-appen utan nät:** ladda ner en film, slå på flygplansläget, spela en stund från *Inställningar →
-  Nedladdat för offline*, stäng och spela igen (ska fortsätta där du var), slå av flygplansläget och kontrollera att
-  positionen syns i webben. Med en barnprofil med lite tid kvar: filmen ska stoppa med serverns besked utan nät.
-- **Prova Android-appens nedladdningar per profil:** installera den nya versionen över 0.7.0 med en nedladdad film
-  (filmen ska finnas kvar för samma profil), byt till en barnprofil (ska inte se den), logga ut (frågan, sedan borta),
-  och lyssna på en ljudbok i bilen genom en tunnel (positionen ska synas i webben efteråt).
-- **Prova nedladdning i Expo-appen** på iPhone och Android: ladda ner en film (480p) och en ljudbok, slå på
-  flygplansläget, starta om appen (den ska öppna *Nedladdat*), titta en stund, slå av flygplansläget och kontrollera att
-  positionen syns i webben. Prova också att låsa skärmen under en nedladdning i några minuter.
-- **Prova Snabbare hemma** hemma med reläets adress: *Mitt konto → Öppna hemadressen* i webben, och Expo-appen (Konto
-  visar *Hemma: direkt via …*). Står det ingen hemadress: öppna servern en gång på dess IP-adress eller ange den under
-  *Administration → Hemadressen*.
-- **Prova återupptagning på iPhone** (Safari, version 1.2.2): börja på en film, stäng, öppna igen – fortsätter den på
-  rätt ställe direkt?
-- **Prova hack i Chrome på version 1.2.2** med de filer som frös förut.
+- **Ta bort grenarna `android-engelska` och `windows-prov`** på GitHub (Android-appen på engelska kom i 1.4.0 och
+  Windows-appen i 1.4.1). Kontrollera först: 2026-11-27 hade `windows-prov` bara en commit vars ändring redan finns på
+  `main` (`fec6612`, samma som iOS-feedbacken), men `android-engelska` hade en ny commit som inte finns på `main`
+  (`c5170ae`, Android: bildtoken och nedladdningarnas förlopp per profil) – slå ihop eller flytta den först.
+- **CarPlay:** ansök om tillståndet hos Apple om det ska byggas.
+
+**Hårdvara hemma**
+
 - **Kör hårdvaruprovet med NVENC** på Unraid-servern: *Administration → Hårdvaruomkodning → Prova omkodningen* när
   ingen tittar. Skicka en skärmbild, eller diagnostikpaketet (*Hälsokontroll*, `hardware.json` → `probe`). Står det
-  *Fungerar inte* för H.264: följ förklaringen och prova igen. Blir 10-bitars HEVC eller 4K långsammare än 1 × vill vi veta det.
+  *Fungerar inte* för H.264: följ förklaringen och prova igen. Blir 10-bitars HEVC eller 4K långsammare än 1 × vill
+  vi veta det. Med grafikkortet är första segmentet fortfarande 2 s – siffrorna avgör om det också kan bli 1 s.
+- **Docker-imagen för arm64** är byggd i GitHub Actions men inte provad på en arm-maskin (t.ex. en Raspberry Pi 4/5).
+
+**Riktiga enheter**
+
+- **iPhone (Safari):** börja på en film, stäng, öppna igen – fortsätter den på rätt ställe direkt? Spola långt fram i
+  en film som kodas om och säg ungefär hur länge det tar innan bilden kommer.
+- **Appen för iPhone, iPad och Apple TV** (bygg med `apple.yml`): Fortsätt titta och spolning långt fram i en omkodad
+  film (även med fjärrkontrollen), *Skicka feedback* och *Mina ärenden*, att bilderna kommer tillbaka efter en stund,
+  och *Hemma: direkt via …* med reläets adress.
+- **Expo-appen i Expo Go** på en riktig iPhone och Android-telefon (`apps/expo/README.md`), på svenska och med
+  telefonen på engelska:
+  - musik med låst skärm i mer än tre minuter, hörlurarnas knappar och omslaget på låsskärmen;
+  - nedladdning: ladda ner en film (480p) och en ljudbok, slå på flygplansläget, starta om appen (den ska öppna
+    *Nedladdat*), titta en stund, slå av flygplansläget och kontrollera att positionen syns i webben; lås också skärmen
+    under en nedladdning i några minuter;
+  - spolning långt fram i en omkodad film, och *Skicka feedback*.
+- **Android-appen utan nät:** ladda ner en film, slå på flygplansläget, spela en stund från *Inställningar →
+  Nedladdat för offline*, stäng och spela igen (ska fortsätta där du var), slå av flygplansläget och kontrollera att
+  positionen syns i webben. Med en barnprofil med lite tid kvar: filmen ska stoppa med serverns besked utan nät.
+- **Android-appens nedladdningar per profil:** installera den nya versionen över 0.7.0 med en nedladdad film
+  (filmen ska finnas kvar för samma profil), byt till en barnprofil (ska inte se den), logga ut (frågan, sedan borta),
+  och lyssna på en ljudbok i bilen genom en tunnel (positionen ska synas i webben efteråt).
+- **Android-appen på Google TV:** spolning med fjärrkontrollen i en omkodad film (fem tryck i rad), *Skicka feedback*
+  med fjärrkontrollen, och appen på engelska.
+- **Snabbare hemma** med reläets adress: *Mitt konto → Öppna hemadressen* i webben, och apparna (Konto/Inställningar
+  visar *Hemma: direkt via …*). Står det ingen hemadress: öppna servern en gång på dess IP-adress eller ange den under
+  *Administration → Hemadressen*.
+- **Hack i Chrome** med de filer som frös förut (version 1.2.2 eller senare).
 - Det som i övrigt kräver riktig hårdvara eller konton står i *Testat och otestat* i README: Chromecast och AirPlay,
-  Google TV-appen på en TV, Android Auto, Let's Encrypt med en publik domän, BraXhn Relay på en riktig VPS, riktiga
-  IPTV-leverantörer och passkeys på telefon.
-- **CarPlay:** ansök om tillståndet hos Apple om det ska byggas.
+  Android Auto, Let's Encrypt med en publik domän, BraXhn Relay på en riktig VPS, riktiga IPTV-leverantörer, passkeys
+  på telefon och Windows-appen på en riktig dator.
