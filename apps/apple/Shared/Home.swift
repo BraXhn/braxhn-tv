@@ -208,13 +208,9 @@ struct UpcomingShelf: View {
         VStack(alignment: .leading, spacing: 6) {
             AsyncImage(url: posterURL(e)) { ph in
                 if let img = ph.image { img.resizable().scaledToFill() }
-                else {
-                    ZStack {
-                        LinearGradient(colors: [Color(hue: hueFor(e.show ?? ""), saturation: 0.5, brightness: 0.4), Color(hue: hueFor(e.show ?? ""), saturation: 0.6, brightness: 0.18)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                        Text(e.show ?? "").font(.headline).multilineTextAlignment(.center).padding(8)
-                    }
-                }
+                // Bilden gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+                else if ph.error != nil { upcomingEmpty(e).onAppear { model.imageFailed(posterURL(e)) } }
+                else { upcomingEmpty(e) }
             }
             .frame(width: width, height: width * 1.5)
             .clipped()
@@ -223,6 +219,14 @@ struct UpcomingShelf: View {
             Text([dateLabel(e.date), sxe(e)].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(width: width)
+    }
+
+    private func upcomingEmpty(_ e: UpcomingEntry) -> some View {
+        ZStack {
+            LinearGradient(colors: [Color(hue: hueFor(e.show ?? ""), saturation: 0.5, brightness: 0.4), Color(hue: hueFor(e.show ?? ""), saturation: 0.6, brightness: 0.18)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Text(e.show ?? "").font(.headline).multilineTextAlignment(.center).padding(8)
+        }
     }
 
     @MainActor private func posterURL(_ e: UpcomingEntry) -> URL? {

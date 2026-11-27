@@ -409,9 +409,12 @@ func artView(_ model: AppModel, path: String?, size: CGFloat, symbol: String) ->
         guard let p = path, let t = model.imageToken else { return nil }
         return model.url(p, [URLQueryItem(name: "t", value: t)])
     }()
+    let empty = ZStack { LinearGradient(colors: [.orange.opacity(0.45), .black], startPoint: .topLeading, endPoint: .bottomTrailing); Image(systemName: symbol).font(.title) }
     return AsyncImage(url: url) { ph in
         if let img = ph.image { img.resizable().scaledToFill() }
-        else { ZStack { LinearGradient(colors: [.orange.opacity(0.45), .black], startPoint: .topLeading, endPoint: .bottomTrailing); Image(systemName: symbol).font(.title) } }
+        // Bilden gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+        else if ph.error != nil { empty.onAppear { model.imageFailed(url) } }
+        else { empty }
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 8))

@@ -234,6 +234,27 @@ t('Safaris egen HLS (iPhone): startpositionen står i spellistorna, och strömme
   assert.ok(!(await text(zero.url)).includes('EXT-X-START'));
 });
 
+t('Apple TV (utan nhls): appen lägger själv till xs, och spellistorna får EXT-X-START utan att sessionen byts', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const text = async (u) => (await fetch(new URL(u, B), { headers: A() })).text();
+  // Som en omstart vid spolning i tvOS-appen: start och prev, inget nhls (då skulle Dolby Digital i TS bli AAC)
+  const pb = await getJson('force=transcode&start=40.4&prev=0123abcd');
+  assert.ok(!pb.url.includes('xs='), 'servern lägger inte till xs utan nhls');
+  // SeekCore.withStart i apps/apple/Shared/SeekCore.swift: xs=<hela sekunder> sist i adressen
+  const url = pb.url + '&xs=40';
+  const master = await text(url);
+  assert.match(master, /#EXT-X-START:TIME-OFFSET=40,PRECISE=YES/);
+  const media = await text(url.replace('master.m3u8', 'index.m3u8'));
+  assert.match(media, /#EXT-X-START:TIME-OFFSET=40,PRECISE=YES/);
+  // Segmenten bär med sig xs men hör till samma session (xs ingår inte i nyckeln): ffmpeg förstartad vid 40 s, korta segment där
+  const seg = media.split('\n').find(l => l.startsWith('seg-'));
+  assert.match(seg, /[?&]xs=40(&|$)/);
+  const own = sessions().filter(x => x.d.pid === pidOf(pb.url));
+  assert.equal(own.length, 1, 'en session för strömmen');
+  assert.ok(own[0].proc && own[0].segs[own[0].start].start >= 39 && own[0].segs[own[0].start].start <= 40.4, `förstartad vid ${own[0].segs?.[own[0].start]?.start}`);
+  assert.ok(own[0].segs.some(s => s.start === 40 && s.dur <= 1.01), 'kort segment vid målet');
+});
+
 t('stopp medan spelaren väntar på ett segment: ffmpeg startas inte om efteråt', async () => {
   for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
   const P = await playlist('force=transcode&q=480');

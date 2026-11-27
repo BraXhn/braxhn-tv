@@ -112,6 +112,13 @@ final class PlayerController: ObservableObject {
     private var retries = 0
     /// Hemadressen slutade gälla (Hemma.swift) – filmen byter adress
     private var homeObserver: NSObjectProtocol?
+    // Spolning i en omkodning (SeekCore, seekRestart nedan): strömmens segment och mätningar, omstarten som väntar på
+    // fler steg från fjärrkontrollen, omstartens nummer (en äldre som blir klar senare tar inte över) och om en omstart
+    // pågår (då är den gamla strömmen stoppad på servern och dess fel ska inte visas)
+    private var seekWatch: SeekCore.Watch?
+    private var settleTask: Task<Void, Never>?
+    private var seekGen = 0
+    private var seekRestarting = false
 
     init(model: AppModel) {
         self.model = model
@@ -214,7 +221,8 @@ final class PlayerController: ObservableObject {
                 Task { [model] in try? await model.post("/api/stream/\(itemId)/stop") }
                 return
             }
-            guard let url = model.absolute(p.url) else { throw APIError(message: L("Ogiltig ström-URL")) }
+            // xs: spellistan säger var uppspelningen börjar (EXT-X-START) – även på Apple TV (SeekCore.withStart)
+            guard let url = model.absolute(p.mode == "direct" ? p.url : SeekCore.withStart(p.url, at: start)) else { throw APIError(message: L("Ogiltig ström-URL")) }
             resetState()
             beginPreparing(gen: gen)
             item = it
@@ -238,6 +246,7 @@ final class PlayerController: ObservableObject {
             let playerItem = makeMainItem(url)
             serverSession = true
             canComfort = true
+            if p.mode == "transcode" { watchStream(url, from: start) }
             // Bio-läge: trailers och förfilm först (filer som AVPlayer inte klarar hoppas över)
             let queue = (p.preroll ?? []).filter { !($0.mime ?? "").contains("matroska") && !($0.mime ?? "").contains("webm") }
             let urls = queue.compactMap { model.absolute($0.url) }
@@ -260,7 +269,7 @@ final class PlayerController: ObservableObject {
     }
 
     /// Startar själva filmen/avsnittet (direkt, eller när bio-lägets kö är slut)
-    private func startMain(_ playerItem: AVPlayerItem, at start: Double, gen: Int) async {
+    private func startMain(_ playerItem: AVPlayerItem, at start: Double, gen: Int, play: Bool = true) async {
         guard isLive(gen) else { return }
         mainStart = start
         playbackBegan = false
@@ -270,7 +279,8 @@ final class PlayerController: ObservableObject {
         reporting = true
         if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
         guard isLive(gen) else { return }
-        player.play()
+        // Pausad film förblir pausad efter en omstart vid spolning (då är bilden där och inget förbereds längre)
+        if play { player.play() } else { preparing = false; slowStart = false }
         installObservers()
         if let s = subtitle { await loadCues(for: s, gen: gen) }
     }
@@ -386,6 +396,11 @@ final class PlayerController: ObservableObject {
         preparing = false
         slowStart = false
         playbackBegan = false
+        settleTask?.cancel()
+        settleTask = nil
+        seekWatch = nil
+        seekGen += 1
+        seekRestarting = false
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -482,6 +497,8 @@ final class PlayerController: ObservableObject {
 
     private func tick(_ t: Double) {
         guard t.isFinite, !closed, prerollTitle == nil else { return }
+        // Spolning i en omkodning: ett hopp utanför bufferten startar om strömmen vid målet
+        if seekWatch != nil, !seekRestarting { observeSeek(t) }
         // Undertexter
         let st = t - subtitleOffset
         if let c = cues.last(where: { $0.start <= st }), st <= c.end { if subtitleText != c.text { subtitleText = c.text } }
@@ -542,6 +559,8 @@ final class PlayerController: ObservableObject {
         generation += 1
         loadTask?.cancel()
         loadTask = nil
+        settleTask?.cancel()
+        settleTask = nil
         onFinished = nil
         stopReporting()
         clearPrerollObservers()
@@ -824,7 +843,7 @@ extension PlayerController {
         preparing = false
         slowStart = false
         // Bara själva filmen räknas – en trailer i bio-läget som spelar betyder inte att filmen har startat
-        if prerollTitle == nil { playbackBegan = true }
+        if prerollTitle == nil { playbackBegan = true; seekWatch?.markStarted() }
     }
 
     fileprivate func makeMainItem(_ url: URL) -> AVPlayerItem {
@@ -862,7 +881,7 @@ extension PlayerController {
     /// grafikkortet inte hunnit koda klart. Annars: stoppad av servern, eller ett fel med Försök igen.
     fileprivate func mainFailed(_ oid: ObjectIdentifier, gen: Int, message: String?) {
         guard !closed, gen == generation, let cur = player.currentItem, ObjectIdentifier(cur) == oid,
-              stopNotice == nil, error == nil else { return }
+              stopNotice == nil, error == nil, !seekRestarting else { return }
         // Hemadressen svarar inte längre: samma ström-URL (samma session) via adressen som gäller nu, där filmen var
         if let url = mainURL {
             _ = model.homeFailed(url)
@@ -908,11 +927,13 @@ extension PlayerController {
 
     /// Byter filmens adress och fortsätter där den var (pausad film förblir pausad)
     fileprivate func switchStream(_ url: URL, gen: Int) {
-        mainURL = url
         let t = player.currentTime().seconds
         let at = t.isFinite && t > 1 ? t : mainStart
+        // Startpositionen i spellistan (xs) följer med dit filmen är nu (samma session på servern)
+        let moved = URL(string: SeekCore.withStart(url.absoluteString, at: at)) ?? url
+        mainURL = moved
         let paused = playbackBegan && player.timeControlStatus == .paused
-        let item = makeMainItem(url)
+        let item = makeMainItem(moved)
         Task { [weak self] in
             guard let self, self.generation == gen, !self.closed else { return }
             await self.startMain(item, at: at, gen: gen)
@@ -939,5 +960,113 @@ extension PlayerController {
         error = nil
         canRetry = false
         restart(audio: audio, subtitle: subtitle)
+    }
+}
+
+// MARK: - Spolning i en omkodning (SeekCore)
+
+extension PlayerController {
+    /// Omkodad ström: spellistans segment (för beslutet vid en spolning). Hämtas bredvid spelaren och påverkar inte
+    /// starten; körningen på servern börjar vid segmentet med from.
+    fileprivate func watchStream(_ url: URL, from: Double) {
+        seekWatch = SeekCore.Watch()
+        let sg = seekGen
+        guard let idx = URL(string: SeekCore.indexURL(url.absoluteString)) else { return }
+        let req = URLRequest(url: idx, timeoutInterval: 10)
+        Task { [weak self] in
+            guard let pair = try? await URLSession.shared.data(for: req),
+                  (pair.1 as? HTTPURLResponse)?.statusCode == 200,
+                  let txt = String(data: pair.0, encoding: .utf8) else { return }
+            guard let self, self.seekGen == sg, self.seekWatch != nil else { return }
+            self.seekWatch?.setFrags(SeekCore.parseFrags(txt), from: from)
+        }
+    }
+
+    /// Slutet på bufferten där t ligger (t om inget är buffrat där)
+    fileprivate func bufferedEnd(_ t: Double) -> Double {
+        guard let ranges = player.currentItem?.loadedTimeRanges else { return t }
+        for v in ranges {
+            let r = v.timeRangeValue
+            let a = r.start.seconds, b = CMTimeRangeGetEnd(r).seconds
+            if a.isFinite, b.isFinite, t >= a - 0.1, t <= b { return b }
+        }
+        return t
+    }
+
+    /// Varje mätning (var 0,25 s och vid varje hopp i tiden): har användaren spolat utanför bufferten? Då startas
+    /// strömmen om vid målet när inget nytt steg kommit på SeekCore.stepSettle sekunder (Apple TV:s klick åt
+    /// höger/vänster, reglaget som drar). Ett nytt steg flyttar målet; hamnar det där spelaren klarar sig själv
+    /// behövs ingen omstart.
+    fileprivate func observeSeek(_ t: Double) {
+        let now = SeekCore.Sample(pos: t, buf: bufferedEnd(t), at: ProcessInfo.processInfo.systemUptime,
+                                  playing: player.timeControlStatus == .playing, rate: Double(player.rate))
+        guard let action = seekWatch?.observe(now) else { return }
+        switch action {
+        case .keep:
+            break
+        case .cancel:
+            settleTask?.cancel()
+            settleTask = nil
+        case .restart:
+            settleTask?.cancel()
+            let gen = generation
+            settleTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(SeekCore.stepSettle * 1_000_000_000))
+                guard !Task.isCancelled, let self, self.generation == gen, let to = self.seekWatch?.pending else { return }
+                await self.seekRestart(to: to, gen: gen)
+            }
+        }
+    }
+
+    /// Spolning i en omkodning: strömmen startas om vid målet (/playback med start och prev). Servern ger korta
+    /// segment där och stoppar den gamla strömmen. Samma ljudspår, undertext (ritas av appen), hastighet och paus som
+    /// förut; adressen är den som gäller nu (hemadressen hemma, model.get/absolute).
+    fileprivate func seekRestart(to t: Double, gen: Int) async {
+        guard !closed, generation == gen, let id = currentId, let old = pb else { return }
+        seekGen += 1
+        let sg = seekGen
+        seekWatch = nil
+        seekRestarting = true
+        let play = player.timeControlStatus != .paused
+        let rate = player.rate
+        // Den gamla strömmen står still: den stoppas ändå på servern (prev), och dess fel visas inte (seekRestarting)
+        player.pause()
+        // Före första bilden i den nya strömmen gäller målet (restart() och nya försök i mainFailed)
+        mainStart = t
+        playbackBegan = false
+        retries = 0
+        var q = model.capabilities(audio: selectedAudio ?? audio, subtitle: subtitle) + model.comfortQuery()
+        q.append(URLQueryItem(name: "start", value: String(Int(t))))
+        if let pid = SeekCore.pidOf(old.url) { q.append(URLQueryItem(name: "prev", value: pid)) }
+        do {
+            let p: Playback = try await model.get("/api/items/\(id)/playback", q)
+            guard !closed, generation == gen, seekGen == sg else { stopReplaced(id, p.url); return }
+            guard let url = model.absolute(p.mode == "direct" ? p.url : SeekCore.withStart(p.url, at: t)) else { throw APIError(message: L("Ogiltig ström-URL")) }
+            pb = p
+            mainURL = url
+            if let a = p.audio, !a.isEmpty { audioTracks = a }
+            selectedAudio = p.audioSelected.flatMap { Int($0) } ?? selectedAudio
+            let item = makeMainItem(url)
+            seekRestarting = false
+            if p.mode == "transcode" { watchStream(url, from: t) }
+            await startMain(item, at: t, gen: gen, play: play)
+            guard !closed, generation == gen, seekGen == sg else { return }
+            if play, rate > 0, rate != 1 { player.rate = rate }
+            // Pausad: ingen spelstart som markerar bilden – spelarens egna hopp är klara när startMain är klar
+            if !play { seekWatch?.markStarted() }
+        } catch {
+            guard !closed, generation == gen, seekGen == sg, !isCancellation(error) else { return }
+            seekRestarting = false
+            preparing = false
+            slowStart = false
+            self.error = error.localizedDescription
+            canRetry = true
+        }
+    }
+
+    /// En ström som ersattes innan den användes stoppas (replaced=1: uppspelningen fortsätter, inget stopp räknas)
+    fileprivate func stopReplaced(_ id: Int, _ url: String) {
+        guard let pid = SeekCore.pidOf(url) else { return }
+        Task { [model] in _ = try? await model.post("/api/stream/\(id)/stop?pid=\(pid)&replaced=1") }
     }
 }

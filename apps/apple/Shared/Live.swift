@@ -85,6 +85,8 @@ struct ChannelLogo: View {
             if hasLogo, let t = model.imageToken, let u = model.url("/api/live/logo/\(id)", [URLQueryItem(name: "t", value: t)]) {
                 AsyncImage(url: u) { ph in
                     if let img = ph.image { img.resizable().scaledToFit().padding(4).background(Color.black.opacity(0.6)) }
+                    // Logon gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+                    else if ph.error != nil { Color.clear.onAppear { model.imageFailed(u) } }
                 }
             }
         }
@@ -473,6 +475,8 @@ struct LivePlayerScreen: View {
     @Environment(\.dismiss) private var dismiss
     let request: LivePlayRequest
     @StateObject private var playback = LivePlayback()
+    /// Rapportera felet: Feedback med Något fungerar inte och Live-TV förvalt (som i filmspelaren)
+    @State private var report = false
 
     var body: some View {
         ZStack {
@@ -493,10 +497,12 @@ struct LivePlayerScreen: View {
             if let e = playback.error {
                 VStack(spacing: 14) {
                     Text("Kunde inte spela").font(.headline)
-                    Text(e).font(.footnote).foregroundStyle(.secondary)
+                    Text(e).font(.footnote).multilineTextAlignment(.center).foregroundStyle(.secondary)
                     Button("Stäng") { close() }.buttonStyle(.borderedProminent)
+                    Button("Rapportera felet") { report = true }.buttonStyle(.bordered)
                 }
-                .padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(24).frame(maxWidth: 640).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .sheet(isPresented: $report) { FeedbackSheet(kind: "bug", area: "livetv").environmentObject(model) }
             }
         }
         .task { await playback.start(request, model: model) }

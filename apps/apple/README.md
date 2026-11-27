@@ -33,8 +33,16 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
   att spela finns *Rapportera felet* i spelaren. På Apple TV skrivs texten med tvOS tangentbord (eller iPhone och
   diktering). En administratör läser ärendet innan det skickas vidare
 - bildtoken (bilder laddas via adress med `?t=`) sparas i nyckelringen per server och profil och förnyas bara när
-  mindre än ett dygn är kvar eller servern svarar 401 på en bild – en ny token vid varje start skulle knuffa ut andra
-  apparnas (servern sparar högst 50 per användare)
+  mindre än ett dygn är kvar eller servern svarar 401 på en bild (affischer, titelsidans bakgrund, omslag, ljudböcker,
+  poddar och kanallogor) – en ny token vid varje start skulle knuffa ut andra apparnas (servern sparar högst 50 per
+  användare)
+- snabb spolning i en omkodad film: spolar du utanför det som är laddat startar appen om strömmen vid målet, med korta
+  segment där (`/playback` med `start` och `prev`, servern stoppar den gamla omkodningen), som webben och de andra
+  apparna. Ljudspår, undertext, hastighet och paus behålls. På Apple TV samlas klicken åt höger/vänster: omstarten
+  väntar 0,6 s på nästa klick. AVPlayer visar inte serverns `X-Seg-Ready`, så appen gissar ur bufferten vad servern
+  redan kodat. Apple TV skickar inte `nhls=1` (då blir Dolby Digital i TS AAC), så appen lägger själv till `xs` i
+  strömmens adress och spelaren börjar vid målet (`EXT-X-START`). Reglerna: `Shared/SeekCore.swift`
+- *Rapportera felet* även i live-TV-spelaren
 
 ## Bygga och installera (kräver en Mac)
 
@@ -109,7 +117,9 @@ appen att installera alls. Därför är det inte byggt – hellre en app som all
 
 Workflowet `.github/workflows/apple.yml` kompilerar båda målen på GitHubs macOS-maskiner vid varje push, utan signering. Koden är skriven och granskad, men **har inte kompilerats** i miljön där den skapades eftersom Xcode saknades där. Kör workflowet, eller bygg i Xcode, och rätta eventuella kompileringsfel.
 
-Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`), Feedbacks regler (`FeedbackCore` i `Feedback.swift`) och
-de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`) är rena typer utan nät och vyer, så att ett testmål kan
-läggas till för dem utan att något annat behöver ändras. `test/apple-i18n.test.js` (Node, utan Xcode) kontrollerar att
-varje svensk text i koden har en engelsk rad i `en.lproj/Localizable.strings` och att Feedbacks områden är serverns.
+Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`), Feedbacks regler (`FeedbackCore` i `Feedback.swift`),
+de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`) och spolningen (`SeekCore`) är rena typer utan nät och
+vyer, så att ett testmål kan läggas till för dem utan att något annat behöver ändras. `test/apple-i18n.test.js` (Node,
+utan Xcode) kontrollerar att varje svensk text i koden har en engelsk rad i `en.lproj/Localizable.strings` och att
+Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser är desamma som i Expo- och
+Android-appen.

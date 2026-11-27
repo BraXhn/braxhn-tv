@@ -222,9 +222,12 @@ func coverView(_ model: AppModel, albumId: Int?, has: Bool, size: CGFloat) -> so
         guard let a = albumId, has, let t = model.imageToken else { return nil }
         return model.url("/api/music/cover/\(a)", [URLQueryItem(name: "t", value: t)])
     }()
+    let empty = ZStack { LinearGradient(colors: [.purple.opacity(0.5), .black], startPoint: .topLeading, endPoint: .bottomTrailing); Image(systemName: "music.note").font(.title) }
     return AsyncImage(url: url) { ph in
         if let img = ph.image { img.resizable().scaledToFill() }
-        else { ZStack { LinearGradient(colors: [.purple.opacity(0.5), .black], startPoint: .topLeading, endPoint: .bottomTrailing); Image(systemName: "music.note").font(.title) } }
+        // Omslaget gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+        else if ph.error != nil { empty.onAppear { model.imageFailed(url) } }
+        else { empty }
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 8))

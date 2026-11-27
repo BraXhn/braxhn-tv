@@ -7,6 +7,20 @@
   medan filmen spelar och följer samma regel som webbspelaren; svarar servern inte gissar den som förut. Det nya
   anropet (`/api/stream/:id/hls/ready`) startar aldrig någon omkodning och kräver samma behörighet som strömmen.
   `prev` och `replaced=1` för omstart vid spolning står nu också i `docs/api.md`. Inte provat på riktig telefon.
+- **Spolning i en omkodad film går fortare även i appen för iPhone, iPad och Apple TV.** Spolar du långt fram eller bak
+  i en film som servern kodar om startar appen nu om strömmen där du spolade till, med korta stycken i början, som
+  webben, Expo- och Android-appen – i stället för att vänta tills servern kodat ett helt sexsekundersstycke. Den gamla
+  omkodningen stoppas direkt. Ljudspår, undertext, hastighet och paus behålls. Spolning inom det som redan är laddat,
+  eller dit servern troligen redan kodat, går som förut, och remux, direktuppspelning och nedladdade filmer påverkas
+  inte. På Apple TV samlas fjärrkontrollens steg (klick åt höger eller vänster): fem klick i rad blir en omstart vid
+  det sista målet. Apple TV:s spelare börjar nu också direkt vid rätt ställe i spellistan vid *Fortsätt titta* och
+  efter en spolning, som iPhone redan gjorde. Byggd i GitHub Actions men inte provad på riktig iPhone eller Apple TV.
+- **Rapportera felet i live-TV-spelaren i appen för iPhone, iPad och Apple TV.** Går en kanal eller inspelning inte att
+  spela finns knappen under *Stäng*, med *Live-TV* förvalt, som i filmspelaren.
+- **Bilder som slutat visas i appen för iPhone, iPad och Apple TV kommer tillbaka direkt.** Svarar servern att
+  bildtoken inte gäller längre (den kan knuffas ut av andra appar) hämtar appen nu en ny även från titelsidans
+  bakgrund, musikens omslag, ljudböckernas och poddarnas bilder, kanallogorna och *Kommer snart* – förut bara från
+  affischkorten.
 
 ## 1.5.0 – 2026-11-27
 - **Feedback och felrapporter i appen för iPhone, iPad och Apple TV.** Under *Inställningar* finns nu *Skicka

@@ -81,8 +81,12 @@ struct ItemDetailView: View {
 
     @MainActor @ViewBuilder func header(_ it: MediaItem) -> some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: model.backdropURL(it) ?? model.imageURL(it, landscape: true)) { ph in
-                if let img = ph.image { img.resizable().scaledToFill() } else { Color.secondary.opacity(0.15) }
+            let bg = model.backdropURL(it) ?? model.imageURL(it, landscape: true)
+            AsyncImage(url: bg) { ph in
+                if let img = ph.image { img.resizable().scaledToFill() }
+                // Bilden gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+                else if ph.error != nil { Color.secondary.opacity(0.15).onAppear { model.imageFailed(bg) } }
+                else { Color.secondary.opacity(0.15) }
             }
             .frame(height: headerHeight).frame(maxWidth: .infinity).clipped()
             .overlay(LinearGradient(colors: [.clear, Color.black.opacity(0.85)], startPoint: .center, endPoint: .bottom))

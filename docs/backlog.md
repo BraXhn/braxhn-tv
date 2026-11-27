@@ -100,9 +100,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `TOK` per app i `test/api-contract.test.js`), så en tredje app kräver ändringar i testet.
 - Android-appen sparar bildtoken bara i minnet och tar en ny vid varje start (`refreshImageToken` i
   `apps/automotive/.../Api.kt`) – samma knuff mot taket på 50 som Expo- och iOS-appen hade. Spara den som de gör nu.
-- iOS/tvOS-appen märker en utknuffad bildtoken (401) bara på affischkorten (`PosterCard` i `Views.swift`); titelsidans
-  bakgrund, musik, ljudböcker och kanallogor visar platshållaren tills token förnyas efter ett dygn eller ett kort
-  laddas om (`imageFailed` i `AppModel.swift`).
 - Album för offline skapar en medietoken per spår vid varje anrop (`/api/music/albums/:aid/offline` i
   `server/routes/music.js`); ett album över 300 spår tappar de första spårens token. En token per album vore lättare.
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
@@ -116,12 +113,14 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   segmentet (`d.abr` i `server/routes/playback.js`). Steget som mastern listar först kunde förstartas.
 - Spolning i en omkodning laddar om strömmen: under ~1 s visar tidslinjen 0:00 och "Förbereder…" (videoelementet kopplas
   om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
-- Safaris egen HLS (iPhone) och iOS/tvOS-appen spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan
-  bilden kommer. De kunde göra som webben (ny `/playback` med `start=` och `prev=`).
+- Safaris egen HLS (iPhone) spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan bilden kommer.
+  Den kunde göra som webben och apparna (ny `/playback` med `start=` och `prev=`).
 - Expo-appen frågar `/hls/ready` var 4:e sekund medan strömmen spelar och använder svaret i 8 s. En fråga som skickas
   strax före en spolning kan i sällsynta fall komma fram till servern efter spelarens begäran av målets segment (olika
   anslutningar) och då säga "kodas" – då väntar appen på 6 s-segmentet i stället för att starta om
   (`apps/expo/src/seekcore.ts` `readyFor`). Inte mätt på riktig telefon.
+- iOS/tvOS-appen gissar fortfarande vad servern har kodat (`readyGuess` i `Shared/SeekCore.swift`) och väntar 0,6 s
+  på nästa steg vid varje spolning, även med reglaget på iPhone. Den kunde fråga `/api/stream/:id/hls/ready` som Expo.
 - Expo-appens webbläge spolar utan omstart: Chromes HLS-spelare hämtar segment 0 och 1 i varje ny ström innan den går
   till målet (bryr sig inte om `EXT-X-START` eller `#t=`), och servern startar då om ffmpeg vid 0. Med hls.js i
   webbläget gick det att göra som webbspelaren (`apps/expo/src/screens/Player.tsx`).
@@ -185,6 +184,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   till svenska och tillbaka. **Inte provat:** Expo Go på en riktig telefon på engelska (att `Intl` ger telefonens språk
   i Hermes på iPhone och Android), Nedladdat med riktiga nedladdningar på engelska.
 
+- 2026-11-27: Snabb spolning i en omkodning i iOS/tvOS-appen, gren `team/apple-spola-2026-11-27`. Reglerna i
+  `Shared/SeekCore.swift` (bara Foundation, samma gränser som Expo/Android): ett hopp i positionen utanför bufferten
+  startar om strömmen vid målet med `/playback?start=&prev=` efter 0,6 s utan nytt steg (`seekRestart` i
+  `Player.swift`), med samma ljudspår, undertext, hastighet och paus; en inaktuell ström stoppas med `replaced=1`.
+  Apple TV skickar inte `nhls` (Dolby Digital i TS skulle bli AAC), så appen lägger själv till `xs` i strömmens adress
+  (`SeekCore.withStart`) och spellistorna får `EXT-X-START` – provat mot servern i `test/fast-resume.test.js` (nytt
+  fall, 12 gröna). Även *Rapportera felet* i live-spelaren och `imageFailed` från titelsidans bakgrund, musik,
+  ljudböcker, poddar, kanallogor och *Kommer snart*. `test/apple-seek.test.js` (2 statiska fall) jämför gränserna med
+  Expo/Android; kontraktet har en variant med `start` och `prev` för iOS. **Inte provat:** appen är inte kompilerad
+  här (ingen Xcode, ingen Swift) och inte körd på iPhone, iPad eller Apple TV.
 - 2026-11-27: Feedback och Mina ärenden i iOS/tvOS-appen och sparad bildtoken, gren `team/apple-feedback-2026-11-27`.
   Samma formulär och *Mina ärenden* som Expo och Android, under *Inställningar* och som *Rapportera felet* i spelaren;
   på Apple TV med tvOS tangentbord (`Shared/Feedback.swift` med reglerna i `FeedbackCore`, `Shared/FeedbackViews.swift`;
