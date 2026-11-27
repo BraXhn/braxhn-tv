@@ -321,22 +321,53 @@ test('/playback skickas innan titelns uppgifter har kommit, och svaret används 
 test('omkodning: spolning utanför bufferten startar en ny ström med korta segment vid målet', { skip }, async () => {
   const { p, close } = await page();
   await helpers(p);
+  // Tidslinjen var 50:e ms: fyllnaden (#tfill), skärmläsarens värde (aria-valuenow) och tidstexten (#ctime), i sekunder.
+  // restartMs = tills videon har data igen efter att den kopplats om; waits = väntetexter som visades
+  await p.evaluate(() => { window.__timeline = () => {
+    const min = { fill: Infinity, aria: Infinity, text: Infinity }, log = [], waits = [], t0 = performance.now();
+    let n = 0, low = false, restartMs = null;
+    const secs = (s) => { const m = /^(?:(\d+):)?(\d+):(\d\d)/.exec(s || ''); return m ? (+m[1] || 0) * 3600 + +m[2] * 60 + +m[3] : null; };
+    const id = setInterval(() => {
+      const P = window.__V.P, v = document.querySelector('#vid'); if (!P || !v) return;
+      const d = P.it.duration, ms = Math.round(performance.now() - t0);
+      const fill = parseFloat(document.querySelector('#tfill').style.width) / 100 * d, aria = +document.querySelector('#scrub').getAttribute('aria-valuenow');
+      const txt = document.querySelector('#ctime').textContent, text = secs(txt);
+      if (v.readyState < 2) low = true; else if (low && restartMs == null && v.readyState >= 3) restartMs = ms;
+      n++; min.fill = Math.min(min.fill, fill); min.aria = Math.min(min.aria, aria); min.text = Math.min(min.text, text ?? -1);
+      if (/Förbereder|Laddar|Startar|Preparing|Loading|Starting/.test(txt) && waits.at(-1)?.txt !== txt) waits.push({ ms, txt });
+      if (log.length < 80) log.push(`${ms}ms ${fill.toFixed(1)}/${aria}/${txt}`);
+    }, 50);
+    return { stop: () => { clearInterval(id); return { n, min, log, waits, restartMs }; } };
+  }; });
   const reqs = [];
   p.on('request', (q) => { const u = q.url(); if (/\/playback\?|\/seg-\d+\.ts/.test(u) && !/warm=1/.test(u)) reqs.push(u); });
+  // Kvalitetsbytet (360p) får en långsam server: 2,5 s innan /playback svarar – då ska "Förbereder…" synas, men först efter 1,5 s
+  await p.route(/\/playback\?.*[?&]q=360(&|$)/, async (rt) => { await new Promise(x => setTimeout(x, 2500)); rt.continue().catch(() => {}); });
   const r = await p.evaluate(async (id) => {
     window.__L.play(id, 0); const f = await window.__frame(x => x >= 0, 30000);
     const v = document.querySelector('#vid'), pb0 = window.__V.P.pb.url;
+    // Första bilden kan visas innan videons loadeddata/playing har kommit, och spelaren startar inte om strömmen för
+    // en spolning innan filmen har börjat (hls.js egna hopp): vänta tills den spelar
+    const w0 = performance.now(); while (!(v.currentTime > 0.5 && !v.paused) && performance.now() - w0 < 15000) await new Promise(x => setTimeout(x, 50));
     const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
     const to = 150, n0 = window.__reqs?.length;
-    const t0 = performance.now(); v.currentTime = to;
+    const t0 = performance.now(); const tl = window.__timeline(); v.currentTime = to;
     const g = await window.__frame(x => x >= to - 0.6 && x < to + 6, 30000);
     const ms = Math.round(performance.now() - t0);
+    await new Promise(x => setTimeout(x, 500)); const seekLine = tl.stop();
     const mv = g.ms == null ? null : await window.__moves(1500);
     // Spolning inom bufferten därefter: ingen ny ström
     const pb1 = window.__V.P.pb.url;
     const w = performance.now(); while (!(v.buffered.length && v.buffered.end(v.buffered.length - 1) > v.currentTime + 4) && performance.now() - w < 15000) await new Promise(x => setTimeout(x, 50));
     v.currentTime = v.currentTime + 2; const h = await window.__frame(x => x >= to, 10000);
-    return { f, g, h, ms, mv, b, to, n0, pb0, pb1, pb2: window.__V.P.pb.url, errors: window.__errors, errlog: window.__errlog, modes: window.__modes };
+    const pb2 = window.__V.P.pb.url;
+    // Byte av kvalitet laddar om strömmen på samma sätt (load() från positionen): tidslinjen står kvar där
+    const qTo = v.currentTime, ql = window.__timeline(), pq = document.querySelector('#pq');
+    pq.value = pq.options[pq.options.length - 1].value; pq.dispatchEvent(new Event('change'));
+    const w2 = performance.now();
+    while (!(window.__V.P.pb.url !== pb2 && !v.paused && v.readyState >= 3 && v.currentTime > qTo - 1) && performance.now() - w2 < 20000) await new Promise(x => setTimeout(x, 50));
+    await new Promise(x => setTimeout(x, 300));
+    return { f, g, h, ms, mv, b, to, n0, pb0, pb1, pb2, pb3: window.__V.P.pb.url, seekLine, qTo, qLine: ql.stop(), errors: window.__errors, errlog: window.__errlog, modes: window.__modes };
   }, ten.id);
   assert.ok(r.f.ms != null, `ingen bild vid start: ${r.f.state}`);
   assert.ok(!r.b.some(([a, b]) => r.to >= a && r.to < b), `förutsättning: ${r.to} s låg utanför bufferten (${JSON.stringify(r.b)})`);
@@ -360,7 +391,20 @@ test('omkodning: spolning utanför bufferten startar en ny ström med korta segm
   assert.ok(first && Math.abs(first.start - r.to) < 0.01 && Math.abs(first.dur - 1) < 0.01, `första segmentet efter spolningen: ${JSON.stringify(first)}`);
   assert.ok(r.h.ms != null, `spolning inom bufferten efteråt: ${r.h.state}`);
   assert.equal(r.pb2, r.pb1, 'spolning inom bufferten startar ingen ny ström');
-  console.log(`spolning utanför bufferten i omkodningen: ${r.ms} ms till bild`);
+  // Medan strömmen startas om står tidslinjen, tidstexten och skärmläsarens värde på målet (förut 0:00 och
+  // "Förbereder…" i ungefär en sekund), och ingen väntetext syns när omstarten går fort (under 1,5 s)
+  for (const [what, line, to, pb] of [['spolningen', r.seekLine, r.to, r.pb1], ['kvalitetsbytet', r.qLine, r.qTo, r.pb3]]) {
+    assert.ok(line.n >= 8, `${what}: för få avläsningar (${line.n})`);
+    for (const k of ['fill', 'aria', 'text']) assert.ok(line.min[k] >= to - 1, `${what}: ${k} gick ner till ${line.min[k]} s (mål ${to.toFixed(1)} s): ${line.log.join(' | ')}`);
+    const early = line.waits.filter(w => w.ms < 1400);
+    assert.deepEqual(early, [], `${what}: väntetext före 1,5 s (omstart på ${line.restartMs} ms)`);
+    if (line.restartMs != null && line.restartMs < 1400) assert.deepEqual(line.waits, [], `${what}: väntetext trots omstart på ${line.restartMs} ms`);
+  }
+  // Den långsamma omstarten: "Förbereder…" efter målets tid
+  assert.ok(r.qLine.restartMs > 2500, `förutsättning: kvalitetsbytet var långsamt (${r.qLine.restartMs} ms)`);
+  assert.ok(r.qLine.waits.some(w => /^\d+:\d\d \/ 3:00 · (Förbereder|Preparing)…$/.test(w.txt)), `kvalitetsbytet: väntetexten ${JSON.stringify(r.qLine.waits)}`);
+  assert.notEqual(r.pb3, r.pb2, 'kvalitetsbytet startade en ny ström');
+  console.log(`spolning utanför bufferten i omkodningen: ${r.ms} ms till bild (tidslinjen lägst ${r.seekLine.min.fill.toFixed(1)} s, mål ${r.to} s); kvalitetsbyte: ${r.qLine.restartMs} ms, lägst ${r.qLine.min.fill.toFixed(1)} s (mål ${r.qTo.toFixed(1)} s), väntetext ${r.qLine.waits.map(w => w.ms + ' ms').join(', ')}`);
   await close();
 });
 

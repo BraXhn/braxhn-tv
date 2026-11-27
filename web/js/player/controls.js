@@ -33,7 +33,17 @@ export function bindControls(cur, v) {
     scrub.setAttribute('aria-valuemax', String(d)); scrub.setAttribute('aria-valuenow', String(pos));
     scrub.setAttribute('aria-valuetext', t('{pos} av {dur}', { pos: fmtTime(pos), dur: fmtTime(d) }));
   };
-  v.addEventListener('timeupdate', () => { ct.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(dur())}`; syncScrub(); });
+  // Tidstexten, tidslinjen och reglaget. Under en omstart av strömmen ger currentTime målet (holdTime i video.js);
+  // dröjer omstarten står "Förbereder…" efter tiden
+  const tfill = q('#tfill');
+  const showTime = cur.showTime = () => {
+    if (P !== cur) return;
+    const d = dur(), now = v.currentTime || 0;
+    ct.textContent = `${fmtTime(now)} / ${fmtTime(d)}` + (cur.hold?.slow ? ' · ' + t('Förbereder…') : '');
+    if (d) tfill.style.width = Math.min(100, now / d * 100) + '%';
+    syncScrub();
+  };
+  v.addEventListener('timeupdate', showTime);
   v.addEventListener('durationchange', syncScrub);
   if (scrub) scrub.addEventListener('keydown', (e) => {
     const d = dur();
@@ -49,7 +59,7 @@ export function bindControls(cur, v) {
   v.addEventListener('pause', () => { if (!v.ended && v.readyState > 1) say(el, t('Pausad')); });
   v.addEventListener('play', () => { if (v.currentTime > 0.5) say(el, t('Spelar')); });
   // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
-  const loading = () => { if (v.readyState < 3) ct.textContent = cur.pb?.mode === 'transcode' ? t('Startar omkodning…') : t('Laddar…'); };
+  const loading = () => { if (v.readyState < 3 && !cur.hold) ct.textContent = cur.pb?.mode === 'transcode' ? t('Startar omkodning…') : t('Laddar…'); };
   v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
   v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
   const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();

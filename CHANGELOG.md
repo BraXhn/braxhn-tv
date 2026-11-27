@@ -11,6 +11,12 @@
   profilbyte använder profilens sparade bildtoken om den finns. Inte provat på riktig telefon, TV eller bil.
 - **Nedladdningar i Android-appen gäller profilen även medan de pågår.** Förut såg en annan profil på samma enhet
   förloppsraden för en nedladdning som pågick och kunde inte ladda ner samma titel samtidigt.
+- **Tidslinjen hoppar inte till 0:00 när du spolar i webbspelaren.** När spelaren startar om en omkodad film vid
+  spolningen (eller när du byter kvalitet, ljudspår eller nattläge och strömmen laddas om) stod tidslinjen och tiden på
+  0:00 med "Förbereder…" i ungefär en sekund. Nu står tidslinjen, tiden och spolningsbilden kvar där du spolade till
+  tills filmen spelar igen, och "Förbereder…" syns bara om det tar mer än 1,5 s (då efter tiden). Samma position gäller
+  under omstarten för Casta, fjärrstyrningen och det lilla fönstret. Provat i Chrome; inte i Safari, AirPlay eller på
+  en riktig Chromecast.
 - **Expo-appen vet vad servern redan har kodat när du spolar.** Förut gissade appen ur det som var laddat i telefonen,
   så en spolning dit servern redan hade kodat kunde starta om strömmen i onödan (och en spolning bakåt dit servern
   hade städat bort stycken kunde vänta på ett helt sexsekundersstycke). Nu frågar appen servern var fjärde sekund

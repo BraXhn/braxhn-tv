@@ -192,8 +192,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Fortsätt titta mitt i en fil med lång GOP: omkodningen börjar på en jämn sekund och ffmpeg avkodar från nyckelbilden
   före (upp till en hel GOP, ~0,1 s per sekund HEVC 1080p). Att lägga B på nyckelbilden före `hs` när nyckelbilderna är
   kända sparar det – kontrollera först med en riktig film (testfilerna har 2 s GOP).
-- Spolning i en omkodning laddar om strömmen: under ~1 s visar tidslinjen 0:00 och "Förbereder…" (videoelementet kopplas
-  om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
 - Expo-appen frågar `/hls/ready` var 4:e sekund medan strömmen spelar och använder svaret i 8 s. En fråga som skickas
   strax före en spolning kan i sällsynta fall komma fram till servern efter spelarens begäran av målets segment (olika
   anslutningar) och då säga "kodas" – då väntar appen på 6 s-segmentet i stället för att starta om
@@ -258,6 +256,15 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-27: Tidslinjen står på målet när webbspelaren startar om strömmen, gren `team/webb-spola-2026-11-27`.
+  `holdTime()` i `web/js/player/video.js` låter videons `currentTime` ge målet från `load()` tills den nya strömmen har
+  data där (eller spelar), så tidslinjen, tiden, skärmläsaren, Casta, fjärrstyrningen, minispelaren och ett nytt byte
+  utgår från målet; spolningsbilden vid målet visas över den svarta videon och "Förbereder…" först efter 1,5 s.
+  Gäller alla `load()` i en ström som redan spelat (spolning i omkodning, kvalitet, ljud, nattläge, H.264-reserv,
+  byte till omkodning vid öppen GOP); `guardSeeks` läser samma mål. `test/web-chrome-playback.test.js` läser
+  tidslinjen var 50:e ms vid spolningen och vid ett kvalitetsbyte med fördröjd server (2,5 s): förut 0 s i 200–250 ms,
+  nu aldrig under målet, väntetexten efter ~1,55 s. **Inte provat:** Safari/AirPlay (egen HLS, `v.src`), riktig
+  Chromecast, och första starten (Fortsätt titta) som visar "Förbereder…" som förut.
 - 2026-11-27: Android-appen – sparad bildtoken och nedladdningar per profil, gren `team/android-tok-2026-11-27`.
   Bildtoken sparas per server och profil i de privata inställningarna (`ImageTokenBook` i `ImageTokenCore.kt`, JSON
   `{ tokens: { userId: { token, until } }, last }` under `img <server>`), förnyas när mindre än ett dygn är kvar eller

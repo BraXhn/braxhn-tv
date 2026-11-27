@@ -102,7 +102,7 @@ export async function play(id, start = 0, opts = {}) {
   const title = it.kind === 'episode' ? `${esc(it.showTitle)} · ${sxe(it)} · ${esc(it.title)}` : esc(it.title);
   const chaps = it.chapters || [];
   const line2 = it.kind === 'episode' ? `${sxe(it)} — ${esc(it.title)}` : (it.year || '');
-  el.innerHTML = `<video id="vid" autoplay playsinline x-webkit-airplay="allow"></video>
+  el.innerHTML = `<video id="vid" autoplay playsinline x-webkit-airplay="allow"></video><div class="phold" id="phold" aria-hidden="true" hidden></div>
     <div class="pbar"><button class="ghost small" id="pclose">${t('← Tillbaka')}</button><span class="title">${title}</span><span class="muted small" id="pmode"></span><span class="stleft" id="pstleft" hidden></span>
       <button class="ghost small castbtn" id="pcast" ${castReady ? '' : 'hidden'} title="${t('Casta till Chromecast')}">${t('📺 Casta')}</button>
       ${canAirPlay() ? '<button class="ghost small" id="pair" title="AirPlay">AirPlay</button>' : ''}
@@ -244,7 +244,6 @@ export async function play(id, start = 0, opts = {}) {
   if (cur.party) joinParty();
   v.addEventListener('timeupdate', () => {
     if (P !== cur) return; if (Date.now() - cur.lastSent > 10000) sendProgress(); markers();
-    const d = cur.it.duration || v.duration; if (d) q('#tfill').style.width = Math.min(100, v.currentTime / d * 100) + '%';
   });
   // Spolningslist med förhandsbilder (bredd cachas, ritas högst en gång per bildruta)
   api(`/items/${it.id}/trickplay`, { bg: true }).then(tp => { if (P === cur) cur.tp = tp; }).catch(() => {});
@@ -452,6 +451,9 @@ async function load(start, { play = true } = {}) {
   const tok = cur.tok = Symbol();
   const live = () => P === cur && cur.tok === tok && v.isConnected;
   cur.unguard?.(); cur.unguard = null; cur.unseek?.(); cur.unseek = null;
+  // Omstart av en ström som redan spelat (spolning, kvalitet, ljud …): tidslinjen står på målet medan videon kopplas om
+  const hold = !!cur.pb && start > 0;
+  if (hold) holdTime(cur, v, start); else dropHold(cur);
   // Den nya strömmen ersätter den förra i samma uppspelning (spolning, kvalitet, ljud …): servern stoppar den (prev)
   let prev = pidOf(cur.pb);
   const early = cur.early; cur.early = null;
@@ -463,7 +465,7 @@ async function load(start, { play = true } = {}) {
     audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
   let pb = null;
   // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
-  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = t('Förbereder…');
+  const ctEl = $('#ctime', el); if (ctEl && !hold) ctEl.textContent = t('Förbereder…');
   // Svaret på frågan som play() skickade innan titelns uppgifter kom (samma start, samma val)
   if (early && early.start === start) {
     if (status.remote && early.extra.bw) { extra.bw = early.extra.bw; if (early.extra.save) extra.save = '1'; }
@@ -481,7 +483,7 @@ async function load(start, { play = true } = {}) {
   if (!pb) {
     if (prev) extra.prev = prev;
     try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
-    catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
+    catch (e) { if (live()) { dropHold(cur); if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
     // Ett nyare load() (flera spolningar i rad) eller stängning har tagit över: strömmen som just startades behövs inte
     if (!live()) return stopStream(it.id, pb, P === cur);
   }
@@ -576,7 +578,9 @@ async function load(start, { play = true } = {}) {
   const lmd = cur.lmd = () => {
     if (cur.lmd === lmd) cur.lmd = null;
     if (!live()) return;
-    if (start > 0 && Math.abs(v.currentTime - start) > 2) v.currentTime = start;
+    // Verkliga tiden (holdTime visar målet): har användaren spolat igen under omstarten gäller det nya målet
+    const want = cur.hold ? cur.hold.t : start;
+    if (want > 0 && Math.abs(realTime(v) - want) > 2) v.currentTime = want;
     setSubs();
   };
   v.addEventListener('loadedmetadata', lmd, { once: true });
@@ -686,9 +690,10 @@ function guardSeeks(cur, v, hls, Hls, { gop, idr, clean, live }) {
   // Klart när bildens buffert är tömd. Målet kan ha ändrats under tiden (flera tryck på →): prova det igen, men töm inte en gång till
   const done = () => { hls.off(Hls.Events.BUFFER_FLUSHED, flushed); clearTimeout(timer); const t = pending; pending = null; if (t != null) seek(t, false); };
   const flushed = (_, e) => { if (!e?.type || /video/.test(e.type)) done(); };
+  // Läggs ovanpå holdTime (omstart pågår): målet visas tills den nya strömmen har bild där
   Object.defineProperty(v, 'currentTime', { configurable: true, enumerable: true,
-    get() { return pending ?? d.get.call(v); },
-    set(t) { if (pending != null) pending = +t; else seek(+t); } });
+    get() { return pending ?? (cur.hold ? cur.hold.t : d.get.call(v)); },
+    set(t) { if (cur.hold) cur.hold.t = +t; if (pending != null) pending = +t; else seek(+t); } });
   return () => { hls.off(Hls.Events.BUFFER_FLUSHED, flushed); clearTimeout(timer); pending = null; delete v.currentTime; };
 }
 /**
@@ -718,6 +723,49 @@ function seekRestarts(cur, v, hls, Hls, live) {
   v.addEventListener('loadeddata', onData); v.addEventListener('playing', onData);
   v.addEventListener('seeking', onSeek);
   return () => { v.removeEventListener('loadeddata', onData); v.removeEventListener('playing', onData); v.removeEventListener('seeking', onSeek); };
+}
+// ---------- målet medan strömmen startas om ----------
+// När load() startar om strömmen (spolning i en omkodning, kvalitet, ljud, fel …) kopplas videoelementet loss och in
+// igen: currentTime blir 0 i ungefär en sekund. Under tiden ger currentTime målet – så att tidslinjen, tidstexten,
+// skärmläsaren, minispelaren, Casta (castItem), fjärrstyrningen och ett nytt byte (reload) utgår från målet – och
+// spolningsbilden vid målet visas i stället för en svart bild. "Förbereder…" visas först om det dröjer (HOLD_SLOW).
+// Släpps när videon har data vid målet (eller börjar spela), av nästa load() och när spelaren stängs.
+const CT = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+const HOLD_SLOW = 1500;
+/** Videons verkliga position (förbi holdTime och guardSeeks) */
+const realTime = (v) => CT.get.call(v);
+const HOLD_EVENTS = ['loadeddata', 'canplay', 'seeked', 'playing', 'timeupdate'];
+function holdTime(cur, v, t) {
+  dropHold(cur);
+  if (!CT?.get || !CT?.set) return;
+  const h = cur.hold = { t, v, slow: false };
+  // Inte ovanpå guardSeeks (den läser cur.hold själv); load() tar bort den innan holdTime anropas
+  if (!Object.getOwnPropertyDescriptor(v, 'currentTime')) {
+    h.get = function () { return cur.hold === h ? h.t : CT.get.call(this); };
+    Object.defineProperty(v, 'currentTime', { configurable: true, enumerable: true, get: h.get,
+      set(x) { if (cur.hold === h) h.t = +x; CT.set.call(this, x); } });
+  }
+  const check = (e) => {
+    if (cur.hold !== h) return;
+    if (e?.type === 'playing' || v.readyState >= 2 && !v.seeking && Math.abs(realTime(v) - h.t) < 1.5) dropHold(cur);
+  };
+  for (const e of HOLD_EVENTS) v.addEventListener(e, check);
+  h.timer = setTimeout(() => { if (cur.hold === h) { h.slow = true; cur.showTime?.(); } }, HOLD_SLOW);
+  h.stop = () => { clearTimeout(h.timer); for (const e of HOLD_EVENTS) v.removeEventListener(e, check); };
+  // Spolningsbilden vid målet (spolningslistens förhandsbilder) där videon är svart under omstarten
+  const ph = $('#phold', cur.el), tp = cur.tp;
+  if (ph && tp?.count && tp.w && tp.h) {
+    const w = Math.round(Math.min(cur.el.clientWidth, cur.el.clientHeight * tp.w / tp.h));
+    if (w > 0) { ph.style.cssText = thumbStyle(tp, cur.it.id, t, w); ph.hidden = false; }
+  }
+  cur.showTime?.();
+}
+function dropHold(cur) {
+  const h = cur?.hold; if (!h) return;
+  cur.hold = null; h.stop();
+  if (h.get && Object.getOwnPropertyDescriptor(h.v, 'currentTime')?.get === h.get) delete h.v.currentTime;
+  const ph = $('#phold', cur.el); if (ph) ph.hidden = true;
+  if (h.v.readyState >= 1) cur.showTime?.();
 }
 function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
 
@@ -776,6 +824,7 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
   sleepClosed();
+  dropHold(P);
   pgsStop(P); textStop(P); stopAudioFx(v); stopFilter(P); stopStats(P); P.unwatch?.(); P.unwatch = null;
   P.tok = null; P.lmd = null;
   P = null;
