@@ -7,6 +7,15 @@
   datum och tal följer språket. Appen skickar `Accept-Language`, så serverns felmeddelanden och hyllnamn kommer på samma
   språk, och de smarta listornas namn översätts som i webben. Ett nytt test hittar svensk text utanför översättningen
   så att den inte smyger tillbaka. Provat i webbläget med webbläsaren på engelska, inte i Expo Go på en riktig telefon.
+- **Spolning i en omkodad film visar bilden på ungefär en sekund.** Spolade du långt fram eller bak i en film som
+  servern kodar om fick du vänta tills ett helt sexsekundersstycke var kodat – 3–4,5 s på en 1080p-film. Nu startar
+  spelaren om strömmen där du spolade till, med korta stycken i början, precis som vid *Fortsätt titta*. Uppmätt i
+  Chrome på en 1080p-film (4 kärnor): 2,7–4,6 s → 0,9–1,1 s till bild. Spolning inom det som redan är laddat, eller dit
+  servern redan har kodat, går som förut. Den gamla omkodningen stoppas direkt, så den tar inte processorn från den nya.
+  Med grafikkort är första stycket 2 s (inte provat med riktigt grafikkort). Gäller webbspelaren; Safari på iPhone och
+  apparna spolar som förut.
+- **Uppspelningen startar en aning tidigare i webben.** Spelaren ber servern starta filmen samtidigt som den hämtar
+  titelns uppgifter, i stället för efteråt (förut 40–150 ms efter klicket).
 - **Feedback och felrapporter i Expo- och Android-appen.** Samma som knappen *Feedback* i webben: välj *Förslag eller
   synpunkt* eller *Något fungerar inte*, vad det gäller (förvalt efter skärmen du var på) och skriv vad som hände. Med
   krysset för teknisk information följer appens version, enhet, skärmstorlek och senaste uppspelningen med, och *Visa

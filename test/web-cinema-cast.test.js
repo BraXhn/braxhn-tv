@@ -265,11 +265,15 @@ t('bio-läge: inte vid Fortsätt titta eller för avsnitt', async () => {
   // filmens gamla knappar (gav ibland "Väntade förgäves på: avsnittets uppspelning" när datorn var hårt belastad).
   // Filmens sida har "Fortsätt från 0:32" (data-play="32") – avsnittets sida har det inte
   await page.waitForFunction(() => !document.querySelector('[data-play="32"]') && !!document.querySelector('[data-play="0"]'), null, { timeout: 60000 });
+  const r0 = reqs.length;
   await page.click('[data-play="0"]');
   await until(() => reqs.some(r => r.url.includes(`/api/items/${S.e2}/playback`)), 'avsnittets uppspelning');
   await page.waitForFunction(() => !!document.querySelector('#vid')?.getAttribute('src'), null, { timeout: 60000 });
   assert.ok(!(await page.$('.cinemabox')));
-  assert.ok(!reqs.some(r => r.url.includes('/playback') && r.url.includes('cinema=1')));
+  // Spelaren skickar /playback innan den vet att titeln är ett avsnitt (samtidigt som titelns uppgifter hämtas), med
+  // cinema=1 vid start från början – servern ger bara trailers till filmer (cinema-cast.test.js). Inga trailers hämtas
+  assert.ok(!reqs.slice(r0).some(r => r.url.includes('/api/trailers/') || r.url.includes('/api/cinema/')), 'inga trailers för avsnittet');
+  assert.ok(!reqs.some(r => r.url.includes(`/api/items/${S.main}/playback`) && r.url.includes('start=32') && r.url.includes('cinema=1')), 'inte vid Fortsätt titta');
   assert.deepEqual(errors, []);
   await close();
   await req(`/api/items/${S.main}/progress`, { method: 'POST', body: { position: 0, duration: 40 } });

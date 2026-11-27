@@ -1571,6 +1571,7 @@ export function claimWarm(it, query, userId) {
 
 // fMP4-initsegment (moov). Identiskt för alla körningar i samma session.
 export async function serveInit(req, res, it, query, userId) {
+  if (wasDropped(query, userId)) return fail(res, 409, 'Uppspelningen har startats om på ett annat ställe');
   const s = sessionFor(it, query, userId);
   if (s.d.fmt !== 'fmp4') return fail(res, 404, 'Inget initsegment');
   const t0 = Date.now();
@@ -1643,6 +1644,7 @@ export function hevcTag(buf, tag) {
 }
 
 export async function serveSegment(req, res, it, n, query, userId) {
+  if (wasDropped(query, userId)) return fail(res, 409, 'Uppspelningen har startats om på ett annat ställe');
   const s = sessionFor(it, query, userId);
   const d = s.d;
   const total = segmentsOf(it, d).length;
@@ -1671,17 +1673,23 @@ export async function serveSegment(req, res, it, n, query, userId) {
   }
   throttle(s, n);
   const file = segFile(s, n);
+  const ready = d.mode === 'transcode' ? readyHeader(s) : null;
   if (d.mode === 'transcode' && d.fmt === 'fmp4') {
     // Bara moof+mdat – ftyp+moov skickas en gång som initsegment
     s.init ||= transcodeInit(s);
     const at = fragStart(file);
     if (at < 0) return fail(res, 404, 'Segmentet försvann – försök igen');
-    return sendSegment(req, res, file, 'video/iso.segment', at, waitMs);
+    return sendSegment(req, res, file, 'video/iso.segment', at, waitMs, ready);
   }
   // ra=<sekunder in i segmentet>: spelaren börjar avkoda här (start, fortsättning, spolning, återhämtning) – se tslead.js
   const ra = query.get('ra');
   if (ra != null && d.mode === 'remux' && d.fmt === 'ts') return sendRandomAccess(req, res, file, waitMs, Math.max(0, Math.min(600, parseFloat(ra) || 0)));
-  sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t', 0, waitMs);
+  sendSegment(req, res, file, d.fmt === 'fmp4' ? 'video/iso.segment' : 'video/mp2t', 0, waitMs, ready);
+}
+/** X-Seg-Ready: de färdiga segmenten i körningen (från ffmpegs start eller det första som inte städats bort) */
+function readyHeader(s) {
+  const lo = Math.max(s.start, (s.trimmed ?? -1) + 1), hi = highestFile(s);
+  return lo >= 0 && hi >= lo ? { 'X-Seg-Ready': `${lo}-${hi}` } : null;
 }
 /** TS-remux utan de bilder i början som behöver föregående segment (öppen GOP). Går något fel skickas filen som den är. */
 async function sendRandomAccess(req, res, file, waitMs, upTo) {
@@ -1738,10 +1746,12 @@ async function awaitSegment(req, res, it, s, n, userId) {
 // X-Seg-Wait: hur länge servern väntade på att segmentet skulle bli klart (ms) – spelarens Statistik skiljer på
 // omkodningens väntan och nätets överföring. Alltid Content-Length (spelarens bandbreddsmätning och keep-alive)
 // och aldrig komprimering (segmenten är redan komprimerade).
-function sendSegment(req, res, file, type, from = 0, waitMs = 0) {
+// X-Seg-Ready (omkodning): segmenten "från-till" som är klara i den pågående körningen – webbspelaren spolar då dit
+// som vanligt i stället för att starta om strömmen vid spolningens mål (video.js, seekRestart i hlsconfig.js).
+function sendSegment(req, res, file, type, from = 0, waitMs = 0, extra = null) {
   let st; try { st = fs.statSync(file); } catch { return fail(res, 404, 'Segmentet försvann – försök igen'); }
   const size = Math.max(0, st.size - from);
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Cache-Control': 'no-store', 'X-Seg-Wait': String(waitMs) });
+  res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Cache-Control': 'no-store', 'X-Seg-Wait': String(waitMs), ...extra });
   if (req.method === 'HEAD' || !size) return res.end();
   pipeline(fs.createReadStream(file, { start: from }), res, () => {});
 }
@@ -1760,6 +1770,7 @@ setInterval(() => {
     // Asynkront: en mapp med hundratals segment tog ~0,1 s att radera synkront – då stod alla strömmar still
     if (idle > 900000) { rmLater(s.dir); sessions.delete(k); }
   }
+  for (const [k, at] of dropped) if (Date.now() - at > 900000) dropped.delete(k);
 }, 15000).unref();
 
 /** Stoppar användarens sessioner av titeln. Med pid bara den uppspelningen (t.ex. webbspelaren som stängs
@@ -1767,6 +1778,24 @@ setInterval(() => {
 export function stopUserSessions(itemId, userId, pid = '') {
   for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) { s.stoppedAt = Date.now(); stopProc(s); }
 }
+/** Spelaren har startat om uppspelningen på ett annat ställe (spolning i en omkodning, /playback med prev=pid): den
+ *  förra strömmen behövs inte. ffmpeg stoppas direkt (annars kodade den vidare upp till 90 s före och tog processorn
+ *  från starten vid spolningens mål) och segmenten tas bort. Bara användarens egen uppspelning med just det pid. */
+export function dropPlayback(itemIds, userId, pid) {
+  if (!pid) return 0;
+  let n = 0;
+  for (const [k, s] of [...sessions]) {
+    if (s.user !== userId || !itemIds.includes(s.item) || s.d.pid !== pid) continue;
+    s.stoppedAt = Date.now(); s.warm = 0; stopProc(s);
+    sessions.delete(k); rmLater(s.dir); n++;
+  }
+  // En begäran till den gamla strömmen som kommer fram efteråt ska inte starta en ny ffmpeg för den
+  if (dropped.size > 1000) dropped.clear();
+  dropped.set(`${userId}:${pid}`, Date.now());
+  return n;
+}
+const dropped = new Map(); // "användare:pid" → när uppspelningen startades om på ett annat ställe
+const wasDropped = (query, userId) => { const pid = query.get('pid'); return !!pid && dropped.has(`${userId}:${pid}`); };
 // Stoppad medan begäran väntade (spelaren stängdes; avbrottet av begäran kan komma fram efter /stop): starta inte om
 // ffmpeg för den – den kodade annars vidare tills städningen och tog processorn från nästa uppspelning
 const stoppedSince = (s, t0) => (s.stoppedAt || 0) >= t0;

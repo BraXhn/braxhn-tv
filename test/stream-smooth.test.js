@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync, spawnSync } from 'node:child_process';
-import { HLS_VOD, hlsConfig, abrClass, holdEmergency, fromFirstByte, TTFB_CAP } from '../web/js/player/hlsconfig.js';
+import { HLS_VOD, hlsConfig, abrClass, holdEmergency, fromFirstByte, TTFB_CAP, seekRestart, readyRange } from '../web/js/player/hlsconfig.js';
 import { stallCause } from '../server/stalls.js';
 import { freePort } from './helpers/port.js';
 
@@ -97,6 +97,30 @@ test('hls.js ABR: bandbredd från första byte, svarstiden kapas, inget nödbyte
   a._abandonRulesCheck();
   assert.deepEqual(seen, [250, 'abandon'], 'när data väl kommer gäller hls.js vanliga regel');
   assert.equal(abrClass({}), null, 'annan hls.js utan standardkontroll: ingen egen');
+});
+
+test('spolning i en omkodning: utanför bufferten startas strömmen om vid målet – men inte när servern har segmentet', () => {
+  // Omkodningens spellista med processorn: 0, 1, 2, 4, 6, 12 … 234 (240 s)
+  const starts = [0, 1, 2, 4]; for (let x = 6; x < 239.5; x += 6) starts.push(x);
+  const frags = starts.map((x, i) => ({ start: x, duration: (starts[i + 1] ?? 240) - x }));
+  const buf = [[0, 40]];
+  assert.equal(seekRestart(buf, 20, { frags }), false, 'inom bufferten');
+  assert.equal(seekRestart(buf, 150, { frags }), true, 'långt fram, okänt vad servern har');
+  assert.equal(seekRestart([[100, 140]], 40, { frags }), true, 'bakåt utanför bufferten');
+  assert.equal(seekRestart(buf, 3, { frags }), false, 'kort segment i början: inget att vinna');
+  assert.equal(seekRestart([[30, 60]], 1.5, { frags }), false);
+  assert.equal(seekRestart(buf, 238, { frags }), false, 'nära slutet ger servern inga korta segment');
+  // Segmentet med 150 s är nummer 4 + (150 − 6) / 6 = 28
+  assert.equal(seekRestart(buf, 150, { frags, ready: [3, 27] }), false, 'servern kodar segmentet just nu');
+  assert.equal(seekRestart(buf, 150, { frags, ready: [3, 30] }), false, 'servern har segmentet klart');
+  assert.equal(seekRestart(buf, 150, { frags, ready: [3, 26] }), true, 'två segment före: snabbare att börja om');
+  assert.equal(seekRestart(buf, 150, { frags, ready: [29, 40] }), true, 'servern har bara senare segment');
+  assert.equal(seekRestart(buf, 40.2, { frags, ready: [3, 9] }), false, 'strax efter bufferten, segmentet hämtas redan');
+  assert.equal(seekRestart(buf, NaN, { frags }), false);
+  assert.equal(seekRestart(buf, 150, { frags: [] }), false, 'spellistan inte inläst');
+  assert.deepEqual(readyRange('12-20'), [12, 20]);
+  assert.equal(readyRange(null), null);
+  assert.equal(readyRange('x'), null);
 });
 
 test('hls.js i Chromium: den riktiga biblioteksversionen tar emot inställningarna och den egna ABR-kontrollen', { skip: !chromium && 'Playwright saknas' }, async () => {

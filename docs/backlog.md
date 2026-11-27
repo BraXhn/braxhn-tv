@@ -107,16 +107,15 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   AirPlay) och inte genom startcachen (`server/pace.js`).
 
 **Från arbetspasset 2026-11-27 (sett men inte gjort)**
-- Spolning utanför bufferten i en omkodning kodar ett helt 6 s-segment innan bilden kommer (vakten: 1,5–3,6 s). Samma
-  korta segment som vid Fortsätt titta (en ny `hs` i spelaren vid spolning) skulle ge ~1 s (`server/stream.js`,
-  `web/js/player/video.js`).
 - Fortsätt titta mitt i en fil med lång GOP: omkodningen börjar på en jämn sekund och ffmpeg avkodar från nyckelbilden
   före (upp till en hel GOP, ~0,1 s per sekund HEVC 1080p). Att lägga B på nyckelbilden före `hs` när nyckelbilderna är
   kända sparar det – kontrollera först med en riktig film (testfilerna har 2 s GOP).
 - Utanför hemmet (ABR) förstartas ingen ffmpeg vid `/playback` – den startar först när spelaren valt steg och bett om
   segmentet (`d.abr` i `server/routes/playback.js`). Steget som mastern listar först kunde förstartas.
-- Webbspelaren ber om `/playback` 40–150 ms efter klicket (titelns uppgifter hämtas först, `play()` i
-  `web/js/player/video.js`); utan förvärmning (pekare/fokus) ligger det på vägen till första bilden.
+- Spolning i en omkodning laddar om strömmen: under ~1 s visar tidslinjen 0:00 och "Förbereder…" (videoelementet kopplas
+  om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
+- Safaris egen HLS (iPhone) och apparna spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan bilden
+  kommer. Apparna kunde göra som webben (ny `/playback` med `start=` och `prev=`).
 
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
@@ -187,6 +186,13 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `app` – fel form tas bort, versionen får inte vara en IP-adress (`test/support.test.js`, fall 12). Kontraktet har
   Android-appens fem nya anrop. Expo i webbläget mot en egen server med Playwright (390×844). **Inte provat:** på riktig
   telefon, Google TV eller bil; Android-appen är inte kompilerad här (ingen Android SDK).
+- 2026-11-27: Spolning i en omkodning och tidig `/playback`, gren `team/spola-2026-11-27`. Spolning utanför bufferten
+  laddar om strömmen från målet med korta segment där (`seekRestart`/`seekRestarts`, `prev=` → `dropPlayback`,
+  `X-Seg-Ready`); `play()` skickar `/playback` samtidigt som titelns uppgifter hämtas (`earlyPlayback`/`earlyFits`).
+  Uppmätt i Chrome, 1080p H.264 10 bitar, 4 kärnor (last 2–6, mest mätningens egen ffmpeg): spolning 2,7–4,6 s → 0,86–1,06 s
+  till bild; vakten (640×360) 1,0–2,1 s → 0,26–0,56 s. `/playback` skickas 12–64 ms innan titelns uppgifter är klara
+  (förut 20–40 ms efter). `test/fast-resume.test.js`, `test/stream-smooth.test.js`, `test/web-chrome-playback.test.js`.
+  **Inte provat:** grafikkort (2 s-segment vid målet), Safari, apparna.
 - 2026-11-27: Omkodningens start, gren `team/tcstart-2026-11-27`. Med processorn är första segmentet där uppspelningen
   börjar 1 s (`h1=1` i adressen, `transcodeStarts` i `server/stream.js`); väntan på segment vaknar när nästa fil skapas
   (`dirChange`); en stoppad session startar inte om ffmpeg för en begäran som väntade (förut kodade den vidare i upp

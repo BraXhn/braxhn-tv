@@ -3,7 +3,7 @@ import { $, $$, api, esc, fmtTime, locale, me, status, store, sxe, toast, toastE
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
-import { abrClass, cleanRange, hlsConfig, openGopSeek, qualitySteps, randomAccess, randomAccessUrl, recoverPlan, segNo } from './hlsconfig.js';
+import { abrClass, cleanRange, hlsConfig, openGopSeek, qualitySteps, randomAccess, randomAccessUrl, readyRange, recoverPlan, seekRestart, segNo } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
@@ -57,18 +57,22 @@ export async function play(id, start = 0, opts = {}) {
   let it;
   await migrateLocalPrefs(); // en gång: gamla webbläsarval (undertextspråk, kvalitet) flyttas till kontot
   if (seq !== playSeq) return;
+  const partyId = opts.party || (P && P.party) || null;
+  // Flera versioner: hämta spårlistan (ljud/undertexter) för den version som faktiskt spelas
+  const want = opts.version || store.get('version.' + id, '');
+  // /playback skickas samtidigt som titelns uppgifter hämtas (förut efter: 40–150 ms senare), så att servern startar
+  // strömmen direkt. load() använder svaret om spårvalen stämmer, annars frågar den igen (earlyPlayback)
+  const early = earlyPlayback(id, start, { want, partyId, opts });
   try {
-    // Flera versioner: hämta spårlistan (ljud/undertexter) för den version som faktiskt spelas
-    const want = opts.version || store.get('version.' + id, '');
     it = await api('/items/' + id + (want ? '?version=' + encodeURIComponent(want) : ''), { bg: true });
     if (it.versions && !it.versions.some(v => String(v.id) === String(want))) {
-      const p = await api(`/items/${id}/playback?${capsQuery({ q: quality === 'auto' ? '' : quality })}&info=1`, { bg: true });
+      // Versionen som servern väljer står i svaret från /playback (eller frågas efter när det inte skickats)
+      const p = (early && await early.pb.catch(() => null)) || await api(`/items/${id}/playback?${capsQuery({ q: quality === 'auto' ? '' : quality })}&info=1`, { bg: true });
       if (p.version && p.version !== it.version) it = await api(`/items/${id}?version=${p.version}`, { bg: true });
     }
   }
-  catch (e) { if (seq === playSeq) toastErr(e); return; }
-  if (seq !== playSeq) return; // ett nyare play() eller en navigering har tagit över
-  const partyId = opts.party || (P && P.party) || null;
+  catch (e) { dropEarly(early, id); if (seq === playSeq) toastErr(e); return; }
+  if (seq !== playSeq) return dropEarly(early, id); // ett nyare play() eller en navigering har tagit över
   // Windows-appen: den inbyggda spelaren (mpv) spelar originalfilen när servern kan skicka den orörd (player/native.js).
   // Inte i Titta tillsammans; annars spelar webbspelaren som vanligt.
   if (!partyId && !opts.noNative && inWindowsApp()) {
@@ -91,7 +95,7 @@ export async function play(id, start = 0, opts = {}) {
   const textSubs = it.subtitles.filter(s => !s.bitmap);
   const defSub = it.defaultSub ? it.subtitles.find(s => s.id === it.defaultSub) : null;
   const sub2Pref = store.get('sub2lang', ''), defSub2 = sub2Pref && textSubs.find(s => s.lang === sub2Pref && s.id !== defSub?.id);
-  const cur = P = { it, el, q: quality, audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null,
+  const cur = P = { it, el, q: quality, audio: defAudio ? String(defAudio.index) : '', sub: defSub ? defSub.id : '', sub2: defSub2 ? defSub2.id : '', offset: 0, hls: null, lastSent: 0, nextTimer: null, pb: null, early,
     party: partyId, es: keepParty, applying: false, tok: null, lmd: null, skipDone: new Set(), skipTimer: null, forceTc: noRemux.has(it.id),
     // Bio-läge: trailers före filmen – bara filmer som startas från början (inte avsnitt, Fortsätt titta eller Titta tillsammans)
     cinema: it.kind === 'movie' && !(start > 0) && !partyId && !opts.noCinema, pre: null };
@@ -383,6 +387,43 @@ function playbackBase({ q, version, forceHls, forceTc, h264, cinema, start }, v 
   return extra;
 }
 
+/** pid i strömmens adress (just den här uppspelningen), eller '' */
+function pidOf(pb) { try { return new URL(pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch { return ''; } }
+/**
+ * /playback innan titelns uppgifter har kommit (play()): allt som skickas är känt redan nu utom spårvalen – utan dem
+ * väljer servern samma förvalda ljudspår som titelns uppgifter anger (kontots språk). load() tar svaret bara om
+ * ljudet blev det spelaren väljer och ingen bildundertext ska brännas in (earlyFits); annars frågar den igen, och
+ * servern stoppar den första strömmen (prev). Inte i Windows-appen (den inbyggda spelaren frågar själv) och inte
+ * utanför hemmet utan en uppmätt uppkoppling (load() mäter först).
+ */
+function earlyPlayback(id, start, { want, partyId, opts }) {
+  if (!partyId && !opts.noNative && inWindowsApp()) return null;
+  const extra = playbackBase({ q: quality, version: want, forceTc: noRemux.has(+id), cinema: !(start > 0) && !partyId && !opts.noCinema, start });
+  if (status.remote) { const bw = lastBandwidth(); if (!bw) return null; extra.bw = String(bw); if (saveData()) extra.save = '1'; }
+  const pb = api(`/items/${id}/playback?${capsQuery(extra)}`, { bg: true });
+  pb.catch(() => {}); // felet visas av load(), som frågar igen
+  return { start, extra, pb };
+}
+/** Stämmer svaret på den tidiga frågan med det load() skulle fråga efter? Bio-läget gäller bara filmer: för ett
+ *  avsnitt ignorerar servern cinema=1, så det får skilja. Versionen får skilja när servern valde den som spelas. */
+function earlyFits(early, extra, pb) {
+  if (extra.sub) return false; // bildundertext som bränns in – den kände spelaren inte till
+  const skip = new Set(['audio', 'sub', 'version', 'cinema']);
+  const keys = new Set([...Object.keys(early.extra), ...Object.keys(extra)].filter(k => !skip.has(k)));
+  for (const k of keys) if (String(early.extra[k] ?? '') !== String(extra[k] ?? '')) return false;
+  if ((early.extra.cinema === '1') !== (extra.cinema === '1') && pb.preroll?.length) return false;
+  if (extra.version && String(early.extra.version ?? '') !== String(extra.version) && String(pb.version ?? '') !== String(extra.version)) return false;
+  return String(pb.audioSelected ?? '') === String(extra.audio ?? '');
+}
+/** Strömmen som servern startade för pb behövs inte. replaced: uppspelningen fortsätter med en annan ström (servern
+ *  räknar det då inte som ett stopp) */
+function stopStream(id, pb, replaced = false) {
+  const pid = pidOf(pb);
+  if (pid) fetch(`/api/stream/${id}/stop?pid=${pid}${replaced ? '&replaced=1' : ''}`, { method: 'POST' }).catch(() => {});
+}
+/** Den tidiga frågan blev inte använd (avbrutet, fel, eller en nyare ström i samma uppspelning) */
+function dropEarly(early, id, replaced = false) { early?.pb.then((pb) => stopStream(id, pb, replaced), () => {}); }
+
 // Förvärmning: pekaren eller fokus på en Spela-knapp – servern startar strömmen redan nu (/playback?warm=1), så att
 // första segmentet är klart vid klicket. Samma titel och position förvärms högst var 15:e sekund.
 const warmedAt = new Map();
@@ -410,25 +451,40 @@ async function load(start, { play = true } = {}) {
   // Varje anrop får en egen token – ett senare load() (kvalitets-/ljudbyte) eller stängning gör detta inaktuellt
   const tok = cur.tok = Symbol();
   const live = () => P === cur && cur.tok === tok && v.isConnected;
-  cur.unguard?.(); cur.unguard = null;
+  cur.unguard?.(); cur.unguard = null; cur.unseek?.(); cur.unseek = null;
+  // Den nya strömmen ersätter den förra i samma uppspelning (spolning, kvalitet, ljud …): servern stoppar den (prev)
+  let prev = pidOf(cur.pb);
+  const early = cur.early; cur.early = null;
   if (cur.hls) { cur.hls.destroy(); cur.hls = null; }
   cur.recover = null; cur.wantPlay = play;
   if (cur.lmd) { v.removeEventListener('loadedmetadata', cur.lmd); cur.lmd = null; }
   const sub = it.subtitles.find(s => s.id === cur.sub);
   const extra = { ...playbackBase({ q: cur.q, version: it.version, forceHls: cur.forceHls, forceTc: cur.forceTc, h264: cur.h264, cinema: cur.cinema, start }, v),
     audio: cur.audio, sub: subBurns(sub) ? sub.id : '' };
+  let pb = null;
+  // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
+  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = t('Förbereder…');
+  // Svaret på frågan som play() skickade innan titelns uppgifter kom (samma start, samma val)
+  if (early && early.start === start) {
+    if (status.remote && early.extra.bw) { extra.bw = early.extra.bw; if (early.extra.save) extra.save = '1'; }
+    const e = await early.pb.catch(() => null);
+    if (!live()) { dropEarly(early, it.id, P === cur); return; }
+    if (e && earlyFits(early, extra, e)) pb = e; else if (e) prev = pidOf(e) || prev;
+  } else if (early) dropEarly(early, it.id, true);
   // Utanför hemmet: uppmätt uppkoppling (väntar högst 1,5 s på en ny mätning) och "Spara data" i telefonen
-  if (status.remote) {
+  if (!pb && status.remote) {
     const bw = lastBandwidth() || await Promise.race([measureBandwidth(), new Promise(r => setTimeout(() => r(0), 1500))]);
     if (!live()) return;
     if (bw) extra.bw = String(bw);
     if (saveData()) extra.save = '1';
   }
-  let pb;
-  // Servern kan behöva en stund för en film som inte analyserats än (nyckelbilder, så att den slipper omkodas)
-  const ctEl = $('#ctime', el); if (ctEl) ctEl.textContent = t('Förbereder…');
-  try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
-  catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
+  if (!pb) {
+    if (prev) extra.prev = prev;
+    try { pb = await api(`/items/${it.id}/playback?${capsQuery(extra)}`, { bg: true }); }
+    catch (e) { if (live()) { if (e.code === 'screen_time') { closePlayer(false); timeUp(); } else toastErr(e); } return; }
+    // Ett nyare load() (flera spolningar i rad) eller stängning har tagit över: strömmen som just startades behövs inte
+    if (!live()) return stopStream(it.id, pb, P === cur);
+  }
   if (!live()) return;
   if (cur.cinema) {
     // Bara första gången: kvalitets- och ljudbyten senare ska inte visa trailers igen
@@ -512,6 +568,9 @@ async function load(start, { play = true } = {}) {
     // Starta när spellistan är inläst – ett play() direkt efter attachMedia avbryts ofta av den nya laddningen
     // ("interrupted by a new load request") och filmen blev stående tills man pausade och startade igen
     hls.on(Hls.Events.MANIFEST_PARSED, () => tryPlay());
+    // Omkodning: spolning utanför bufferten startar om strömmen vid målet (korta segment där). Före attachMedia, så
+    // att lyssnaren går före hls.js egen och kan hindra den från att hämta 6 s-segmentet i den gamla strömmen
+    if (pb.mode === 'transcode') cur.unseek = seekRestarts(cur, v, hls, Hls, live);
     hls.loadSource(pb.url); hls.attachMedia(v);
   }
   const lmd = cur.lmd = () => {
@@ -631,6 +690,34 @@ function guardSeeks(cur, v, hls, Hls, { gop, idr, clean, live }) {
     get() { return pending ?? d.get.call(v); },
     set(t) { if (pending != null) pending = +t; else seek(+t); } });
   return () => { hls.off(Hls.Events.BUFFER_FLUSHED, flushed); clearTimeout(timer); pending = null; delete v.currentTime; };
+}
+/**
+ * Spolning utanför bufferten i en omkodning: i stället för att hls.js hämtar 6 s-segmentet med målet (servern kodar
+ * hela segmentet innan något visas) laddas strömmen om från målet – servern ger då korta segment där (start= → hs),
+ * precis som vid Fortsätt titta, och stoppar den gamla strömmen (prev). Beslutet: seekRestart i hlsconfig.js – inte
+ * när servern redan har segmentet klart eller kodar det just nu (X-Seg-Ready). hls.js egna hopp vid starten räknas
+ * inte (först när filmen har visat bild). Ger funktionen som tar bort lyssnarna.
+ */
+function seekRestarts(cur, v, hls, Hls, live) {
+  let ready = null, started = false;
+  const own = () => live() && cur.hls === hls;
+  hls.on(Hls.Events.FRAG_LOADED, (_, d) => {
+    if (d.frag?.type !== 'main') return;
+    try { ready = readyRange(d.networkDetails?.getResponseHeader?.('X-Seg-Ready')) || ready; } catch {}
+  });
+  const onData = () => { started = true; };
+  const onSeek = (e) => {
+    if (!own() || !started) return;
+    const t = v.currentTime, b = [];
+    for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
+    const lv = hls.levels?.[hls.currentLevel] || hls.levels?.[hls.loadLevel] || hls.levels?.[0];
+    if (!seekRestart(b, t, { frags: lv?.details?.fragments || [], ready })) return;
+    e.stopImmediatePropagation(); // hls.js ska inte börja hämta i den gamla strömmen
+    load(t, { play: !!cur.wantPlay });
+  };
+  v.addEventListener('loadeddata', onData); v.addEventListener('playing', onData);
+  v.addEventListener('seeking', onSeek);
+  return () => { v.removeEventListener('loadeddata', onData); v.removeEventListener('playing', onData); v.removeEventListener('seeking', onSeek); };
 }
 function reload(play) { if (!P) return; const v = $('#vid', P.el); if (v) load(v.currentTime || 0, { play: play ?? (!v.paused || !v.currentTime) }); }
 

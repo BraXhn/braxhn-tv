@@ -16,7 +16,7 @@ const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 const skip = !CHROME ? 'Google Chrome saknas' : !chromium ? 'Playwright saknas' : !hasFfmpeg ? 'ffmpeg saknas' : false;
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'bxtv-chrome-'));
 const FPS = 24, SECS = 14;
-let srv, browser, film, flat, lang;
+let srv, browser, film, flat, lang, ten;
 
 before(async () => {
   if (skip) return;
@@ -35,10 +35,13 @@ before(async () => {
     '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'ac3', '-ac', '2',
     '-metadata:s:a:0', 'language=swe', '-metadata:s:a:1', 'language=eng', path.join(dir, 'Spraak (2022).mkv')]);
   fs.writeFileSync(path.join(dir, 'Spraak (2022).sv.srt'), '1\n00:00:01,000 --> 00:00:05,000\nHej\n');
-  srv = await startServer({ root: ROOT, media: path.join(ROOT, 'media'), port: await freePort(), env: { NODE_ENV: 'test', TMDB_API_KEY: '', WATCH_FILES: '0' } });
+  // H.264 i 10 bitar: kodas alltid om (spolning i en omkodning)
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=${FPS}`, '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '180',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '48', '-pix_fmt', 'yuv420p10le', '-c:a', 'aac', '-ac', '2', path.join(dir, 'Tio Bitar (2023).mkv')]);
+  srv = await startServer({ root: ROOT, media: path.join(ROOT, 'media'), port: await freePort(), env: { NODE_ENV: 'test', TMDB_API_KEY: '', WATCH_FILES: '0', HWACCEL: 'none' } });
   await srv.setup();
   const items = (await srv.req('/api/libraries/1/items')).data.items;
-  film = items.find(x => /Oppen/.test(x.title)); flat = items.find(x => /Pyramid/.test(x.title)); lang = items.find(x => /Spraak/.test(x.title));
+  film = items.find(x => /Oppen/.test(x.title)); flat = items.find(x => /Pyramid/.test(x.title)); lang = items.find(x => /Spraak/.test(x.title)); ten = items.find(x => /Tio Bitar/.test(x.title));
   browser = await launchChrome();
 });
 after(async () => { await browser?.close(); await srv?.stop(); fs.rmSync(ROOT, { recursive: true, force: true }); });
@@ -273,6 +276,92 @@ test('öppen GOP: spolning inom bufferten ger inget avkodningsfel (ra hämtar om
   // tc: spolning förbi filens första GOP byter till omkodning innan Chrome hinner avkoda något
   const b = await run(flat.id, [8]);
   assert.deepEqual(b.modes, ['remux', 'transcode'], 'omkodning vid spolningen');
+});
+
+// Förut hämtade play() titelns uppgifter först och skickade /playback 40–150 ms efter klicket. Nu går frågorna samtidigt:
+// servern startar strömmen medan spelaren väntar på uppgifterna. Titelns svar fördröjs här så att ordningen syns.
+test('/playback skickas innan titelns uppgifter har kommit, och svaret används (ingen andra fråga)', { skip }, async () => {
+  const { p, close } = await page();
+  await helpers(p);
+  const log = [];
+  const t = () => Date.now();
+  p.on('request', (q) => { const u = q.url(); if (/\/playback\?/.test(u) && !/warm=1/.test(u)) log.push({ pb: t(), url: u }); });
+  await p.route(new RegExp(`/api/items/${lang.id}(\\?|$)`), async (r) => { await new Promise(x => setTimeout(x, 600)); log.push({ items: t() }); r.continue(); });
+  const r = await p.evaluate(async (id) => { window.__L.play(id, 0); const f = await window.__frame(x => x >= 0, 30000); return { f, mode: window.__V.P?.pb?.mode, audio: window.__V.P?.audio, url: window.__V.P?.pb?.url }; }, lang.id);
+  assert.ok(r.f.ms != null, `ingen bild: ${r.f.state}`);
+  const pbs = log.filter(x => x.pb), items = log.find(x => x.items);
+  assert.equal(pbs.length, 1, 'en enda fråga till /playback: ' + pbs.map(x => x.url).join(' | '));
+  assert.ok(pbs[0].pb < items.items, `/playback skickades ${items.items - pbs[0].pb} ms innan titelns uppgifter kom`);
+  assert.doesNotMatch(pbs[0].url, /[?&]audio=/, 'ljudspåret väljer servern (samma förval som titelns uppgifter)');
+  const a = new URL(r.url, srv.base).searchParams.get('audio');
+  if (a != null) assert.equal(a, String(r.audio), 'spåret i strömmen är spelarens förval');
+  await close();
+  // Förvärmningen tar fortfarande över: warm=1 före klicket, sedan play() – samma ström (pid)
+  const b = await page();
+  await helpers(b.p);
+  // Förvärmningen väntar medan en annan omkodning spelas: stoppa de tidigare testernas strömmar (som /stop)
+  for (const x of [film, flat, lang]) await srv.req(`/api/stream/${x.id}/stop`, { method: 'POST' });
+  const warmed = () => (fs.readFileSync(srv.logFile, 'utf8').match(/Tio Bitar: första segmentet klart .*\(förvärmd\)/g) || []).length;
+  const w0 = warmed();
+  const warm = await b.p.evaluate(async (id) => {
+    window.__V.warmPlay(id, 0, { movie: true });
+    await new Promise(x => setTimeout(x, 800));
+    window.__L.play(id, 0); const f = await window.__frame(x => x >= 0, 30000);
+    return { f };
+  }, ten.id);
+  assert.ok(warm.f.ms != null, `ingen bild efter förvärmningen: ${warm.f.state}`);
+  await new Promise(x => setTimeout(x, 300));
+  assert.equal(warmed(), w0 + 1, 'uppspelningen tog över den förvärmda strömmen');
+  await b.close();
+});
+
+// Spolning utanför bufferten i en omkodning: förut hämtade hls.js 6 s-segmentet med målet i samma ström, och servern
+// kodade hela segmentet innan något visades. Nu laddar spelaren om strömmen från målet: korta segment där (hs), och
+// servern stoppar den gamla strömmen (prev).
+test('omkodning: spolning utanför bufferten startar en ny ström med korta segment vid målet', { skip }, async () => {
+  const { p, close } = await page();
+  await helpers(p);
+  const reqs = [];
+  p.on('request', (q) => { const u = q.url(); if (/\/playback\?|\/seg-\d+\.ts/.test(u) && !/warm=1/.test(u)) reqs.push(u); });
+  const r = await p.evaluate(async (id) => {
+    window.__L.play(id, 0); const f = await window.__frame(x => x >= 0, 30000);
+    const v = document.querySelector('#vid'), pb0 = window.__V.P.pb.url;
+    const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
+    const to = 150, n0 = window.__reqs?.length;
+    const t0 = performance.now(); v.currentTime = to;
+    const g = await window.__frame(x => x >= to - 0.6 && x < to + 6, 30000);
+    const ms = Math.round(performance.now() - t0);
+    const mv = g.ms == null ? null : await window.__moves(1500);
+    // Spolning inom bufferten därefter: ingen ny ström
+    const pb1 = window.__V.P.pb.url;
+    const w = performance.now(); while (!(v.buffered.length && v.buffered.end(v.buffered.length - 1) > v.currentTime + 4) && performance.now() - w < 15000) await new Promise(x => setTimeout(x, 50));
+    v.currentTime = v.currentTime + 2; const h = await window.__frame(x => x >= to, 10000);
+    return { f, g, h, ms, mv, b, to, n0, pb0, pb1, pb2: window.__V.P.pb.url, errors: window.__errors, errlog: window.__errlog, modes: window.__modes };
+  }, ten.id);
+  assert.ok(r.f.ms != null, `ingen bild vid start: ${r.f.state}`);
+  assert.ok(!r.b.some(([a, b]) => r.to >= a && r.to < b), `förutsättning: ${r.to} s låg utanför bufferten (${JSON.stringify(r.b)})`);
+  assert.ok(r.g.ms != null, `spolning till ${r.to} s gav ingen bild: ${r.g.state}`);
+  assert.ok(r.mv.frames >= 1.5 * FPS * 0.8 && !r.mv.paused, `bilden rör sig efteråt (${r.mv.frames} bildrutor)`);
+  assert.equal(r.errors, 0, r.errlog.join('; '));
+  assert.deepEqual(r.modes, ['transcode']);
+  const pid0 = new URL(r.pb0, srv.base).searchParams.get('pid'), u1 = new URL(r.pb1, srv.base);
+  assert.equal(u1.searchParams.get('hs'), String(r.to), 'ny ström med korta segment vid målet: ' + r.pb1);
+  assert.notEqual(u1.searchParams.get('pid'), pid0);
+  const i = reqs.findIndex(u => /\/playback\?/.test(u) && /[?&]start=150(&|$)/.test(u));
+  assert.ok(i > 0, 'ny fråga till /playback vid spolningen: ' + reqs.filter(u => /playback/.test(u)).join(' | '));
+  assert.match(reqs[i], new RegExp(`[?&]prev=${pid0}(&|$)`), 'servern stoppar den gamla strömmen');
+  const after = reqs.slice(i + 1).filter(u => /seg-/.test(u));
+  assert.ok(after.length && after.every(u => !u.includes(`pid=${pid0}`)), 'inga segment från den gamla strömmen efter spolningen');
+  // Första segmentet efter spolningen är 1 s långt (processorn) och börjar vid målet
+  const idx = await srv.req(new URL(r.pb1.replace('master.m3u8', 'index.m3u8'), srv.base).href);
+  const lines = idx.data.toString().split('\n'); let at = 0; const segs = [];
+  for (let k = 0; k < lines.length; k++) { const m = /^#EXTINF:([\d.]+)/.exec(lines[k]); if (m) { segs.push({ start: at, dur: +m[1], n: +/seg-(\d+)/.exec(lines[k + 1])[1] }); at += +m[1]; } }
+  const first = segs[+/seg-(\d+)/.exec(after[0])[1]];
+  assert.ok(first && Math.abs(first.start - r.to) < 0.01 && Math.abs(first.dur - 1) < 0.01, `första segmentet efter spolningen: ${JSON.stringify(first)}`);
+  assert.ok(r.h.ms != null, `spolning inom bufferten efteråt: ${r.h.state}`);
+  assert.equal(r.pb2, r.pb1, 'spolning inom bufferten startar ingen ny ström');
+  console.log(`spolning utanför bufferten i omkodningen: ${r.ms} ms till bild`);
+  await close();
 });
 
 test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {

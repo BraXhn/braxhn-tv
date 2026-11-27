@@ -169,3 +169,29 @@ export function rateOf(marks) {
   const ms = Math.max(1, last[0] - a[0]), bytes = Math.max(0, last[1] - a[1]);
   return bytes ? Math.round(bytes * 8 / ms) : 0; // byte/ms × 8 = kbit/s
 }
+
+// ---------- spolning i en omkodning ----------
+/**
+ * Spolning utanför bufferten i en omkodad ström: ska spelaren starta om strömmen vid t i stället för att låta hls.js
+ * hämta segmentet? Spellistan har 6 s-segment, och servern måste koda hela segmentet med målet innan något kan visas
+ * (1,5–3,6 s i uppspelningsvakten). En ny ström med start vid t får korta segment just där (1 s med processorn, 2 s
+ * med grafikkortet – samma som Fortsätt titta, hs i strömmens adress), så bilden kommer på ungefär en sekund.
+ * Spellistan ändras aldrig under hls.js: det är en ny ström med en egen spellista.
+ * buffered = [[start, slut], …], frags = spellistans segment [{ start, duration }], ready = [från, till] segment som
+ * servern redan har klara i den pågående körningen (X-Seg-Ready) eller null. Nej när t är buffrat, när segmentet
+ * redan är kort (början av filen, efter en fortsättning), när servern har det klart eller kodar det just nu, och nära
+ * slutet (där ger servern inga korta segment).
+ */
+export function seekRestart(buffered, t, { frags = [], ready = null } = {}) {
+  if (!Number.isFinite(t) || !frags.length) return false;
+  if (buffered.some(([a, b]) => t >= a - 0.1 && t < b)) return false;
+  const n = frags.findIndex(f => t >= f.start - 0.001 && t < f.start + f.duration);
+  if (n < 0) return false;
+  const last = frags.at(-1);
+  if (t > last.start + last.duration - 4) return false;
+  if (frags[n].duration <= 2.01) return false;
+  if (ready && n >= ready[0] && n <= ready[1] + 1) return false;
+  return true;
+}
+/** X-Seg-Ready från servern ("12-20") → [12, 20], annars null */
+export function readyRange(h) { const m = /^(\d+)-(\d+)$/.exec(String(h || '').trim()); return m ? [+m[1], +m[2]] : null; }

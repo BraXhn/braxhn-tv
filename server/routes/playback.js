@@ -125,6 +125,10 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
     return fail(c.res, 403, pm.maxStreams === 1 ? 'Ditt konto får bara spela en sak i taget – stoppa den andra uppspelningen först'
       : `Ditt konto får spela högst ${pm.maxStreams} saker samtidigt – stoppa någon av de andra först`);
   const t0 = Date.now();
+  // prev=<pid>: webbspelaren startar om samma uppspelning på ett annat ställe (spolning utanför bufferten i en
+  // omkodning, se video.js) – den förra strömmen stoppas först, så att processorn går till starten vid målet
+  const prevPid = /^[0-9a-f]{8}$/.test(c.q.get('prev') || '') ? c.q.get('prev') : '';
+  if (prevPid && !warm && c.q.get('info') !== '1') st.dropPlayback(ver.versionsOf(main).map(v => v.id), c.user.id, prevPid);
   // Användarens uppspelningsval (Mitt konto): gäller när klienten inte själv valt kvalitet eller ljudspår
   const prefs = pp.getPrefs(c.user.id);
   const adminCap = getSetting('remote_quality', process.env.REMOTE_QUALITY || '1080');
@@ -392,8 +396,9 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // Utan pid (apparna) stoppas alla användarens sessioner av titeln som förut.
   const pid = /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
   for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid);
-  // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden
-  if (row) act.clientStop(c.user.id, ver.mainOf(row).id);
+  // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden. replaced=1 (webbspelaren): bara
+  // en ström som ersatts av en nyare i samma uppspelning (flera spolningar i rad) – uppspelningen fortsätter
+  if (row && !(pid && c.q.get('replaced') === '1')) act.clientStop(c.user.id, ver.mainOf(row).id);
   send(c.res, 200, { ok: true });
 });
 

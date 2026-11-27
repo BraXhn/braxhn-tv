@@ -260,6 +260,49 @@ t('stopp medan spelaren väntar på ett segment: ffmpeg startas inte om efteråt
   st.stopUserSessions(it.id, s.user);
 });
 
+// Spolning utanför bufferten i en omkodning: webbspelaren startar om strömmen vid målet (/playback med start= och
+// prev=<pid för strömmen som spelades>, video.js seekRestarts) i stället för att vänta på hela 6 s-segmentet
+t('spolning i en omkodning: ny ström med korta segment vid målet, segmenten stämmer, och den gamla stoppas', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const P0 = await playlist('force=transcode&q=480');
+  const pid0 = pidOf(P0.pb.url);
+  const r0 = await fetch(P0.segs[1].url, { headers: A() }); await r0.arrayBuffer();
+  // Servern säger vilka segment som är klara i körningen – spelaren spolar dit som vanligt
+  assert.match(r0.headers.get('x-seg-ready') || '', /^0-\d+$/, 'X-Seg-Ready: ' + r0.headers.get('x-seg-ready'));
+  const old = sessions().find(x => x.d.pid === pid0);
+  assert.ok(old?.proc, 'den första strömmen kodar');
+  // Spolning till 57,4 s: i den gamla spellistan ligger målet mitt i 6 s-segmentet 54–60
+  assert.equal(P0.segs.find(x => x.start <= 57.4 && x.start + x.dur > 57.4).dur, 6);
+  const P = await playlist(`force=transcode&q=480&start=57.4&prev=${pid0}`);
+  assert.match(P.pb.url, /[?&]hs=57(&|$)/); assert.match(P.pb.url, /[?&]h1=1(&|$)/);
+  assert.notEqual(pidOf(P.pb.url), pid0, 'en ny ström med egen spellista – den gamla ändras inte');
+  // Den gamla strömmen är stoppad och borta, och en sen begäran till den startar ingen ny ffmpeg
+  assert.ok(!old.proc && !sessions().includes(old), 'den gamla strömmen är stoppad');
+  const late = await fetch(P0.segs.at(-2).url, { headers: A() }); await late.arrayBuffer();
+  assert.equal(late.status, 409, 'begäran till den gamla strömmen');
+  assert.ok(!sessions().some(x => x.d.pid === pid0), 'ingen ny session för den gamla strömmen');
+  // Korta segment från målet: … 48, 54, 56, 57 (1 s, där 57,4 ligger), 58, 60 (2 s), 62 (6 s) …
+  assert.deepEqual(P.segs.map(x => x.start).filter(x => x >= 48 && x <= 68), [48, 54, 56, 57, 58, 60, 62, 68]);
+  const at = (x) => P.segs.find(y => y.start === x);
+  assert.equal(at(57).dur, 1);
+  // ffmpeg är förstartad där – och segmenten är så långa som spellistan säger, med nyckelbild på gränsen
+  const s = sessions().find(x => x.d.pid === pidOf(P.pb.url));
+  assert.equal(s.segs[s.start].start, 57, 'förstartad på segmentet med målet');
+  const t0 = Date.now();
+  await check(at(57), 'segment 57 (1 s)');
+  const ms = Date.now() - t0;
+  await check(at(58), 'segment 58'); await check(at(60), 'segment 60'); await check(at(62), 'segment 62 (6 s)');
+  // Bakåt i den nya strömmen: före de korta segmenten (vanliga 6 s) och genomspelning in i dem
+  for (const x of [48, 54, 56, 57]) await check(at(x), `bakåt ${x}`);
+  assert.ok(ms < 5000, `första segmentet efter spolningen på ${ms} ms`);
+  // prev gäller bara den egna uppspelningen: en annan pid (annan enhet) stoppas inte
+  const Q = await playlist('force=transcode&q=480&start=30');
+  const other = sessions().find(x => x.d.pid === pidOf(Q.pb.url));
+  await playlist(`force=transcode&q=480&start=40&prev=${pidOf(P.pb.url)}`);
+  assert.ok(sessions().includes(other), 'den andra uppspelningen finns kvar');
+  for (const x of sessions()) st.stopUserSessions(it.id, x.user);
+});
+
 t('första segmentet vid omkodning är 1 s och kommer fortare än med 2 s (tidsmått, omväxlande körningar)', async () => {
   const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
   assert.ok(heavy?.duration > 15, 'den tunga filen är inläst');
