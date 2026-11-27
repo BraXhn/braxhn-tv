@@ -23,6 +23,23 @@ nät. Går det inte (gästnät, brandvägg) kan du starta med `npx expo start --
 I appen väljer du **Lägg till server** och anger serverns adress, till exempel `192.168.1.10` (blir
 `http://192.168.1.10:8420`) eller `tv.example.com` (blir `https://`), och loggar in med ditt vanliga konto.
 
+## Språk
+
+Appen finns på svenska och engelska. Den följer telefonens språk: svenska om telefonen är på svenska, annars engelska
+(samma regel som Android-appen). Under **Konto → Språk** kan du välja *Telefonens språk*, *Svenska* eller *English*;
+valet sparas i telefonen och appen ritas om direkt (du hamnar på *Konto* igen).
+
+- Appen skickar `Accept-Language` (`sv` eller `en`) med varje anrop, så serverns felmeddelanden och hyllnamn kommer på
+  samma språk. Har profilen ett eget språk i webben (*Mitt konto → Språk*) gäller det för serverns texter.
+- Datum och tal följer språket: på engelska telefonens egen engelska variant (`en-US` ger t.ex. 1,200), annars `en-GB`;
+  på svenska `sv-SE` (1,2 GB).
+- De fasta smarta listornas namn (*Mest spelat senaste 30 dagarna* …) skickar servern på svenska; appen översätter dem
+  efter listans id, som webben.
+- Kvar på svenska: sidans namn i den tekniska informationen i en felrapport (till utvecklarna), och text som sparats i
+  Nedladdat innan språket byttes (serie/säsong under titeln och ett gammalt felmeddelande).
+- Telefonens språk läses med `Intl` (inget extra paket). Det är **inte provat i Expo Go** på en telefon på engelska,
+  bara i webbläget med webbläsaren på engelska.
+
 ## Servrar
 
 - Har du **en** sparad server öppnas den direkt när appen startar.
@@ -68,6 +85,7 @@ och sedan `npx expo install --fix`.
 - Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
 - Nedladdning av filmer, avsnitt och ljudböcker som spelas utan nät (se *Nedladdat* nedan).
 - Feedback och felrapporter (se *Feedback* nedan).
+- Svenska och engelska efter telefonens språk, eller valt under *Konto* (se *Språk* ovan).
 
 ## Feedback
 
@@ -228,9 +246,16 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   utanför React), `src/components/audio.tsx` (omslag, låtrader, minispelaren), `src/screens/Music.tsx` (fliken Musik,
   album, artist, spellista), `src/screens/Books.tsx` (ljudböcker och poddar) och `src/screens/NowPlaying.tsx`
   (helskärmsspelaren). Nedladdat: `src/offlinecore.ts` (logiken utan filsystem: poster, kö, väntande positioner,
-  undertexter, skärmtid utan nät – inga importer), `src/offline.ts` (filerna, `DownloadTask`, serveranropen),
+  undertexter, skärmtid utan nät – bara `i18n.ts` importeras), `src/offline.ts` (filerna, `DownloadTask`, serveranropen),
   `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat). Feedback: `src/feedback.ts`
   (texter, var man är, senaste uppspelningen, anropen) och `src/screens/Feedback.tsx` (formuläret och Mina ärenden).
+- **Texter:** skriv all text som syns på svenska i `t('…')` från `src/i18n.ts` (variabler `t('Säsong {n}', { n })`,
+  plural `tn(n, '1 avsnitt', '{n} avsnitt')`) och lägg den engelska raden i `src/i18n-en.ts`. Finns texten redan i
+  webbens `web/i18n/en.js` ska den engelska vara exakt densamma. Text som ska följa språket får inte ligga i en konstant
+  på modulnivå – gör en funktion (som `KIND()` i `src/feedback.ts`). `test/expo-i18n.test.js` (`node --test
+  test/expo-i18n.test.js` i repots rot) letar svensk text utanför `t()` i alla `.ts`/`.tsx` (strängar och JSX-text, med
+  uttryckliga undantag i testet), kräver en engelsk rad för varje `t()` och ingen oanvänd, samma `{platshållare}`, samma
+  engelska som webben för delade texter, och provar språkvalet, plural och tal i Node.
 - Testerna för nedladdningen ligger i repots `test/expo-offline.test.js` och körs med Node (22.18 eller senare läser
   TypeScript): `node --test test/expo-offline.test.js` i repots rot. `offlinecore.ts` testas direkt, `offline.ts` med ett
   låtsat filsystem och en låtsad server (`test/helpers/expo-loader.mjs`, `expo-fakes.mjs`) – telefonens riktiga filsystem

@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- **Expo-appen på engelska.** Appen följer telefonens språk – svenska om telefonen är på svenska, annars engelska, som
+  Android-appen – och under *Konto → Språk* kan du välja *Telefonens språk*, *Svenska* eller *English*. Alla texter
+  (380) är översatta; de som också finns i webben (156) har exakt samma engelska. Plural (*1 episode / 3 episodes*),
+  datum och tal följer språket. Appen skickar `Accept-Language`, så serverns felmeddelanden och hyllnamn kommer på samma
+  språk, och de smarta listornas namn översätts som i webben. Ett nytt test hittar svensk text utanför översättningen
+  så att den inte smyger tillbaka. Provat i webbläget med webbläsaren på engelska, inte i Expo Go på en riktig telefon.
 - **Feedback och felrapporter i Expo- och Android-appen.** Samma som knappen *Feedback* i webben: välj *Förslag eller
   synpunkt* eller *Något fungerar inte*, vad det gäller (förvalt efter skärmen du var på) och skriv vad som hände. Med
   krysset för teknisk information följer appens version, enhet, skärmstorlek och senaste uppspelningen med, och *Visa

@@ -149,6 +149,11 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Ansiktsigenkänning i foton (Plex har det). Låg nytta här.
 - Skicka e-bok till läsplatta med e-post (Audiobookshelf har det) – kontrollera först om det redan finns.
 - Expo-appen: live-TV och TV-guide.
+- Expo-appen: `NSLocalNetworkUsageDescription` i `app.json` är bara på svenska; iOS visar den när appen ber om hemnätet.
+  Ett eget bygge kan få en engelsk variant med `locales` i `app.json` (gäller inte Expo Go).
+- Expo-appen: Nedladdat sparar serie/säsong (`sub`) och felmeddelanden som text när posten skapas (`offlinecore.ts`
+  `videoEntry`, `offline.ts` `friendly`) – byts språket står de kvar på det gamla. Spara delarna och skriv texten vid
+  visning.
 
 **Småfel**
 - Inspelningens datum i filens metadata (`server/dvr.js`) och datumet i filnamnen för exporter (Min historik,
@@ -160,6 +165,17 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   annan profil på samma enhet ser förloppsraden för en nedladdning som pågår och kan inte starta samma titel samtidigt.
 
 ## Klart
+
+- 2026-11-27: Expo-appen på engelska, gren `team/expo-engelska-2026-11-27`. `src/i18n.ts` (`t`, `tn`, `fmtNum`,
+  språkval efter telefonen via `Intl` – svenska → sv, annars en – och *Konto → Språk*, sparat i telefonen) och
+  `src/i18n-en.ts` med 380 texter, varav 156 med exakt webbens engelska. `Accept-Language` till servern, datum och tal
+  efter språket, plural med `Intl.PluralRules`, smarta listornas namn efter id. `test/expo-i18n.test.js` (7 fall: ingen
+  svensk text utanför `t()` – 286 fynd på main –, katalogen mot koden och webben, språkval/plural/tal i Node);
+  `test/expo-offline.test.js` kör nu på svenska uttryckligen. Webbläget mot en egen server med Playwright (390×844,
+  Chrome på engelska): start, film, serie, musik, album, helskärmsspelare, Konto, Nedladdat (bara webbens besked – med
+  en tillfällig byggvariant, eftersom Nedladdat inte nås i webbläget), Feedback och Mina ärenden utan svensk text, byte
+  till svenska och tillbaka. **Inte provat:** Expo Go på en riktig telefon på engelska (att `Intl` ger telefonens språk
+  i Hermes på iPhone och Android), Nedladdat med riktiga nedladdningar på engelska.
 
 - 2026-11-27: Feedback och Mina ärenden i Expo- och Android-appen, gren `team/app-feedback-2026-11-27`. Samma dialog
   som webben (typ, *Gäller* förvalt efter skärmen man var på, meddelande, teknisk information med *Visa vad som skickas
