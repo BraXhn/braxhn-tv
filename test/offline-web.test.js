@@ -162,6 +162,19 @@ t('tittarposition med at: ett senare framsteg från en annan enhet skrivs inte �
   const rb = (await req(`/api/audiobooks/book/${S.book}/progress`, { method: 'POST', body: { position: 5, at: now - 200 } })).data;
   assert.equal(rb.stale, true);
   assert.equal((await req(`/api/audiobooks/book/${S.book}`)).data.position, 20);
+  // Poddavsnitt på samma sätt (Android-appen skickar positioner i efterhand)
+  const db = new DatabaseSync(path.join(CONFIG, 'braxhn-tv.db'));
+  db.exec('PRAGMA busy_timeout=5000');
+  db.exec("INSERT INTO podcasts(id,url,title,added) VALUES(77,'https://example.com/p.xml','Podden',0); INSERT INTO podcast_episodes(id,podcast_id,guid,title,duration,url,added) VALUES(78,77,'g','Avsnittet',3600,'https://example.com/a.mp3',0)");
+  const epPos = () => db.prepare('SELECT position FROM podcast_progress WHERE episode_id=78').get()?.position;
+  assert.equal((await req('/api/podcasts/episodes/78/progress', { method: 'POST', body: { position: 300, at: now - 100 } })).status, 200);
+  assert.equal(epPos(), 300);
+  const rp = (await req('/api/podcasts/episodes/78/progress', { method: 'POST', body: { position: 50, at: now - 200 } })).data;
+  assert.equal(rp.stale, true); assert.equal(rp.stop, undefined); assert.equal(epPos(), 300);
+  await req('/api/podcasts/episodes/78/progress', { method: 'POST', body: { position: 400 } });
+  assert.equal(epPos(), 400);
+  db.exec('DELETE FROM podcasts WHERE id=77');
+  db.close();
   await req(`/api/items/${S.e2}/progress`, { method: 'POST', body: { position: 0 } });
   await req(`/api/audiobooks/book/${S.book}/progress`, { method: 'POST', body: { position: 0 } });
 });

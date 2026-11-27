@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { all, run, get, now, tx, getSetting, IMAGES } from '../db.js';
-import { send, readJson, fail, streamFile, MIME, clientIp } from '../util.js';
+import { send, readJson, fail, streamFile, MIME, clientIp, syncAt } from '../util.js';
 import { audit, createSession } from '../auth.js';
 import { scan, removeImages, status as scanStatus, refreshItem, extractThumb, tmdbSearch, tmdb, hasTmdb, forgetFolder, parseMovie, matchQuery } from '../scanner.js';
 import { titleHints } from '../match.js';
@@ -332,7 +332,7 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
   const wasWatched = !!prev?.watched;
   // at (tillägg, webbappens offline-läge): när positionen sparades (Unix-sekunder). Ett senare framsteg från en
   // annan enhet vinner – den gamla positionen skrivs då inte över. Ingen "spelas nu" eller skärmtid för det.
-  const at = Number.isFinite(+atRaw) && +atRaw > 0 ? Math.min(Math.floor(+atRaw), now()) : null;
+  const at = syncAt(atRaw);
   if (at && prev && prev.updated >= at) return send(c.res, 200, { watched: wasWatched, stale: true, stop: false });
   const watched = dur && (pos / dur > 0.92 || dur - pos < 120 && pos > 60) ? 1 : 0;
   // Omtittning av en sedd titel: sedd-markeringen behålls men positionen sparas (syns i "Fortsätt titta")

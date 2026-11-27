@@ -261,6 +261,13 @@ export const underFailed = (file, failed) => failed.some(d => file === d || file
 /** Dagens datum (ÅÅÅÅ-MM-DD) i serverns lokala tid (TZ, som i Dockerfile) – inte UTC, som är gårdagen strax efter midnatt */
 export const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/**
+ * at från en app eller webbens offline-läge: när en position sparades (Unix-sekunder). Gäller för framsteg i filmer,
+ * ljudböcker, e-böcker och poddar: ett framsteg med at som inte är nyare än det som finns skrivs inte över (stale).
+ * Ger hela sekunder, högst nu (en klocka som går före blir nu), eller null när at saknas eller är ogiltigt.
+ */
+export const syncAt = (at) => Number.isFinite(+at) && +at > 0 ? Math.min(Math.floor(+at), Math.floor(Date.now() / 1000)) : null;
+
 // ---- filströmning med Range-stöd ----
 /**
  * Skickar en fil (ev. del av den enligt Range). pipeline stänger filen även om klienten avbryter,

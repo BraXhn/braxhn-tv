@@ -255,11 +255,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   visning.
 
 **Småfel**
-- Inspelningens datum i filens metadata (`server/dvr.js`) och datumet i filnamnen för exporter (Min historik,
-  ordlistan, Mina uppgifter) räknas i UTC – mellan midnatt och kl. 01–02 blir det gårdagens datum.
-- Poddavsnittens framsteg (`POST /api/podcasts/episodes/:eid/progress`, `server/podcasts.js` `saveProgress`) tar inte
-  emot `at`: en position som Android-appen skickar i efterhand kan skriva över en nyare från en annan enhet. Böcker och
-  filmer har regeln redan.
 - Android-appen: förloppet och felen för nedladdningar (`Downloads.active`/`errors`) gäller titeln, inte profilen – en
   annan profil på samma enhet ser förloppsraden för en nedladdning som pågår och kan inte starta samma titel samtidigt.
 
@@ -269,6 +264,11 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-27: Småfel, gren `team/smafel-2026-11-27`. Poddavsnittens framsteg tar emot `at` med samma regel som filmer,
+  ljudböcker och e-böcker (gemensam `syncAt` i `server/util.js`); testat i `test/books-podcasts.test.js` och
+  `test/offline-web.test.js`. Lokalt datum i inspelningens metadata och exporters filnamn var redan rättat 2026-11-25
+  (`util.localDate`, `test/security-review5.test.js`); raden låg kvar. Skärmtidens och aktivitetens egna kopior av
+  datumfunktionen använder nu `util.localDate`.
 - 2026-11-27: Expo-appen frågar servern vad som är kodat vid spolning (commit `8d49b54`). `/api/stream/:id/hls/ready`
   (samma svar som `X-Seg-Ready`, startar aldrig någon omkodning) var 4:e sekund medan strömmen spelar; svaret används
   i 8 s (`readyFor` i `apps/expo/src/seekcore.ts`), annars gissar appen som förut. `prev` och `replaced=1` står i

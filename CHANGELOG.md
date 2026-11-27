@@ -1,6 +1,10 @@
 # Ändringar
 
 ## Ej utgiven
+- **En poddposition som skickas i efterhand skriver inte längre över en nyare.** Lyssnade du på ett poddavsnitt utan
+  nät i Android-appen och fortsatte sedan på en annan enhet, kunde telefonen skicka sin äldre position när den fick nät
+  igen och flytta tillbaka dig. Nu tar servern emot `at` (när positionen sparades) även för poddar, som för filmer och
+  ljudböcker: den senaste positionen vinner. Appar som inte skickar `at` fungerar som förut.
 - **Expo-appen vet vad servern redan har kodat när du spolar.** Förut gissade appen ur det som var laddat i telefonen,
   så en spolning dit servern redan hade kodat kunde starta om strömmen i onödan (och en spolning bakåt dit servern
   hade städat bort stycken kunde vänta på ett helt sexsekundersstycke). Nu frågar appen servern var fjärde sekund

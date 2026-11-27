@@ -631,9 +631,11 @@ Bara tillägg – apparna påverkas inte.
   duration, artist, codec, gain, peak, url }] }` – en mediatoken per spår (scope −spårets id).
 - `GET /api/audiobooks/book/:id/offline?a=<format>`: som `/play` (`files[].url` med en token för boken, `chapters`, `position`, `speed`).
 - Båda kräver rätten att ladda ner (**403** annars) och användarens bibliotek (**404**).
-- `at` (Unix-sekunder) i `POST /api/items/:id/progress` och `POST /api/audiobooks/book/:id/progress`: när positionen sparades
-  offline. Finns ett framsteg som är nyare än `at` ändras inget och svaret har `stale: true`; annars sparas positionen med
-  `updated = at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
+- `at` (Unix-sekunder) i `POST /api/items/:id/progress`, `POST /api/audiobooks/book/:id/progress` och
+  `POST /api/podcasts/episodes/:eid/progress` (tillägg, bakåtkompatibelt): när positionen sparades offline. Finns ett
+  framsteg som är minst lika nytt som `at` ändras inget och svaret har `stale: true` (poddar: `{ played, stale: true }`);
+  annars sparas positionen med `updated = at`. Ett `at` i framtiden räknas som nu, och `0`, negativa tal eller text som
+  inget `at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
 ## Undertexter i offline-filen (`/api/items/:id/offline`, `/api/stream/:id/offline-file`)
 
 Inga nya fält – anropen och svaren är desamma. MP4-filen som apparna laddar ner (`q` = 480/720/1080/orig) har nu

@@ -4,6 +4,7 @@
 // (positionen står still) räknas inte. Dagen och klockslagen följer serverns lokala tid (TZ).
 import { db, get, run } from './db.js';
 import { tr } from './i18n.js';
+import { localDate } from './util.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   day TEXT NOT NULL, seconds REAL NOT NULL DEFAULT 0, extra INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));`);
@@ -17,7 +18,7 @@ const DAYS = ['söndag', 'måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'l�
 // "På måndagar går det att titta …" – nycklar i web/i18n/en.js (server/i18n.js)
 const DAYS_PL = ['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'];
 
-export const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const localDay = localDate; // samma lokala dag (TZ) som util.localDate
 const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '')); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
 const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const minutes = (v) => { if (v === '' || v == null) return null; const n = parseInt(v); return Number.isFinite(n) ? Math.max(0, Math.min(1440, n)) : null; };

@@ -20,6 +20,7 @@ import { permsOf } from './perms.js';
 import { ranked } from './search.js';
 import { withZip, ZipError } from './ebooks/zip.js';
 import { readEpub, readComic, readPdf, seriesFromName, imageType } from './ebooks/formats.js';
+import { syncAt } from './util.js';
 
 const pexec = promisify(execFile);
 export const EXT = new Set(['.epub', '.pdf', '.cbz', '.cbr']);
@@ -258,7 +259,7 @@ export function cleanLocator(l) {
 }
 /** at (valfri): när positionen sparades (Unix-sekunder) – ett senare sparat läge vinner */
 export function saveProgress(uid, id, { locator, percent, finished, at } = {}) {
-  at = Number.isFinite(+at) && +at > 0 ? Math.min(Math.floor(+at), now()) : null;
+  at = syncAt(at);
   if (at) { const p = get('SELECT updated, finished FROM ebook_progress WHERE user_id=? AND ebook_id=?', uid, id); if (p && p.updated >= at) return { stale: true, finished: !!p.finished }; }
   let pc = Math.max(0, Math.min(100, +percent || 0));
   const done = finished === true || (finished !== false && pc >= 99.5) ? 1 : 0;

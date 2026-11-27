@@ -10,7 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { db, get, all, run, now, getSetting, CONFIG, IMAGES, searchKeys } from './db.js';
 import { ranked } from './search.js';
-import { streamFile } from './util.js';
+import { streamFile, syncAt } from './util.js';
 import * as jobs from './jobs.js';
 
 // RFC 822-datum med tidszonsförkortningar (CEST, BST …) som Date.parse inte förstår
@@ -348,12 +348,15 @@ export function podcast(id, uid) {
 }
 export const latest = (uid, limit = 30) => all(`SELECT e.*, p.title AS ptitle, q.position, q.played FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id
   LEFT JOIN podcast_progress q ON q.episode_id=e.id AND q.user_id=? WHERE COALESCE(q.played,0)=0 ORDER BY e.published DESC LIMIT ?`, uid, limit).map(epShape);
-export function saveProgress(uid, epId, position, played) {
+/** at (valfri): när positionen sparades (Unix-sekunder, appens offline-läge) – ett senare framsteg vinner, som för böcker och filmer */
+export function saveProgress(uid, epId, position, played, at = null) {
   const e = get('SELECT duration FROM podcast_episodes WHERE id=?', epId); if (!e) return null;
+  at = syncAt(at);
+  if (at) { const p = get('SELECT updated, played FROM podcast_progress WHERE user_id=? AND episode_id=?', uid, epId); if (p && p.updated >= at) return { played: !!p.played, stale: true }; }
   const pos = Math.max(0, +position || 0);
   const done = played != null ? (played ? 1 : 0) : (e.duration && e.duration - pos < 45 ? 1 : 0);
   run(`INSERT INTO podcast_progress(user_id,episode_id,position,played,updated) VALUES(?,?,?,?,?) ON CONFLICT(user_id,episode_id) DO UPDATE SET
-    position=excluded.position, played=${played != null ? 'excluded.played' : 'MAX(played, excluded.played)'}, updated=excluded.updated`, uid, epId, done ? 0 : pos, done, now());
+    position=excluded.position, played=${played != null ? 'excluded.played' : 'MAX(played, excluded.played)'}, updated=excluded.updated`, uid, epId, done ? 0 : pos, done, at || now());
   return { played: !!done };
 }
 export const episodeRow = (id) => get('SELECT * FROM podcast_episodes WHERE id=?', id);

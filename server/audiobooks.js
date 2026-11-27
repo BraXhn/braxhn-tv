@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { db, get, all, run, tx, now, getSetting, IMAGES, searchKeys } from './db.js';
 import { ranked } from './search.js';
 import { probe, AUDIO, makeCover } from './music.js';
-import { underFailed } from './util.js';
+import { underFailed, syncAt } from './util.js';
 import { rootsOf, listRoots, relOf, under, listWarnings } from './libpaths.js';
 import { libOk, libFilter } from './perms.js';
 
@@ -225,7 +225,7 @@ export function book(id, uid) {
 /** at (valfri): när positionen sparades (Unix-sekunder, webbappens offline-läge) – ett senare framsteg vinner */
 export function saveProgress(uid, id, position, speed, at = null) {
   const b = get('SELECT duration, library_id FROM books WHERE id=?', id); if (!b || !libOk(uid, b.library_id)) return null;
-  at = Number.isFinite(+at) && +at > 0 ? Math.min(Math.floor(+at), now()) : null;
+  at = syncAt(at);
   if (at) { const p = get('SELECT updated, finished FROM book_progress WHERE user_id=? AND book_id=?', uid, id); if (p && p.updated >= at) return { finished: !!p.finished, stale: true }; }
   const pos = Math.max(0, Math.min(+position || 0, b.duration || 1e9));
   if (!at) countListening(uid, id, pos, speed);

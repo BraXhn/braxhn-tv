@@ -7,6 +7,7 @@ import * as webhooks from './webhooks.js';
 import * as offsite from './offsite.js';
 import { AUDIO } from './music.js';
 import { rootsOf } from './libpaths.js';
+import { localDate as localDay } from './util.js';
 
 // ---------------- spelas nu ----------------
 // En uppspelning (session) per användare och titel. Servern ser: uppspelningsbeslutet (GET /api/items/:id/playback =
@@ -223,7 +224,6 @@ export function stats() {
 
 // ---------------- säkerhetskopiering ----------------
 export const BACKUP_DIR = process.env.BACKUP_DIR || path.join(CONFIG, 'backups');
-const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export function backupNow() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const d = new Date();

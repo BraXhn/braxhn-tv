@@ -102,6 +102,29 @@ test('poddar: lokala adresser nekas, prenumeration och nedladdning fungerar', as
   } finally { delete process.env.PODCAST_ALLOW_PRIVATE; srv.close(); }
 });
 
+test('poddar: framsteg med at – ett senare framsteg från en annan enhet skrivs inte över', () => {
+  run("INSERT INTO podcasts(id,url,title,added) VALUES(900,'https://example.com/at.xml','At-podden',0)");
+  run("INSERT INTO podcast_episodes(id,podcast_id,guid,title,duration,url,added) VALUES(901,900,'at1','Avsnittet',3600,'https://example.com/a.mp3',0)");
+  const now = Math.floor(Date.now() / 1000);
+  const row = () => get('SELECT position, played, updated FROM podcast_progress WHERE user_id=1 AND episode_id=901');
+  // Telefonen lyssnade offline för två timmar sedan; tv:n sparade en nyare position för en timme sedan
+  assert.deepEqual(pods.saveProgress(1, 901, 500, undefined, now - 3600), { played: false });
+  assert.equal(row().position, 500); assert.equal(row().updated, now - 3600); // updated = när positionen sparades, inte nu
+  const r = pods.saveProgress(1, 901, 200, undefined, now - 7200);
+  assert.equal(r.stale, true); assert.equal(r.played, false); assert.equal(row().position, 500);
+  // Samma sparning igen (svaret tappades): stale, ingen ändring
+  assert.equal(pods.saveProgress(1, 901, 500, undefined, now - 3600).stale, true);
+  // Nyare offline-position vinner; at i framtiden räknas som nu
+  pods.saveProgress(1, 901, 800, undefined, now - 60); assert.equal(row().position, 800);
+  pods.saveProgress(1, 901, 900, undefined, now + 86400); assert.equal(row().position, 900); assert.ok(row().updated <= now + 5);
+  // Lyssnat-markering i efterhand men äldre än det som finns: ändrar inget
+  assert.equal(pods.saveProgress(1, 901, 0, true, now - 7200).stale, true); assert.equal(row().played, 0);
+  // Konstiga at (0, text, negativa) och inget at alls: som förut, sparas med nu
+  for (const at of [0, 'x', -5, null, undefined]) { pods.saveProgress(1, 901, 1000, undefined, at); assert.equal(row().position, 1000); }
+  assert.deepEqual(pods.saveProgress(1, 901, 1100), { played: false }); assert.equal(row().position, 1100);
+  run('DELETE FROM podcasts WHERE id=900');
+});
+
 test('poddar: spärrade adresser och skadliga flöden', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '169.254.169.254', '100.64.1.1', '::1', '::ffff:7f00:1', '::ffff:a9fe:a9fe', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1', '64:ff9b::a00:1', '2002:a00:1::'])
     assert.ok(pods.blockedIp(ip), ip);

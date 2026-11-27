@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { pipeline } from 'node:stream';
 import { get, run, now } from '../db.js';
-import { fail, send, readJson, clientIp, streamFile } from '../util.js';
+import { fail, send, readJson, clientIp, streamFile, syncAt } from '../util.js';
 import { createSession, audit } from '../auth.js';
 import * as music from '../music.js';
 import * as books from '../audiobooks.js';
@@ -49,7 +49,7 @@ route('GET', '/api/audiobooks/book/:bid', user, (c) => {
 route('POST', '/api/audiobooks/book/:bid/progress', user, async (c) => {
   const { position, speed, at } = await readJson(c.req);
   const r = books.saveProgress(c.user.id, +c.p.bid, position, speed, at); if (!r) return fail(c.res, 404, 'Finns inte');
-  if (r.stale || (at && Number.isFinite(+at))) return send(c.res, 200, r); // offline-synk: ingen skärmtid
+  if (r.stale || syncAt(at)) return send(c.res, 200, r); // offline-synk: ingen skärmtid
   const sc = screen.heartbeat(c.user.id, 'b:' + (+c.p.bid), +position, { audio: true });
   send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: screen.inLang(sc, reqLang(c.req)) } : r);
 });
@@ -232,8 +232,9 @@ route('GET', '/api/podcasts/:pid/image', img, async (c) => {
 });
 route('POST', '/api/podcasts/episodes/:eid/progress', user, async (c) => {
   if (kidPods(c)) return;
-  const { position, played } = await readJson(c.req);
-  const r = pods.saveProgress(c.user.id, +c.p.eid, position, played); if (!r) return fail(c.res, 404, 'Finns inte');
+  const { position, played, at } = await readJson(c.req);
+  const r = pods.saveProgress(c.user.id, +c.p.eid, position, played, at); if (!r) return fail(c.res, 404, 'Finns inte');
+  if (r.stale || syncAt(at)) return send(c.res, 200, r); // offline-synk: ingen skärmtid
   const sc = played ? null : screen.heartbeat(c.user.id, 'p:' + (+c.p.eid), +position, { audio: true });
   send(c.res, 200, sc ? { ...r, stop: !sc.allowed, screenTime: screen.inLang(sc, reqLang(c.req)) } : r);
 });
