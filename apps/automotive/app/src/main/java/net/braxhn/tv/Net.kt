@@ -185,13 +185,15 @@ object Media {
      */
     const val TIMEOUT_MS = 60_000
 
-    /** Hemadressen (Hemma.kt): gamla adresser skrivs om, och nätverksfel mot hemadressen går tillbaka till den sparade */
+    /** Hemadressen (Hemma.kt): gamla adresser skrivs om, och nätverksfel mot hemadressen går tillbaka till den sparade.
+     *  listener: ser varje svar (spelaren läser X-Seg-Ready ur segmenten, PlayerScreen.kt) */
     @OptIn(UnstableApi::class)
-    fun http(): androidx.media3.datasource.DataSource.Factory = Home.dataSource(DefaultHttpDataSource.Factory()
+    fun http(listener: androidx.media3.datasource.TransferListener? = null): androidx.media3.datasource.DataSource.Factory = Home.dataSource(DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(true)
         .setUserAgent("BraXhnTV-Android")
         .setConnectTimeoutMs(TIMEOUT_MS)
-        .setReadTimeoutMs(TIMEOUT_MS))
+        .setReadTimeoutMs(TIMEOUT_MS)
+        .setTransferListener(listener))
 }
 
 /**

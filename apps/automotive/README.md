@@ -28,6 +28,7 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - **repliksökning**: fliken *Repliker* i sökningen spelar från strax före repliken
 - **familjefiltret** och **syntolkning** visas i spelaren; markerade scener hoppas över. *Synka automatiskt* i undertextmenyn för undertextfiler
 - byte av ljudspår och undertexter under uppspelning, kapitel
+- **snabb spolning i omkodade filmer**: spolar du utanför det som är laddat startar spelaren om strömmen där du spolade till, med korta stycken där, så att bilden kommer på ungefär en sekund i stället för 3–4 (se nedan)
 - musik, **ljudböcker och poddar i bilens mediaspelare** (får användas under körning)
 - offline-nedladdning
 - **byt profil** i hushållet (PIN eller huvudkontots lösenord när servern kräver det)
@@ -42,6 +43,8 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - i bilens mediaspelare och Android Auto: flikarna Musik, Ljudböcker och Poddar, **Stationer** (låtradio och stationer från serverns ljudanalys), *Radio: artist* överst på varje artistsida, sökning i musik, ljudböcker och poddar och **röststyrning** ("Hey Google, spela … på BraXhn TV" spelar bästa träffen: låten med sitt album, ett album, en ljudbok eller poddens senaste avsnitt)
 
 Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan direkt, remux eller omkodning. Spelaren väntar upp till 60 s på servern, så en omkodning med grafikkort som tar några sekunder att komma igång startas inte om.
+
+**Spolning i en omkodad film:** spelaren startar om strömmen vid målet (`/playback` med `start=` och `prev=<förra strömmens pid>`) i stället för att vänta på att servern kodar ett helt sexsekundersstycke, som webbspelaren. Servern stoppar den gamla omkodningen direkt. Ljudspår, undertext, hastighet och paus behålls, och adressen är den som gäller just då (hemadressen hemma). Ingen omstart när målet redan är laddat, när servern har det klart eller kodar det (`X-Seg-Ready` i segmentens svar), när stycket redan är kort, nära slutet och innan första bilden visats. Alla spolningar går samma väg: tidslinjen, snabbspolning och fjärrkontrollens media- och pilknappar (via `SeekingPlayer` runt ExoPlayer), kapitel, *Hoppa över intro* och familjefiltrets överhoppade scener. Fjärrkontrollens steg (snabbspola framåt/bakåt) samlas: omstarten väntar 0,6 s på nästa tryck och tidslinjen visar målet under tiden, så fem tryck blir en omstart. Reglerna: `SeekCore.kt` (JVM-test i `SeekCoreTest.kt`). Remux, direktuppspelning, live-TV och nedladdat påverkas inte.
 
 **Barnprofiler:** poddar visas inte (servern stänger dem för barn), och när en vuxen trycker *Stoppa* i Föräldraöversikten stannar filmen inom ungefär tio sekunder med beskedet *En vuxen stoppade uppspelningen*. Samma sak när skärmtiden tar slut, med serverns förklaring – även utan nät för en nedladdad titel (se *Nedladdat och utan nät*).
 
@@ -161,6 +164,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil och feedbackens regler): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil, feedbackens regler och spolningen i en omkodning): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
-**Inte provat på riktig enhet (appversion 0.7.0):** att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.
+**Inte provat på riktig enhet (appversion 0.7.0):** spolningen i en omkodning (omstarten vid målet, fjärrkontrollens steg, bilen), att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

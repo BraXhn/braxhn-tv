@@ -31,6 +31,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem as M3Item
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -38,11 +39,16 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,10 +95,18 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     // Tid som spelats sedan förra rapporten (ms) och förra varvet i bevakningen – räknas som skärmtid utan nät
     val played = remember(req) { longArrayOf(0L, 0L) }
     val closeFocus = remember { FocusRequester() }
+    // Spolning i en omkodning (SeekCore): serverns X-Seg-Ready ur segmentens svar, målet för en omstart som pågår
+    // (-1 = ingen; tidslinjen visar det), om strömmen har visat bild, och omstartens nummer (en äldre som blir klar
+    // senare tar inte över)
+    val segReady = remember { SegReady() }
+    val pendingSeek = remember { longArrayOf(-1L) }
+    val firstFrame = remember { booleanArrayOf(false) }
+    val restartGen = remember { intArrayOf(0) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
 
     val player = remember {
         // 60 s tidsgräns (Media.http): en omkodning med grafikkort kan ta ~10 s till första segmentet
-        val http = Media.http()
+        val http = Media.http(segReady)
         // Avkodarreserv (t.ex. Dolby Vision → HEVC-avkodaren). På TV: ljudutgångens hastighetsstyrning, så att
         // bitström (Dolby/DTS till förstärkaren) och hastighetsändring fungerar ihop
         val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
@@ -129,7 +143,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         val id = item?.id ?: (if (offline) req.id else return)
         // Pågår förra anropet hoppas den här rapporten över; tiden räknas med i nästa
         if (final) { if (finalSent[0]) return; finalSent[0] = true } else if (reporting[0]) return
-        val pos = player.currentPosition / 1000.0
+        val pos = (if (pendingSeek[0] >= 0) pendingSeek[0] else player.currentPosition) / 1000.0
         val dur = pb?.duration ?: item?.duration ?: player.duration.takeIf { d -> d > 0 }?.let { d -> d / 1000.0 } ?: 0.0
         val secs = played[0] / 1000.0; played[0] = 0L; val started = System.currentTimeMillis()
         // Under trailers/förfilm finns inget framsteg att spara. Kommer framsteget inte fram sparas positionen i appen
@@ -153,8 +167,87 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         if (final && !offline) StreamGate.stop(id)
     }
 
+    /** Filmen i spelarens kö: strömmen med alla textundertexter (kan bytas direkt), den valda markerad som standard */
+    fun mainItem(it: MediaItem, p: Playback, sub: SubtitleTrack?): M3Item {
+        val subs = p.subtitles.map { s ->
+            M3Item.SubtitleConfiguration.Builder(Uri.parse(Api.absolute(s.url)))
+                .setId(s.id).setMimeType(MimeTypes.TEXT_VTT).setLanguage(s.lang).setLabel(s.label)
+                .setSelectionFlags(if (s.id == sub?.id) C.SELECTION_FLAG_DEFAULT else 0).build()
+        }
+        return M3Item.Builder()
+            .setUri(Api.absolute(p.url))
+            .apply { if (p.mode != "direct") setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .setSubtitleConfigurations(subs)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(if (it.isEpisode) "${it.showTitle} – ${it.sxe} ${it.title}" else it.title).build())
+            .build()
+    }
+
+    /**
+     * Spolning i en omkodning: strömmen startas om vid målet (/playback med start och prev). Servern ger korta segment
+     * där och stoppar den gamla strömmen. Samma ljudspår, undertext, hastighet och paus som förut; adressen är den som
+     * gäller nu (hemadressen hemma). Ett nyare mål (nästa steg med fjärrkontrollen) gör den här omstarten inaktuell.
+     */
+    fun seekRestart(ms: Long) {
+        val it = item ?: return
+        val old = pb ?: return
+        val gen = ++restartGen[0]
+        firstFrame[0] = false
+        val sub = currentSub
+        val audio: Int? = old.audioSelected?.toIntOrNull() ?: req.audio
+        scope.launch {
+            val r = runCatching {
+                val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(audio, sub) }
+                Api.get<Playback>("/api/items/${it.id}/playback", caps + Api.comfortQuery() +
+                    ("start" to (ms / 1000).toString()) + ("prev" to SeekCore.pidOf(old.url)))
+            }
+            val np = r.getOrNull()
+            if (gen != restartGen[0] || item?.id != it.id) {
+                // Inaktuell: strömmen som just startades behövs inte (uppspelningen fortsätter, inget stopp räknas)
+                SeekCore.pidOf(np?.url)?.let { pid -> Api.appScope.launch { runCatching { Api.post("/api/stream/${it.id}/stop?pid=$pid&replaced=1") } } }
+                return@launch
+            }
+            if (np == null) { pendingSeek[0] = -1; error = r.exceptionOrNull()?.message ?: context.getString(R.string.player_unknown_error); return@launch }
+            pb = np; prerolls = emptyList(); mainIndex = 0
+            // En undertext som valts i spelaren pekar på den gamla strömmens spår – den nya väljer currentSub som standard
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT).build()
+            player.setMediaItem(mainItem(it, np, sub), ms)
+            player.prepare()
+            pendingSeek[0] = -1
+        }
+    }
+
+    /**
+     * En spolning till ms (tidslinjen, fjärrkontrollen, kapitel, hoppa över intro): true = strömmen startas om vid målet
+     * i stället för att spelaren hämtar segmentet (SeekCore.shouldRestart). step = fjärrkontrollens eller knapparnas
+     * steg: omstarten väntar på nästa tryck (STEP_SETTLE_MS). Den gamla strömmen stoppas direkt i spelaren, så att den
+     * inte börjar hämta 6 s-segmentet.
+     */
+    fun onSeek(ms: Long, step: Boolean): Boolean {
+        val p = pb ?: return false
+        if (offline || p.mode != "transcode" || stopped != null || error != null || player.currentMediaItemIndex < mainIndex) return false
+        if (pendingSeek[0] < 0) {
+            val m = player.currentManifest as? HlsManifest
+            val frags = m?.mediaPlaylist?.segments?.map { s -> SeekCore.Frag(s.relativeStartTimeUs / 1e6, s.durationUs / 1e6) } ?: emptyList()
+            val buffered = listOf(player.currentPosition / 1000.0 to player.bufferedPosition / 1000.0)
+            if (!SeekCore.shouldRestart(buffered, ms / 1000.0, frags, segReady.rangeFor(SeekCore.pidOf(p.url)), firstFrame[0])) return false
+            player.stop() // behåller kön och playWhenReady (paus förblir paus)
+        }
+        pendingSeek[0] = ms
+        settleJob?.cancel()
+        settleJob = scope.launch {
+            if (step) delay(SeekCore.STEP_SETTLE_MS)
+            seekRestart(pendingSeek[0])
+        }
+        return true
+    }
+
+    /** Appens egna hopp (kapitel, intro, sammanfattning, familjefiltret): som en spolning i tidslinjen */
+    fun seekMain(ms: Long) { if (!onSeek(ms, false)) player.seekTo(ms) }
+
     // Läs in objekt + uppspelningsbeslut och starta
     LaunchedEffect(req) {
+        // Nytt avsnitt i samma spelare: en omstart vid spolning i det förra gäller inte
+        settleJob?.cancel(); restartGen[0]++; pendingSeek[0] = -1; firstFrame[0] = false
         // Nedladdad fil: spela lokalt (fungerar utan nät)
         Downloads.localFile(req.id)?.let { f ->
             status = context.getString(R.string.player_offline); offline = true
@@ -191,20 +284,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             currentSub = sub
             status = listOfNotNull(when (p.mode) { "direct" -> context.getString(R.string.player_direct); "remux" -> context.getString(R.string.player_remux); else -> context.getString(R.string.player_transcode) },
                 if (p.tonemap == true) "HDR→SDR" else hdrLabel(it.hdr), if (p.remote == true) context.getString(R.string.player_remote) else null).joinToString(" · ")
-            // Alla textundertexter bifogas så att de kan bytas direkt; den valda markeras som standard
-            val subs = p.subtitles.map { s ->
-                M3Item.SubtitleConfiguration.Builder(Uri.parse(Api.absolute(s.url)))
-                    .setId(s.id).setMimeType(MimeTypes.TEXT_VTT).setLanguage(s.lang).setLabel(s.label)
-                    .setSelectionFlags(if (s.id == sub?.id) C.SELECTION_FLAG_DEFAULT else 0).build()
-            }
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, sub == null || sub.bitmap == true).build()
-            val mi = M3Item.Builder()
-                .setUri(Api.absolute(p.url))
-                .apply { if (p.mode != "direct") setMimeType(MimeTypes.APPLICATION_M3U8) }
-                .setSubtitleConfigurations(subs)
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(if (it.isEpisode) "${it.showTitle} – ${it.sxe} ${it.title}" else it.title).build())
-                .build()
+            val mi = mainItem(it, p, sub)
             // Trailers och förfilm först (egna adresser med token), sedan filmen
             val pre = p.preroll.map { e ->
                 M3Item.Builder().setUri(Api.absolute(e.url))
@@ -245,7 +327,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             val f = p?.filter
             if (f != null && f.mode == "skip" && idx >= mainIndex && player.isPlaying) {
                 val sc = f.skip.firstOrNull { x -> t >= x.start && t < x.end - 0.3 }
-                if (sc != null) { player.seekTo((sc.end * 1000).toLong()); note = context.getString(R.string.player_skipped_scene, sc.label ?: context.getString(R.string.player_marked_scene)) }
+                if (sc != null) { seekMain((sc.end * 1000).toLong()); note = context.getString(R.string.player_skipped_scene, sc.label ?: context.getString(R.string.player_marked_scene)) }
             }
             if (++n % 20 == 0 && player.isPlaying) report()
         }
@@ -313,7 +395,10 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     if (next != null) onPlay(Screen.Play(next, 0.0, null, null)) else onClose()
                 }
             }
+            override fun onRenderedFirstFrame() { firstFrame[0] = true }
             override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
+                // En omstart vid spolning pågår: den gamla strömmen gäller inte längre
+                if (pendingSeek[0] >= 0) return
                 // En trailer som inte går att spela: gå direkt till filmen
                 if (player.currentMediaItemIndex < mainIndex) { player.seekTo(mainIndex, 0L); player.prepare(); return }
                 error = playerErrorText(e)
@@ -343,7 +428,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
 
     /** Startar om samma titel där man är (t.ex. nytt ljud från servern), utan bio-läge */
     fun restart(audio: Int? = req.audio, sub: SubtitleTrack? = currentSub) {
-        val at = if (player.currentMediaItemIndex >= mainIndex) player.currentPosition / 1000.0 else req.start
+        val at = if (pendingSeek[0] >= 0) pendingSeek[0] / 1000.0 else if (player.currentMediaItemIndex >= mainIndex) player.currentPosition / 1000.0 else req.start
         report(final = true); player.stop()
         onPlay(Screen.Play(req.id, at, audio, sub, nonce = req.nonce + 1, skipPreroll = true))
     }
@@ -391,8 +476,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     val extraStatus: String? = listOfNotNull(if (audioDesc) tr(R.string.audio_description) else null,
         pb?.filter?.let { f -> tr(if (f.mode == "skip") R.string.player_family_skip else R.string.player_family) }).joinToString(" · ").takeIf { x -> x.isNotEmpty() }
 
+    // Spelaren som PlayerView styr: spolningar går först till onSeek (senaste versionen, med aktuella värden)
+    val seekHook = rememberUpdatedState<(Long, Boolean) -> Boolean> { ms, step -> onSeek(ms, step) }
+    val viewPlayer = remember(player) { SeekingPlayer(player, seekHook, pendingSeek) }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player; setShowSubtitleButton(true); keepScreenOn = true } },
+        AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = viewPlayer; setShowSubtitleButton(true); keepScreenOn = true } },
             update = { v -> v.useController = !inPip }, modifier = Modifier.fillMaxSize())
         // Bild-i-bild: bara videon, inga knappar
         if (!inPip) {
@@ -443,7 +532,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                             val now = player.currentPosition / 1000.0
                             val cur = p.chapters.lastOrNull { c -> c.start <= now }
                             items(p.chapters) { c ->
-                                OptionRow("${c.title}   ${fmtTime(c.start)}", c == cur) { player.seekTo(((c.start + 0.05) * 1000).toLong()); menu = null }
+                                OptionRow("${c.title}   ${fmtTime(c.start)}", c == cur) { seekMain(((c.start + 0.05) * 1000).toLong()); menu = null }
                             }
                         } else if (p != null) {
                             if (p.audio.size > 1) {
@@ -480,8 +569,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             Button(onClick = {
                 val p = pb
                 if (kind == "pre") player.seekTo(mainIndex, 0L)
-                else if (kind == "recap" && p?.recap != null) player.seekTo((p.recap.end * 1000).toLong())
-                else if (kind == "intro" && p?.intro != null) player.seekTo((p.intro.end * 1000).toLong())
+                else if (kind == "recap" && p?.recap != null) seekMain((p.recap.end * 1000).toLong())
+                else if (kind == "intro" && p?.intro != null) seekMain((p.intro.end * 1000).toLong())
                 else item?.nextId?.let { next -> report(final = true); player.stop(); onPlay(Screen.Play(next, 0.0, null, null)) }
             }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
                 .focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
@@ -540,4 +629,49 @@ private fun OptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun fmtTime(s: Double): String {
     val t = s.toInt(); val h = t / 3600; val m = (t % 3600) / 60; val sec = t % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
+}
+
+/**
+ * Spelaren som PlayerView (tidslinjen, snabbspolning, fjärrkontrollens media- och pilknappar) styr: varje spolning går
+ * först till onSeek, som kan starta om strömmen vid målet i stället (omkodning, SeekCore). Medan en omstart pågår
+ * visar tidslinjen målet, och nästa steg räknas därifrån.
+ */
+@OptIn(UnstableApi::class)
+private class SeekingPlayer(p: Player, private val onSeek: State<(Long, Boolean) -> Boolean>, private val pending: LongArray) : ForwardingPlayer(p) {
+    private fun pos(): Long = if (pending[0] >= 0) pending[0] else super.getCurrentPosition()
+    override fun getCurrentPosition(): Long = pos()
+    override fun getContentPosition(): Long = if (pending[0] >= 0) pending[0] else super.getContentPosition()
+    override fun seekTo(positionMs: Long) { if (!onSeek.value(positionMs, false)) super.seekTo(positionMs) }
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        if (mediaItemIndex != currentMediaItemIndex || !onSeek.value(positionMs, false)) super.seekTo(mediaItemIndex, positionMs)
+    }
+    override fun seekForward() {
+        val t = SeekCore.stepTarget(pos(), seekForwardIncrement, duration)
+        if (!onSeek.value(t, true)) super.seekForward()
+    }
+    override fun seekBack() {
+        val t = SeekCore.stepTarget(pos(), -seekBackIncrement, duration)
+        if (!onSeek.value(t, true)) super.seekBack()
+    }
+}
+
+/**
+ * X-Seg-Ready ur serverns svar på segmenten (omkodning): vilka segment servern har klara i den pågående körningen, för
+ * strömmen (pid) som senast svarade. Läses av onSeek – spolar man dit görs ingen omstart.
+ */
+@OptIn(UnstableApi::class)
+private class SegReady : TransferListener {
+    @Volatile private var last: Pair<String, IntRange>? = null
+    fun rangeFor(pid: String?): IntRange? = last?.takeIf { pid != null && it.first == pid }?.second
+    override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+    override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
+        val u = dataSpec.uri.toString()
+        if (!u.contains("/hls/seg-")) return
+        val h = source.responseHeaders.entries.firstOrNull { e -> e.key.equals("X-Seg-Ready", ignoreCase = true) }?.value?.firstOrNull()
+        val r = SeekCore.readyRange(h) ?: return
+        val pid = SeekCore.pidOf(u) ?: return
+        last = pid to r
+    }
+    override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {}
+    override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
 }

@@ -462,12 +462,13 @@
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "night": "1", "dialog": "1", "cinema": "1" }],
         "svar": "@Playback.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:170, :183 (förmågor: Api.kt:259-273 och TvOutput.kt (bitström, HDR), nattläge/dialog: Api.kt:338, bio-läge cinema=1: :177; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: sista varianten; :165 skickar info=1)",
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:263, :280 (förmågor: Api.kt:275-289 och TvOutput.kt (bitström, HDR), nattläge/dialog: Api.kt:354, bio-läge cinema=1: :274-276; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: femte varianten; :263 skickar info=1; spolning i en omkodning: :200 med start och prev=<förra strömmens pid>, sista varianten)",
         "query": [{ "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0" },
                   { "c": "mp4,mkv,webm", "v": "h264", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0" },
                   { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0", "info": "1" },
                   { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0", "night": "1", "dialog": "1", "cinema": "1" },
-                  { "c": "mp4,mkv,webm", "v": "h264,hevc,vp9,av1", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3,dts,truehd", "atrack": "1", "audio": "2", "hdr": "1", "hdrt": "hdr10,hlg,dovi", "dv": "1" }],
+                  { "c": "mp4,mkv,webm", "v": "h264,hevc,vp9,av1", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3,dts,truehd", "atrack": "1", "audio": "2", "hdr": "1", "hdrt": "hdr10,hlg,dovi", "dv": "1" },
+                  { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "audio": "1", "hdr": "0", "start": "30", "prev": "0123abcd" }],
         "svar": "@Playback.android" } },
     "GET /api/stream/:id/direct": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge direct)", "svar": { "media": "^video/" } },
@@ -654,7 +655,7 @@
 
     "POST /api/stream/:id/stop": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:179, :481", "svar": null },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:201 (StreamGate, från PlayerScreen.kt:153)", "svar": null } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:203 (StreamGate, från PlayerScreen.kt:167); pid och replaced=1 för en ström som ersatts vid spolning: PlayerScreen.kt:206", "query": [{}, { "pid": "0123abcd", "replaced": "1" }], "svar": null } },
     "POST /api/logout": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:187-190", "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:263", "svar": null } },
