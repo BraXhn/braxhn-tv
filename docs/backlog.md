@@ -183,8 +183,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   bokmärken, favoriter och spellistor går inte att ändra i appen än (`apps/expo/src/music.ts`, `screens/Music.tsx`).
 - Expo-appen saknas i `test/contracts/apps.json`: testet känner bara `ios` och `android` (`APPS`, typnamnens slut,
   `TOK` per app i `test/api-contract.test.js`), så en tredje app kräver ändringar i testet.
-- Android-appen sparar bildtoken bara i minnet och tar en ny vid varje start (`refreshImageToken` i
-  `apps/automotive/.../Api.kt`) – samma knuff mot taket på 50 som Expo- och iOS-appen hade. Spara den som de gör nu.
 - Album för offline skapar en medietoken per spår vid varje anrop (`/api/music/albums/:aid/offline` i
   `server/routes/music.js`); ett album över 300 spår tappar de första spårens token. En token per album vore lättare.
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
@@ -254,16 +252,21 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `videoEntry`, `offline.ts` `friendly`) – byts språket står de kvar på det gamla. Spara delarna och skriv texten vid
   visning.
 
-**Småfel**
-- Android-appen: förloppet och felen för nedladdningar (`Downloads.active`/`errors`) gäller titeln, inte profilen – en
-  annan profil på samma enhet ser förloppsraden för en nedladdning som pågår och kan inte starta samma titel samtidigt.
-
 ## Klart
 
 Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHANGELOG.md).
 
 ### Ej utgiven
 
+- 2026-11-27: Android-appen – sparad bildtoken och nedladdningar per profil, gren `team/android-tok-2026-11-27`.
+  Bildtoken sparas per server och profil i de privata inställningarna (`ImageTokenBook` i `ImageTokenCore.kt`, JSON
+  `{ tokens: { userId: { token, until } }, last }` under `img <server>`), förnyas när mindre än ett dygn är kvar eller
+  efter 401 på en bild (`Api.imageFailed` från Coils `Home.images`, högst en gång i minuten) och tas bort vid
+  utloggning; start, inloggning och profilbyte tar inte längre en ny. `TokenResponse` har `ttl` (kontraktet också).
+  Förlopp och fel för nedladdningar nycklas per profil (`DownloadKey`/`DownloadProgress` i `DownloadCore.kt`), och
+  följer med när nedladdningar från 0.7.0 flyttas till en profil. JVM-test: `ImageTokenCoreTest.kt` (9) och
+  `DownloadCoreTest.kt` (11, varav 2 nya) gröna lokalt. **Inte provat:** `Api.kt`, `Offline.kt` och `Hemma.kt` är
+  inte kompilerade här (ingen Android SDK) och appen inte körd på telefon, TV eller bil.
 - 2026-11-27: Småfel, gren `team/smafel-2026-11-27`. Poddavsnittens framsteg tar emot `at` med samma regel som filmer,
   ljudböcker och e-böcker (gemensam `syncAt` i `server/util.js`); testat i `test/books-podcasts.test.js` och
   `test/offline-web.test.js`. Lokalt datum i inspelningens metadata och exporters filnamn var redan rättat 2026-11-25

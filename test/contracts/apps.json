@@ -214,8 +214,8 @@
         "filter": "@FamilyPlan.android", "subAutoSync": "boolean" } },
     "Chapter.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:104",
       "required": { "start": "number", "end": "number", "title": "string" } },
-    "TokenResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:108",
-      "required": { "token": "string" } },
+    "TokenResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:111",
+      "required": { "token": "string" }, "optional": { "ttl": "integer" } },
     "LiveProg.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Live.kt:57",
       "required": { "id": "integer", "start": "integer", "stop": "integer", "title": "string" },
       "optional": { "subtitle": "string" } },
@@ -440,7 +440,7 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:317-326", "svar": "@QuickConnectPoll.android" } },
     "POST /api/media-token": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:522 (loadImageToken: sparad per server och profil, ny bara när den snart går ut eller efter 401 – imageFailed)", "svar": "@TokenResponse.ios" },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:251", "svar": "@TokenResponse.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:286 (loadImageToken: sparad per server och profil, ny bara när den snart går ut eller efter 401 – imageFailed)", "svar": "@TokenResponse.android" } },
     "GET /api/home": {
       "ios": { "källa": "apps/apple/Shared/Views.swift:290", "svar": "@HomeResponse.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:303-305 (HomeResponse och HomeExtras ur samma svar)", "svar": "@HomeResponse.android" } },

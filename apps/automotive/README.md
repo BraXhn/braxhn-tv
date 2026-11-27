@@ -53,7 +53,8 @@ Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan
 Nedladdade filmer och avsnitt spelas från filen under *Inställningar → Nedladdat för offline*, även helt utan nät.
 
 - **Per profil:** det nedladdade gäller den server och profil som laddade ner det (en mapp per server och profil), som
-  i Expo-appen. En barnprofil på samma telefon ser inte vad en vuxen laddat ner, och tvärtom.
+  i Expo-appen. En barnprofil på samma telefon ser inte vad en vuxen laddat ner, och tvärtom – inte heller en
+  nedladdning som pågår: förloppet och felen gäller profilen, så två profiler kan ladda ner samma titel samtidigt.
 - **Utloggning:** *Logga ut* frågar först när något är nedladdat från servern, och tar sedan bort allt nedladdat från
   servern (alla profiler) – det går att ladda ner igen efter inloggningen. Väntande positioner skickas innan.
   Blir inloggningen ogiltig (servern svarar 401) tas inget bort; det syns igen när samma profil loggar in.
@@ -92,7 +93,7 @@ Det här **kan inte** upprätthållas utan nät:
 
 Logiken ligger i `OfflineCore.kt` (ingen Android, testad på JVM i `OfflineCoreTest.kt`: kön med filmer, ljudböcker och
 poddar, `at`, ordning, ny dag, sommartid och vintertid, fönster över midnatt) och `DownloadCore.kt` (vem som ser vad,
-flytten från 0.7.0, borttagning vid 403/404, testad i `DownloadCoreTest.kt`), lagringen och anropen i `OfflineSync.kt`
+flytten från 0.7.0, borttagning vid 403/404, förlopp och fel per profil, testad i `DownloadCoreTest.kt`), lagringen och anropen i `OfflineSync.kt`
 och `Offline.kt`. Samma regler som Expo-appen (`apps/expo/src/offlinecore.ts`, `offline.ts`).
 
 ## Feedback
@@ -124,6 +125,13 @@ JVM i `FeedbackCoreTest.kt`; vyerna och anropen i `Feedback.kt`.
 - Felmeddelanden säger vad som är fel: servern hittades inte, kunde inte ansluta, certifikatet godkänns inte eller att reläet inte når hemservern.
 
 **Stöd projektet:** längst ner i Inställningar finns raden *Stöd projektet* när servern anger en donationslänk (PayPal). Den öppnar länken i webbläsaren – inget annat, inga påminnelser, och den visas aldrig för barnprofiler. Saknar enheten webbläsare (bilen, vissa TV-apparater) visas adressen.
+
+**Bildtoken:** bilderna hämtas med en kortlivad bildtoken i adressen (kontots token skickas aldrig i en adress).
+Den sparas per server och profil i appens privata inställningar, som inloggningen, och förnyas bara när mindre än ett
+dygn är kvar eller när servern svarar 401 på en bild (högst en kontroll i minuten). Servern sparar högst 50 bildtoken
+per användare, så en ny vid varje start skulle knuffa ut andra enheters och deras bilder skulle sluta visas. De
+sparade tas bort vid utloggning. Reglerna: `ImageTokenCore.kt` (JVM-test i `ImageTokenCoreTest.kt`), samma som iOS-
+och Expo-appen.
 
 **Språk:** appen följer enhetens språk – svenska på en svensk telefon, TV eller bil, annars engelska. Texterna ligger i `app/src/main/res/values/strings.xml` (engelska, standard) och `app/src/main/res/values-sv/strings.xml` (svenska), med samma ordval som webben (`web/i18n/en.js`). Ny text läggs i båda filerna och hämtas med `tr(R.string.…)` i Compose eller `str(R.string.…)` utanför (se `Strings.kt`); `test/android-i18n.test.js` stoppar svensk text i Kotlin-koden och kontrollerar att filerna stämmer överens. Texter från servern (felmeddelanden, namn på egna samlingar, inspelningarnas krockbesked) visas som servern skickar dem, alltså på svenska än så länge. Appen skickar enhetens språk i `Accept-Language`.
 
@@ -164,6 +172,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil, feedbackens regler och spolningen i en omkodning): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil, bildtoken, feedbackens regler och spolningen i en omkodning): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
 **Inte provat på riktig enhet (appversion 0.7.0):** spolningen i en omkodning (omstarten vid målet, fjärrkontrollens steg, bilen), att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

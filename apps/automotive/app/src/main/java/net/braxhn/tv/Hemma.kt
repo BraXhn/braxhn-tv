@@ -184,7 +184,8 @@ object Home {
         }
     }
 
-    /** Bilderna (Coil): samma omskrivning som strömmarna, och ett nytt försök via den sparade adressen vid nätverksfel */
+    /** Bilderna (Coil): samma omskrivning som strömmarna, ett nytt försök via den sparade adressen vid nätverksfel och
+     *  en kontroll av bildtoken när en bild inte går att ladda (Api.imageFailed) */
     val images = object : Interceptor {
         override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
             val req = chain.request
@@ -194,6 +195,8 @@ object Home {
             if (res is ErrorResult && res.throwable is IOException && onHome(url) && leave()) {
                 return chain.proceed(req.newBuilder().data(rewrite(url)).build())
             }
+            // Kan vara bildtoken som inte gäller längre (401): Api frågar servern och hämtar då en ny
+            if (res is ErrorResult) Api.imageFailed(url)
             return res
         }
     }

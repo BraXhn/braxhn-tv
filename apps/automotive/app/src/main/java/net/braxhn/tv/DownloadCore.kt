@@ -97,3 +97,32 @@ object DownloadAccess {
     /** Får kontot inte ladda ner längre (canDownload i /api/status) tas allt som profilen laddat ner bort */
     fun removeAll(canDownload: Boolean, count: Int): Boolean = !canDownload && count > 0
 }
+
+/**
+ * Förloppet och felen för nedladdningar gäller en profil, som listan och mappen: en annan profil på samma enhet ser
+ * inte förloppsraden och kan ladda ner samma titel samtidigt (till sin egen mapp). scope = profilens "server-profil",
+ * "" = en nedladdning från före profilerna och null = profilen var inte känd (t.ex. felet att servern inte svarat).
+ */
+data class DownloadKey(val scope: String?, val id: Int)
+
+object DownloadProgress {
+    /**
+     * Det som visas för profilen som är inloggad nu (scope, null = ingen känd profil). legacy = de gamla nedladdningarna
+     * från före profilerna visas här (samma inloggning som vid uppdateringen): då även deras förlopp. Profilens eget gäller före.
+     */
+    fun <V> view(all: Map<DownloadKey, V>, scope: String?, legacy: Boolean): Map<Int, V> {
+        val out = LinkedHashMap<Int, V>()
+        if (legacy && scope != "") all.forEach { (k, v) -> if (k.scope == "") out[k.id] = v }
+        all.forEach { (k, v) -> if (k.scope == scope) out[k.id] = v }
+        return out
+    }
+
+    /** De gamla nedladdningarna flyttades till profilen (from → to): deras förlopp och fel följer med. Profilens eget gäller före. */
+    fun <V> rekey(all: Map<DownloadKey, V>, from: String?, to: String?): Map<DownloadKey, V> {
+        if (from == to) return all
+        val out = LinkedHashMap<DownloadKey, V>()
+        all.forEach { (k, v) -> if (k.scope != from) out[k] = v }
+        all.forEach { (k, v) -> if (k.scope == from) out.putIfAbsent(DownloadKey(to, k.id), v) }
+        return out
+    }
+}

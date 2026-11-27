@@ -111,4 +111,38 @@ class DownloadCoreTest {
         assertFalse(DownloadAccess.removeAll(canDownload = false, count = 0))
         assertFalse(DownloadAccess.removeAll(canDownload = true, count = 3))
     }
+
+    // ---------- förlopp och fel per profil ----------
+
+    @Test fun forloppetGallerProfilenInteTiteln() {
+        val vuxen = DownloadScope.of(server, 1)
+        val barn = DownloadScope.of(server, 7)
+        // Vuxen laddar ner film 5: barnet på samma enhet ser ingen förloppsrad och kan ladda ner samma film själv
+        val all = mapOf(DownloadKey(vuxen, 5) to 0.3f)
+        assertEquals(mapOf(5 to 0.3f), DownloadProgress.view(all, vuxen, legacy = false))
+        assertEquals(emptyMap<Int, Float>(), DownloadProgress.view(all, barn, legacy = false))
+        // Båda samtidigt: var och en ser sin egen
+        val both = all + (DownloadKey(barn, 5) to 0.8f)
+        assertEquals(mapOf(5 to 0.3f), DownloadProgress.view(both, vuxen, legacy = false))
+        assertEquals(mapOf(5 to 0.8f), DownloadProgress.view(both, barn, legacy = false))
+        // Utloggad (ingen profil): bara fel som hörde till "ingen profil", t.ex. att servern inte svarat
+        val errs = mapOf(DownloadKey(vuxen, 5) to "fel", DownloadKey(null, 9) to "ingen server")
+        assertEquals(mapOf(9 to "ingen server"), DownloadProgress.view(errs, null, legacy = false))
+        assertEquals(mapOf(5 to "fel"), DownloadProgress.view(errs, vuxen, legacy = false))
+    }
+
+    @Test fun deGamlasForloppFoljerMedTillProfilen() {
+        val barn = DownloadScope.of(server, 7)
+        val all = mapOf(DownloadKey("", 4) to 0.6f, DownloadKey(barn, 2) to 0.1f)
+        // Samma inloggning som vid uppdateringen, profilen inte känd än: de gamla och deras förlopp visas
+        assertEquals(mapOf(4 to 0.6f), DownloadProgress.view(all, null, legacy = true))
+        assertEquals(mapOf(4 to 0.6f, 2 to 0.1f), DownloadProgress.view(all, barn, legacy = true))
+        assertEquals(mapOf(2 to 0.1f), DownloadProgress.view(all, barn, legacy = false))
+        // Flytten till profilen: förloppet följer med, profilens eget gäller före
+        val moved = DownloadProgress.rekey(all + (DownloadKey(barn, 4) to 0.9f), "", barn)
+        assertEquals(mapOf(DownloadKey(barn, 2) to 0.1f, DownloadKey(barn, 4) to 0.9f), moved)
+        assertEquals(mapOf(DownloadKey(barn, 4) to 0.6f, DownloadKey(barn, 2) to 0.1f).toMap(),
+            DownloadProgress.rekey(all, "", barn).toMap())
+        assertEquals(all, DownloadProgress.rekey(all, barn, barn))
+    }
 }

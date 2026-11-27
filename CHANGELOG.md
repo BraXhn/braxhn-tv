@@ -5,6 +5,12 @@
   nät i Android-appen och fortsatte sedan på en annan enhet, kunde telefonen skicka sin äldre position när den fick nät
   igen och flytta tillbaka dig. Nu tar servern emot `at` (när positionen sparades) även för poddar, som för filmer och
   ljudböcker: den senaste positionen vinner. Appar som inte skickar `at` fungerar som förut.
+- **Android-appen tar inte längre en ny bildtoken vid varje start.** Den sparas per server och profil och förnyas bara
+  när den snart går ut eller när servern svarar att den inte gäller längre. Förut kunde många starter knuffa ut andra
+  enheters bildtoken (servern sparar högst 50 per användare), så att deras bilder slutade visas. Inloggning och
+  profilbyte använder profilens sparade bildtoken om den finns. Inte provat på riktig telefon, TV eller bil.
+- **Nedladdningar i Android-appen gäller profilen även medan de pågår.** Förut såg en annan profil på samma enhet
+  förloppsraden för en nedladdning som pågick och kunde inte ladda ner samma titel samtidigt.
 - **Expo-appen vet vad servern redan har kodat när du spolar.** Förut gissade appen ur det som var laddat i telefonen,
   så en spolning dit servern redan hade kodat kunde starta om strömmen i onödan (och en spolning bakåt dit servern
   hade städat bort stycken kunde vänta på ett helt sexsekundersstycke). Nu frågar appen servern var fjärde sekund

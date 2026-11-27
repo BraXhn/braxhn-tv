@@ -53,8 +53,8 @@ object ProgressQueue {
     }
 
     /**
-     * Kroppen i POST …/progress. Servern behåller ett senare framsteg från en annan enhet (at) för filmer, avsnitt och
-     * ljudböcker; poddavsnittens framsteg tar inte emot at än (server/podcasts.js) – där gäller den som kommer fram sist.
+     * Kroppen i POST …/progress. Servern behåller ett senare framsteg från en annan enhet (at) för filmer, avsnitt,
+     * ljudböcker och poddavsnitt.
      */
     fun body(p: PendingProgress): Map<String, Number> =
         if (p.kind == ITEM && p.duration > 0) mapOf("position" to p.position, "duration" to p.duration, "at" to p.at)

@@ -8,6 +8,8 @@ import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -35,9 +37,20 @@ object Downloads {
     private lateinit var ctx: Context
     /** Det som profilen som är inloggad nu har laddat ner */
     val records = MutableStateFlow<List<DownloadRecord>>(emptyList())
-    val active = MutableStateFlow<Map<Int, Float>>(emptyMap())
-    /** Senaste fel per titel (visas i detaljvyn) */
-    val errors = MutableStateFlow<Map<Int, String>>(emptyMap())
+    private val shownActive = MutableStateFlow<Map<Int, Float>>(emptyMap())
+    private val shownErrors = MutableStateFlow<Map<Int, String>>(emptyMap())
+    /** Förloppet (0–1) per titel för profilen som är inloggad nu – en annan profils nedladdning syns inte här */
+    val active: StateFlow<Map<Int, Float>> = shownActive.asStateFlow()
+    /** Senaste fel per titel för profilen som är inloggad nu (visas i detaljvyn) */
+    val errors: StateFlow<Map<Int, String>> = shownErrors.asStateFlow()
+    /** Förlopp och fel per profil och titel (DownloadProgress i DownloadCore.kt), och nedladdningarna som pågår.
+     *  Ändras bara under progressLock, så att en flytt från före profilerna inte tappar något. */
+    private val progressLock = Any()
+    private var progress: Map<DownloadKey, Float> = emptyMap()
+    private var failures: Map<DownloadKey, String> = emptyMap()
+    private val tracks = HashSet<Track>()
+    /** En nedladdning som pågår: profilen kan bytas från "" till en profil av flytten från före profilerna */
+    private class Track(var scope: String?, val id: Int) { val key get() = DownloadKey(scope, id) }
     /** Besked i Nedladdat, t.ex. att titlar togs bort för att profilen inte får se dem längre */
     val notice = MutableStateFlow<String?>(null)
     private val pending = MutableStateFlow<List<PendingDownload>>(emptyList())
@@ -51,6 +64,8 @@ object Downloads {
     @Volatile private var scope: String? = null
     /** De gamla nedladdningarna som visas just nu (samma inloggning som vid uppdateringen, profilen inte känd än) */
     @Volatile private var legacyIds: Set<Int> = emptySet()
+    /** De gamla nedladdningarna visas just nu (då även deras förlopp) */
+    @Volatile private var showingLegacy = false
     /** Senaste kontrollen mot servern per profil (ms) */
     private val checked = HashMap<String, Long>()
     private val checking = AtomicBoolean(false)
@@ -66,10 +81,7 @@ object Downloads {
         }
         open()
         // Fortsätt bevaka nedladdningar som pågick när appen stängdes
-        pending.value.forEach { p ->
-            active.update { it + (p.id to 0.5f) }
-            launchTracked(p.id) { poll(p) }
-        }
+        pending.value.forEach { p -> launchTracked(p.scope, p.id, 0.5f) { t -> poll(p, t) } }
     }
 
     // ---------- lagring per profil ----------
@@ -110,9 +122,24 @@ object Downloads {
             val own = sc?.let { loadList(it) } ?: emptyList()
             val old = if (showLegacy) loadList("").filter { l -> own.none { it.id == l.id } } else emptyList()
             legacyIds = old.map { it.id }.toSet()
+            showingLegacy = showLegacy
             records.value = own + old
         }
+        changeProgress {}
     }
+
+    // ---------- förlopp och fel per profil ----------
+
+    /** Ändrar förlopp/fel och visar det som gäller profilen som är inloggad nu */
+    private fun changeProgress(block: () -> Unit) {
+        synchronized(progressLock) {
+            block()
+            shownActive.value = DownloadProgress.view(progress, scope, showingLegacy)
+            shownErrors.value = DownloadProgress.view(failures, scope, showingLegacy)
+        }
+    }
+    private fun setProgress(t: Track, v: Float) = changeProgress { if (t in tracks) progress = progress + (t.key to v) }
+    private fun isActive(sc: String, id: Int): Boolean = synchronized(progressLock) { progress.containsKey(DownloadKey(sc, id)) }
 
     /** De gamla nedladdningarna flyttas till profilens mapp och lista (filer som inte gick att flytta väntar till nästa gång) */
     private fun migrate(target: String) {
@@ -120,6 +147,11 @@ object Downloads {
         val (merged, move) = DownloadMigration.merge(loadList(target), old)
         val dir = dirOf(target)
         val failed = move.filter { r -> !moveFile(File(root, r.file), File(dir, r.file)) }
+        // Förlopp och fel för de gamla följer med till profilen
+        changeProgress {
+            progress = DownloadProgress.rekey(progress, "", target); failures = DownloadProgress.rekey(failures, "", target)
+            tracks.filter { it.scope == "" }.forEach { it.scope = target }
+        }
         saveList(target, merged.filter { it !in failed })
         // Samma titel fanns redan i profilens mapp: den gamla filen behövs inte
         old.filter { o -> move.none { it.id == o.id } }.forEach { File(root, it.file).delete() }
@@ -157,23 +189,32 @@ object Downloads {
 
     /** Startar en nedladdning i appens livslånga scope – fortsätter även när användaren lämnar vyn. */
     fun start(item: MediaItem, quality: String) {
-        if (active.value.containsKey(item.id) || localFile(item.id) != null) return
-        val sc = scope ?: run { errors.update { it + (item.id to str(R.string.dl_need_server)) }; return }
-        active.update { it + (item.id to 0f) }
-        errors.update { it - item.id }
-        launchTracked(item.id) { download(item, quality, sc) }
+        if (localFile(item.id) != null) return
+        val sc = scope ?: run { changeProgress { failures = failures + (DownloadKey(null, item.id) to str(R.string.dl_need_server)) }; return }
+        launchTracked(sc, item.id, 0f) { t -> download(item, quality, sc, t) }
     }
 
-    private fun launchTracked(id: Int, block: suspend () -> Unit) {
+    /** Startar bevakningen av en nedladdning för profilen sc – inte om profilen redan har titeln på väg */
+    private fun launchTracked(sc: String, id: Int, start: Float, block: suspend (Track) -> Unit) {
+        val t = Track(sc, id)
+        var busy = false
+        changeProgress {
+            busy = shownActive.value.containsKey(id) && sc == scope || progress.containsKey(t.key)
+            if (!busy) {
+                tracks += t; progress = progress + (t.key to start)
+                failures = failures - t.key - DownloadKey(null, id)
+            }
+        }
+        if (busy) return
         Api.appScope.launch {
-            try { block() }
+            try { block(t) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { errors.update { it + (id to (e.message ?: e.toString())) } }
-            finally { active.update { it - id } }
+            catch (e: Exception) { changeProgress { failures = failures + (t.key to (e.message ?: e.toString())) } }
+            finally { changeProgress { tracks -= t; progress = progress - t.key } }
         }
     }
 
-    private suspend fun download(item: MediaItem, quality: String, sc: String) {
+    private suspend fun download(item: MediaItem, quality: String, sc: String, t: Track) {
         Api.post("/api/items/${item.id}/offline", buildJsonObject { put("q", quality) })
         var st: OfflineStatus
         do {
@@ -181,7 +222,7 @@ object Downloads {
             st = Api.get("/api/items/${item.id}/offline", mapOf("q" to quality))
             if (st.status == "error") throw ApiException(st.error ?: str(R.string.dl_server_failed))
             val prep = (st.progress ?: 0) / 200f
-            active.update { it + (item.id to prep) }
+            setProgress(t, prep)
         } while (st.status != "ready")
         val rel = st.url ?: throw ApiException(str(R.string.dl_no_link))
         val name = "${item.id}.mp4"
@@ -195,11 +236,11 @@ object Downloads {
             if (item.isEpisode) item.sxe else item.year?.toString() ?: "", "$sc/$name", sc)
         pending.update { list -> list.filter { it.id != item.id || it.scope != sc } + p }
         savePending()
-        poll(p)
+        poll(p, t)
     }
 
     /** Bevakar DownloadManager tills filen är klar. Avbryts eller misslyckas den tas den bort ur DownloadManager. */
-    private suspend fun poll(p: PendingDownload) {
+    private suspend fun poll(p: PendingDownload, t: Track) {
         var completed = false
         try {
             while (true) {
@@ -211,7 +252,7 @@ object Downloads {
                     val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
                     if (total > 0) {
                         val v = 0.5f + got.toFloat() / total / 2
-                        active.update { it + (p.id to v) }
+                        setProgress(t, v)
                     }
                     if (status == DownloadManager.STATUS_FAILED) throw ApiException(str(R.string.dl_failed))
                     status == DownloadManager.STATUS_SUCCESSFUL
@@ -359,7 +400,7 @@ object Downloads {
     private suspend fun syncNow() {
         val sc = scope ?: return
         // Glöm avsnitt som inte längre finns (borttagna för hand eller misslyckade) – de kan laddas ner igen
-        val auto = autoIds(sc).filter { localFile(it) != null || active.value.containsKey(it) }.toMutableSet()
+        val auto = autoIds(sc).filter { localFile(it) != null || isActive(sc, it) }.toMutableSet()
         val plan: SyncPlan = Api.get("/api/offline/sync", mapOf("have" to auto.sorted().joinToString(",")))
         if (scope != sc) return // profilen byttes under tiden
         for (id in plan.remove) if (id in auto && localFile(id) != null) { remove(id); auto.remove(id) }
@@ -367,7 +408,7 @@ object Downloads {
         if (!plan.enabled || plan.items.isEmpty()) return
         if (plan.wifiOnly && !unmetered()) return
         for (item in plan.items) {
-            if (localFile(item.id) != null || active.value.containsKey(item.id)) continue
+            if (localFile(item.id) != null || isActive(sc, item.id)) continue
             auto.add(item.id)
             saveAutoIds(sc, auto)
             start(item, plan.quality)

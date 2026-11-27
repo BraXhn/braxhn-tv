@@ -8,6 +8,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -105,7 +108,7 @@ fun castLine(cast: List<CastMember>?): String? {
 
 class ApiException(msg: String, val need2fa: Boolean = false, val needPassword: Boolean = false, val code: Int = 0) : IOException(msg)
 
-@Serializable data class TokenResponse(val token: String)
+@Serializable data class TokenResponse(val token: String, val ttl: Int? = null)
 
 // ---------- klient ----------
 
@@ -121,9 +124,15 @@ object Api {
     /** Adressen som användaren sparade (inloggningen) – ändras inte av hemadressen */
     @Volatile var saved = ""
     val token = MutableStateFlow<String?>(null)
-    /** Kortlivad token som bara gäller bilder – kontots token skickas aldrig i URL:er. */
+    /** Kortlivad token som bara gäller bilder – kontots token skickas aldrig i URL:er. Sparas per server och profil
+     *  (ImageTokenCore.kt) och förnyas bara när den snart går ut eller servern svarar 401 på en bild. */
     val imageToken = MutableStateFlow<String?>(null)
-    private var imageTokenAt = 0L
+    /** När bildtoken i minnet slutar gälla (ms) och vems den är ("server profil") */
+    @Volatile private var imageTokenUntil = 0L
+    @Volatile private var imageTokenOwner: String? = null
+    /** Flera vyer frågar samtidigt vid start – bara en hämtning åt gången */
+    private val imageTokenLock = Mutex()
+    @Volatile private var imageCheckedAt = 0L
     var quality: String
         get() = prefs.getString("quality", "auto") ?: "auto"
         set(v) { prefs.edit().putString("quality", v).apply() }
@@ -240,23 +249,74 @@ object Api {
             if (!code.isNullOrBlank()) put("code", code.trim())
         }))
         prefs.edit().putString("server", server.value).putString("token", r.token).apply(); saved = server.value
-        token.value = r.token; Downloads.open() // ny inloggning: dess profil visas när /api/status svarat
-        refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
+        token.value = r.token; OfflineSync.rememberUser(r.user.id); Downloads.open() // ny inloggning: profilen är känd
+        refreshImageToken(); Session.refresh(); Home.check(force = true)
     }
 
-    /** Hämtar ny bildtoken (gäller 7 dygn) om den saknas eller är äldre än ett dygn. */
-    suspend fun refreshImageToken(force: Boolean = false) {
-        if (token.value == null) return
-        if (!force && imageToken.value != null && System.currentTimeMillis() - imageTokenAt < 86_400_000L) return
-        runCatching { json.decodeFromString<TokenResponse>(post("/api/media-token")) }.getOrNull()?.let {
-            imageToken.value = it.token; imageTokenAt = System.currentTimeMillis()
+    /**
+     * Ser till att det finns en bildtoken som gäller minst ett dygn till: den i minnet, den sparade för servern och
+     * profilen, annars en ny från servern (som sparas). force = den som används fungerar inte längre (401 på en bild).
+     * Vid start innan /api/status svarat: profilen som inloggningen hörde till senast, annars den som använde bildtoken senast.
+     */
+    suspend fun refreshImageToken(force: Boolean = false) { imageTokenLock.withLock { loadImageToken(force) } }
+
+    private suspend fun loadImageToken(force: Boolean) {
+        val tok = token.value ?: return
+        val base = saved.takeIf { it.isNotEmpty() } ?: return
+        val key = ImageTokenBook.key(base)
+        val book = ImageTokenBook.decode(prefs.getString(key, null))
+        var uid = OfflineSync.uidFor(OfflineSync.fp(tok))
+        // Första gången och profilen okänd (t.ex. /api/status misslyckades vid start): fråga servern
+        if (uid == null && book.last == null) {
+            runCatching { get<ServerStatus>("/api/status") }.getOrNull()?.user?.let { if (token.value == tok) OfflineSync.rememberUser(it.id) }
+            uid = OfflineSync.uidFor(OfflineSync.fp(tok))
+        }
+        val user = uid ?: book.last ?: return
+        if (saved != base || token.value != tok) return
+        val owner = "$base $user"
+        when (val pick = ImageTokens.pick(book, user, owner, imageTokenOwner, imageTokenUntil, System.currentTimeMillis(), force)) {
+            ImageTokens.Pick.Keep -> {}
+            is ImageTokens.Pick.Saved -> {
+                imageTokenUntil = pick.token.until; imageTokenOwner = owner; imageToken.value = pick.token.token
+                if (book.last != user) prefs.edit().putString(key, book.copy(last = user).encoded()).apply()
+            }
+            ImageTokens.Pick.Fetch -> {
+                // En annan profils token visas inte medan den nya hämtas
+                if (imageTokenOwner != owner) { imageToken.value = null; imageTokenOwner = null; imageTokenUntil = 0L }
+                val r = runCatching { json.decodeFromString<TokenResponse>(post("/api/media-token")) }.getOrNull() ?: return
+                // Servern eller profilen byttes medan token hämtades: den hör inte till det som gäller nu
+                if (saved != base || token.value != tok || (OfflineSync.uidFor(OfflineSync.fp(tok)) ?: user) != user) return
+                val now = System.currentTimeMillis()
+                val until = ImageTokenBook.until(r.ttl, now)
+                val next = ImageTokenBook.decode(prefs.getString(key, null)).storing(r.token, until, user, now)
+                prefs.edit().putString(key, next.encoded()).apply()
+                imageTokenUntil = until; imageTokenOwner = owner; imageToken.value = r.token
+            }
+        }
+    }
+
+    /**
+     * En bild gick inte att ladda (Home.images): fråga servern om det var bildtoken (401, t.ex. utknuffad av taket på
+     * 50 per användare) och hämta då en ny. Högst en kontroll i minuten (ImageTokens.shouldCheck).
+     */
+    fun imageFailed(url: String) {
+        val tok = imageToken.value
+        if (!ImageTokens.shouldCheck(url, tok, imageCheckedAt, System.currentTimeMillis())) return
+        imageCheckedAt = System.currentTimeMillis()
+        appScope.launch {
+            val code = runCatching {
+                val c = URL(Home.rewrite(url)).openConnection() as HttpURLConnection
+                try { c.connectTimeout = 15000; c.readTimeout = 15000; c.instanceFollowRedirects = false; c.responseCode } finally { c.disconnect() }
+            }.getOrNull()
+            if (code == 401 && imageToken.value == tok) refreshImageToken(force = true)
         }
     }
 
     fun clearLogin() {
-        prefs.edit().remove("token").apply(); Session.reset(); Home.leave(); Home.reset()
+        // De sparade bildtoken för servern tas också bort (som iOS- och Expo-appens utloggning)
+        prefs.edit().remove("token").remove(ImageTokenBook.key(saved)).apply(); Session.reset(); Home.leave(); Home.reset()
         token.value = null; Downloads.open() // nedladdningarna ligger kvar och syns igen när profilen loggar in
-        imageToken.value = null
+        imageToken.value = null; imageTokenOwner = null; imageTokenUntil = 0L
     }
 
     suspend fun logout() { // nedladdningarna hör till inloggningen: positioner skickas först, sedan tas allt nedladdat bort
@@ -319,8 +379,8 @@ object Api {
         val t = r.token
         if (r.status == "approved" && t != null) {
             prefs.edit().putString("server", server.value).putString("token", t).apply(); saved = server.value
-            token.value = t; Downloads.open()
-            refreshImageToken(force = true); Session.refresh(); Home.check(force = true)
+            token.value = t; r.user?.let { OfflineSync.rememberUser(it.id) }; Downloads.open()
+            refreshImageToken(); Session.refresh(); Home.check(force = true)
         }
         return r.status
     }
@@ -335,8 +395,8 @@ object Api {
             if (!password.isNullOrBlank()) put("password", password)
         }))
         prefs.edit().putString("token", r.token).apply()
-        token.value = r.token; Downloads.open() // den nya profilen har sina egna nedladdningar
-        refreshImageToken(force = true); Session.refresh()
+        token.value = r.token; OfflineSync.rememberUser(r.user.id); Downloads.open() // den nya profilen har sina egna nedladdningar
+        refreshImageToken(); Session.refresh() // profilens sparade bildtoken, eller en ny
     }
 
     /** Lägger till i eller tar bort från Min lista (ett avsnitt räknas som hela serien på servern). */
