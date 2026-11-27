@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.5.0 – 2026-11-27
 - **Feedback och felrapporter i appen för iPhone, iPad och Apple TV.** Under *Inställningar* finns nu *Skicka
   feedback* och *Mina ärenden*, som i webben och de andra apparna: välj *Förslag eller synpunkt* eller *Något fungerar
   inte*, vad det gäller (förvalt efter skärmen du var på) och skriv vad som hände. Med teknisk information följer
