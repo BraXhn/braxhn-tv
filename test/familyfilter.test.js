@@ -32,7 +32,12 @@ const F = await import('../server/familyfilter.js');
 const t = (name, fn) => test(name, { skip: !hasFfmpeg && 'ffmpeg saknas' }, fn);
 const tw = (name, fn) => test(name, { skip: !hasFfmpeg ? 'ffmpeg saknas' : !chromium ? 'Playwright saknas' : false }, fn);
 let srv, browser;
-after(async () => { await browser?.close(); srv?.kill(); if (!process.env.KEEP) fs.rmSync(ROOT, { recursive: true, force: true }); else console.log('kvar:', ROOT); });
+// Vänta tills servern har avslutats (och slutat skriva i tc/) innan mappen tas bort – annars ENOTEMPTY under last
+after(async () => {
+  await browser?.close();
+  if (srv && srv.exitCode == null) await new Promise((r) => { srv.once('exit', r); srv.kill(); setTimeout(r, 5000); });
+  if (!process.env.KEEP) fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); else console.log('kvar:', ROOT);
+});
 
 const srtTime = (x) => { const ms = Math.round(x * 1000); const h = Math.floor(ms / 3600e3), m = Math.floor(ms / 60e3) % 60, s = Math.floor(ms / 1000) % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
