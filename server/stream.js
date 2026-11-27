@@ -19,6 +19,10 @@ const pexec = promisify(execFile);
 const SEG = 6; // målängd per HLS-segment i sekunder
 // Omkodning börjar med korta segment (0, 2, 4 s) så att bilden kommer igång snabbare, sedan SEG s
 const HEAD = [0, 2, 4];
+// Med processorn är första segmentet bara 1 s (h1=1 i strömmens adress, se hlsParams): spelaren väntar på hela första
+// segmentet, och kodningen av det är den största delen av starten (1080p: 0,5–0,8 s för 2 s med libx264 veryfast).
+// Gränserna blir 0, 1, 2, 4, 6, 12 … Grafikkortens kodare behåller 2 s: deras egen GOP (GOP_SEC) ska dela alla gränser.
+const FIRST_SHORT = 1;
 // ffmpeg får bara läsa lokala filer (skydd mot skadliga mediefiler som försöker öppna nätverksadresser)
 export const SAFE_IN = ['-protocol_whitelist', 'file,pipe'];
 const m3uAttr = (v) => String(v ?? '').replace(/["\r\n,]/g, ' ').slice(0, 80);
@@ -185,7 +189,7 @@ const FMP4_SEG = ['-f', 'segment', '-segment_format', 'mp4', '-segment_format_op
 // tvingade nyckelbilderna (forcedKeys) som IDR blir segmenten ändå rätt – men en drivrutin/ffmpeg som inte tar
 // emot tvingade bilder gav då nyckelbilder (och därmed segmentgränser) bara var 250:e bild: segment-muxern väntade
 // ~10 s på nästa fil. GOP_SEC delar alla segmentgränser (0, 2, 4, 6, 12 … – HEAD och SEG), så även kodarens egna
-// nyckelbilder hamnar på gränserna.
+// nyckelbilder hamnar på gränserna. Därför får bara processorn (som alltid tar emot de tvingade) 1 s första segment (h1).
 export const GOP_SEC = 2;
 /** GOP-längd i bilder för källans bildfrekvens (okänd: 25) */
 export const gopFrames = (fps) => Math.max(2, Math.round(GOP_SEC * (Number(fps) > 0 ? Number(fps) : 25)));
@@ -872,6 +876,9 @@ export function hlsParams(d, o, token) {
   if (d.abr && d.mode === 'transcode') p.set('abr', '1');
   if (d.ab) p.set('ab', String(d.ab));
   if (d.mode === 'transcode' && d.vc && d.vc !== 'h264') p.set('vc', d.vc);
+  // Processorn (även HEVC/AV1-kodaren och H.264 som reserv): 1 s första segment. Grafikkortet slås aldrig på under
+  // körningen (bara av, disableHw), så en ström som börjat med processorn fortsätter med den
+  if (d.mode === 'transcode' && HW === 'none') p.set('h1', '1');
   if (d.night) p.set('night', '1');
   if (d.dialog) p.set('dialog', '1');
   if (d.ff) p.set('ff', '1');
@@ -896,6 +903,9 @@ function readParams(q) {
     vc: ['hevc', 'av1'].includes(q.get('vc')) ? q.get('vc') : 'h264',
     // Sekunden där uppspelningen börjar (Fortsätt titta): korta segment just där, se segmentsOf
     hs: Math.max(0, Math.min(1e6, Math.floor(+q.get('hs') || 0))),
+    // Omkodning med 1 s första segment (processorn, se FIRST_SHORT). Står i adressen: spellistan och ffmpeg ska ha
+    // samma gränser även om något ändras under uppspelningen
+    h1: q.get('h1') === '1',
     // Startposition i spellistan (EXT-X-START) för spelare som annars börjar på segment 0 (Safaris egen HLS)
     xs: Math.max(0, Math.min(1e6, Math.floor(+q.get('xs') || 0)))
   };
@@ -1008,14 +1018,16 @@ export function serveSubPlaylist(res, it, sid, query) {
 }
 
 /** Omkodningens segmentstarter: 0, 2, 4, 6, 12 … – och med hs (≥ SEG) korta segment även där uppspelningen börjar:
- *  … G, B, B+2, B+4, B+6, B+12 … där B = hs avrundat nedåt till jämn sekund och G = sista vanliga gränsen före B */
-export function transcodeStarts(duration, hs = 0) {
+ *  … G, B, B+2, B+4, B+6, B+12 … där B = hs avrundat nedåt till jämn sekund och G = sista vanliga gränsen före B.
+ *  h1: första segmentet där uppspelningen börjar är 1 s (0, 1, 2, 4, 6 … resp. B, B+1, B+2, B+4, B+6 …) */
+export function transcodeStarts(duration, hs = 0, h1 = false) {
   const end = duration - 0.5;
-  const starts = HEAD.filter(t => t === 0 || t < end);
+  const head = (b) => h1 ? [b, b + FIRST_SHORT, ...HEAD.slice(1).map(t => b + t)] : HEAD.map(t => b + t);
+  const starts = head(0).filter(t => t === 0 || t < end);
   const B = hs >= SEG ? Math.floor(hs / 2) * 2 : 0;
   if (!B || B + 2 >= end) { for (let t = SEG; t < end; t += SEG) starts.push(t); return starts; }
   for (let t = SEG; t < B; t += SEG) starts.push(t);
-  for (const t of [B, B + 2, B + 4]) if (t < end) starts.push(t);
+  for (const t of head(B)) if (t < end) starts.push(t);
   for (let t = B + SEG; t < end; t += SEG) starts.push(t);
   return starts;
 }
@@ -1024,7 +1036,7 @@ function segmentsOf(it, d) {
     const b = remuxBounds(it, d.fmt, d.hs);
     if (b) return b.map((t, i) => ({ start: t, dur: (b[i + 1] ?? it.duration) - t }));
   }
-  const starts = transcodeStarts(it.duration, d.hs);
+  const starts = transcodeStarts(it.duration, d.hs, d.h1);
   return starts.map((t, i) => ({ start: t, dur: (starts[i + 1] ?? it.duration) - t }));
 }
 
@@ -1475,7 +1487,7 @@ function keyFor(it, query, userId) {
     if (d.audioMode === 'copy') d.audioMode = 'aac';
     if (d.audio === '') { const a = streamsOf(it).filter(x => x.type === 'audio'); const def = a.find(x => x.default) || a[0]; if (def) d.audio = String(def.index); }
   } else if (d.ff && d.audioMode === 'copy') d.audioMode = 'aac';
-  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.pid ? '-' + d.pid : ''}${d.hs ? '-hs' + d.hs : ''}`;
+  const key = `${userId}-${it.id}-${d.mode}-${d.fmt}-${d.tag}-${d.vc}-${d.q}-${d.audio}-${d.audioMode}-${d.burn}-${d.tonemap ? 1 : 0}${d.night ? '-n' : ''}${d.dialog ? '-dl' : ''}${d.ff ? '-ff' : ''}${d.h1 ? '-h1' : ''}${d.pid ? '-' + d.pid : ''}${d.hs ? '-hs' + d.hs : ''}`;
   return { d, key };
 }
 function sessionFor(it, query, userId) {
@@ -1571,6 +1583,7 @@ export async function serveInit(req, res, it, query, userId) {
   resume(s);
   while (!ready()) {
     if (!s.proc) {
+      if (stoppedSince(s, t0)) return fail(res, 409, 'Uppspelningen stoppades');
       // ffmpeg som dör direkt (trasig fil) ska inte startas om var 100:e ms
       if (++starts > 3) return fail(res, 500, 'ffmpeg misslyckades – se serverloggen');
       if (!ensureCapacity(s, userId)) return fail(res, 503, 'För många samtidiga strömmar');
@@ -1578,7 +1591,7 @@ export async function serveInit(req, res, it, query, userId) {
     }
     if (Date.now() - t0 > (tc ? 90000 : 30000) || req.destroyed) return fail(res, 504, 'Initsegmentet blev inte klart');
     s.last = Date.now();
-    await new Promise(r => setTimeout(r, 100));
+    await dirChange(s, 100);
   }
   let buf;
   if (tc) { buf = Buffer.from(s.init); s.initServed = true; }
@@ -1677,6 +1690,17 @@ async function sendRandomAccess(req, res, file, waitMs, upTo) {
   res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Content-Length': buf.length, 'Cache-Control': 'no-store', 'X-Seg-Wait': String(waitMs) });
   res.end(req.method === 'HEAD' ? undefined : buf);
 }
+/** Väntar tills en fil skapas eller tas bort i sessionsmappen (newFile) eller något ändras där, högst ms. Segmentet
+ *  räknas som klart när ffmpeg öppnar nästa fil – med bara en fast väntan (50 ms) skickades det i snitt 25 ms för sent.
+ *  fs.watch kan sakna stöd eller missa en händelse (nätverksmontering): då gäller tidsgränsen som förut. */
+function dirChange(s, ms, newFile = false) {
+  return new Promise((ok) => {
+    let w = null;
+    const done = () => { clearTimeout(t); if (w) { try { w.close(); } catch {} w = null; } ok(); };
+    const t = setTimeout(done, ms);
+    try { w = fs.watch(s.dir, { persistent: false }, (ev) => { if (!newFile || ev === 'rename') done(); }); w.on('error', done); } catch {}
+  });
+}
 /** Väntar tills segment n är klart (startar ffmpeg vid behov). Allt annat än true = ett felsvar har skickats. */
 async function awaitSegment(req, res, it, s, n, userId) {
   {
@@ -1700,12 +1724,13 @@ async function awaitSegment(req, res, it, s, n, userId) {
       // kan ha pausat den efter att den här började vänta
       if (s.paused) resume(s);
       if (!s.proc && !complete(s, n)) {
+        if (stoppedSince(s, t0)) return fail(res, 409, 'Uppspelningen stoppades');
         if (++starts > 3) return fail(res, 500, 'ffmpeg misslyckades – se serverloggen');
         if (!ensureCapacity(s, userId)) return fail(res, 503, 'Servern har för många samtidiga omkodningar just nu');
         startFfmpeg(s, it, n);
       }
-      // Kort intervall: segmentet skickas inom ~50 ms från att det blivit klart (förut i snitt 60 ms senare)
-      await new Promise(r => setTimeout(r, 50));
+      // Väck direkt när ffmpeg skapar nästa fil (= segmentet är klart), annars efter högst 50 ms
+      await dirChange(s, 50, true);
     }
   }
   return true;
@@ -1740,8 +1765,11 @@ setInterval(() => {
 /** Stoppar användarens sessioner av titeln. Med pid bara den uppspelningen (t.ex. webbspelaren som stängs
  *  medan Chromecast fortsätter med en egen session); utan pid alla (appar och adminens stopp). */
 export function stopUserSessions(itemId, userId, pid = '') {
-  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) stopProc(s);
+  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) { s.stoppedAt = Date.now(); stopProc(s); }
 }
+// Stoppad medan begäran väntade (spelaren stängdes; avbrottet av begäran kan komma fram efter /stop): starta inte om
+// ffmpeg för den – den kodade annars vidare tills städningen och tog processorn från nästa uppspelning
+const stoppedSince = (s, t0) => (s.stoppedAt || 0) >= t0;
 export const activeTranscodes = () => [...sessions.values()].filter(s => s.proc).map(s => s.d.mode);
 /** Någon hämtar en HLS-ström just nu (segment de senaste 20 s) – bakgrundsjobben väntar (jobs.watching) */
 export const streamingNow = (ms = 20000) => { const t = Date.now() - ms; for (const s of sessions.values()) if ((s.reqAt || 0) > t) return true; return false; };
@@ -1802,5 +1830,5 @@ export function liveEncoder({ deinterlace = true, maxHeight = null, bitrate = nu
 }
 
 // För tester
-export const _segs = { trimBehind, highestFile, videoArgs, transcodeInit, fallbackH264 };
+export const _segs = { trimBehind, highestFile, videoArgs, transcodeInit, fallbackH264, dirChange };
 export const _slots = { subSlot, kfAcquire, kfRelease, kf: () => ({ active: kfActive, waiting: kfWait.length }), listDir, liveSubs, sessions };

@@ -143,24 +143,24 @@ t('fMP4-omkodning: samma moov i alla körningar och tfdt i absolut tid (även ef
   const wait = async (f) => { for (let i = 0; i < 300 && !fs.existsSync(f); i++) await sleep(100); assert.ok(fs.existsSync(f), f); };
   st.prewarm(it, q, 2, 0);
   const s = [...st._slots.sessions.values()].find(x => x.item === 98);
-  await wait(path.join(s.dir, 'seg_00004.m4s'));
+  await wait(path.join(s.dir, 'seg_00005.m4s'));
   const initA = st._segs.transcodeInit(s);
-  const a3 = fs.readFileSync(path.join(s.dir, 'seg_00003.m4s'));
+  const a3 = fs.readFileSync(path.join(s.dir, 'seg_00004.m4s'));
   st.stopUserSessions(98, 2);
   for (const f of fs.readdirSync(s.dir)) fs.rmSync(path.join(s.dir, f), { force: true });
   s.init = null;
-  // Ny körning från 12 s (segment 4 i rutnätet 0, 2, 4, 6, 12, 18), som efter en spolning
+  // Ny körning från 12 s (segment 5 i rutnätet 0, 1, 2, 4, 6, 12, 18 – 1 s första segment med processorn), som efter en spolning
   st.prewarm(it, q, 2, 12);
-  await wait(path.join(s.dir, 'seg_00005.m4s'));
+  await wait(path.join(s.dir, 'seg_00006.m4s'));
   const initB = st._segs.transcodeInit(s);
   assert.ok(initA && initB);
   assert.ok(initA.equals(initB), 'moov ändras inte mellan körningar');
   const tfdt = (b) => { const i = b.indexOf('tfdt'); return b[i + 4] === 1 ? Number(b.readBigUInt64BE(i + 8)) : b.readUInt32BE(i + 8); };
   const m = initA.indexOf('mdhd'), ts = initA[m + 4] === 1 ? initA.readUInt32BE(m + 24) : initA.readUInt32BE(m + 16);
-  const b4 = fs.readFileSync(path.join(s.dir, 'seg_00004.m4s'));
-  assert.ok(Math.abs(tfdt(b4.subarray(st.fragStart(path.join(s.dir, 'seg_00004.m4s')))) / ts - 12) < 0.05, 'segment 4 börjar på 12 s');
-  assert.ok(Math.abs(tfdt(a3.subarray(a3.indexOf('moof') - 4)) / ts - 6) < 0.05, 'segment 3 börjar på 6 s');
-  const v = probeJson(path.join(s.dir, 'seg_00004.m4s'));
+  const b4 = fs.readFileSync(path.join(s.dir, 'seg_00005.m4s'));
+  assert.ok(Math.abs(tfdt(b4.subarray(st.fragStart(path.join(s.dir, 'seg_00005.m4s')))) / ts - 12) < 0.05, 'segment 5 börjar på 12 s');
+  assert.ok(Math.abs(tfdt(a3.subarray(a3.indexOf('moof') - 4)) / ts - 6) < 0.05, 'segment 4 börjar på 6 s');
+  const v = probeJson(path.join(s.dir, 'seg_00005.m4s'));
   assert.deepEqual(v.map(x => x.codec_name).sort(), ['ac3', 'hevc']);
   st.stopUserSessions(98, 2);
 });
@@ -272,4 +272,19 @@ t('HEIC-rutnät (som från iPhone) sätts ihop till hela bilden med ffmpeg 7.1',
   const [r1, g1, b1] = at(0, 0), [r2, g2, b2] = at(9, 6);
   assert.ok(r1 > 150 && g1 < 90 && b1 < 90, `uppe till vänster rött: ${at(0, 0)}`);
   assert.ok(b2 > 150 && r2 < 90 && g2 < 90, `nere till höger blått: ${at(9, 6)}`);
+});
+
+test('1 s första segment bara med processorn: grafikkortens kodare behåller 2 s (deras GOP delar alla gränser)', () => {
+  const body = `const d = { mode: 'transcode', q: 'orig', audio: '1', audioMode: 'aac', fmt: 'ts', vc: 'h264' };
+    out.tc = st.hlsParams(d, {}, null).get('h1'); out.remux = st.hlsParams({ ...d, mode: 'remux' }, {}, null).get('h1');
+    out.hevc = st.hlsParams({ ...d, vc: 'hevc', fmt: 'fmp4' }, {}, null).get('h1');
+    out.starts = st.transcodeStarts(30, 0, true);`;
+  for (const hw of ['nvenc', 'vaapi', 'qsv']) {
+    const r = withHw(hw, body);
+    assert.deepEqual([r.tc, r.remux, r.hevc], [null, null, null], hw);
+    // Gränserna med h1 (processorn) – 1 s är inte en multipel av GOP_SEC, därför inte med grafikkortet
+    assert.deepEqual(r.starts, [0, 1, 2, 4, 6, 12, 18, 24]);
+  }
+  const cpu = withHw('none', body);
+  assert.deepEqual([cpu.tc, cpu.remux, cpu.hevc], ['1', null, '1']);
 });

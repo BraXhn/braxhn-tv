@@ -241,7 +241,7 @@ t('servern tystar ljudet i HLS-strömmen: remux från början, remux och omkodni
   const st = audioStart(s2);
   assert.ok(st > 11 && st < 13, 'segmentet börjar vid 12 s: ' + st);
   assertMuted(s2, [[12.5, 15.4, false], [16.0, 17.6, true]]); // TS-tiderna är filmens tider
-  // Omkodning (force=transcode) från 12 s: segmenten 12–18 s (0, 2, 4, 6, 12, 14, 16, 18 – korta där uppspelningen börjar)
+  // Omkodning (force=transcode) från 12 s: segmenten 12–18 s (0, 1, 2, 4, 6, 12, 13, 14, 16, 18 – korta där uppspelningen börjar, första 1 s med processorn)
   const tc = (await req(`/api/items/${S.film}/playback?force=transcode&start=12`, { tok: S.lill })).data;
   assert.equal(tc.mode, 'transcode');
   const s4 = await hlsFile(tc.url, path.join(ROOT, 'tc-seg4.ts'), { from: 12, to: 18 });

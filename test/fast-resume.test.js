@@ -24,6 +24,11 @@ const FILM = path.join(MEDIA, 'Filmer', 'Resume Film (2020).mkv');
 if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '80',
   '-c:v', 'libx264', '-preset', 'ultrafast', '-x264-params', 'keyint=24:min-keyint=24:scenecut=0', '-pix_fmt', 'yuv420p', '-c:a', 'ac3', FILM]);
 
+// Tyngre fil för tidsmåttet (720p, 10 bitar – omkodas alltid, som en riktig film där kodningen tar tid)
+const HEAVY = path.join(MEDIA, 'Filmer', 'Tung Film (2021).mkv');
+if (hasFfmpeg) execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=24,noise=alls=8:allf=t', '-f', 'lavfi', '-i', 'sine=frequency=300', '-t', '20',
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '48', '-pix_fmt', 'yuv420p10le', '-c:a', 'aac', HEAVY]);
+
 const D = await import('../server/db.js');
 const sc = await import('../server/scanner.js');
 const auth = await import('../server/auth.js');
@@ -42,6 +47,11 @@ test('omkodningens gränser: som förut utan hs, korta segment vid hs', () => {
   assert.deepEqual(st.transcodeStarts(60, 23.9), [0, 2, 4, 6, 12, 18, 22, 24, 26, 28, 34, 40, 46, 52, 58], 'B = jämn sekund före hs, rutnätet fortsätter från B');
   assert.deepEqual(st.transcodeStarts(60, 6), [0, 2, 4, 6, 8, 10, 12, 18, 24, 30, 36, 42, 48, 54]);
   assert.deepEqual(st.transcodeStarts(40, 39), st.transcodeStarts(40), 'för nära slutet');
+  // h1 (processorn): första segmentet där uppspelningen börjar är 1 s, sedan som förut
+  assert.deepEqual(st.transcodeStarts(40, 0, true), [0, 1, 2, 4, 6, 12, 18, 24, 30, 36]);
+  assert.deepEqual(st.transcodeStarts(60, 18, true), [0, 1, 2, 4, 6, 12, 18, 19, 20, 22, 24, 30, 36, 42, 48, 54]);
+  assert.deepEqual(st.transcodeStarts(60, 23.9, true), [0, 1, 2, 4, 6, 12, 18, 22, 23, 24, 26, 28, 34, 40, 46, 52, 58], 'hs udda: segmentet där uppspelningen börjar (23–24) är 1 s');
+  assert.deepEqual(st.transcodeStarts(1.2, 0, true), [0], 'kort fil: ett segment');
   for (const hs of [7, 13, 100, 3599, 7000]) {
     const s = st.transcodeStarts(7200, hs), b = Math.floor(hs / 2) * 2;
     assert.ok(s.includes(b) && s.includes(b + 2) && s.includes(b + 4) && s.includes(b + 6), `hs ${hs}`);
@@ -57,12 +67,12 @@ test('tvingade nyckelbilder hamnar exakt på gränserna, var ffmpeg än startar'
     for (let i = 0; i < secs * fps; i++) { const tt = i / fps; if (f(tt, n)) { out.push(Math.round(tt * 1000) / 1000); n++; } }
     return out;
   };
-  for (const [dur, hs] of [[120, 0], [120, 44], [120, 47.5], [120, 6], [50, 31]]) {
-    const starts = st.transcodeStarts(dur, hs);
+  for (const [dur, hs, h1] of [[120, 0], [120, 44], [120, 47.5], [120, 6], [50, 31], [120, 0, true], [120, 44, true], [120, 47.5, true], [120, 6, true], [50, 31, true]]) {
+    const starts = st.transcodeStarts(dur, hs, h1);
     for (let n = 0; n < starts.length; n++) {
       const rel = starts.slice(n).map(x => x - starts[n]);
       const got = keysOf(st.forcedKeys(rel), 25, dur - starts[n] - 0.5);
-      assert.deepEqual(got.slice(0, rel.length), rel, `längd ${dur}, hs ${hs}, start vid ${starts[n]}`);
+      assert.deepEqual(got.slice(0, rel.length), rel, `längd ${dur}, hs ${hs}${h1 ? ', h1' : ''}, start vid ${starts[n]}`);
     }
   }
   // Från början utan hs: samma mönster som alltid (0, 2, 4, 6, 12 …)
@@ -104,23 +114,25 @@ t('omkodning: /playback med start= ger korta segment där, och segmenten stämme
   it = D.get('SELECT * FROM items WHERE path=?', FILM);
   assert.ok(it?.duration > 70);
   await st.computeKeyframes(it);
-  // Utan start: som förut
+  // Utan start: korta segment från början – det första 1 s med processorn (h1=1 i adressen, HWACCEL=none här)
   const P0 = await playlist('force=transcode&q=480');
   assert.ok(!P0.pb.url.includes('hs='));
-  assert.deepEqual(P0.segs.slice(0, 5).map(s => s.start), [0, 2, 4, 6, 12]);
-  // Fortsätt vid 43,7 s: B = 42
+  assert.match(P0.pb.url, /[?&]h1=1(&|$)/);
+  assert.deepEqual(P0.segs.slice(0, 6).map(s => s.start), [0, 1, 2, 4, 6, 12]);
+  await check(P0.segs[0], 'segment 0 (1 s)'); await check(P0.segs[1], 'segment 1 (1 s)'); await check(P0.segs[2], 'segment 2 (2 s)'); await check(P0.segs[4], 'segment 6 (6 s)');
+  // Fortsätt vid 43,7 s: B = 42, segmentet där 43,7 ligger (43–44) är 1 s
   const P = await playlist('force=transcode&q=480&start=43.7');
   assert.match(P.pb.url, /[?&]hs=43(&|$)/);
-  assert.deepEqual(P.segs.map(s => s.start).filter(x => x >= 30 && x <= 60), [30, 36, 42, 44, 46, 48, 54, 60]);
+  assert.deepEqual(P.segs.map(s => s.start).filter(x => x >= 30 && x <= 60), [30, 36, 42, 43, 44, 46, 48, 54, 60]);
   const at = (x) => P.segs.find(s => s.start === x);
-  // Spelaren hämtar segmentet där 43,7 ligger (42–44) – ffmpeg är redan förstartad där
+  // Spelaren hämtar segmentet där 43,7 ligger (43–44) – ffmpeg är redan förstartad där
   const t0 = Date.now();
-  await check(at(42), 'segment 42');
+  await check(at(43), 'segment 43');
   const ms = Date.now() - t0;
   await check(at(44), 'segment 44'); await check(at(46), 'segment 46'); await check(at(48), 'segment 48 (6 s)'); await check(at(54), 'segment 54');
   assert.ok(ms < 5000, `första segmentet på ${ms} ms`);
-  // Bakåt till före de korta segmenten och spela igenom: 30, 36 (6 s), sedan 42, 44, 46 (2 s) i samma körning
-  for (const x of [30, 36, 42, 44, 46, 48]) await check(at(x), `genomspelning ${x}`);
+  // Bakåt till före de korta segmenten och spela igenom: 30, 36 (6 s), sedan 42, 43 (1 s), 44, 46 (2 s) i samma körning
+  for (const x of [30, 36, 42, 43, 44, 46, 48]) await check(at(x), `genomspelning ${x}`);
   // Hopp rakt in i de korta segmenten (44) efter att ha varit någon annanstans
   await check(at(0), 'segment 0'); await check(at(44), 'hopp till 44'); await check(at(46), 'sedan 46'); await check(at(48), 'sedan 48');
 });
@@ -170,7 +182,7 @@ t('förvärmning: strömmen startas vid warm=1, pausas efter några segment och 
   assert.equal(pidOf(P.pb.url), s.d.pid, 'samma ström som förvärmdes');
   assert.ok(!s.warm && s.warmed && !s.paused);
   const t0 = Date.now();
-  await check(P.segs.find(x => x.start === 42), 'förvärmt segment 42');
+  await check(P.segs.find(x => x.start === 43), 'förvärmt segment 43 (där 43,7 ligger)');
   assert.ok(Date.now() - t0 < 400, `segmentet var redan klart (${Date.now() - t0} ms)`);
   await check(P.segs.find(x => x.start === 44), 'segment 44'); await check(P.segs.find(x => x.start === 48), 'segment 48');
   assert.ok(act.listActive().some(x => x.itemId === it.id));
@@ -220,4 +232,84 @@ t('Safaris egen HLS (iPhone): startpositionen står i spellistorna, och strömme
   // Från början: ingen tagg
   const zero = await getJson('force=hls&nhls=1');
   assert.ok(!(await text(zero.url)).includes('EXT-X-START'));
+});
+
+t('stopp medan spelaren väntar på ett segment: ffmpeg startas inte om efteråt', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const P = await playlist('force=transcode&q=480');
+  const s = sessions().find(x => x.d.pid === pidOf(P.pb.url));
+  for (let i = 0; i < 50 && !s.proc; i++) await sleep(20);
+  st.stopUserSessions(it.id, s.user);
+  // Segmentet längst bort: förstarten (från 0) täcker det inte – begäran startar en egen körning och väntar på den
+  const far = P.segs.at(-2);
+  const pending = fetch(far.url, { headers: A() });
+  for (let i = 0; i < 100 && !s.proc; i++) await sleep(5);
+  assert.ok(s.proc, 'begäran startade ffmpeg');
+  // Långsam omkodning (som 4K): segmentet blir inte klart innan stoppet
+  s.proc.kill('SIGSTOP');
+  // Spelaren stängs (som /stop) medan begäran fortfarande väntar – avbrottet av begäran kan komma fram senare
+  st.stopUserSessions(it.id, s.user, s.d.pid);
+  const r = await pending;
+  // Förut startade den väntande begäran om ffmpeg (som sedan kodade vidare i upp till en minut och tog processorn från
+  // nästa uppspelning) och fick segmentet
+  assert.notEqual(r.status, 200, 'den väntande begäran avbryts i stället för att starta om ffmpeg');
+  await sleep(200);
+  assert.ok(!s.proc, 'ingen ffmpeg kvar efter stoppet');
+  // En ny begäran efter stoppet fungerar som vanligt
+  await check(P.segs[1], 'nytt segment efter stoppet');
+  st.stopUserSessions(it.id, s.user);
+});
+
+t('första segmentet vid omkodning är 1 s och kommer fortare än med 2 s (tidsmått, omväxlande körningar)', async () => {
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  assert.ok(heavy?.duration > 15, 'den tunga filen är inläst');
+  const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(heavy.id, x.user); st.stopUserSessions(it.id, x.user); x.reqAt = 0; } };
+  // Tid från begäran av första segmentet (ffmpeg startas då) tills det är hämtat; old = samma ström utan h1 (2 s).
+  // Förstarten från /playback stoppas i båda fallen, så att de mäts likadant
+  const first = async (old) => {
+    stopAll();
+    const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode&q=orig`, { headers: A() })).json();
+    stopAll(); await sleep(150);
+    const u = new URL(pb.url.replace('master.m3u8', 'seg-0.ts'), B);
+    assert.equal(u.searchParams.get('h1'), '1');
+    if (old) u.searchParams.delete('h1');
+    const t0 = performance.now();
+    const r = await fetch(u, { headers: A() });
+    const buf = Buffer.from(await r.arrayBuffer());
+    assert.equal(r.status, 200);
+    return { ms: performance.now() - t0, buf };
+  };
+  const a = [], b = [];
+  for (let i = 0; i < 3; i++) { a.push(await first(false)); b.push(await first(true)); }
+  stopAll();
+  const med = (x) => x.map(y => y.ms).sort((p, q) => p - q)[1];
+  // Första segmentet innehåller 1 s bild (24 bilder) i stället för 2 s
+  const f = path.join(ROOT, 'forsta.ts'); fs.writeFileSync(f, a[0].buf);
+  const n = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', f]).toString().trim().split(/\s+/)[0];
+  assert.equal(+n, 24, `${n} bilder i första segmentet`);
+  const ny = med(a), gammal = med(b);
+  console.log(`första segmentet (720p, 10 bitar → H.264): 1 s ${Math.round(ny)} ms, 2 s ${Math.round(gammal)} ms`);
+  assert.ok(ny < gammal, `1 s första segment (${Math.round(ny)} ms) ska komma före 2 s (${Math.round(gammal)} ms)`);
+  assert.ok(ny < 4000, `första segmentet på ${Math.round(ny)} ms`);
+});
+
+test('väntan på ett segment vaknar när ffmpeg skapar nästa fil, inte först efter tidsgränsen', async () => {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'vakna-'));
+  const s = { dir };
+  // Ny fil efter 30 ms: väckt långt före tidsgränsen (2 s)
+  let t0 = performance.now();
+  setTimeout(() => fs.writeFileSync(path.join(dir, 'seg_00001.ts'), 'x'), 30);
+  await st._segs.dirChange(s, 2000, true);
+  const woke = performance.now() - t0;
+  assert.ok(woke < 1000, `vaknade efter ${Math.round(woke)} ms`);
+  // En fil som bara växer väcker inte väntan på nästa segment (newFile), men tidsgränsen gäller
+  t0 = performance.now();
+  const iv = setInterval(() => fs.appendFileSync(path.join(dir, 'seg_00001.ts'), 'y'), 10);
+  await st._segs.dirChange(s, 150, true);
+  clearInterval(iv);
+  assert.ok(performance.now() - t0 >= 140, 'växande fil väcker inte');
+  // Mappen saknas (borttagen session): tidsgränsen gäller som förut
+  t0 = performance.now();
+  await st._segs.dirChange({ dir: path.join(dir, 'finns-inte') }, 60, true);
+  assert.ok(performance.now() - t0 >= 50);
 });

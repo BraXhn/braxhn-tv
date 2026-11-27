@@ -10,6 +10,17 @@
   Google TV). I bilen visas bara *Mina ärenden*, att läsa. Går en film inte att spela finns *Rapportera felet* i
   spelaren (inte i bilen). Servern sparar appens namn, version och plattform som en egen rad i den tekniska
   informationen (*Skickat från appen*). Inte provat på riktig telefon, TV eller bil.
+- **Omkodade filmer kommer igång fortare, från början och vid Fortsätt titta.** När servern kodar om med processorn är
+  det första segmentet där uppspelningen börjar nu 1 s i stället för 2 s, så spelaren får första bilden när hälften så
+  mycket är kodat. Uppmätt i Chrome på en 1080p-film (4 kärnor, ingen annan last): H.264 i 10 bitar 1,9–2,0 s → 0,8–0,9 s
+  till första bild från början och 1,4–1,6 s → 0,9 s mitt i, HEVC 1,0–1,1 s → 0,7–0,9 s från början och 1,1 s → 1,0 s
+  mitt i. Servern levererar första segmentet 0,2–0,6 s fortare (0,67–1,3 s → 0,45–0,7 s i olika omgångar). Bilden och bithastigheten
+  efter de första 4 sekunderna är exakt desamma som förut. Med grafikkort (NVENC/QSV/VA-API) är första segmentet
+  fortfarande 2 s (inte provat med riktigt grafikkort). Segmentet skickas också direkt när det blivit klart, inte upp
+  till 50 ms senare.
+- **En stoppad omkodning kunde starta igen av sig själv.** Stängdes spelaren medan den väntade på ett segment startade
+  servern om ffmpeg för den väntande begäran, och omkodningen fortsatte i upp till en minut – och tog processorn från
+  nästa film som startades. Nu avbryts den väntande begäran i stället.
 - **Undertexterna följer med i filmer som laddats ner för offline.** Filen som apparna laddar ner har nu filmens
   textundertexter inbyggda (även undertextfiler bredvid filmen, som `.sv.srt`, och nedladdade undertexter), med språk
   och namn. Telefonens egen spelare kan då visa dem i helskärm, i bild-i-bild och på AirPlay/Chromecast – förut syntes

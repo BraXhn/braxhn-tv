@@ -106,8 +106,19 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
   AirPlay) och inte genom startcachen (`server/pace.js`).
 
+**Från arbetspasset 2026-11-27 (sett men inte gjort)**
+- Spolning utanför bufferten i en omkodning kodar ett helt 6 s-segment innan bilden kommer (vakten: 1,5–3,6 s). Samma
+  korta segment som vid Fortsätt titta (en ny `hs` i spelaren vid spolning) skulle ge ~1 s (`server/stream.js`,
+  `web/js/player/video.js`).
+- Fortsätt titta mitt i en fil med lång GOP: omkodningen börjar på en jämn sekund och ffmpeg avkodar från nyckelbilden
+  före (upp till en hel GOP, ~0,1 s per sekund HEVC 1080p). Att lägga B på nyckelbilden före `hs` när nyckelbilderna är
+  kända sparar det – kontrollera först med en riktig film (testfilerna har 2 s GOP).
+- Utanför hemmet (ABR) förstartas ingen ffmpeg vid `/playback` – den startar först när spelaren valt steg och bett om
+  segmentet (`d.abr` i `server/routes/playback.js`). Steget som mastern listar först kunde förstartas.
+- Webbspelaren ber om `/playback` 40–150 ms efter klicket (titelns uppgifter hämtas först, `play()` i
+  `web/js/player/video.js`); utan förvärmning (pekare/fokus) ligger det på vägen till första bilden.
+
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
-- Omkodningens start tar 0,7–0,9 s och är den långsammaste vägen (`transcodeStarts`, `encArgs` i `server/stream.js`).
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
 - Feedback i iOS/tvOS-appen (Expo och Android har den sedan 2026-11-27). Expo- och Android-appens formulär är inte
   provade på riktig telefon, TV eller bil (se *Klart* 2026-11-27).
@@ -160,6 +171,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `app` – fel form tas bort, versionen får inte vara en IP-adress (`test/support.test.js`, fall 12). Kontraktet har
   Android-appens fem nya anrop. Expo i webbläget mot en egen server med Playwright (390×844). **Inte provat:** på riktig
   telefon, Google TV eller bil; Android-appen är inte kompilerad här (ingen Android SDK).
+- 2026-11-27: Omkodningens start, gren `team/tcstart-2026-11-27`. Med processorn är första segmentet där uppspelningen
+  börjar 1 s (`h1=1` i adressen, `transcodeStarts` i `server/stream.js`); väntan på segment vaknar när nästa fil skapas
+  (`dirChange`); en stoppad session startar inte om ffmpeg för en begäran som väntade (förut kodade den vidare i upp
+  till en minut och tog processorn från nästa start). Uppmätt 1080p, 4 kärnor, ingen annan last: servern 0,67–1,3 s →
+  0,45–0,7 s till första segment, Chrome 1,0–2,0 s → 0,7–1,0 s till första bild (H.264 10 bitar och HEVC → H.264, från
+  början och mitt i). Bilden efter 4 s är bit för bit densamma. Grafikkortet behåller 2 s (inte provat med riktigt
+  grafikkort). Prövat och inte behållet (siffror i `docs/arkitektur.md`): servering medan segmentet skrivs (hls.js
+  lägger bara in hela segment, och lokalt tar överföringen 5–20 ms), `ultrafast`/`zerolatency` för början, mindre
+  `-probesize`.
+
 - 2026-11-26: Undertexter i offline-filen, gren `team/offline-undertext-2026-11-26`. Fel: `server/offline.js` kodade
   med `-sn`, så nedladdade filmer saknade undertexter i filen – apparna ritade egna ovanpå, som inte syns i telefonens
   helskärm, bild-i-bild eller AirPlay/Chromecast. Nu läggs textundertexterna (inbäddade, externa `.sv.srt` och

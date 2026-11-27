@@ -231,8 +231,9 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
     const last0 = Math.max(...dts(f0)), first1 = dts(path.join(ROOT, 'abr0.ts'))[0];
     assert.ok(first1 > last0, `DTS ${last0} → ${first1}`);
   }
-  // Omkodning börjar med korta segment: 0, 2, 4, 6, 12 …
-  assert.ok(Math.abs(starts[0] - 2) < 0.05, `segment 1 börjar vid 2 s (${starts[0]})`);
+  // Omkodning börjar med korta segment: 0, 1, 2, 4, 6, 12 … (1 s första segment med processorn, h1=1 i alla varianter)
+  assert.ok(inf.every(m => new URLSearchParams(m[4].split('?')[1]).get('h1') === '1'), 'h1 i alla varianter');
+  assert.ok(Math.abs(starts[0] - 1) < 0.05, `segment 1 börjar vid 1 s (${starts[0]})`);
 });
 
 t('utanför hemmet med Auto: uppmätt bandbredd väljer var uppspelningen börjar – stegen upp till taket finns kvar', async () => {
