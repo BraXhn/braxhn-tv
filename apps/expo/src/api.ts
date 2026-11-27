@@ -261,7 +261,7 @@ export interface Library { id: number; name: string; type: string; count?: numbe
 export interface HomeResponse { continue: MediaItem[]; rows: { title: string; library?: Library; items: MediaItem[] }[]; watchlist: MediaItem[]; recommended?: MediaItem[] }
 export interface Playback {
   mode: 'direct' | 'remux' | 'transcode'; url: string; duration: number | null; reasons?: string[]; quality?: string;
-  intro?: { start: number; end: number } | null; credits?: number | null; remote?: boolean;
+  intro?: { start: number; end: number } | null; credits?: number | null; remote?: boolean; audioSelected?: string | null;
 }
 
 /** Var uppspelningen ska börja: som webben – under två minuter (eller en fjärdedel av korta klipp) börjar titeln om */
@@ -286,17 +286,22 @@ export function audioCaps(): string {
   if (Platform.OS === 'ios') return 'mp3,aac,flac'; // AVPlayer: inte Ogg (Opus/Vorbis)
   return 'mp3,aac,flac,opus,vorbis'; // Android (ExoPlayer) och webbläsare
 }
-/** Förmågorna appen anger för /playback – som de andra apparna gör, efter vad enhetens spelare klarar */
+/** Förmågorna appen anger för /playback – som de andra apparna gör, efter vad enhetens spelare klarar.
+ *  nhls=1: telefonens egen HLS-spelare (AVPlayer, ExoPlayer) – spellistan säger då var uppspelningen börjar
+ *  (EXT-X-START), så att spelaren inte först hämtar början av filmen och sedan spolar (start och omstart vid spolning).
+ *  Inte i webbläget: Chromes HLS bryr sig inte om taggen. */
 export function playbackCaps(): Record<string, string> {
   if (Platform.OS === 'ios') return { c: 'mp4', v: 'h264,hevc', a: 'aac,ac3,eac3,mp3,flac,alac', hdr: '0', dv: '0', nhls: '1' };
-  if (Platform.OS === 'android') return { c: 'mp4,webm,mkv', v: 'h264,hevc,vp9', a: 'aac,mp3,opus,vorbis,flac', hdr: '0', dv: '0' };
+  if (Platform.OS === 'android') return { c: 'mp4,webm,mkv', v: 'h264,hevc,vp9', a: 'aac,mp3,opus,vorbis,flac', hdr: '0', dv: '0', nhls: '1' };
   return { c: 'mp4,webm', v: 'h264,vp9,vp8', a: 'aac,mp3,opus,vorbis,flac', hdr: '0', dv: '0' };
 }
 /** Frågesträngen till /playback. Förvärmningen (warm) skickar samma utan ljudspår – servern väljer profilens förval. */
-export function playbackQuery(o: { start?: number; audio?: number | null; warm?: boolean }): string {
+// prev: strömmen som den nya ersätter (spolning i en omkodning, seekcore.ts) – servern stoppar den direkt.
+export function playbackQuery(o: { start?: number; audio?: number | null; warm?: boolean; prev?: string }): string {
   const q: Record<string, string> = { ...playbackCaps() };
   if (o.start && o.start >= 1) q.start = String(Math.floor(o.start));
   if (o.warm) q.warm = '1'; else if (o.audio != null) q.audio = String(o.audio);
+  if (o.prev && !o.warm) q.prev = o.prev;
   return Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }
 /** Servern startar strömmen redan när fingret landar på Spela (se docs/api.md, warm=1) – tyst om det inte går */

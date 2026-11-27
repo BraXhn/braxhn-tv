@@ -4,9 +4,10 @@
 // En nedladdad titel spelas från telefonen (fungerar utan nät), med de nedladdade undertexterna ritade ovanpå bilden.
 // Positionen går till servern som vanligt när den svarar (skärmtiden räknas och kan säga stopp); utan nät sparas den i
 // telefonen och skickas med "at" senare, och den senaste skärmtidsstatusen avgör om det får spelas (offline.ts).
+// Spolning utanför bufferten i en omkodning startar om strömmen vid målet med korta segment där (seekcore.ts).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useVideoPlayer, VideoView, type AudioTrack, type SubtitleTrack } from 'expo-video';
 import { useEvent, useEventListener } from 'expo';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
@@ -18,11 +19,13 @@ import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
 import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
+import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, restartsOn, runAfterSeek, seekJump, type Frag, type Sample } from '../seekcore';
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
 import { t } from '../i18n';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
+const titleOf = (it: ItemDetail) => (it.kind === 'episode' ? `${it.showTitle || ''} – ${sxe(it)} ${it.title}` : it.title);
 
 export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const { id, start } = route.params;
@@ -40,9 +43,20 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const [startFailed, setStartFailed] = useState(false);
   const [chrome, setChrome] = useState(true);
   const [pos, setPos] = useState(start);
-  const sought = useRef(false), lastSent = useRef(0), closed = useRef(false), ended = useRef(false);
+  const lastSent = useRef(0), closed = useRef(false), ended = useRef(false);
+  // Var och om spelaren ska börja när källan är redo (start, och efter en omstart vid en spolning)
+  const want = useRef<{ t: number; play: boolean } | null>({ t: start, play: true });
+  // Omkodad ström: adressen, spellistans segment, segmentet där omkodningen på servern började, om bild har visats
+  const stream = useRef<{ url: string; frags: Frag[]; runSeg: number; started: boolean } | null>(null);
+  const sample = useRef<Sample | null>(null);
+  // Omstart vid spolning: pågår (nummer, så att en äldre som blir klar senare inte tar över), ljudspåret som skickas,
+  // spåren i spelaren som väljs igen i den nya strömmen
+  const restartGen = useRef(0), audioParam = useRef<number | null>(null);
+  const keepTracks = useRef<{ audio: AudioTrack | null; sub: SubtitleTrack | null } | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
-  const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = local?.subs.length ? 0.25 : 1; p.staysActiveInBackground = true; });
+  // Mätningen var 0,25 s (inte 1 s) så att en spolning märks direkt – annars hinner spelaren börja hämta 6 s-segmentet
+  const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = 0.25; p.staysActiveInBackground = true; });
   const { status, error: playerError } = useEvent(player, 'statusChange', { status: player.status });
 
   // Liggande läge går bra i spelaren; resten av appen är stående. Musik eller en ljudbok som spelar pausas.
@@ -91,11 +105,13 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         const it = await api<ItemDetail>('/api/items/' + id);
         if (!live) return;
         setItem(it);
-        const p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio: it.defaultAudio ?? null })}`);
+        audioParam.current = it.defaultAudio ?? null;
+        const p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio: audioParam.current })}`);
         if (!live) return;
         setPb(p);
+        if (p.mode === 'transcode' && restartsOn(Platform.OS)) watchStream(p.url, start);
         await player.replaceAsync({ uri: absolute(p.url), contentType: p.mode === 'direct' ? 'auto' : 'hls',
-          metadata: { title: it.kind === 'episode' ? `${it.showTitle || ''} – ${sxe(it)} ${it.title}` : it.title } });
+          metadata: { title: titleOf(it) } });
         if (!live) return;
         if (it.kind === 'episode' && it.show) {
           const show = await api<ItemDetail>('/api/items/' + it.show).catch(() => null);
@@ -109,12 +125,80 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
 
   // När spelaren är redo: börja där man slutade (spellistan kan redan ha satt positionen – då görs inget) och spela.
   // Uppspelningen startas här och inte direkt efter att källan satts – då avbryts den av laddningen.
+  // Efter en omstart vid en spolning: till målet, och spela bara om spelaren spelade (en pausad film förblir pausad).
   useEffect(() => {
-    if (status !== 'readyToPlay' || sought.current || !pb) return;
-    sought.current = true;
-    if (start > 0 && Math.abs(player.currentTime - start) > 2) player.currentTime = start;
-    player.play();
-  }, [status, start, player, pb]);
+    const w = want.current;
+    if (status !== 'readyToPlay' || !w || !pb || restarting) return;
+    want.current = null;
+    if (w.t > 0 && Math.abs(player.currentTime - w.t) > 2) player.currentTime = w.t;
+    if (w.play) player.play();
+  }, [status, player, pb, restarting]);
+
+  /** Omkodad ström: spellistans segment (för beslutet vid en spolning). Hämtas bredvid spelaren, påverkar inte starten. */
+  const watchStream = useCallback((url: string, from: number) => {
+    const s = { url, frags: [] as Frag[], runSeg: -1, started: false };
+    stream.current = s; sample.current = null;
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
+    fetch(absolute(indexUrl(url)), { signal: ctl.signal }).then((r) => (r.ok ? r.text() : '')).then((txt) => {
+      if (stream.current !== s) return;
+      s.frags = parseFrags(txt);
+      s.runSeg = Math.max(0, fragAt(s.frags, from));
+    }).catch(() => {}).finally(() => clearTimeout(timer));
+  }, []);
+
+  /**
+   * Spolning utanför bufferten i en omkodning: strömmen startas om vid målet (/playback med start och prev). Servern
+   * ger korta segment där och stoppar den gamla strömmen; ljudspåret är detsamma, spåren i spelaren väljs igen.
+   */
+  const restartAt = useCallback(async (to: number, play: boolean) => {
+    const it = item, old = stream.current;
+    if (!it || !old) return;
+    const gen = ++restartGen.current;
+    stream.current = null; sample.current = null;
+    keepTracks.current = { audio: player.audioTrack, sub: player.subtitleTrack };
+    want.current = { t: to, play };
+    setRestarting(true);
+    // Den gamla källan bort direkt: spelaren slutar hämta 6 s-segmentet (servern stoppar den strömmen ändå)
+    player.replace(null);
+    let p: Playback;
+    try { p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start: to, audio: audioParam.current, prev: pidOf(old.url) })}`); }
+    catch (e: any) {
+      if (gen !== restartGen.current || closed.current) return;
+      setRestarting(false);
+      setError(e?.message || t('Uppspelningen kunde inte startas')); setStartFailed(true);
+      return;
+    }
+    // Ett nyare försök (en spolning till) eller stängning: strömmen som just startades behövs inte
+    if (gen !== restartGen.current || closed.current) { stopReplaced(p.url); return; }
+    setPb(p);
+    if (p.mode === 'transcode' && restartsOn(Platform.OS)) watchStream(p.url, to);
+    await player.replaceAsync({ uri: absolute(p.url), contentType: p.mode === 'direct' ? 'auto' : 'hls', metadata: { title: titleOf(it) } }).catch(() => {});
+    if (gen === restartGen.current) setRestarting(false);
+  }, [item, id, player, watchStream]);
+
+  /** Strömmen ersattes innan den användes: bara den stoppas (replaced=1 – uppspelningen fortsätter, inget stopp räknas) */
+  const stopReplaced = useCallback((url: string) => {
+    const pid = pidOf(url);
+    if (pid) api(`/api/stream/${id}/stop?pid=${pid}&replaced=1`, { method: 'POST' }).catch(() => {});
+  }, [id]);
+
+  /** Bilden visas i strömmen: spolningar räknas från nu (hoppet till startpositionen är spelarens eget) */
+  const markStarted = useCallback(() => {
+    const s = stream.current;
+    if (s && !s.started) { s.started = true; sample.current = null; }
+  }, []);
+
+  /** Varje mätning: har positionen hoppat (spolning)? Utanför bufferten i en omkodning startas strömmen om vid målet. */
+  const watchSeek = useCallback((pos: number, buf: number) => {
+    const s = stream.current;
+    if (!s) return;
+    const prev = sample.current;
+    const now: Sample = { pos, buf: Number.isFinite(buf) ? buf : 0, at: Date.now(), playing: player.playing, rate: player.playbackRate };
+    sample.current = now;
+    if (!prev || !s.started || !seekJump(prev, now)) return;
+    if (decideSeek(prev, pos, s)) { restartAt(pos, prev.playing || player.playing); return; }
+    s.runSeg = runAfterSeek(prev, pos, s);
+  }, [player, restartAt]);
 
   const send = useCallback(async (force = false) => {
     const secs = player.currentTime || 0, d = player.duration || item?.duration || 0;
@@ -148,8 +232,26 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     }
   }, [player, id]);
 
-  useEventListener(player, 'timeUpdate', (e) => { setPos(e.currentTime); send(); });
-  useEventListener(player, 'playingChange', (e) => { if (e.isPlaying) beat.current = Date.now(); else send(true); });
+  // Positionen på hela sekunder (introknappen) – med nedladdade undertexter exakt, för texten
+  useEventListener(player, 'timeUpdate', (e) => {
+    setPos(subs.length ? e.currentTime : Math.floor(e.currentTime)); send();
+    if (!restarting) watchSeek(e.currentTime, e.bufferedPosition ?? player.bufferedPosition);
+  });
+  useEventListener(player, 'playingChange', (e) => {
+    if (e.isPlaying) { beat.current = Date.now(); markStarted(); }
+    else send(true);
+  });
+  // Den nya strömmen efter en omstart: samma ljud- och undertextspår som förut (om spelaren visar några)
+  useEventListener(player, 'sourceLoad', () => {
+    const k = keepTracks.current;
+    if (!k) return;
+    keepTracks.current = null;
+    const same = (a: { language?: string; label?: string } | null, b: { language?: string; label?: string }) => !!a && a.language === b.language && a.label === b.label;
+    try {
+      if (k.sub) { const x = player.availableSubtitleTracks.find((s) => same(k.sub, s)); if (x) player.subtitleTrack = x; }
+      if (k.audio) { const x = player.availableAudioTracks.find((s) => same(k.audio, s)); if (x) player.audioTrack = x; }
+    } catch {}
+  });
   useEventListener(player, 'playToEnd', () => {
     if (ended.current) return;
     ended.current = true;
@@ -169,6 +271,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       return;
     }
     if (secs > 0 && d > 0) api(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } }).catch(() => {});
+    restartGen.current++; // en omstart som pågår ska inte ta över efter stängningen
     api(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
   }, [id, player, local]);
 
@@ -180,7 +283,8 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     </Pressable>
   ) : null;
   const cue = subIdx >= 0 && subs[subIdx] ? cueAt(subs[subIdx].cues, pos) : '';
-  const msg = error || (status === 'error' ? playerError?.message || t('Uppspelningen misslyckades') : '');
+  // Under en omstart vid spolning kan den gamla strömmens fel komma fram – det gäller inte längre
+  const msg = error || (status === 'error' && !restarting ? playerError?.message || t('Uppspelningen misslyckades') : '');
   const failed = !!msg && (startFailed || status === 'error');
   // Till Feedback: titeln som spelas och felet (förval och teknisk information i felrapporten)
   useEffect(() => { notePlayback(id, failed ? msg : ''); }, [id, failed, msg]);
@@ -188,8 +292,8 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     <View style={st.root}>
       <StatusBar hidden />
       <VideoView player={player} style={st.video} contentFit="contain" nativeControls allowsPictureInPicture
-        fullscreenOptions={{ enable: true }} onFirstFrameRender={() => setChrome(false)} />
-      {(status === 'loading' || !pb) && !msg ? (
+        fullscreenOptions={{ enable: true }} onFirstFrameRender={() => { setChrome(false); if (!want.current) markStarted(); }} />
+      {(status === 'loading' || !pb || restarting) && !msg ? (
         <View style={st.center} pointerEvents="none">
           <ActivityIndicator color={C.accent} size="large" />
           <Text style={st.wait}>{pb?.mode === 'transcode' ? t('Servern förbereder strömmen…') : t('Laddar…')}</Text>

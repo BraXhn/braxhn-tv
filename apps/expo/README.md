@@ -81,11 +81,32 @@ och sedan `npx expo install --fix`.
 - Bibliotek (filmer och serier) sorterade efter titel, senast tillagt eller år, och sökning.
 - Titelsidan: Spela, Fortsätt, Börja om, Markera som sedd, Min lista, säsonger och avsnitt.
 - Spelaren: telefonens egen spelare med helskärm och bild-i-bild. Den fortsätter där du slutade, skickar framsteg
-  till servern, hoppar över intro och går vidare till nästa avsnitt.
+  till servern, hoppar över intro och går vidare till nästa avsnitt. Spolar du långt i en film som servern kodar om
+  startar appen om strömmen där du spolade till, så att bilden kommer på ungefär en sekund (se *Spolning* nedan).
 - Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
 - Nedladdning av filmer, avsnitt och ljudböcker som spelas utan nät (se *Nedladdat* nedan).
 - Feedback och felrapporter (se *Feedback* nedan).
 - Svenska och engelska efter telefonens språk, eller valt under *Konto* (se *Språk* ovan).
+
+## Spolning i en omkodad film
+
+Spolar du utanför det som redan är laddat i en film som servern kodar om, ber appen servern starta om strömmen där du
+spolade till (`/playback` med `start=` och `prev=<förra strömmens pid>`), som webbspelaren. Servern ger då korta stycken
+just där (1 s med processorn) och stoppar den gamla omkodningen direkt, i stället för att först koda ett helt
+sexsekundersstycke. Ljudspåret är detsamma, en pausad film förblir pausad, och spåren som valts i telefonens spelare
+väljs igen. Ingen omstart när målet redan är laddat, när servern redan har kodat dit (gissat ur var omkodningen började
+och hur långt spelaren laddat – appen ser inte serverns svar), nära slutet, när stycket redan är kort och innan första
+bilden visats. Remux och direktuppspelning spolar som förut.
+
+Telefonens spelare märker spolningen som ett hopp i positionen (mätt var 0,25 s, `src/seekcore.ts`). Appen skickar
+`nhls=1` även på Android, så att spellistan säger var uppspelningen börjar (`EXT-X-START`) och spelaren inte först
+hämtar början av filmen – det gör också att *Fortsätt titta* börjar direkt på rätt ställe. **I webbläget görs ingen
+omstart:** Chromes egen HLS-spelare hämtar alltid de två första styckena i en ny ström innan den går till målet, och
+då blev spolningen långsammare (uppmätt 2,4–2,8 s → 2,9–3,7 s till bild).
+
+Uppmätt mot servern som telefonens spelare gör (börjar där spellistan säger, 1080p H.264 10 bitar, 4 kärnor):
+segmentet med målet kom efter 2,1–2,4 s förut och 0,67–0,80 s med omstarten (12 spolningar var); avkodningen i
+telefonen kommer till. **Inte provat på en riktig iPhone eller Android-telefon.**
 
 ## Feedback
 
@@ -249,6 +270,7 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   undertexter, skärmtid utan nät – bara `i18n.ts` importeras), `src/offline.ts` (filerna, `DownloadTask`, serveranropen),
   `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat). Feedback: `src/feedback.ts`
   (texter, var man är, senaste uppspelningen, anropen) och `src/screens/Feedback.tsx` (formuläret och Mina ärenden).
+  Spolning i en omkodning: `src/seekcore.ts` (reglerna, testas i repots `test/expo-seek.test.js`) och `src/screens/Player.tsx`.
 - **Texter:** skriv all text som syns på svenska i `t('…')` från `src/i18n.ts` (variabler `t('Säsong {n}', { n })`,
   plural `tn(n, '1 avsnitt', '{n} avsnitt')`) och lägg den engelska raden i `src/i18n-en.ts`. Finns texten redan i
   webbens `web/i18n/en.js` ska den engelska vara exakt densamma. Text som ska följa språket får inte ligga i en konstant
