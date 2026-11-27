@@ -43,7 +43,8 @@ final class PlayerController: ObservableObject {
     @Published var subtitleText = ""
     @Published var skipTitle: String?
     @Published var status = ""
-    @Published var error: String?
+    /// Felet som visas. Feedback förvalt "Något fungerar inte" en halvtimme efter ett fel (FeedbackTracker).
+    @Published var error: String? { didSet { if let e = error { FeedbackTracker.shared.notePlayback(currentId ?? 0, error: e) } } }
     @Published var title = ""
     @Published var audioTracks: [AudioStream] = []
     @Published var subtitleTracks: [SubtitleTrack] = []
@@ -134,6 +135,8 @@ final class PlayerController: ObservableObject {
     /// Startar (eller byter till) en titel. En pågående laddning avbryts.
     func load(itemId: Int, at start: Double, audio: Int?, subtitle: SubtitleTrack?, cinema: Bool = true) {
         guard !closed else { return }
+        // Titeln i Feedbacks tekniska information (servern lägger till namn och format)
+        FeedbackTracker.shared.notePlayback(itemId, error: nil)
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             await self?.start(itemId: itemId, at: start, audio: audio, subtitle: subtitle, cinema: cinema)
@@ -634,6 +637,7 @@ struct PlayerScreen: View {
             }
         }
         .onDisappear { holder.ctrl?.close() }
+        .feedbackPage("Spelaren")
         #if os(iOS)
         .statusBarHidden()
         #endif
@@ -646,8 +650,11 @@ struct PlayerScreen: View {
 }
 
 struct PlayerContent: View {
+    @EnvironmentObject var model: AppModel
     @ObservedObject var ctrl: PlayerController
     let close: () -> Void
+    /// Rapportera felet: Feedback med Något fungerar inte och Uppspelning förvalt
+    @State private var report = false
 
     var body: some View {
         ZStack {
@@ -761,8 +768,11 @@ struct PlayerContent: View {
                         if ctrl.canRetry { Button("Försök igen") { ctrl.retry() }.buttonStyle(.borderedProminent) }
                         Button("Stäng") { close() }.buttonStyle(.bordered)
                     }
+                    // Egen rad: tre knappar får inte plats bredvid varandra på Apple TV
+                    Button("Rapportera felet") { report = true }.buttonStyle(.bordered)
                 }
                 .padding(24).frame(maxWidth: 640).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .sheet(isPresented: $report) { FeedbackSheet(kind: "bug", area: "uppspelning").environmentObject(model) }
             }
         }
     }

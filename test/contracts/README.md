@@ -48,16 +48,17 @@ Varje typ och endpoint har `källa` med fil och rad i appen. Översikt:
 
 | Område | iOS/tvOS (`apps/apple/Shared/`) | Android (`apps/automotive/app/src/main/java/net/braxhn/tv/`) |
 |---|---|---|
-| Inloggning, status, bildtoken, utloggning | `AppModel.swift:106-149`, typer i `Models.swift:3-19, 237` | `Api.kt:234-265`, typer i `Api.kt:37-39, 108` |
+| Inloggning, status, bildtoken, utloggning | `AppModel.swift:135-198` (bildtoken sparad per server och profil: `:494-601`), typer i `Models.swift:3-19, 247` | `Api.kt:234-265`, typer i `Api.kt:37-39, 108` |
 | Inloggning med kod (TV) | `AppModel.swift:220-245`, typer i `Models.swift:242-252` | `Api.kt:301-326`, typer i `Api.kt:369-371` |
 | Startsida, bibliotek, sök, titelsida | `Views.swift:290, 291, 351, 376`, `DetailView.swift:70`, typer i `Models.swift:21-193` (nya hyllor: `Home.swift:7-64`) | `MainActivity.kt:301, 303, 347, 371, 522` (betyg, extramaterial, temamusik, repliker och undertextsynk: `Features.kt:65-115, 210, 243, 327-344`), typer i `Api.kt:40-96` |
 | Uppspelning, undertexter, strömmar | `Player.swift:142-182, 409-412, 481`, förmågor `AppModel.swift:154-172` (nattläge/dialog `:291-296`, bio-läge `Player.swift:237-241`), typer i `Models.swift:195-226`, `Home.swift:66` | `PlayerScreen.kt:154-214`, förmågor `Api.kt:275-289`, typer i `Api.kt:97-104` |
 | Framsteg och sedd | `AppModel.swift:175`, `DetailView.swift:137` | `Api.kt:291-296` (svaret: `Net.kt:33-35`, stopp: `PlayerScreen.kt:106-151`, skärmtid `GET /api/screentime`: `Net.kt:56`, utan nät: `OfflineSync.kt`) |
-| Bilder (`?t=` bildtoken) | `AppModel.swift:50-61` | `Api.kt:183-188` |
+| Bilder (`?t=` bildtoken) | `AppModel.swift:66-77` (401: `imageFailed`, `Views.swift` PosterCard) | `Api.kt:183-188` |
 | Offline och offline-synk | `Offline.swift:5-29, 140-148, 233` | `Offline.kt:21-27, 177-193, 363` (per profil: `DownloadCore.kt`) |
 | Lyssningsinställningar | `Listening.swift:6-55` | `Api.kt:25, 145-154` |
 | Musik | `Music.swift:7-60, 129-149, 203, 223, 316-378` | `MusicService.kt:42-62, 143, 253-256, 277, 314-366, 490, 517-584` |
 | Ljudböcker | `Listen.swift:7-33, 154-155, 209, 257, 360-362, 505, 566` | `MusicService.kt:50-53, 233, 289, 296-304, 336, 488` |
 | Poddar | `Listen.swift:35-74, 165-167, 260, 360-362, 472, 506, 589` | `MusicService.kt:54-58, 236, 291-292, 338-342, 464, 489` |
 | Live-TV, guide och inspelningar | `Live.swift:8-56, 85, 149, 171, 276, 290, 298, 325, 385, 391, 419-420` | `Live.kt:57-65, 85, 103, 129, 136, 237-252`, `Guide.kt:49-67, 100, 149, 216-222, 244, 298-383`, `MainActivity.kt:138` |
-| Profiler, Min lista, bio-läge, nattläge, startsidans nya hyllor | `Home.swift:82-98, 329, 398`, `AppModel.swift:254-271` | `Api.kt:331-354`, `Extras.kt:58-90, 246-254`, `PlayerScreen.kt:178-180`, `MainActivity.kt:286-288, 471` |
+| Profiler, Min lista, bio-läge, nattläge, startsidans nya hyllor | `Home.swift:82-98, 329, 398`, `AppModel.swift:322-366` | `Api.kt:331-354`, `Extras.kt:58-90, 246-254`, `PlayerScreen.kt:178-180`, `MainActivity.kt:286-288, 471` |
+| Feedback och Mina ärenden | `Feedback.swift:17-126, 372-399` (vyer: `FeedbackViews.swift`) | `Feedback.kt:43-57, 96-106` |

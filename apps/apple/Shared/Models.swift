@@ -246,6 +246,8 @@ struct APIError: LocalizedError {
 
 struct TokenResponse: Decodable {
     let token: String
+    /// Hur länge bildtoken gäller i sekunder (saknas hos äldre servrar: 7 dagar)
+    let ttl: Int?
 }
 
 /// Inloggning med kod (POST /api/quickconnect): koden visas på skärmen, nyckeln används för att polla

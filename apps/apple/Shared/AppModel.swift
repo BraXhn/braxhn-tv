@@ -9,9 +9,16 @@ final class AppModel: ObservableObject {
     @Published var server: String = UserDefaults.standard.string(forKey: "server") ?? "" { didSet { if server != oldValue { resetHome() } } }
     @Published private(set) var token: String? = Keychain.read("token")
     @Published var user: UserInfo?
-    /// Kortlivad token som bara gäller bilder (bild-URL:er kan inte skicka Authorization-header)
+    /// Kortlivad token som bara gäller bilder (bild-URL:er kan inte skicka Authorization-header). Sparas i nyckelringen
+    /// per server och profil (ImageTokenBook längst ned i filen) och förnyas bara när den snart går ut eller servern svarar 401.
     @Published private(set) var imageToken: String?
-    private var imageTokenDate = Date.distantPast
+    /// När bildtoken i minnet slutar gälla (unix-sekunder) och vems den är ("server profil-id")
+    private var imageTokenUntil: Double = 0
+    private var imageTokenOwner: String?
+    /// Hämtningen som pågår (flera vyer frågar samtidigt vid start – bara en ny token) och senaste 401-kontrollen
+    private var imageTokenTask: Task<Void, Never>?
+    private var imageTokenGen = 0
+    private var imageCheckedAt = Date.distantPast
     @Published var quality: String = UserDefaults.standard.string(forKey: "quality") ?? "auto" {
         didSet { UserDefaults.standard.set(quality, forKey: "quality") }
     }
@@ -138,17 +145,23 @@ final class AppModel: ObservableObject {
         Keychain.save("token", r.token)
         token = r.token
         user = r.user
-        await refreshImageToken(force: true)
+        await refreshImageToken()
         await refreshUser()
     }
 
-    /// Hämtar en ny bildtoken (gäller 7 dagar) om den saknas eller är äldre än ett dygn.
+    /// Ser till att det finns en bildtoken som gäller minst ett dygn till: den i minnet, den sparade för servern och
+    /// profilen, annars en ny (loadImageToken längst ned i filen). force = den sparade fungerar inte längre (401).
     func refreshImageToken(force: Bool = false) async {
-        guard token != nil, force || imageToken == nil || Date().timeIntervalSince(imageTokenDate) > 86400 else { return }
-        if let data = try? await post("/api/media-token"), let r = try? JSONDecoder().decode(TokenResponse.self, from: data) {
-            imageToken = r.token
-            imageTokenDate = Date()
+        if let running = imageTokenTask {
+            await running.value
+            if !force { return }
         }
+        imageTokenGen &+= 1
+        let gen = imageTokenGen
+        let task = Task { await self.loadImageToken(force: force) }
+        imageTokenTask = task
+        await task.value
+        if imageTokenGen == gen { imageTokenTask = nil }
     }
 
     func restore() async {
@@ -157,7 +170,7 @@ final class AppModel: ObservableObject {
             user = s.user
             remote = s.remote ?? false
             donateURL = safeDonateURL(s.donateUrl)
-            if s.user == nil { logout() } else { await refreshImageToken(force: true) }
+            if s.user == nil { logout() } else { await refreshImageToken() }
         }
     }
 
@@ -177,9 +190,13 @@ final class AppModel: ObservableObject {
             session.dataTask(with: r).resume()
         }
         Keychain.delete("token")
+        // De sparade bildtoken för servern tas också bort (som Expo-appens utloggning)
+        Keychain.delete(ImageTokenBook.key(server: server))
         token = nil
         user = nil
         imageToken = nil
+        imageTokenOwner = nil
+        imageTokenUntil = 0
         resetHome()
     }
 
@@ -289,7 +306,7 @@ extension AppModel {
             Keychain.save("token", t)
             token = t
             user = u
-            await refreshImageToken(force: true)
+            await refreshImageToken()
             await refreshUser()
         }
         return r.status
@@ -312,7 +329,7 @@ extension AppModel {
         Keychain.save("token", t)
         token = t
         user = u
-        await refreshImageToken(force: true)
+        await refreshImageToken()
         await refreshUser()
         // Alla flikar byggs om (MainTabs har .id(generation)) så att inget från förra profilen visas
         ProfileEvents.shared.generation += 1
@@ -473,3 +490,112 @@ let appLocale: Locale = {
     if Locale.current.language.languageCode?.identifier == lang { return Locale.current }
     return Locale(identifier: lang == "en" ? "en_US" : "sv_SE")
 }()
+
+// MARK: - Bildtoken sparad per server och profil
+
+// (sist i filen av samma skäl som ovan)
+extension AppModel {
+    /// Bildtoken i minnet om den är profilens och gäller minst ett dygn till, annars den sparade i nyckelringen,
+    /// sist en ny från servern (som sparas). Vid start innan /api/status svarat: profilen som använde den senast.
+    fileprivate func loadImageToken(force: Bool) async {
+        guard token != nil, !server.isEmpty else { return }
+        let base = server
+        let key = ImageTokenBook.key(server: base)
+        var book = ImageTokenBook.decode(Keychain.read(key))
+        // Första gången och profilen okänd (t.ex. /api/status misslyckades vid start): fråga servern
+        if user == nil && book.last == nil { await refreshUser() }
+        guard let uid = user?.id ?? book.last, server == base, token != nil else { return }
+        let owner = "\(base) \(uid)"
+        let now = Date()
+        if !force, imageToken != nil, imageTokenOwner == owner,
+           imageTokenUntil - now.timeIntervalSince1970 > ImageTokenBook.renewBefore { return }
+        if !force, let saved = book.usable(for: uid, now: now) {
+            imageToken = saved.token
+            imageTokenUntil = saved.until
+            imageTokenOwner = owner
+            if book.last != uid {
+                book.last = uid
+                if let s = book.encoded() { Keychain.save(key, s) }
+            }
+            return
+        }
+        guard let data = try? await post("/api/media-token"),
+              let r = try? JSONDecoder().decode(TokenResponse.self, from: data) else { return }
+        // Servern eller profilen byttes medan token hämtades: den hör inte till det som gäller nu
+        guard server == base, token != nil, (user?.id ?? uid) == uid else { return }
+        let at = Date()
+        let until = ImageTokenBook.until(ttl: r.ttl, now: at)
+        book = ImageTokenBook.decode(Keychain.read(key)).storing(r.token, until: until, for: uid, now: at)
+        if let s = book.encoded() { Keychain.save(key, s) }
+        imageToken = r.token
+        imageTokenUntil = until
+        imageTokenOwner = owner
+    }
+
+    /// En bild gick inte att ladda: fråga servern om det var bildtoken (401, t.ex. utknuffad av taket på 50 per
+    /// användare) och hämta då en ny. Högst en kontroll i minuten, så att en bild som saknas (404) inte ger en ström av anrop.
+    func imageFailed(_ url: URL?) {
+        guard let url, let tok = imageToken, url.absoluteString.contains("t=" + tok),
+              Date().timeIntervalSince(imageCheckedAt) > 60 else { return }
+        imageCheckedAt = Date()
+        Task {
+            guard let pair = try? await session.data(for: URLRequest(url: url)),
+                  (pair.1 as? HTTPURLResponse)?.statusCode == 401, imageToken == tok else { return }
+            await refreshImageToken(force: true)
+        }
+    }
+}
+
+/// En sparad bildtoken och när den slutar gälla (unix-sekunder)
+struct SavedImageToken: Codable, Equatable {
+    let token: String
+    let until: Double
+}
+
+/// En servers sparade bildtoken per profil (användar-id som text) och profilen som använde bildtoken senast. Sparas
+/// som JSON i nyckelringen. Servern sparar högst 50 bildtoken per användare och tar bort de äldsta (server/auth.js
+/// IMG_MAX), så en ny token vid varje start skulle knuffa ut andra apparnas. Samma regler som Expo-appen
+/// (apps/expo/src/api.ts ensureImageToken): förnya när mindre än ett dygn är kvar.
+struct ImageTokenBook: Codable, Equatable {
+    var tokens: [String: SavedImageToken] = [:]
+    var last: Int?
+
+    /// Förnya när mindre än så här är kvar
+    static let renewBefore: TimeInterval = 86400
+    /// Servrar som inte skickar ttl ger token som gäller 7 dagar
+    static let defaultTTL = 7 * 86400
+
+    /// Nyckeln i nyckelringen (en per server, den sparade adressen)
+    static func key(server: String) -> String { "img " + server }
+
+    /// Profilens sparade token, om den gäller minst ett dygn till
+    func usable(for user: Int, now: Date) -> SavedImageToken? {
+        guard let t = tokens[String(user)], !t.token.isEmpty,
+              t.until - now.timeIntervalSince1970 > Self.renewBefore else { return nil }
+        return t
+    }
+
+    /// Med profilens nya token (tom text tar bort den), utan utgångna token och med profilen som den senaste
+    func storing(_ token: String, until: Double, for user: Int, now: Date) -> ImageTokenBook {
+        var b = self
+        b.tokens = b.tokens.filter { $0.value.until > now.timeIntervalSince1970 }
+        b.tokens[String(user)] = token.isEmpty ? nil : SavedImageToken(token: token, until: until)
+        b.last = user
+        return b
+    }
+
+    /// När en ny token slutar gälla: serverns ttl i sekunder (minst en minut)
+    static func until(ttl: Int?, now: Date) -> Double {
+        now.timeIntervalSince1970 + Double(max(60, ttl ?? defaultTTL))
+    }
+
+    /// Läser det sparade; trasigt eller saknas = tomt
+    static func decode(_ s: String?) -> ImageTokenBook {
+        guard let d = s?.data(using: .utf8), let b = try? JSONDecoder().decode(ImageTokenBook.self, from: d) else { return ImageTokenBook() }
+        return b
+    }
+
+    func encoded() -> String? {
+        (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+}

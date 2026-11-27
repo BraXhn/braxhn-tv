@@ -27,6 +27,14 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - tydliga felmeddelanden: ingen anslutning, fel adress, certifikatfel, för många försök (429), full disk/databasfel
   (507/503 med serverns förklaring) och en server som inte svarar via BraXhn Relay
 - nedladdning visas bara för konton som får ladda ner
+- feedback och felrapporter (Inställningar → *Skicka feedback* och *Mina ärenden*), som knappen *Feedback* i webben:
+  typ, *Gäller* (förvalt efter skärmen du var på), meddelande och teknisk information med *Visa vad som skickas med*.
+  *Mina ärenden* visar status och teamets svar, och där svarar du när teamet ber om mer information. Går en film inte
+  att spela finns *Rapportera felet* i spelaren. På Apple TV skrivs texten med tvOS tangentbord (eller iPhone och
+  diktering). En administratör läser ärendet innan det skickas vidare
+- bildtoken (bilder laddas via adress med `?t=`) sparas i nyckelringen per server och profil och förnyas bara när
+  mindre än ett dygn är kvar eller servern svarar 401 på en bild – en ny token vid varje start skulle knuffa ut andra
+  apparnas (servern sparar högst 50 per användare)
 
 ## Bygga och installera (kräver en Mac)
 
@@ -101,5 +109,7 @@ appen att installera alls. Därför är det inte byggt – hellre en app som all
 
 Workflowet `.github/workflows/apple.yml` kompilerar båda målen på GitHubs macOS-maskiner vid varje push, utan signering. Koden är skriven och granskad, men **har inte kompilerats** i miljön där den skapades eftersom Xcode saknades där. Kör workflowet, eller bygg i Xcode, och rätta eventuella kompileringsfel.
 
-Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`) är en ren typ utan nät och app, så att ett testmål kan
-läggas till för den utan att något annat behöver ändras.
+Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`), Feedbacks regler (`FeedbackCore` i `Feedback.swift`) och
+de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`) är rena typer utan nät och vyer, så att ett testmål kan
+läggas till för dem utan att något annat behöver ändras. `test/apple-i18n.test.js` (Node, utan Xcode) kontrollerar att
+varje svensk text i koden har en engelsk rad i `en.lproj/Localizable.strings` och att Feedbacks områden är serverns.

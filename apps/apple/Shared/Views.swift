@@ -10,9 +10,9 @@ extension View {
     func withRoutes() -> some View {
         navigationDestination(for: Route.self) { r in
             switch r {
-            case .item(let id): ItemDetailView(id: id)
-            case .library(let l): LibraryView(library: l)
-            case .watchlist: WatchlistView()
+            case .item(let id): ItemDetailView(id: id).feedbackPage("Titelsidan")
+            case .library(let l): LibraryView(library: l).feedbackPage("Bibliotek")
+            case .watchlist: WatchlistView().feedbackPage("Min lista")
             }
         }
     }
@@ -68,18 +68,18 @@ struct MainTabs: View {
     }
     private var tabs: some View {
         TabView {
-            NavigationStack { HomeView().withRoutes() }
+            NavigationStack { HomeView().withRoutes().feedbackPage("Hem") }
                 .tabItem { Label("Hem", systemImage: "house") }
-            NavigationStack { SearchView().withRoutes() }
+            NavigationStack { SearchView().withRoutes().feedbackPage("Sök") }
                 .tabItem { Label("Sök", systemImage: "magnifyingglass") }
-            NavigationStack { LiveView() }
+            NavigationStack { LiveView().feedbackPage("Live-TV") }
                 .tabItem { Label("Live-TV", systemImage: "antenna.radiowaves.left.and.right") }
-            NavigationStack { MusicView() }
+            NavigationStack { MusicView().feedbackPage("Musik") }
                 .tabItem { Label("Musik", systemImage: "music.note") }
-            NavigationStack { ListenView() }
+            NavigationStack { ListenView().feedbackPage("Lyssna") }
                 .tabItem { Label("Lyssna", systemImage: "headphones") }
             #if os(iOS)
-            NavigationStack { DownloadsView() }
+            NavigationStack { DownloadsView().feedbackPage("Nedladdat") }
                 .tabItem { Label("Nedladdat", systemImage: "arrow.down.circle") }
             #endif
             NavigationStack { SettingsView() }
@@ -182,7 +182,11 @@ struct PosterCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
                 AsyncImage(url: model.imageURL(item, landscape: landscape)) { phase in
-                    if let img = phase.image { img.resizable().scaledToFill() } else { placeholder }
+                    if let img = phase.image { img.resizable().scaledToFill() }
+                    else if phase.error != nil {
+                        // Bilden gick inte att ladda: kanske bildtoken som inte gäller längre (AppModel.imageFailed)
+                        placeholder.onAppear { model.imageFailed(model.imageURL(item, landscape: landscape)) }
+                    } else { placeholder }
                 }
                 .frame(width: width, height: height)
                 .clipped()
@@ -438,6 +442,8 @@ struct SettingsView: View {
                 Text("Nattläge jämnar ut ljudnivån så att explosioner inte väcker grannarna, tydligare dialog lyfter rösterna. Servern filtrerar ljudet (stereo). Kan också ändras i spelaren.")
             }
             ListenSettingsSection()
+            // Feedback och Mina ärenden (FeedbackViews.swift)
+            FeedbackSection()
             Section {
                 Button("Logga ut", role: .destructive) { model.logout() }
             }

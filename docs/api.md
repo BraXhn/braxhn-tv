@@ -173,7 +173,7 @@ curl -H "X-Api-Key: bxtv_…" -H "Content-Type: application/json" \
 
 Finns teamet utanför hemmet måste nyckeln skapas utan *Bara från hemnätet*.
 
-**Webbens egna vägar** (vanlig inloggning, inte API-nyckel; Expo- och Android-appen använder samma): `POST /api/support` (nytt ärende: `{ kind, area, text,
+**Webbens egna vägar** (vanlig inloggning, inte API-nyckel; Expo-, Android- och iOS/tvOS-appen använder samma): `POST /api/support` (nytt ärende: `{ kind, area, text,
 tech, context }`, högst 5 per timme för andra än administratörer), `POST /api/support/context` (förhandsvisning av
 det som bifogas), `GET /api/support` (mina ärenden), `GET /api/support/count`, `GET /api/support/:id` och
 `POST /api/support/:id/reply`. Man når bara sina egna ärenden; någon annans ger 404. Administratören (hemnätet):

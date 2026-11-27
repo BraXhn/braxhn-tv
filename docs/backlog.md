@@ -98,9 +98,11 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   bokmärken, favoriter och spellistor går inte att ändra i appen än (`apps/expo/src/music.ts`, `screens/Music.tsx`).
 - Expo-appen saknas i `test/contracts/apps.json`: testet känner bara `ios` och `android` (`APPS`, typnamnens slut,
   `TOK` per app i `test/api-contract.test.js`), så en tredje app kräver ändringar i testet.
-- iOS- och Android-apparna sparar bildtoken bara i minnet och tar en ny vid varje start (`restore()` i
-  `apps/apple/Shared/AppModel.swift`, `refreshImageToken` i `apps/automotive/.../Api.kt`) – samma knuff mot taket på
-  50 som Expo-appen hade. Spara den som Expo-appen gör nu.
+- Android-appen sparar bildtoken bara i minnet och tar en ny vid varje start (`refreshImageToken` i
+  `apps/automotive/.../Api.kt`) – samma knuff mot taket på 50 som Expo- och iOS-appen hade. Spara den som de gör nu.
+- iOS/tvOS-appen märker en utknuffad bildtoken (401) bara på affischkorten (`PosterCard` i `Views.swift`); titelsidans
+  bakgrund, musik, ljudböcker och kanallogor visar platshållaren tills token förnyas efter ett dygn eller ett kort
+  laddas om (`imageFailed` i `AppModel.swift`).
 - Album för offline skapar en medietoken per spår vid varje anrop (`/api/music/albums/:aid/offline` i
   `server/routes/music.js`); ett album över 300 spår tappar de första spårens token. En token per album vore lättare.
 - Takten på `/direct` för profiler med skärmtid är inte provad med riktiga appar (AVPlayer, ExoPlayer, Chromecast,
@@ -119,8 +121,8 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
-- Feedback i iOS/tvOS-appen (Expo och Android har den sedan 2026-11-27). Expo- och Android-appens formulär är inte
-  provade på riktig telefon, TV eller bil (se *Klart* 2026-11-27).
+- Feedback i apparna är inte provad på riktig telefon, Apple TV, Google TV eller bil, och iOS/tvOS-appens är inte
+  kompilerad där den skrevs (se *Klart* 2026-11-27).
 - Serverns etiketter för spår och avsnitt utan titel (*Avsnitt N*) är svenska även på engelska.
 - Cast-skriptet ger fyra konsolfel per sidladdning över vanlig http (CSP tillåter bara https).
 
@@ -176,6 +178,15 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   till svenska och tillbaka. **Inte provat:** Expo Go på en riktig telefon på engelska (att `Intl` ger telefonens språk
   i Hermes på iPhone och Android), Nedladdat med riktiga nedladdningar på engelska.
 
+- 2026-11-27: Feedback och Mina ärenden i iOS/tvOS-appen och sparad bildtoken, gren `team/apple-feedback-2026-11-27`.
+  Samma formulär och *Mina ärenden* som Expo och Android, under *Inställningar* och som *Rapportera felet* i spelaren;
+  på Apple TV med tvOS tangentbord (`Shared/Feedback.swift` med reglerna i `FeedbackCore`, `Shared/FeedbackViews.swift`;
+  sidan för *Gäller* sätts med `.feedbackPage(…)` i `Views.swift` och `Player.swift`). Bildtoken sparas i nyckelringen
+  per server och profil (`ImageTokenBook` i `AppModel.swift`, `{ tokens: { userId: { token, until } }, last }`), förnyas
+  när mindre än ett dygn är kvar eller efter 401 på ett affischkort (`imageFailed`), och tas bort vid utloggning; start,
+  inloggning och profilbyte tar inte längre en ny. Kontraktet har iOS-appens fem nya anrop och `ttl` i
+  `TokenResponse.ios` (148 fall gröna); `test/apple-i18n.test.js` (3 fall) kontrollerar de engelska texterna.
+  **Inte provat:** appen är inte kompilerad här (ingen Xcode) och inte körd på iPhone, iPad eller Apple TV.
 - 2026-11-27: Feedback och Mina ärenden i Expo- och Android-appen, gren `team/app-feedback-2026-11-27`. Samma dialog
   som webben (typ, *Gäller* förvalt efter skärmen man var på, meddelande, teknisk information med *Visa vad som skickas
   med* från `POST /api/support/context`) och *Mina ärenden* med status, svar och svar på teamets fråga. Expo: under

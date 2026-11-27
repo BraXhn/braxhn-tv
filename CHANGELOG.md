@@ -1,6 +1,17 @@
 # Ändringar
 
 ## Ej utgiven
+- **Feedback och felrapporter i appen för iPhone, iPad och Apple TV.** Under *Inställningar* finns nu *Skicka
+  feedback* och *Mina ärenden*, som i webben och de andra apparna: välj *Förslag eller synpunkt* eller *Något fungerar
+  inte*, vad det gäller (förvalt efter skärmen du var på) och skriv vad som hände. Med teknisk information följer
+  appens version, enhet, skärmstorlek och senaste uppspelningen med, och *Visa vad som skickas med* visar exakt vad.
+  *Mina ärenden* visar status och teamets svar, och där kan du svara när teamet ber om mer information. Går en film
+  inte att spela finns *Rapportera felet* i spelaren. På Apple TV skriver du med tvOS tangentbord. En administratör
+  läser ärendet innan det går vidare. Inte provat på riktig iPhone eller Apple TV.
+- **Appen för iPhone, iPad och Apple TV tar inte längre en ny bildtoken vid varje start.** Servern sparar högst 50
+  bildtoken per användare, så en app som startades ofta kunde knuffa ut de andra apparnas – och deras bilder slutade
+  visas. Nu sparas token säkert i nyckelringen per server och profil och förnyas bara när mindre än ett dygn är kvar,
+  eller när servern säger att den inte gäller längre.
 - **Expo-appen på engelska.** Appen följer telefonens språk – svenska om telefonen är på svenska, annars engelska, som
   Android-appen – och under *Konto → Språk* kan du välja *Telefonens språk*, *Svenska* eller *English*. Alla texter
   (380) är översatta; de som också finns i webben (156) har exakt samma engelska. Plural (*1 episode / 3 episodes*),
