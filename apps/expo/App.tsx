@@ -24,6 +24,11 @@ import DownloadsScreen from './src/screens/Downloads';
 import * as off from './src/offline';
 import { startView } from './src/offlinecore';
 import { confirm } from './src/components/download';
+import { FeedbackScreen, TicketsScreen } from './src/screens/Feedback';
+import { noteRoute } from './src/feedback';
+
+/** Skärmen som syns just nu (förvalet i Feedback följer den) */
+const focused = (s: any): string => { const r = s?.routes?.[s.index ?? 0]; return r?.state ? focused(r.state) : r?.name || ''; };
 
 const Stack = createNativeStackNavigator<StackParams>();
 const theme = { ...DarkTheme, colors: { ...DarkTheme.colors, background: C.bg, card: C.chrome, text: C.text, border: C.line, primary: C.accent } };
@@ -120,7 +125,7 @@ export default function App() {
           : state === 'profiles' ? <Profiles current={user?.name || ''} onDone={afterProfile} />
           : state === 'pick' ? <Servers onPick={open} onAdd={() => { setAgain(null); setState('add'); }} onChanged={() => (servers.length ? redraw((n) => n + 1) : setState('add'))} />
           : (
-          <NavigationContainer theme={theme} key={`${user?.id || 0}${offlineStart ? '-off' : ''}` /* ny profil: börja om på startsidan */}>
+          <NavigationContainer theme={theme} onStateChange={(s) => noteRoute(focused(s))} key={`${user?.id || 0}${offlineStart ? '-off' : ''}` /* ny profil: börja om på startsidan */}>
             <Stack.Navigator initialRouteName={offlineStart ? 'Downloads' : 'Main'} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}>
               <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); off.closeScope(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
               <Stack.Screen name="Library" component={LibraryScreen} />
@@ -133,6 +138,8 @@ export default function App() {
               <Stack.Screen name="Podcast" component={PodcastScreen} />
               <Stack.Screen name="Downloads">{(p) => <DownloadsScreen {...p} offline={offlineStart} onRetry={() => { setState('loading'); enter(false); }} />}</Stack.Screen>
               <Stack.Screen name="NowPlaying" component={NowPlaying} options={{ animation: 'slide_from_bottom', presentation: 'fullScreenModal' }} />
+              <Stack.Screen name="Feedback" options={{ animation: 'slide_from_bottom' }}>{(p) => <FeedbackScreen {...p} user={user} />}</Stack.Screen>
+              <Stack.Screen name="Tickets">{(p) => <TicketsScreen {...p} user={user} />}</Stack.Screen>
             </Stack.Navigator>
           </NavigationContainer>
         )}

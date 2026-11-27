@@ -19,6 +19,7 @@ import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
 import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
 import type { Props } from '../nav';
+import { notePlayback } from '../feedback';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
 
@@ -34,6 +35,8 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const [subIdx, setSubIdx] = useState(-1);
   const beat = useRef(0);
   const [error, setError] = useState('');
+  // Uppspelningen kunde inte startas (inte ett stopp från skärmtiden eller en vuxen): då går felet att rapportera
+  const [startFailed, setStartFailed] = useState(false);
   const [chrome, setChrome] = useState(true);
   const [pos, setPos] = useState(start);
   const sought = useRef(false), lastSent = useRef(0), closed = useRef(false), ended = useRef(false);
@@ -98,7 +101,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
           const eps = show?.children || [], i = eps.findIndex((e) => e.id === it.id);
           if (live && i >= 0 && eps[i + 1]) setNext(nextOf(eps[i + 1]));
         }
-      } catch (e: any) { if (live) setError(e?.message || 'Uppspelningen kunde inte startas'); }
+      } catch (e: any) { if (live) { setError(e?.message || 'Uppspelningen kunde inte startas'); setStartFailed(true); } }
     })();
     return () => { live = false; };
   }, [id, start, player, local]);
@@ -177,6 +180,9 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   ) : null;
   const cue = subIdx >= 0 && subs[subIdx] ? cueAt(subs[subIdx].cues, pos) : '';
   const msg = error || (status === 'error' ? playerError?.message || 'Uppspelningen misslyckades' : '');
+  const failed = !!msg && (startFailed || status === 'error');
+  // Till Feedback: titeln som spelas och felet (förval och teknisk information i felrapporten)
+  useEffect(() => { notePlayback(id, failed ? msg : ''); }, [id, failed, msg]);
   return (
     <View style={st.root}>
       <StatusBar hidden />
@@ -192,7 +198,10 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         <View style={st.center}>
           <Ionicons name="alert-circle-outline" size={40} color={C.err} />
           <Text style={st.msg}>{msg}</Text>
-          <Button label="Stäng" kind="primary" onPress={() => navigation.goBack()} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+            {failed ? <Button label="Rapportera felet" icon="chatbox-ellipses-outline" onPress={() => navigation.replace('Feedback', { kind: 'bug', area: 'uppspelning' })} /> : null}
+            <Button label="Stäng" kind="primary" onPress={() => navigation.goBack()} />
+          </View>
         </View>
       ) : null}
       {chrome || msg ? (

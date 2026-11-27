@@ -15,6 +15,7 @@ import { Listen } from './Music';
 import { MiniPlayer } from '../components/audio';
 import * as off from '../offline';
 import { fmtSize, usedBytes } from '../offlinecore';
+import { needInfoCount, noteTab } from '../feedback';
 
 const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = { movie: 'film-outline', show: 'tv-outline', music: 'musical-notes-outline', audiobook: 'book-outline', photo: 'images-outline', ebook: 'library-outline' };
 const VIDEO = (l: Library) => l.type === 'movie' || l.type === 'show';
@@ -29,6 +30,7 @@ export default function Main({ navigation, route, onLogout, onSwitch, onProfiles
   const open = useCallback((it: MediaItem) => navigation.push('Item', { id: it.kind === 'episode' && it.show ? it.show : it.id }), [navigation]);
 
   useEffect(() => { api<Library[]>('/api/libraries').then((l) => setLibs(l.filter((x) => VIDEO(x) || LISTEN(x)))).catch(() => {}); }, []);
+  useEffect(() => { noteTab(tab); }, [tab]);
   const goSearch = () => { setTab('search'); setTimeout(() => searchRef.current?.focus(), 50); };
 
   return (
@@ -49,7 +51,7 @@ export default function Main({ navigation, route, onLogout, onSwitch, onProfiles
         {tab === 'search' ? <Search query={query} open={open} /> : null}
         {tab === 'music' ? <Listen /> : null}
         {tab === 'list' ? <Watchlist open={open} /> : null}
-        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} onDownloads={() => navigation.push('Downloads')} /> : null}
+        {tab === 'account' ? <Account user={user} onLogout={onLogout} onSwitch={onSwitch} onProfiles={onProfiles} onAdd={onAdd} onDownloads={() => navigation.push('Downloads')} onFeedback={() => navigation.push('Feedback', {})} onTickets={() => navigation.push('Tickets')} /> : null}
       </View>
 
       <MiniPlayer />
@@ -149,8 +151,11 @@ function Watchlist({ open }: { open: (it: MediaItem) => void }) {
   return <Grid items={items} open={open} />;
 }
 
-function Account({ user, onLogout, onSwitch, onProfiles, onAdd, onDownloads }: { user: UserInfo | null; onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void; onDownloads: () => void }) {
+function Account({ user, onLogout, onSwitch, onProfiles, onAdd, onDownloads, onFeedback, onTickets }: { user: UserInfo | null; onLogout: () => void; onSwitch: () => void; onProfiles: () => void; onAdd: () => void; onDownloads: () => void; onFeedback: () => void; onTickets: () => void }) {
   const [version, setVersion] = useState('');
+  // Egna ärenden där teamet väntar på svar (hämtas igen när man kommer tillbaka till Konto)
+  const [waiting, setWaiting] = useState(0);
+  useFocusEffect(useCallback(() => { needInfoCount().then(setWaiting).catch(() => {}); }, []));
   const dl = off.useDownloads();
   useEffect(() => { api<{ version?: string }>('/api/status').then((s) => setVersion(s.version || '')).catch(() => {}); }, []);
   return (
@@ -172,6 +177,15 @@ function Account({ user, onLogout, onSwitch, onProfiles, onAdd, onDownloads }: {
           <View style={{ flexDirection: 'row', marginTop: 6 }}><Button label="Visa Nedladdat" icon="download-outline" onPress={onDownloads} /></View>
         </View>
       ) : null}
+      <View style={st.panel}>
+        <Text style={st.h2}>Feedback</Text>
+        <Text style={st.dim2}>Har du en idé eller är det något som inte fungerar? Skicka feedback eller en felrapport.{user?.is_admin ? ' Du är administratör: den skickas direkt till utvecklarna.' : ' En administratör läser den först.'}</Text>
+        {waiting ? <Text style={[st.dim2, { color: C.warn }]}>{waiting === 1 ? 'Teamet väntar på ditt svar i ett ärende.' : `Teamet väntar på ditt svar i ${waiting} ärenden.`}</Text> : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6 }}>
+          <Button label="Skicka feedback" icon="chatbox-ellipses-outline" onPress={onFeedback} />
+          <Button label={waiting ? `Mina ärenden (${waiting})` : 'Mina ärenden'} icon="chatbubbles-outline" onPress={onTickets} />
+        </View>
+      </View>
       <View style={st.panel}>
         <Text style={st.h2}>Servrar</Text>
         <Text style={st.dim2}>{servers.length > 1 ? `${servers.length} servrar är sparade. Appen frågar vilken du vill öppna när den startar.` : 'Med en enda server öppnas den direkt när appen startar. Lägger du till fler får du välja vid start.'}</Text>

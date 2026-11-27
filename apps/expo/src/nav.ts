@@ -15,5 +15,8 @@ export type Stack = {
   NowPlaying: undefined;
   // Nedladdat (fungerar utan nät)
   Downloads: undefined;
+  // Feedback och felrapporter (från Konto och från spelaren vid ett fel) och Mina ärenden
+  Feedback: { kind?: 'idea' | 'bug'; area?: string } | undefined;
+  Tickets: undefined;
 };
 export type Props<T extends keyof Stack> = NativeStackScreenProps<Stack, T>;
