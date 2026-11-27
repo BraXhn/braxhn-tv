@@ -7,15 +7,16 @@ import { C, R } from '../theme';
 import * as off from '../offline';
 import { fmtSize, keyOf, progressOf, qualityLabel, qualityOptions, type DlEntry } from '../offlinecore';
 import { Button } from './ui';
+import { t, tn } from '../i18n';
 
 let lastQ = '480'; // senast valda kvalitet (mindre filer passar telefonen bäst)
 
 /** Frågar först (Ta bort / Avbryt). På webben finns inga nedladdningar, så frågan behövs bara i appen. */
 export function confirm(title: string, text: string, ok: string, fn: () => void) {
   if (Platform.OS === 'web') { if (globalThis.confirm?.(`${title}\n\n${text}`)) fn(); return; }
-  Alert.alert(title, text, [{ text: 'Avbryt', style: 'cancel' }, { text: ok, style: 'destructive', onPress: fn }]);
+  Alert.alert(title, text, [{ text: t('Avbryt'), style: 'cancel' }, { text: ok, style: 'destructive', onPress: fn }]);
 }
-export const askRemove = (e: DlEntry) => confirm(`Ta bort ${e.title}?`, 'Filen tas bort från telefonen. Du kan ladda ner den igen när du har nät.', 'Ta bort', () => { off.remove(e.key); });
+export const askRemove = (e: DlEntry) => confirm(t('Ta bort {title}?', { title: e.title }), t('Filen tas bort från telefonen. Du kan ladda ner den igen när du har nät.'), t('Ta bort'), () => { off.remove(e.key); });
 
 /** Förloppsrad med text */
 export function Progress({ e }: { e: DlEntry }) {
@@ -32,10 +33,10 @@ export function Progress({ e }: { e: DlEntry }) {
 export function EntryActions({ e, small = true }: { e: DlEntry; small?: boolean }) {
   return (
     <View style={st.row}>
-      {e.state === 'queued' || e.state === 'preparing' || e.state === 'downloading' ? <Button small={small} icon="pause" label="Pausa" onPress={() => off.pause(e.key)} /> : null}
-      {e.state === 'paused' ? <Button small={small} icon="play" label="Fortsätt" onPress={() => off.resume(e.key)} /> : null}
-      {e.state === 'error' ? <Button small={small} icon="refresh" label="Försök igen" onPress={() => off.resume(e.key)} /> : null}
-      <Button small={small} kind="danger" icon={e.state === 'done' ? 'trash-outline' : 'close'} label={e.state === 'done' ? 'Ta bort' : 'Avbryt'} onPress={() => askRemove(e)} />
+      {e.state === 'queued' || e.state === 'preparing' || e.state === 'downloading' ? <Button small={small} icon="pause" label={t('Pausa')} onPress={() => off.pause(e.key)} /> : null}
+      {e.state === 'paused' ? <Button small={small} icon="play" label={t('Fortsätt')} onPress={() => off.resume(e.key)} /> : null}
+      {e.state === 'error' ? <Button small={small} icon="refresh" label={t('Försök igen')} onPress={() => off.resume(e.key)} /> : null}
+      <Button small={small} kind="danger" icon={e.state === 'done' ? 'trash-outline' : 'close'} label={e.state === 'done' ? t('Ta bort') : t('Avbryt')} onPress={() => askRemove(e)} />
     </View>
   );
 }
@@ -46,14 +47,14 @@ function QualityPick({ height, duration, many, onPick, onCancel }: { height?: nu
   const { free } = off.storage();
   return (
     <View style={st.pick}>
-      <Text style={st.small}>{many ? `Kvalitet för ${many} avsnitt` : 'Välj kvalitet'}{free ? ` · ledigt på telefonen: ${fmtSize(free)}` : ''}</Text>
+      <Text style={st.small}>{many ? tn(many, 'Kvalitet för 1 avsnitt', 'Kvalitet för {n} avsnitt') : t('Välj kvalitet')}{free ? ' · ' + t('ledigt på telefonen: {v}', { v: fmtSize(free) }) : ''}</Text>
       {opts.map((o) => (
-        <Pressable key={o.q} onPress={() => { lastQ = o.q; onPick(o.q); }} style={({ pressed }) => [st.opt, o.q === lastQ && st.optOn, pressed && { opacity: 0.7 }]} accessibilityRole="button" accessibilityLabel={`Ladda ner i ${o.label}`}>
+        <Pressable key={o.q} onPress={() => { lastQ = o.q; onPick(o.q); }} style={({ pressed }) => [st.opt, o.q === lastQ && st.optOn, pressed && { opacity: 0.7 }]} accessibilityRole="button" accessibilityLabel={t('Ladda ner i {v}', { v: o.label })}>
           <Text style={st.optT}>{o.label}</Text>
           <Text style={st.small} numberOfLines={1}>{[o.hint, o.bytes ? `≈ ${fmtSize(o.bytes)}` : ''].filter(Boolean).join(' · ')}</Text>
         </Pressable>
       ))}
-      <Button small label="Avbryt" onPress={onCancel} />
+      <Button small label={t('Avbryt')} onPress={onCancel} />
     </View>
   );
 }
@@ -70,12 +71,12 @@ export function DownloadVideo({ it }: { it: { id: number; kind: string; title: s
   if (!off.mayDownload()) return null;
   const start = async (q: string) => {
     setPicking(false); setBusy(true);
-    try { await off.downloadVideo(it as any, q); setErr(''); } catch (x: any) { setErr(x?.message || 'Det gick inte att ladda ner'); } finally { setBusy(false); }
+    try { await off.downloadVideo(it as any, q); setErr(''); } catch (x: any) { setErr(x?.message || t('Det gick inte att ladda ner')); } finally { setBusy(false); }
   };
   return (
     <View style={st.box}>
       {picking ? <QualityPick height={it.height} duration={it.duration} onPick={start} onCancel={() => setPicking(false)} />
-        : <Button icon="download-outline" label={busy ? 'Frågar servern…' : 'Ladda ner'} disabled={busy} onPress={() => setPicking(true)} />}
+        : <Button icon="download-outline" label={busy ? t('Frågar servern…') : t('Ladda ner')} disabled={busy} onPress={() => setPicking(true)} />}
       {err ? <Text style={[st.small, { color: C.err }]}>{err}</Text> : null}
     </View>
   );
@@ -93,14 +94,14 @@ export function DownloadSeason({ eps, label }: { eps: ({ id: number; kind: strin
   const start = async (q: string) => {
     setPicking(false);
     let ok = 0, fail = '';
-    for (const x of todo) { try { if (await off.downloadVideo(x as any, q)) ok++; } catch (y: any) { fail = y?.message || 'Det gick inte'; } }
-    setMsg(fail ? `${ok} av ${todo.length} avsnitt lades till. ${fail}` : '');
+    for (const x of todo) { try { if (await off.downloadVideo(x as any, q)) ok++; } catch (y: any) { fail = y?.message || t('Det gick inte'); } }
+    setMsg(fail ? tn(todo.length, '{ok} av 1 avsnitt lades till. {fail}', '{ok} av {n} avsnitt lades till. {fail}', { ok, fail }) : '');
   };
   return (
     <View style={[st.box, { paddingHorizontal: 14 }]}>
-      {have.length ? <Text style={st.small}>{`${done} av ${eps.length} avsnitt nedladdade${have.length > done ? `, ${have.length - done} på gång` : ''}`}</Text> : null}
+      {have.length ? <Text style={st.small}>{tn(eps.length, '{done} av 1 avsnitt nedladdat', '{done} av {n} avsnitt nedladdade', { done }) + (have.length > done ? t(', {n} på gång', { n: have.length - done }) : '')}</Text> : null}
       {picking ? <QualityPick many={todo.length} duration={todo.reduce((s, x) => s + (x.duration || 0), 0)} onPick={start} onCancel={() => setPicking(false)} />
-        : todo.length ? <Button small icon="download-outline" label={`Ladda ner ${label} (${todo.length} avsnitt)`} onPress={() => setPicking(true)} /> : null}
+        : todo.length ? <Button small icon="download-outline" label={tn(todo.length, 'Ladda ner {label} (1 avsnitt)', 'Ladda ner {label} ({n} avsnitt)', { label })} onPress={() => setPicking(true)} /> : null}
       {msg ? <Text style={[st.small, { color: C.err }]}>{msg}</Text> : null}
     </View>
   );
@@ -114,9 +115,9 @@ export function EpisodeDownload({ it }: { it: { id: number; kind: string; title:
   if (!e && !off.mayDownload()) return null;
   const p = e ? progressOf(e) : null;
   const icon: keyof typeof Ionicons.glyphMap = !e ? 'download-outline' : e.state === 'done' ? 'checkmark-circle' : e.state === 'paused' ? 'pause-circle-outline' : e.state === 'error' ? 'alert-circle-outline' : 'cloud-download';
-  const label = !e ? `Ladda ner avsnitt ${it.episode ?? ''} i ${qualityLabel(lastQ)}` : e.state === 'done' ? `Nedladdat, ta bort` : p!.text;
+  const label = !e ? t('Ladda ner avsnitt {n} i {q}', { n: it.episode ?? '', q: qualityLabel(lastQ) }) : e.state === 'done' ? t('Nedladdat, ta bort') : p!.text;
   const press = () => {
-    if (!e) { off.downloadVideo(it as any, lastQ).catch((x) => Alert.alert('Det gick inte att ladda ner', x?.message || '')); return; }
+    if (!e) { off.downloadVideo(it as any, lastQ).catch((x) => Alert.alert(t('Det gick inte att ladda ner'), x?.message || '')); return; }
     if (e.state === 'done') askRemove(e);
     else if (e.state === 'paused' || e.state === 'error') off.resume(e.key);
     else off.pause(e.key);
@@ -140,8 +141,8 @@ export function DownloadBook({ id, cover }: { id: number; cover?: boolean }) {
   if (!off.mayDownload()) return null;
   return (
     <View style={[st.box, { paddingHorizontal: 14 }]}>
-      <Button icon="download-outline" label={busy ? 'Frågar servern…' : 'Ladda ner boken'} disabled={busy}
-        onPress={async () => { setBusy(true); try { await off.downloadBook(id, cover !== false); setErr(''); } catch (x: any) { setErr(x?.message || 'Det gick inte att ladda ner'); } finally { setBusy(false); } }} />
+      <Button icon="download-outline" label={busy ? t('Frågar servern…') : t('Ladda ner boken')} disabled={busy}
+        onPress={async () => { setBusy(true); try { await off.downloadBook(id, cover !== false); setErr(''); } catch (x: any) { setErr(x?.message || t('Det gick inte att ladda ner')); } finally { setBusy(false); } }} />
       {err ? <Text style={[st.small, { color: C.err }]}>{err}</Text> : null}
     </View>
   );

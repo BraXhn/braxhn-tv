@@ -10,6 +10,7 @@ import { C, R } from '../theme';
 import { listProfiles, switchProfile, type Profile, type UserInfo } from '../api';
 import { Button, ErrorState, Loading } from '../components/ui';
 import { saveNow as saveAudio } from '../music';
+import { t } from '../i18n';
 
 /** Samma färg som webben ger profilen: egen färg om den är satt, annars en nyans räknad ur namnet */
 export function profileColor(p: { name: string; color?: string | null }): string {
@@ -32,7 +33,7 @@ export default function Profiles({ current, onDone }: { current: string; onDone:
 
   const load = useCallback(async () => {
     setError('');
-    try { setData(await listProfiles()); } catch (e: any) { setError(e?.message || 'Kunde inte hämta profilerna'); }
+    try { setData(await listProfiles()); } catch (e: any) { setError(e?.message || t('Kunde inte hämta profilerna')); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -48,7 +49,7 @@ export default function Profiles({ current, onDone }: { current: string; onDone:
     } catch (e: any) {
       if (e?.data?.needPin) { setAsk({ p, kind: 'pin', wrong: !!extra.pin }); setSecret(''); }
       else if (e?.data?.needPassword) { setAsk({ p, kind: 'password', wrong: !!extra.password }); setSecret(''); }
-      else { setAsk(null); setNote(e?.message || 'Kunde inte byta profil – försök igen.'); }
+      else { setAsk(null); setNote(e?.message || t('Kunde inte byta profil – försök igen.')); }
     } finally { setBusy(0); }
   }
   const submit = () => {
@@ -56,7 +57,7 @@ export default function Profiles({ current, onDone }: { current: string; onDone:
     pick(ask.p, ask.kind === 'pin' ? { pin: secret } : { password: secret });
   };
 
-  if (error && !data) return <SafeAreaView style={st.root}><ErrorState error={error} onRetry={load} /><Button label={`Fortsätt som ${current}`} onPress={() => onDone(null)} style={st.back} /></SafeAreaView>;
+  if (error && !data) return <SafeAreaView style={st.root}><ErrorState error={error} onRetry={load} /><Button label={t('Fortsätt som {name}', { name: current })} onPress={() => onDone(null)} style={st.back} /></SafeAreaView>;
   if (!data) return <SafeAreaView style={st.root}><Loading /></SafeAreaView>;
 
   return (
@@ -69,35 +70,35 @@ export default function Profiles({ current, onDone }: { current: string; onDone:
           {ask ? (
             <View style={st.panel}>
               <View style={[st.av, st.avSmall, { backgroundColor: profileColor(ask.p) }]}><Text style={[st.avText, { fontSize: 26 }]}>{ask.p.name.slice(0, 1).toUpperCase()}</Text></View>
-              <Text style={st.h2}>{ask.kind === 'pin' ? `PIN för ${ask.p.name}` : `Byt till ${ask.p.name}`}</Text>
-              <Text style={st.dim}>{ask.kind === 'pin' ? 'Skriv profilens PIN.' : 'Skriv huvudkontots lösenord för att byta till en profil utan åldersgräns.'}</Text>
+              <Text style={st.h2}>{ask.kind === 'pin' ? t('PIN för {name}', { name: ask.p.name }) : t('Byt till {name}', { name: ask.p.name })}</Text>
+              <Text style={st.dim}>{ask.kind === 'pin' ? t('Skriv profilens PIN.') : t('Skriv huvudkontots lösenord för att byta till en profil utan åldersgräns.')}</Text>
               <TextInput style={[st.input, ask.kind === 'pin' && st.pinInput]} value={secret} onChangeText={(v) => setSecret(ask.kind === 'pin' ? v.replace(/\D/g, '') : v)}
                 secureTextEntry autoFocus keyboardType={ask.kind === 'pin' ? 'number-pad' : 'default'} maxLength={ask.kind === 'pin' ? 8 : 200}
                 autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType={ask.kind === 'pin' ? 'oneTimeCode' : 'password'}
-                returnKeyType="go" onSubmitEditing={submit} accessibilityLabel={ask.kind === 'pin' ? 'PIN' : 'Huvudkontots lösenord'} />
-              {ask.wrong ? <Text style={st.err} accessibilityRole="alert">{ask.kind === 'pin' ? 'Fel PIN – försök igen.' : 'Fel lösenord – försök igen.'}</Text> : null}
+                returnKeyType="go" onSubmitEditing={submit} accessibilityLabel={ask.kind === 'pin' ? 'PIN' : t('Huvudkontots lösenord')} />
+              {ask.wrong ? <Text style={st.err} accessibilityRole="alert">{ask.kind === 'pin' ? t('Fel PIN – försök igen.') : t('Fel lösenord – försök igen.')}</Text> : null}
               {note ? <Text style={st.err} accessibilityRole="alert">{note}</Text> : null}
-              <Button label={busy ? 'Byter…' : 'Byt profil'} kind="primary" onPress={submit} disabled={!!busy || !secret} style={{ marginTop: 16, alignSelf: 'stretch' }} />
-              <Button label="Avbryt" onPress={() => { setAsk(null); setNote(''); }} disabled={!!busy} style={{ marginTop: 10, alignSelf: 'stretch' }} />
+              <Button label={busy ? t('Byter…') : t('Byt profil')} kind="primary" onPress={submit} disabled={!!busy || !secret} style={{ marginTop: 16, alignSelf: 'stretch' }} />
+              <Button label={t('Avbryt')} onPress={() => { setAsk(null); setNote(''); }} disabled={!!busy} style={{ marginTop: 10, alignSelf: 'stretch' }} />
             </View>
           ) : (<>
-            <Text style={st.h1}>Vem tittar?</Text>
+            <Text style={st.h1}>{t('Vem tittar?')}</Text>
             <View style={st.list}>
               {data.profiles.map((p) => (
                 <Pressable key={p.id} style={({ pressed }) => [st.card, pressed && { opacity: 0.75 }]} onPress={() => pick(p)} disabled={!!busy}
-                  accessibilityRole="button" accessibilityLabel={`${p.name}${p.kid ? `, barnprofil` : ''}${p.hasPin ? ', kräver PIN' : ''}${p.id === data.current ? ', vald nu' : ''}`}>
+                  accessibilityRole="button" accessibilityLabel={p.name + (p.kid ? ', ' + t('barnprofil') : '') + (p.hasPin ? ', ' + t('kräver PIN') : '') + (p.id === data.current ? ', ' + t('vald nu') : '')}>
                   <View style={[st.av, { backgroundColor: profileColor(p) }, p.id === data.current && st.avOn]}>
                     <Text style={st.avText}>{p.name.slice(0, 1).toUpperCase()}</Text>
                     {busy === p.id ? <View style={st.avBusy}><Text style={st.dim}>…</Text></View> : null}
                   </View>
                   <Text style={st.name} numberOfLines={1}>{p.name}</Text>
-                  {p.kid ? <Text style={st.sub}>Barn{p.maxAge != null ? ` · max ${p.maxAge} år` : ''}</Text>
+                  {p.kid ? <Text style={st.sub}>{t('Barn')}{p.maxAge != null ? ' · ' + t('max {n} år', { n: p.maxAge }) : ''}</Text>
                     : p.hasPin ? <Text style={st.sub}><Ionicons name="lock-closed" size={11} color={C.dim} /> PIN</Text> : null}
                 </Pressable>
               ))}
             </View>
             {note ? <Text style={[st.err, { textAlign: 'center' }]} accessibilityRole="alert">{note}</Text> : null}
-            <Button label={`Fortsätt som ${current}`} onPress={() => onDone(null)} style={{ alignSelf: 'center', marginTop: 26 }} />
+            <Button label={t('Fortsätt som {name}', { name: current })} onPress={() => onDone(null)} style={{ alignSelf: 'center', marginTop: 26 }} />
           </>)}
         </ScrollView>
       </KeyboardAvoidingView>

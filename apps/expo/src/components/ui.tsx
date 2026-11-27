@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { C, R, TOUCH } from '../theme';
 import { imageFailed, imageToken, imageUrl, sxe, type MediaItem } from '../api';
+import { t, tn } from '../i18n';
 
 export function Button({ label, onPress, onPressIn, kind = 'ghost', icon, disabled, style, small }: {
   label: string; onPress?: () => void; onPressIn?: () => void; kind?: 'primary' | 'ghost' | 'danger';
@@ -44,7 +45,7 @@ export function Art({ it, land, width }: { it: MediaItem; land?: boolean; width:
 export function Card({ it, width, onPress, land }: { it: MediaItem; width: number; onPress: () => void; land?: boolean }) {
   const ep = it.kind === 'episode';
   const title = ep ? it.showTitle || it.title : it.title;
-  const sub = ep ? [it.title, sxe(it)].filter(Boolean) : [it.year ? String(it.year) : it.kind === 'show' && it.episodes ? `${it.episodes} avsnitt` : ''];
+  const sub = ep ? [it.title, sxe(it)].filter(Boolean) : [it.year ? String(it.year) : it.kind === 'show' && it.episodes ? tn(it.episodes, '1 avsnitt', '{n} avsnitt') : ''];
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title} style={({ pressed }) => [{ width }, pressed && { opacity: 0.75 }]}>
       <Art it={it} land={land} width={width} />
@@ -75,7 +76,7 @@ export function ErrorState({ error, onRetry }: { error: string; onRetry?: () => 
     <View style={s.center}>
       <Ionicons name="cloud-offline-outline" size={36} color={C.dim} />
       <Text style={s.errText}>{error}</Text>
-      {onRetry ? <Button label="Försök igen" kind="primary" onPress={onRetry} /> : null}
+      {onRetry ? <Button label={t('Försök igen')} kind="primary" onPress={onRetry} /> : null}
     </View>
   );
 }

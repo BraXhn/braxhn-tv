@@ -7,6 +7,13 @@ import assert from 'node:assert/strict';
 
 // Saknas modulen eller har den ett fel ska testet falla, inte hoppas över: bara Node utan TypeScript hoppar över
 const skip = process.features?.typescript ? false : 'Node utan TypeScript-stöd';
+// Lastaren först: offlinecore.ts importerar i18n.ts utan filändelse (som Metro). Texterna provas på svenska här
+// (Node säger annars sitt eget språk, ofta en-US); engelskan provas i test/expo-i18n.test.js.
+if (!skip) {
+  const { register } = await import('node:module');
+  register('./helpers/expo-loader.mjs', import.meta.url);
+  (await import('../apps/expo/src/i18n.ts')).setLangChoice('sv');
+}
 const c = skip ? null : await import('../apps/expo/src/offlinecore.ts');
 
 const movie = { id: 7, kind: 'movie', title: 'Filmen', year: 2020, duration: 5400, position: 600 };
@@ -207,8 +214,6 @@ test('start utan nät och kontrollen mot servern', { skip }, () => {
 // DownloadTask provas inte här.
 let off = null, F = null;
 if (!skip) {
-  const { register } = await import('node:module');
-  register('./helpers/expo-loader.mjs', import.meta.url);
   F = await import('./helpers/expo-fakes.mjs');
   off = await import('../apps/expo/src/offline.ts');
   off.timing.wait = 5; off.timing.retry = 40; off.timing.save = 1;

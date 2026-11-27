@@ -8,6 +8,7 @@ import { fmtTime } from '../api';
 import { bookCoverUrl, chapterAt, close, currentTrack, jumpTo, next, podImageUrl, prev, removeAt, seek, setRate, shuffleRest, toggle, toggleRepeat, useNowPlaying } from '../music';
 import { albumCover, Cover, Sheet } from '../components/audio';
 import type { Props } from '../nav';
+import { t } from '../i18n';
 
 const RATES = [0.8, 1, 1.15, 1.25, 1.5, 1.75, 2];
 
@@ -20,45 +21,45 @@ export default function NowPlaying({ navigation }: Props<'NowPlaying'>) {
   if (!np.mode) {
     return (
       <View style={[ns.root, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel="Stäng"><Ionicons name="chevron-down" size={28} color={C.text} /></Pressable>
-        <Text style={[ns.sub, { textAlign: 'center', marginTop: 40 }]}>Inget spelas just nu.</Text>
+        <Pressable onPress={() => navigation.goBack()} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Stäng')}><Ionicons name="chevron-down" size={28} color={C.text} /></Pressable>
+        <Text style={[ns.sub, { textAlign: 'center', marginTop: 40 }]}>{t('Inget spelas just nu.')}</Text>
       </View>
     );
   }
   const music = np.mode === 'music';
-  const t = currentTrack();
+  const cur = currentTrack();
   const ch = np.mode === 'book' ? chapterAt(np.pos) : null;
-  const title = music ? t?.title || '' : np.mode === 'book' ? np.book?.title || '' : np.episode?.title || '';
-  const sub = music ? t?.artist || '' : np.mode === 'book' ? [np.book?.author, ch?.title].filter(Boolean).join(' · ') : np.episode?.podcastTitle || '';
-  const uri = music ? (t ? albumCover(t, 600) : null) : np.mode === 'book' ? (np.book?.cover ? bookCoverUrl(np.book.id, 600) : null) : np.episode ? podImageUrl(np.episode.podcast, 600) : null;
+  const title = music ? cur?.title || '' : np.mode === 'book' ? np.book?.title || '' : np.episode?.title || '';
+  const sub = music ? cur?.artist || '' : np.mode === 'book' ? [np.book?.author, ch?.title].filter(Boolean).join(' · ') : np.episode?.podcastTitle || '';
+  const uri = music ? (cur ? albumCover(cur, 600) : null) : np.mode === 'book' ? (np.book?.cover ? bookCoverUrl(np.book.id, 600) : null) : np.episode ? podImageUrl(np.episode.podcast, 600) : null;
   const size = Math.min(width - 56, height * 0.42, 420);
-  const label = music ? 'Kö' : 'Kapitel';
+  const label = music ? t('Kö') : t('Kapitel');
   const hasList = music ? np.queue.length > 1 : (np.book?.chapters.length || 0) > 1;
 
   return (
     <View style={[ns.root, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 12) }]}>
       <View style={ns.top}>
-        <Pressable onPress={() => navigation.goBack()} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel="Minimera spelaren"><Ionicons name="chevron-down" size={28} color={C.text} /></Pressable>
-        <Text style={ns.topT} numberOfLines={1}>{music ? (np.radio ? `Låtradio${np.radio.name ? ': ' + np.radio.name : ''}` : t?.album || '') : np.mode === 'book' ? 'Ljudbok' : 'Podd'}</Text>
-        <Pressable onPress={() => { close(); navigation.goBack(); }} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel="Stäng spelaren"><Ionicons name="close" size={24} color={C.dim} /></Pressable>
+        <Pressable onPress={() => navigation.goBack()} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Minimera spelaren')}><Ionicons name="chevron-down" size={28} color={C.text} /></Pressable>
+        <Text style={ns.topT} numberOfLines={1}>{music ? (np.radio ? (np.radio.name ? t('Låtradio: {v}', { v: np.radio.name }) : t('Låtradio')) : cur?.album || '') : np.mode === 'book' ? t('Ljudbok') : t('Podd')}</Text>
+        <Pressable onPress={() => { close(); navigation.goBack(); }} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Stäng spelaren')}><Ionicons name="close" size={24} color={C.dim} /></Pressable>
       </View>
 
       {view === 'cover' || !hasList ? (
         <View style={ns.coverWrap}>
-          <Pressable disabled={!music || !t?.albumId} onPress={() => { navigation.goBack(); if (t?.albumId) navigation.navigate('Album', { id: t.albumId }); }} accessibilityRole="button" accessibilityLabel="Gå till albumet">
+          <Pressable disabled={!music || !cur?.albumId} onPress={() => { navigation.goBack(); if (cur?.albumId) navigation.navigate('Album', { id: cur.albumId }); }} accessibilityRole="button" accessibilityLabel={t('Gå till albumet')}>
             <Cover uri={uri} size={size} icon={np.mode === 'book' ? 'book' : np.mode === 'podcast' ? 'mic' : 'musical-notes'} style={{ borderRadius: R.md }} />
           </Pressable>
         </View>
       ) : music ? (
         <FlatList style={ns.list} data={np.queue} keyExtractor={(x, i) => x.id + ':' + i} initialScrollIndex={Math.max(0, np.idx - 2)} getItemLayout={(_, i) => ({ length: 54, offset: 54 * i, index: i })}
           renderItem={({ item, index }) => (
-            <Pressable onPress={() => jumpTo(index)} style={[ns.qrow, index === np.idx && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={`Spela ${item.title}`}>
+            <Pressable onPress={() => jumpTo(index)} style={[ns.qrow, index === np.idx && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={t('Spela {title}', { title: item.title })}>
               <Cover uri={albumCover(item, 120)} size={38} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[ns.qT, index === np.idx && { color: C.accent }, index < np.idx && { color: C.dim }]} numberOfLines={1}>{item.title}</Text>
                 <Text style={ns.qS} numberOfLines={1}>{item.artist || ''}</Text>
               </View>
-              {index !== np.idx ? <Pressable onPress={() => removeAt(index)} hitSlop={8} style={ns.iconBtnSm} accessibilityRole="button" accessibilityLabel={`Ta bort ${item.title} ur kön`}><Ionicons name="close" size={18} color={C.dim} /></Pressable> : null}
+              {index !== np.idx ? <Pressable onPress={() => removeAt(index)} hitSlop={8} style={ns.iconBtnSm} accessibilityRole="button" accessibilityLabel={t('Ta bort {title} ur kön', { title: item.title })}><Ionicons name="close" size={18} color={C.dim} /></Pressable> : null}
             </Pressable>
           )} />
       ) : (
@@ -66,7 +67,7 @@ export default function NowPlaying({ navigation }: Props<'NowPlaying'>) {
           renderItem={({ item }) => {
             const on = item === ch;
             return (
-              <Pressable onPress={() => seek(item.start)} style={[ns.qrow, on && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={`Gå till ${item.title}`}>
+              <Pressable onPress={() => seek(item.start)} style={[ns.qrow, on && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={t('Gå till {title}', { title: item.title })}>
                 <Text style={[ns.qT, { flex: 1 }, on && { color: C.accent }]} numberOfLines={1}>{item.title}</Text>
                 <Text style={ns.qS}>{fmtTime(item.start)}</Text>
               </Pressable>
@@ -83,32 +84,32 @@ export default function NowPlaying({ navigation }: Props<'NowPlaying'>) {
 
       <View style={ns.controls}>
         {music ? (
-          <Pressable onPress={shuffleRest} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel="Blanda resten av kön"><Ionicons name="shuffle" size={24} color={C.dim} /></Pressable>
+          <Pressable onPress={shuffleRest} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Blanda resten av kön')}><Ionicons name="shuffle" size={24} color={C.dim} /></Pressable>
         ) : (
-          <Pressable onPress={() => setRateMenu(true)} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={`Hastighet ${np.rate} gånger`}><Text style={ns.rate}>{np.rate}×</Text></Pressable>
+          <Pressable onPress={() => setRateMenu(true)} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Hastighet {v} gånger', { v: np.rate })}><Text style={ns.rate}>{np.rate}×</Text></Pressable>
         )}
-        <Pressable onPress={prev} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={music ? 'Föregående' : 'Bakåt 15 sekunder'}>
+        <Pressable onPress={prev} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={music ? t('Föregående') : t('Bakåt 15 sekunder')}>
           <Ionicons name={music ? 'play-skip-back' : 'play-back'} size={30} color={C.text} />
         </Pressable>
-        <Pressable onPress={toggle} style={ns.play} accessibilityRole="button" accessibilityLabel={np.playing ? 'Pausa' : 'Spela'}>
+        <Pressable onPress={toggle} style={ns.play} accessibilityRole="button" accessibilityLabel={np.playing ? t('Pausa') : t('Spela')}>
           {np.buffering ? <ActivityIndicator color={C.onAccent} /> : <Ionicons name={np.playing ? 'pause' : 'play'} size={34} color={C.onAccent} style={!np.playing ? { marginLeft: 4 } : null} />}
         </Pressable>
-        <Pressable onPress={next} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={music ? 'Nästa' : 'Framåt 30 sekunder'}>
+        <Pressable onPress={next} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={music ? t('Nästa') : t('Framåt 30 sekunder')}>
           <Ionicons name={music ? 'play-skip-forward' : 'play-forward'} size={30} color={C.text} />
         </Pressable>
         {music ? (
-          <Pressable onPress={toggleRepeat} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel="Upprepa kön" accessibilityState={{ selected: np.repeat }}><Ionicons name="repeat" size={24} color={np.repeat ? C.accent : C.dim} /></Pressable>
+          <Pressable onPress={toggleRepeat} style={ns.iconBtn} accessibilityRole="button" accessibilityLabel={t('Upprepa kön')} accessibilityState={{ selected: np.repeat }}><Ionicons name="repeat" size={24} color={np.repeat ? C.accent : C.dim} /></Pressable>
         ) : <View style={ns.iconBtn} />}
       </View>
 
       {hasList ? (
-        <Pressable onPress={() => setView(view === 'cover' ? 'list' : 'cover')} style={ns.listBtn} accessibilityRole="button" accessibilityLabel={view === 'cover' ? `Visa ${label.toLowerCase()}` : 'Visa omslaget'}>
+        <Pressable onPress={() => setView(view === 'cover' ? 'list' : 'cover')} style={ns.listBtn} accessibilityRole="button" accessibilityLabel={view === 'cover' ? (music ? t('Visa kön') : t('Visa kapitlen')) : t('Visa omslaget')}>
           <Ionicons name={view === 'cover' ? 'list' : 'image-outline'} size={18} color={C.text} />
-          <Text style={ns.listBtnT}>{view === 'cover' ? `${label}${music ? ` (${np.queue.length - np.idx - 1} kvar)` : ''}` : 'Omslag'}</Text>
+          <Text style={ns.listBtnT}>{view === 'cover' ? (music ? t('{label} ({n} kvar)', { label, n: np.queue.length - np.idx - 1 }) : label) : t('Omslag')}</Text>
         </Pressable>
       ) : <View style={{ height: 44 }} />}
 
-      <Sheet visible={rateMenu} onClose={() => setRateMenu(false)} title="Hastighet" items={RATES.map((r) => ({ icon: r === np.rate ? 'checkmark' : 'speedometer-outline', label: `${r}×`, on: r === np.rate, onPress: () => setRate(r) }))} />
+      <Sheet visible={rateMenu} onClose={() => setRateMenu(false)} title={t('Hastighet')} items={RATES.map((r) => ({ icon: r === np.rate ? 'checkmark' : 'speedometer-outline', label: `${r}×`, on: r === np.rate, onPress: () => setRate(r) }))} />
     </View>
   );
 }
@@ -129,7 +130,7 @@ function Scrubber({ pos, dur, onSeek }: { pos: number; dur: number; onSeek: (s: 
         onResponderMove={(e) => setDrag(at(e.nativeEvent.pageX - x0.current))}
         onResponderRelease={(e) => { const s = at(e.nativeEvent.pageX - x0.current); setDrag(null); onSeek(s); }}
         onResponderTerminate={() => setDrag(null)}
-        accessibilityRole="adjustable" accessibilityLabel="Tidslinje" accessibilityValue={{ min: 0, max: Math.round(dur), now: Math.round(shown), text: `${fmtTime(shown)} av ${fmtTime(dur)}` }}
+        accessibilityRole="adjustable" accessibilityLabel={t('Tidslinje')} accessibilityValue={{ min: 0, max: Math.round(dur), now: Math.round(shown), text: t('{got} av {size}', { got: fmtTime(shown), size: fmtTime(dur) }) }}
         accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
         onAccessibilityAction={(e) => onSeek(pos + (e.nativeEvent.actionName === 'increment' ? 15 : -15))}>
         <View style={ns.rail}><View style={[ns.fill, { width: `${frac * 100}%` }]} /></View>

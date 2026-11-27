@@ -12,11 +12,19 @@ import { Button, Empty, ErrorState, Loading } from '../components/ui';
 import { AlbumCard, Cover, Header, MiniPlayer, TrackRow, s as as } from '../components/audio';
 import { BooksSection, PodcastsSection } from './Books';
 import type { Props, Stack } from '../nav';
+import { t, tn } from '../i18n';
 
 type Nav = NavigationProp<Stack>;
 interface MusicHome { recentAlbums: Album[]; recentlyPlayed: Album[]; favorites: Track[]; playlists: { id: number; name: string; tracks: number; duration: number | null }[]; smart: { id: string; name: string; count: number; covers?: number[] }[] }
 interface Artist { id: number; name: string; albums: number; cover_album?: number | null; image?: boolean }
 type Section = { kind: 'music' | 'audiobook'; lib: Library } | { kind: 'podcast' };
+// Servern skickar de fasta smarta listornas och stationernas namn på svenska (server/listening.js SMART, server/sonic.js);
+// webben översätter dem i klienten, och appen gör likadant efter listans id. Egna listor (u1, u2 …) visas som de heter.
+const SMART_NAMES = (): Record<string, string> => ({
+  top30: t('Mest spelat senaste 30 dagarna'), forgotten: t('Favoriter du inte hört på länge'), recent: t('Nyligen tillagt'), never: t('Aldrig spelat'),
+  'sonic-calm': t('Lugnt'), 'sonic-energy': t('Energi'), 'sonic-focus': t('Fokus'), 'sonic-party': t('Fest'),
+});
+const smartName = (x: { id: string; name: string }) => SMART_NAMES()[x.id] || x.name;
 
 /** Fliken: välj bibliotek (musik, ljudböcker) eller poddar. Barnprofiler ser bara de bibliotek servern ger dem. */
 export function Listen() {
@@ -31,7 +39,7 @@ export function Listen() {
       setLibs(l.filter((x) => x.type === 'music' || x.type === 'audiobook'));
       setPods(!!p && (p.podcasts.length > 0 || p.canAdd));
       setError('');
-    } catch (e: any) { setError(e?.message || 'Kunde inte hämta biblioteken'); }
+    } catch (e: any) { setError(e?.message || t('Kunde inte hämta biblioteken')); }
   }, []);
   useEffect(() => { load(); }, [load]);
   const sections: Section[] = useMemo(() => [
@@ -41,7 +49,7 @@ export function Listen() {
   ], [libs, pods]);
   if (error && !libs) return <ErrorState error={error} onRetry={load} />;
   if (!libs) return <Loading />;
-  if (!sections.length) return <Empty text="Här finns ingen musik, inga ljudböcker och inga poddar som den här profilen får lyssna på." />;
+  if (!sections.length) return <Empty text={t('Här finns ingen musik, inga ljudböcker och inga poddar som den här profilen får lyssna på.')} />;
   const cur = sections[Math.min(sel, sections.length - 1)];
   return (
     <View style={{ flex: 1 }}>
@@ -51,7 +59,7 @@ export function Listen() {
             {sections.map((x, i) => {
               const on = x === cur;
               const icon = x.kind === 'music' ? 'musical-notes-outline' : x.kind === 'audiobook' ? 'book-outline' : 'mic-outline';
-              const name = x.kind === 'podcast' ? 'Poddar' : x.lib.name;
+              const name = x.kind === 'podcast' ? t('Poddar') : x.lib.name;
               return (
                 <Pressable key={i} onPress={() => setSel(i)} style={[st.chip, on && st.chipOn]} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={name}>
                   <Ionicons name={icon} size={16} color={on ? C.accent : C.dim} /><Text style={[st.chipText, on && { color: C.accent }]}>{name}</Text>
@@ -68,22 +76,23 @@ export function Listen() {
   );
 }
 
-const TABS = [['home', 'Översikt'], ['albums', 'Album'], ['artists', 'Artister'], ['playlists', 'Spellistor']] as const;
+const TABS = ['home', 'albums', 'artists', 'playlists'] as const;
+const tabLabel = (k: (typeof TABS)[number]) => (k === 'home' ? t('Översikt') : k === 'albums' ? t('Album') : k === 'artists' ? t('Artister') : t('Spellistor'));
 function MusicLib({ lib }: { lib: Library }) {
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>('home');
+  const [tab, setTab] = useState<(typeof TABS)[number]>('home');
   const [q, setQ] = useState('');
   return (
     <View style={{ flex: 1 }}>
       <View style={st.msearch}>
         <Ionicons name="search" size={16} color={C.dim} />
-        <TextInput style={st.msearchIn} value={q} onChangeText={setQ} placeholder="Sök artist, album, låt" placeholderTextColor={C.dim} autoCorrect={false} autoCapitalize="none" returnKeyType="search" accessibilityLabel="Sök i musiken" />
-        {q ? <Pressable onPress={() => setQ('')} hitSlop={10} accessibilityLabel="Rensa sökningen"><Ionicons name="close-circle" size={16} color={C.dim} /></Pressable> : null}
+        <TextInput style={st.msearchIn} value={q} onChangeText={setQ} placeholder={t('Sök artist, album, låt')} placeholderTextColor={C.dim} autoCorrect={false} autoCapitalize="none" returnKeyType="search" accessibilityLabel={t('Sök i musiken')} />
+        {q ? <Pressable onPress={() => setQ('')} hitSlop={10} accessibilityLabel={t('Rensa sökningen')}><Ionicons name="close-circle" size={16} color={C.dim} /></Pressable> : null}
       </View>
       {q.trim().length >= 2 ? <MusicSearch lib={lib.id} q={q.trim()} /> : (<>
         <View style={st.tabs} accessibilityRole="tablist">
-          {TABS.map(([k, label]) => (
+          {TABS.map((k) => (
             <Pressable key={k} onPress={() => setTab(k)} style={[st.tab, tab === k && st.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: tab === k }}>
-              <Text style={[st.tabText, tab === k && { color: C.text }]}>{label}</Text>
+              <Text style={[st.tabText, tab === k && { color: C.text }]}>{tabLabel(k)}</Text>
             </Pressable>
           ))}
         </View>
@@ -98,7 +107,7 @@ function useLoad<T>(path: string): { data: T | null; error: string; reload: () =
   const [error, setError] = useState('');
   const reload = useCallback(async () => {
     try { await ensureImageToken(); setData(await api<T>(path)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta musiken'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta musiken')); }
   }, [path]);
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
   return { data, error, reload };
@@ -126,29 +135,29 @@ function MusicHomeView({ lib }: { lib: number }) {
   const smart = data.smart.filter((x) => x.count > 0);
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }} refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.accent} onRefresh={async () => { setRefreshing(true); await reload(); setRefreshing(false); }} />}>
-      <AlbumShelf title="Spelat nyligen" items={data.recentlyPlayed} />
+      <AlbumShelf title={t('Spelat nyligen')} items={data.recentlyPlayed} />
       {smart.length ? (
         <View style={{ marginTop: 22 }}>
-          <Text style={st.h2}>Smarta listor</Text>
+          <Text style={st.h2}>{t('Smarta listor')}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}>
             {smart.map((x) => (
-              <Pressable key={x.id} style={{ width: 140 }} onPress={() => nav.navigate('Playlist', { id: 0, lib, smart: x.id, name: x.name })} accessibilityRole="button" accessibilityLabel={x.name}>
+              <Pressable key={x.id} style={{ width: 140 }} onPress={() => nav.navigate('Playlist', { id: 0, lib, smart: x.id, name: smartName(x) })} accessibilityRole="button" accessibilityLabel={smartName(x)}>
                 <Cover uri={x.covers?.[0] ? `${session.server}/api/music/cover/${x.covers[0]}?w=300${session.imgToken ? '&t=' + session.imgToken : ''}` : null} size={140} icon="sparkles-outline" />
-                <Text style={as.cardT} numberOfLines={1}>{x.name}</Text>
-                <Text style={as.cardS}>{x.count} låtar</Text>
+                <Text style={as.cardT} numberOfLines={1}>{smartName(x)}</Text>
+                <Text style={as.cardS}>{tn(x.count, '{n} låt', '{n} låtar')}</Text>
               </Pressable>
             ))}
           </ScrollView>
         </View>
       ) : null}
-      <AlbumShelf title="Nytt i biblioteket" items={data.recentAlbums} />
-      {!data.recentAlbums.length ? <Text style={[st.dim, { padding: 24 }]}>Inga album ännu.</Text> : null}
+      <AlbumShelf title={t('Nytt i biblioteket')} items={data.recentAlbums} />
+      {!data.recentAlbums.length ? <Text style={[st.dim, { padding: 24 }]}>{t('Inga album ännu.')}</Text> : null}
       {data.favorites.length ? (
         <View style={{ marginTop: 22 }}>
           <View style={st.headRow}>
-            <Text style={[st.h2, { paddingHorizontal: 0, flex: 1 }]}>Favoriter</Text>
-            <Button small icon="play" label="Spela" onPress={() => playTracks(data.favorites, 0)} />
-            <Button small icon="shuffle" label="Blanda" onPress={() => playTracks(data.favorites, Math.floor(Math.random() * data.favorites.length), { shuffle: true })} />
+            <Text style={[st.h2, { paddingHorizontal: 0, flex: 1 }]}>{t('Favoriter')}</Text>
+            <Button small icon="play" label={t('Spela')} onPress={() => playTracks(data.favorites, 0)} />
+            <Button small icon="shuffle" label={t('Blanda')} onPress={() => playTracks(data.favorites, Math.floor(Math.random() * data.favorites.length), { shuffle: true })} />
           </View>
           {data.favorites.slice(0, 50).map((t, i) => <TrackRow key={t.id} t={t} i={i} showCover onPress={() => playTracks(data.favorites, i)} />)}
         </View>
@@ -172,20 +181,21 @@ function AlbumGrid({ items, header }: { items: Album[]; header?: React.ReactElem
   );
 }
 
-const SORTS = [['artist', 'Artist'], ['title', 'Titel'], ['added', 'Senast tillagda'], ['year', 'År']] as const;
+const SORTS = ['artist', 'title', 'added', 'year'] as const;
+const sortLabel = (k: (typeof SORTS)[number]) => (k === 'artist' ? t('Artist') : k === 'title' ? t('Titel') : k === 'added' ? t('Senast tillagda') : t('År'));
 function Albums({ lib }: { lib: number }) {
-  const [sort, setSort] = useState<(typeof SORTS)[number][0]>('artist');
+  const [sort, setSort] = useState<(typeof SORTS)[number]>('artist');
   const { data, error, reload } = useLoad<Album[]>(`/api/music/${lib}/albums?sort=${sort}`);
   return (
     <View style={{ flex: 1 }}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[st.chips, { paddingTop: 2 }]} style={{ flexGrow: 0 }}>
-        {SORTS.map(([k, label]) => (
+        {SORTS.map((k) => (
           <Pressable key={k} onPress={() => setSort(k)} style={[st.chip, sort === k && st.chipOn]} accessibilityRole="button" accessibilityState={{ selected: sort === k }}>
-            <Text style={[st.chipText, sort === k && { color: C.accent }]}>{label}</Text>
+            <Text style={[st.chipText, sort === k && { color: C.accent }]}>{sortLabel(k)}</Text>
           </Pressable>
         ))}
       </ScrollView>
-      {error && !data ? <ErrorState error={error} onRetry={reload} /> : !data ? <Loading /> : !data.length ? <Empty text="Inga album ännu." /> : <AlbumGrid items={data} />}
+      {error && !data ? <ErrorState error={error} onRetry={reload} /> : !data ? <Loading /> : !data.length ? <Empty text={t('Inga album ännu.')} /> : <AlbumGrid items={data} />}
     </View>
   );
 }
@@ -197,13 +207,13 @@ function Artists({ lib }: { lib: number }) {
   const nav = useNavigation<Nav>();
   if (error && !data) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  if (!data.length) return <Empty text="Inga artister ännu." />;
+  if (!data.length) return <Empty text={t('Inga artister ännu.')} />;
   return (
     <FlatList data={data} keyExtractor={(x) => String(x.id)} contentContainerStyle={{ paddingVertical: 6 }}
       renderItem={({ item }) => (
         <Pressable onPress={() => nav.navigate('Artist', { id: item.id })} style={({ pressed }) => [as.row, pressed && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={item.name}>
           <Cover uri={artistImage(item)} size={48} round icon="person" />
-          <View style={{ flex: 1 }}><Text style={as.rowT} numberOfLines={1}>{item.name}</Text><Text style={as.rowS}>{item.albums} {item.albums === 1 ? 'album' : 'album'}</Text></View>
+          <View style={{ flex: 1 }}><Text style={as.rowT} numberOfLines={1}>{item.name}</Text><Text style={as.rowS}>{tn(item.albums, '1 album', '{n} album')}</Text></View>
           <Ionicons name="chevron-forward" size={18} color={C.dim} />
         </Pressable>
       )} />
@@ -216,10 +226,10 @@ function Playlists({ lib }: { lib: number }) {
   if (error && !data) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const rows = [
-    ...data.playlists.map((p) => ({ key: 'p' + p.id, name: p.name, sub: `${p.tracks} låtar${p.duration ? ' · ' + fmtDur(p.duration) : ''}`, icon: 'list' as const, go: () => nav.navigate('Playlist', { id: p.id, name: p.name }) })),
-    ...data.smart.map((x) => ({ key: 's' + x.id, name: x.name, sub: `${x.count} låtar · uppdateras automatiskt`, icon: 'sparkles-outline' as const, go: () => nav.navigate('Playlist', { id: 0, lib, smart: x.id, name: x.name }) })),
+    ...data.playlists.map((p) => ({ key: 'p' + p.id, name: p.name, sub: tn(p.tracks, '{n} låt', '{n} låtar') + (p.duration ? ' · ' + fmtDur(p.duration) : ''), icon: 'list' as const, go: () => nav.navigate('Playlist', { id: p.id, name: p.name }) })),
+    ...data.smart.map((x) => ({ key: 's' + x.id, name: smartName(x), sub: tn(x.count, '{n} låt', '{n} låtar') + ' · ' + t('uppdateras automatiskt'), icon: 'sparkles-outline' as const, go: () => nav.navigate('Playlist', { id: 0, lib, smart: x.id, name: smartName(x) }) })),
   ];
-  if (!rows.length) return <Empty text="Inga spellistor ännu. Spellistor skapas i webbgränssnittet." />;
+  if (!rows.length) return <Empty text={t('Inga spellistor ännu. Spellistor skapas i webbgränssnittet.')} />;
   return (
     <FlatList data={rows} keyExtractor={(x) => x.key} contentContainerStyle={{ paddingVertical: 6 }}
       renderItem={({ item }) => (
@@ -238,25 +248,25 @@ function MusicSearch({ lib, q }: { lib: number; q: string }) {
   const nav = useNavigation<Nav>();
   useEffect(() => {
     let live = true;
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try { await ensureImageToken(); const x = await api<{ artists: Artist[]; albums: Album[]; tracks: Track[] }>(`/api/music/${lib}/search?q=${encodeURIComponent(q)}`); if (live) { setR(x); setError(''); } }
-      catch (e: any) { if (live) setError(e?.message || 'Sökningen misslyckades'); }
+      catch (e: any) { if (live) setError(e?.message || t('Sökningen misslyckades')); }
     }, 250);
-    return () => { live = false; clearTimeout(t); };
+    return () => { live = false; clearTimeout(timer); };
   }, [lib, q]);
   if (error) return <ErrorState error={error} />;
   if (!r) return <Loading />;
-  if (!r.artists.length && !r.albums.length && !r.tracks.length) return <Empty text={`Inga träffar på "${q}".`} />;
+  if (!r.artists.length && !r.albums.length && !r.tracks.length) return <Empty text={t('Inga träffar på "{q}".', { q })} />;
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-      {r.artists.length ? <Text style={[st.h2, { marginTop: 14 }]}>Artister</Text> : null}
+      {r.artists.length ? <Text style={[st.h2, { marginTop: 14 }]}>{t('Artister')}</Text> : null}
       {r.artists.map((a) => (
         <Pressable key={a.id} onPress={() => nav.navigate('Artist', { id: a.id })} style={as.row} accessibilityRole="button" accessibilityLabel={a.name}>
           <Cover size={44} round icon="person" /><Text style={[as.rowT, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
         </Pressable>
       ))}
-      <AlbumShelf title="Album" items={r.albums} />
-      {r.tracks.length ? <Text style={[st.h2, { marginTop: 22 }]}>Låtar</Text> : null}
+      <AlbumShelf title={t('Album')} items={r.albums} />
+      {r.tracks.length ? <Text style={[st.h2, { marginTop: 22 }]}>{t('Låtar')}</Text> : null}
       {r.tracks.map((t, i) => <TrackRow key={t.id} t={t} i={i} showCover onPress={() => playTracks(r.tracks, i)} />)}
     </ScrollView>
   );
@@ -272,7 +282,7 @@ function TrackPage({ title, header, tracks, numbered, error, reload, onBack }: {
       <View style={st.body}>
         {error && !tracks ? <ErrorState error={error} onRetry={reload} /> : !tracks ? <Loading /> : (
           <FlatList data={tracks} keyExtractor={(x) => String(x.id)} ListHeaderComponent={<>{header}</>} contentContainerStyle={{ paddingBottom: 24 }}
-            ListEmptyComponent={<Text style={[st.dim, { padding: 24 }]}>Listan är tom just nu.</Text>}
+            ListEmptyComponent={<Text style={[st.dim, { padding: 24 }]}>{t('Listan är tom just nu.')}</Text>}
             renderItem={({ item, index }) => <TrackRow t={item} i={index} numbered={numbered} onPress={() => playTracks(tracks, index)} />} />
         )}
       </View>
@@ -286,9 +296,9 @@ function PlayButtons({ tracks, radio }: { tracks: Track[]; radio?: { seed: { alb
   return (
     <>
       <View style={st.btns}>
-        <Button kind="primary" icon="play" label="Spela" disabled={!tracks.length} onPress={() => playTracks(tracks, 0)} />
-        <Button icon="shuffle" label="Blanda" disabled={!tracks.length} onPress={() => playTracks(tracks, Math.floor(Math.random() * tracks.length), { shuffle: true })} />
-        {radio ? <Button icon="radio-outline" label="Låtradio" onPress={() => startRadio(radio.seed, radio.name).then(() => setErr('')).catch((e) => setErr(e?.message || 'Låtradion gick inte att starta'))} /> : null}
+        <Button kind="primary" icon="play" label={t('Spela')} disabled={!tracks.length} onPress={() => playTracks(tracks, 0)} />
+        <Button icon="shuffle" label={t('Blanda')} disabled={!tracks.length} onPress={() => playTracks(tracks, Math.floor(Math.random() * tracks.length), { shuffle: true })} />
+        {radio ? <Button icon="radio-outline" label={t('Låtradio')} onPress={() => startRadio(radio.seed, radio.name).then(() => setErr('')).catch((e) => setErr(e?.message || t('Låtradion gick inte att starta')))} /> : null}
       </View>
       {err ? <Text style={[st.dim, { color: C.err, paddingHorizontal: 14, textAlign: 'left' }]}>{err}</Text> : null}
     </>
@@ -300,7 +310,7 @@ export function AlbumScreen({ navigation, route }: Props<'Album'>) {
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     try { await ensureImageToken(); setA(await api(`/api/music/albums/${route.params.id}`)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta albumet'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta albumet')); }
   }, [route.params.id]);
   useEffect(() => { load(); }, [load]);
   const discs = new Set((a?.trackList || []).map((t) => t.disc || 1)).size;
@@ -310,7 +320,7 @@ export function AlbumScreen({ navigation, route }: Props<'Album'>) {
         <Cover uri={a.cover ? `${session.server}/api/music/cover/${a.id}?w=600${session.imgToken ? '&t=' + session.imgToken : ''}` : null} size={220} icon="disc-outline" />
         <Text style={st.h1}>{a.title}</Text>
         {a.artistId ? <Pressable onPress={() => navigation.push('Artist', { id: a.artistId! })} accessibilityRole="link"><Text style={st.artistLink}>{a.artist}</Text></Pressable> : <Text style={st.artistLink}>{a.artist}</Text>}
-        <Text style={st.meta}>{[a.year, `${a.trackList.length} låtar`, fmtDur(a.duration), a.genre].filter(Boolean).join(' · ')}</Text>
+        <Text style={st.meta}>{[a.year, tn(a.trackList.length, '{n} låt', '{n} låtar'), fmtDur(a.duration), a.genre].filter(Boolean).join(' · ')}</Text>
       </View>
       <PlayButtons tracks={a.trackList} radio={{ seed: { albumId: a.id }, name: a.title }} />
     </View>
@@ -324,21 +334,21 @@ export function PlaylistScreen({ navigation, route }: Props<'Playlist'>) {
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     try { await ensureImageToken(); setP(await api(smart ? `/api/music/${lib}/smart/${encodeURIComponent(smart)}` : `/api/music/playlists/${id}`)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta spellistan'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta spellistan')); }
   }, [id, lib, smart]);
   useEffect(() => { load(); }, [load]);
   const header = p ? (
     <View>
       <View style={st.hero}>
         <Cover size={160} icon={smart ? 'sparkles-outline' : 'list'} />
-        <Text style={st.small}>{smart ? 'SMART LISTA' : 'SPELLISTA'}</Text>
-        <Text style={st.h1}>{p.name || name}</Text>
-        <Text style={st.meta}>{`${p.trackList.length} låtar · ${fmtDur(p.trackList.reduce((x, t) => x + (t.duration || 0), 0)) || '0 min'}`}</Text>
+        <Text style={st.small}>{smart ? t('SMART LISTA') : t('SPELLISTA')}</Text>
+        <Text style={st.h1}>{smart ? smartName({ id: smart, name: p.name || name || '' }) : p.name || name}</Text>
+        <Text style={st.meta}>{tn(p.trackList.length, '{n} låt', '{n} låtar') + ' · ' + (fmtDur(p.trackList.reduce((x, tr) => x + (tr.duration || 0), 0)) || '0 min')}</Text>
       </View>
       <PlayButtons tracks={p.trackList} />
     </View>
   ) : null;
-  return <TrackPage title={p?.name || name || ''} header={header} tracks={p?.trackList || null} error={error} reload={load} onBack={() => navigation.goBack()} />;
+  return <TrackPage title={smart ? smartName({ id: smart, name: p?.name || name || '' }) : p?.name || name || ''} header={header} tracks={p?.trackList || null} error={error} reload={load} onBack={() => navigation.goBack()} />;
 }
 
 export function ArtistScreen({ navigation, route }: Props<'Artist'>) {
@@ -347,7 +357,7 @@ export function ArtistScreen({ navigation, route }: Props<'Artist'>) {
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     try { await ensureImageToken(); setA(await api(`/api/music/artists/${route.params.id}`)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta artisten'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta artisten')); }
   }, [route.params.id]);
   useEffect(() => { load(); }, [load]);
   return (
@@ -359,12 +369,12 @@ export function ArtistScreen({ navigation, route }: Props<'Artist'>) {
             <View style={st.hero}>
               <Cover uri={artistImage({ id: a.id, name: a.name, albums: a.albums.length, image: true })} size={150} round icon="person" />
               <Text style={st.h1}>{a.name}</Text>
-              <Text style={st.meta}>{a.albums.length} album</Text>
+              <Text style={st.meta}>{tn(a.albums.length, '1 album', '{n} album')}</Text>
             </View>
             <PlayButtons tracks={a.popular} radio={{ seed: { artistId: a.id }, name: a.name }} />
-            {a.popular.length ? <Text style={[st.h2, { marginTop: 18 }]}>Populärt</Text> : null}
+            {a.popular.length ? <Text style={[st.h2, { marginTop: 18 }]}>{t('Populärt')}</Text> : null}
             {a.popular.map((t, i) => <TrackRow key={t.id} t={t} i={i} showCover onPress={() => playTracks(a.popular, i)} />)}
-            <AlbumShelf title="Album" items={a.albums} />
+            <AlbumShelf title={t('Album')} items={a.albums} />
           </ScrollView>
         )}
       </View>

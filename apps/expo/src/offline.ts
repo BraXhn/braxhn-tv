@@ -16,6 +16,7 @@ import { AppState, Platform } from 'react-native';
 import { Directory, DownloadTask, File, Paths } from 'expo-file-system';
 import { api, ApiError, audioCaps, imageUrl, leaveHome, session } from './api';
 import * as core from './offlinecore';
+import { t, tn } from './i18n';
 import type { DlEntry, DlSub, ScreenCache, ScreenStatus } from './offlinecore';
 
 /** Webbläget har inget filsystem: där finns ingen nedladdning */
@@ -120,8 +121,8 @@ interface VideoLike { id: number; kind: string; title: string; year?: number | n
 type OfflineStatus = { status: 'none' | 'queued' | 'running' | 'ready' | 'error' | 'missing'; progress?: number; url?: string; size?: number; error?: string; subs?: { id: string; lang: string | null; label: string; forced: boolean; url: string }[] };
 
 function mustUse() {
-  if (!supported) throw new ApiError('Nedladdning finns bara i appen på telefonen, inte i webbläsaren.');
-  if (!scope) throw new ApiError('Logga in för att ladda ner.');
+  if (!supported) throw new ApiError(t('Nedladdning finns bara i appen på telefonen, inte i webbläsaren.'));
+  if (!scope) throw new ApiError(t('Logga in för att ladda ner.'));
 }
 /** Ladda ner en film eller ett avsnitt. Servern tillfrågas direkt, så att ett nej (rätten att ladda ner, familjefiltret,
  *  barnprofilens gränser) syns på en gång. false = finns redan i Nedladdat. */
@@ -131,7 +132,7 @@ export async function downloadVideo(it: VideoLike, q: string): Promise<boolean> 
   if (find(key)) return false;
   const my = scope;
   const st = await api<OfflineStatus>(`/api/items/${it.id}/offline`, { method: 'POST', body: { q } });
-  if (st.status === 'error') throw new ApiError(st.error || 'Servern kunde inte förbereda filen – försök igen senare.');
+  if (st.status === 'error') throw new ApiError(st.error || t('Servern kunde inte förbereda filen – försök igen senare.'));
   if (my !== scope || find(key)) return false;
   list = [...list, { ...core.videoEntry(it, q), state: st.status === 'ready' ? 'queued' : 'preparing', prep: st.progress || 0 }];
   emit(); persist(true);
@@ -147,7 +148,7 @@ export async function downloadBook(id: number, cover = true): Promise<boolean> {
   if (find(key)) return false;
   const my = scope;
   const b = await api<{ id: number; title: string; author?: string | null; narrator?: string | null; duration?: number | null; position?: number; speed?: number; chapters?: core.Chapter[]; files: { id: number; offset: number; duration: number; url: string }[] }>(`/api/audiobooks/book/${id}/offline?a=${encodeURIComponent(audioCaps())}`);
-  if (!b?.files?.length) throw new ApiError('Boken har inga ljudfiler.');
+  if (!b?.files?.length) throw new ApiError(t('Boken har inga ljudfiler.'));
   if (my !== scope || find(key)) return false;
   list = [...list, core.bookEntry(b)];
   emit(); persist(true);
@@ -244,18 +245,18 @@ async function loop() {
     const items = core.todo(list);
     if (!items.length) return;
     let moved = false, waiting = false;
-    for (const t of items) {
-      const e = find(t.key);
+    for (const job of items) {
+      const e = find(job.key);
       if (!e || !core.isActive(e) || scope !== my) continue;
       try { if ((await work(e, my)) === 'wait') waiting = true; else moved = true; }
       catch (err: any) {
-        if (err?.name === 'AbortError' || scope !== my || !find(t.key)) { moved = true; continue; } // pausad, borttagen, profilbyte
+        if (err?.name === 'AbortError' || scope !== my || !find(job.key)) { moved = true; continue; } // pausad, borttagen, profilbyte
         if (netErr(err)) {
-          updateIn(my, t.key, (x) => (core.isActive(x) ? { ...x, state: 'queued', error: 'Väntar på kontakt med servern – fortsätter av sig själv.' } : x));
+          updateIn(my, job.key, (x) => (core.isActive(x) ? { ...x, state: 'queued', error: t('Väntar på kontakt med servern – fortsätter av sig själv.') } : x));
           clearTimeout(retry); retry = setTimeout(pump, timing.retry);
           return;
         }
-        updateIn(my, t.key, (x) => ({ ...x, state: 'error', error: friendly(err) }));
+        updateIn(my, job.key, (x) => ({ ...x, state: 'error', error: friendly(err) }));
         moved = true;
       }
     }
@@ -265,19 +266,19 @@ async function loop() {
 function friendly(err: any): string {
   if (err instanceof ApiError) return err.message;
   const code = core.httpStatusOf(msgOf(err));
-  if (code === 401) return 'Länken till filen gäller inte längre – tryck Försök igen.';
-  if (code === 403) return 'Servern nekade nedladdningen.';
-  if (code === 404) return 'Filen finns inte längre på servern.';
-  if (code) return `Servern svarade ${code} – försök igen senare.`;
-  if (/space|ENOSPC|full/i.test(msgOf(err))) return 'Telefonen har inte plats – ta bort något i Nedladdat.';
-  return 'Nedladdningen misslyckades – tryck Försök igen.';
+  if (code === 401) return t('Länken till filen gäller inte längre – tryck Försök igen.');
+  if (code === 403) return t('Servern nekade nedladdningen.');
+  if (code === 404) return t('Filen finns inte längre på servern.');
+  if (code) return t('Servern svarade {code} – försök igen senare.', { code });
+  if (/space|ENOSPC|full/i.test(msgOf(err))) return t('Telefonen har inte plats – ta bort något i Nedladdat.');
+  return t('Nedladdningen misslyckades – tryck Försök igen.');
 }
 /** Ett steg för posten: 'wait' = servern förbereder filen, 'done' = klar */
 async function work(e: DlEntry, my: string): Promise<'wait' | 'done'> {
   if (e.kind === 'book') {
     const b = await api<{ files: { id: number; url: string }[] }>(`/api/audiobooks/book/${e.id}/offline?a=${encodeURIComponent(audioCaps())}`);
     const byId = new Map((b.files || []).map((f) => [f.id, f.url]));
-    if (e.files.some((f) => !byId.get(f.id!))) throw new ApiError('Boken har ändrats på servern – ta bort den och ladda ner igen.', 409);
+    if (e.files.some((f) => !byId.get(f.id!))) throw new ApiError(t('Boken har ändrats på servern – ta bort den och ladda ner igen.'), 409);
     updateIn(my, e.key, (x) => ({ ...x, state: 'downloading', error: null }));
     for (let i = 0; i < e.files.length; i++) await fetchFile(my, e.key, i, byId.get(e.files[i].id!)!, 0);
     finish(my, e.key, []);
@@ -286,10 +287,10 @@ async function work(e: DlEntry, my: string): Promise<'wait' | 'done'> {
   const q = encodeURIComponent(e.q);
   let st = await api<OfflineStatus>(`/api/items/${e.id}/offline?q=${q}&subs=1`);
   if (st.status === 'none' || (st.status === 'error' && e.state !== 'preparing')) st = await api<OfflineStatus>(`/api/items/${e.id}/offline`, { method: 'POST', body: { q: e.q } });
-  if (st.status === 'error') throw new ApiError(st.error || 'Servern kunde inte förbereda filen – försök igen senare.', 500);
+  if (st.status === 'error') throw new ApiError(st.error || t('Servern kunde inte förbereda filen – försök igen senare.'), 500);
   if (st.status !== 'ready') { updateIn(my, e.key, (x) => (core.isActive(x) ? { ...x, state: 'preparing', prep: st.progress || 0, error: null } : x), false); return 'wait'; }
   if (!st.url) st = await api<OfflineStatus>(`/api/items/${e.id}/offline?q=${q}&subs=1`);
-  if (!st.url) throw new ApiError('Servern gav ingen länk till filen – försök igen.', 500);
+  if (!st.url) throw new ApiError(t('Servern gav ingen länk till filen – försök igen.'), 500);
   await fetchFile(my, e.key, 0, st.url, st.size || 0);
   // Undertexterna (små) sist – en undertext som inte går att hämta hoppas över
   const subs: DlSub[] = [];
@@ -321,7 +322,7 @@ async function fetchFile(my: string, key: string, i: number, rel: string, size: 
   let plan = core.resumePlan({ os: Platform.OS, partial: partial(), expect: single ? e0.expect : undefined, size, saved: e0.resume });
   // Plats: avbryt i förväg om filen uppenbart inte får plats
   const free = storage().free;
-  if (size && free && free < size - partial() + 100e6) throw new ApiError(`Telefonen har inte plats (${core.fmtSize(size)} behövs, ${core.fmtSize(free)} ledigt) – ta bort något i Nedladdat.`, 507);
+  if (size && free && free < size - partial() + 100e6) throw new ApiError(t('Telefonen har inte plats ({need} behövs, {free} ledigt) – ta bort något i Nedladdat.', { need: core.fmtSize(size), free: core.fmtSize(free) }), 507);
   const before = e0.files.reduce((s, f, j) => s + (j !== i && f.done ? f.size : 0), 0);
   updateIn(my, key, (x) => ({ ...x, state: 'downloading', prep: 100, error: null, ...(single && size ? { size, expect: size } : {}) }));
   let last = 0;
@@ -461,7 +462,7 @@ export async function online(canDownload?: boolean) {
   const my = scope;
   allowed = canDownload !== false; emit();
   if (canDownload === false) {
-    if (list.length) { removeAll(); notice = 'Nedladdningarna togs bort: kontot får inte ladda ner längre.'; emit(); }
+    if (list.length) { removeAll(); notice = t('Nedladdningarna togs bort: kontot får inte ladda ner längre.'); emit(); }
     return;
   }
   refreshScreen().catch(() => {});
@@ -477,7 +478,7 @@ export async function online(canDownload?: boolean) {
     if (status === 0) { checked.delete(my); return; } // nätet försvann: igen nästa gång
     if (core.accessVerdict(status) === 'remove') { await remove(e.key); gone.push(e.title); }
   }
-  if (gone.length && scope === my) { notice = `${gone.join(', ')} togs bort från Nedladdat – profilen får inte se ${gone.length > 1 ? 'dem' : 'den'} längre, eller så finns ${gone.length > 1 ? 'de' : 'den'} inte kvar på servern.`; emit(); }
+  if (gone.length && scope === my) { notice = tn(gone.length, '{titles} togs bort från Nedladdat – profilen får inte se den längre, eller så finns den inte kvar på servern.', '{titles} togs bort från Nedladdat – profilen får inte se dem längre, eller så finns de inte kvar på servern.', { titles: gone.join(', ') }); emit(); }
 }
 
 // Appen tillbaka i förgrunden: kön och positionerna fortsätter (nätet kan ha kommit tillbaka)

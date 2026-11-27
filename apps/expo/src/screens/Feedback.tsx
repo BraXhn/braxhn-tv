@@ -14,15 +14,16 @@ import {
   AREA, FROM, KIND, KIND_SUB, MAX_TEXT, contextRows, currentArea, fmtDate, myTickets, previewContext, recentError, replyTicket, sendTicket, statusLabel,
   type Kind, type TechContext, type Ticket, type Tone,
 } from '../feedback';
+import { t } from '../i18n';
 
 /** Servern före 1.3.0 har inte feedback: säg det i stället för "Finns inte (404)" */
-const errText = (e: any, fallback: string) => (e?.status === 404 ? 'Servern har inte feedback än. Den som sköter servern behöver uppdatera BraXhn TV till version 1.3.0 eller senare.' : e?.message || fallback);
+const errText = (e: any, fallback: string) => (e?.status === 404 ? t('Servern har inte feedback än. Den som sköter servern behöver uppdatera BraXhn TV till version 1.3.0 eller senare.') : e?.message || fallback);
 
 function Header({ title, onBack, right }: { title: string; onBack: () => void; right?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[st.head, { paddingTop: insets.top + 6 }]}>
-      <Pressable onPress={onBack} style={st.back} hitSlop={8} accessibilityRole="button" accessibilityLabel="Tillbaka"><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
+      <Pressable onPress={onBack} style={st.back} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Tillbaka')}><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
       <Text style={st.headTitle} numberOfLines={1} accessibilityRole="header">{title}</Text>
       {right}
     </View>
@@ -37,7 +38,7 @@ function Badge({ label, tone }: { label: string; tone: Tone }) {
 /** Den tekniska informationen som en lista */
 function ContextList({ c }: { c: TechContext | null }) {
   const rows = contextRows(c);
-  if (!rows.length) return <Text style={st.small}>Ingen teknisk information bifogas.</Text>;
+  if (!rows.length) return <Text style={st.small}>{t('Ingen teknisk information bifogas.')}</Text>;
   return <View style={{ gap: 6 }}>{rows.map(([k, v], i) => <View key={i}><Text style={st.dt}>{k}</Text><Text style={st.dd} selectable>{v}</Text></View>)}</View>;
 }
 
@@ -81,30 +82,30 @@ export function FeedbackScreen({ navigation, route, user }: Props<'Feedback'> & 
     if (!tech || !showCtx) return;
     const n = ++seq.current;
     setCtx(null);
-    previewContext(kind).then((r) => { if (n === seq.current) setCtx({ c: r.context }); }).catch((e) => { if (n === seq.current) setCtx({ c: null, error: errText(e, 'Kunde inte hämta förhandsvisningen') }); });
+    previewContext(kind).then((r) => { if (n === seq.current) setCtx({ c: r.context }); }).catch((e) => { if (n === seq.current) setCtx({ c: null, error: errText(e, t('Kunde inte hämta förhandsvisningen')) }); });
   }, [tech, showCtx, kind]);
 
   const send = async () => {
-    if (!text.trim()) { setError('Skriv ett meddelande.'); return; }
+    if (!text.trim()) { setError(t('Skriv ett meddelande.')); return; }
     setBusy(true); setError('');
     try {
       const r = await sendTicket({ kind, area, text, tech });
-      setDone({ sent: r.status === 'approved', message: r.message || (r.status === 'approved' ? 'Ärendet är skickat till teamet.' : 'Ärendet är mottaget och väntar på granskning.') });
-    } catch (e: any) { setError(errText(e, 'Ärendet kunde inte skickas – försök igen.')); }
+      setDone({ sent: r.status === 'approved', message: r.message || (r.status === 'approved' ? t('Ärendet är skickat till teamet.') : t('Ärendet är mottaget och väntar på granskning.')) });
+    } catch (e: any) { setError(errText(e, t('Ärendet kunde inte skickas – försök igen.'))); }
     finally { setBusy(false); }
   };
 
   if (done) return (
     <View style={st.root}>
-      <Header title={done.sent ? 'Tack – ärendet är skickat' : 'Tack – ärendet är mottaget'} onBack={() => navigation.goBack()} />
+      <Header title={done.sent ? t('Tack – ärendet är skickat') : t('Tack – ärendet är mottaget')} onBack={() => navigation.goBack()} />
       <View style={st.body}>
         <View style={st.panel}>
           <Ionicons name="checkmark-circle" size={36} color={C.ok} />
           <Text style={st.lead}>{done.message}</Text>
-          <Text style={st.small}>Svaret syns under Mina ärenden.</Text>
+          <Text style={st.small}>{t('Svaret syns under Mina ärenden.')}</Text>
           <View style={st.row}>
-            <Button label="Mina ärenden" icon="chatbubbles-outline" onPress={() => navigation.replace('Tickets')} />
-            <Button label="Klar" kind="primary" onPress={() => navigation.goBack()} />
+            <Button label={t('Mina ärenden')} icon="chatbubbles-outline" onPress={() => navigation.replace('Tickets')} />
+            <Button label={t('Klar')} kind="primary" onPress={() => navigation.goBack()} />
           </View>
         </View>
       </View>
@@ -113,44 +114,44 @@ export function FeedbackScreen({ navigation, route, user }: Props<'Feedback'> & 
 
   return (
     <View style={st.root}>
-      <Header title="Feedback och felrapporter" onBack={() => navigation.goBack()} />
+      <Header title={t('Feedback och felrapporter')} onBack={() => navigation.goBack()} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={st.body} keyboardShouldPersistTaps="handled">
-          <View style={{ gap: 10 }} accessibilityRole="radiogroup" accessibilityLabel="Vad vill du göra?">
+          <View style={{ gap: 10 }} accessibilityRole="radiogroup" accessibilityLabel={t('Vad vill du göra?')}>
             {(['idea', 'bug'] as const).map((k) => (
-              <Pressable key={k} onPress={() => setKind(k)} style={[st.opt, kind === k && st.optOn]} accessibilityRole="radio" aria-checked={kind === k} accessibilityLabel={KIND[k]}>
+              <Pressable key={k} onPress={() => setKind(k)} style={[st.opt, kind === k && st.optOn]} accessibilityRole="radio" aria-checked={kind === k} accessibilityLabel={KIND()[k]}>
                 <Ionicons name={kind === k ? 'radio-button-on' : 'radio-button-off'} size={20} color={kind === k ? C.accent : C.dim} />
-                <View style={{ flex: 1 }}><Text style={st.optTitle}>{KIND[k]}</Text><Text style={st.small}>{KIND_SUB[k]}</Text></View>
+                <View style={{ flex: 1 }}><Text style={st.optTitle}>{KIND()[k]}</Text><Text style={st.small}>{KIND_SUB()[k]}</Text></View>
               </Pressable>
             ))}
           </View>
 
-          <Text style={st.label}>Gäller</Text>
-          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Gäller">
-            {Object.entries(AREA).map(([k, v]) => (
+          <Text style={st.label}>{t('Gäller')}</Text>
+          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel={t('Gäller')}>
+            {Object.entries(AREA()).map(([k, v]) => (
               <Pressable key={k} onPress={() => setArea(k)} style={[st.chip, area === k && st.chipOn]} accessibilityRole="radio" aria-checked={area === k}>
                 <Text style={[st.chipText, area === k && { color: C.onAccent }]}>{v}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={st.label} nativeID="fbtext">Meddelande</Text>
+          <Text style={st.label} nativeID="fbtext">{t('Meddelande')}</Text>
           <TextInput style={st.input} value={text} onChangeText={(v) => { setText(v); if (error) setError(''); }} multiline maxLength={MAX_TEXT} textAlignVertical="top"
-            placeholder="T.ex. Tryckte på Spela på en film. Bilden frös efter en minut." placeholderTextColor={C.dim} accessibilityLabel="Meddelande" accessibilityLabelledBy="fbtext" />
-          <Text style={st.small}>Vad gjorde du, vad hände och vad hade du väntat dig?</Text>
+            placeholder={t('T.ex. Tryckte på Spela på en film. Bilden frös efter en minut.')} placeholderTextColor={C.dim} accessibilityLabel={t('Meddelande')} accessibilityLabelledBy="fbtext" />
+          <Text style={st.small}>{t('Vad gjorde du, vad hände och vad hade du väntat dig?')}</Text>
 
-          <Check on={tech} onPress={() => setTech((v) => !v)} label="Skicka med teknisk information (appversion, enhet, skärmstorlek och senaste uppspelningen)" />
+          <Check on={tech} onPress={() => setTech((v) => !v)} label={t('Skicka med teknisk information (appversion, enhet, skärmstorlek och senaste uppspelningen)')} />
           {tech ? (
-            <Fold label="Visa vad som skickas med" open={showCtx} onToggle={() => setShowCtx((v) => !v)}>
-              {ctx ? (ctx.error ? <Text style={st.small}>{ctx.error}</Text> : <ContextList c={ctx.c} />) : <Text style={st.small}>Hämtar…</Text>}
+            <Fold label={t('Visa vad som skickas med')} open={showCtx} onToggle={() => setShowCtx((v) => !v)}>
+              {ctx ? (ctx.error ? <Text style={st.small}>{ctx.error}</Text> : <ContextList c={ctx.c} />) : <Text style={st.small}>{t('Hämtar…')}</Text>}
             </Fold>
           ) : null}
 
-          <Text style={st.small}>{admin ? 'Du är administratör: ärendet skickas direkt till utvecklarna.' : 'En administratör läser ärendet först. Det skickas till utvecklarna bara om administratören godkänner det.'} Svaret syns under Mina ärenden.</Text>
+          <Text style={st.small}>{admin ? t('Du är administratör: ärendet skickas direkt till utvecklarna.') : t('En administratör läser ärendet först. Det skickas till utvecklarna bara om administratören godkänner det.')} {t('Svaret syns under Mina ärenden.')}</Text>
           {error ? <Text style={st.err} accessibilityLiveRegion="polite">{error}</Text> : null}
           <View style={[st.row, { justifyContent: 'flex-end' }]}>
-            <Button label="Mina ärenden" icon="chatbubbles-outline" onPress={() => navigation.replace('Tickets')} />
-            <Button label={busy ? 'Skickar…' : 'Skicka'} kind="primary" icon="send" disabled={busy} onPress={send} />
+            <Button label={t('Mina ärenden')} icon="chatbubbles-outline" onPress={() => navigation.replace('Tickets')} />
+            <Button label={busy ? t('Skickar…') : t('Skicka')} kind="primary" icon="send" disabled={busy} onPress={send} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -168,40 +169,40 @@ function TicketCard({ k, admin, onReplied }: { k: Ticket; admin: boolean; onRepl
   const [showCtx, setShowCtx] = useState(false);
   const [showSent, setShowSent] = useState(false);
   const send = async () => {
-    if (!reply.trim()) { setError('Skriv ett svar.'); return; }
+    if (!reply.trim()) { setError(t('Skriv ett svar.')); return; }
     setBusy(true); setError('');
-    try { await replyTicket(k.id, reply); setReply(''); onReplied(admin ? 'Svaret är skickat till teamet.' : 'Svaret är mottaget och väntar på granskning.'); }
-    catch (e: any) { setError(errText(e, 'Svaret kunde inte skickas – försök igen.')); }
+    try { await replyTicket(k.id, reply); setReply(''); onReplied(admin ? t('Svaret är skickat till teamet.') : t('Svaret är mottaget och väntar på granskning.')); }
+    catch (e: any) { setError(errText(e, t('Svaret kunde inte skickas – försök igen.'))); }
     finally { setBusy(false); }
   };
   return (
     <View style={st.panel}>
       <View style={[st.row, { alignItems: 'center' }]}><Text style={st.num}>#{k.id}</Text><Badge label={label} tone={tone} /></View>
-      <Text style={st.small}>{KIND[k.kind] || ''} · {AREA[k.area] || ''} · {fmtDate(k.created)}</Text>
+      <Text style={st.small}>{KIND()[k.kind] || ''} · {AREA()[k.area] || ''} · {fmtDate(k.created)}</Text>
       {k.title ? <Text style={st.h3}>{k.title}</Text> : null}
       <Text style={st.text} selectable>{k.text}</Text>
       {k.sentText || k.sentTitle ? (
-        <Fold label="Administratören ändrade texten innan den skickades" open={showSent} onToggle={() => setShowSent((v) => !v)}>
+        <Fold label={t('Administratören ändrade texten innan den skickades')} open={showSent} onToggle={() => setShowSent((v) => !v)}>
           {k.sentTitle ? <Text style={st.h3}>{k.sentTitle}</Text> : null}<Text style={st.text}>{k.sentText || k.text}</Text>
         </Fold>
       ) : null}
       {k.thread.map((m, i) => (
         <View key={i} style={[st.msg, m.from === 'team' && st.msgTeam]}>
-          <Text style={st.small}><Text style={{ fontWeight: '700', color: C.text }}>{FROM[m.from] || m.from}</Text> · {fmtDate(m.created)}{m.pending ? ' · Väntar på granskning' : ''}</Text>
-          {m.status === 'reopened' ? <Text style={st.small}>Ärendet öppnades igen</Text> : null}
+          <Text style={st.small}><Text style={{ fontWeight: '700', color: C.text }}>{FROM()[m.from] || m.from}</Text> · {fmtDate(m.created)}{m.pending ? ' · ' + t('Väntar på granskning') : ''}</Text>
+          {m.status === 'reopened' ? <Text style={st.small}>{t('Ärendet öppnades igen')}</Text> : null}
           {m.text ? <Text style={st.text} selectable>{m.text}</Text> : m.status && m.status !== 'reopened' ? <Text style={st.small}>{statusLabel({ status: m.status, version: m.version })[0]}</Text> : null}
         </View>
       ))}
       {k.canReply ? (
         <View style={{ gap: 8, marginTop: 4 }}>
-          <Text style={st.label} nativeID={`fbr${k.id}`}>Ditt svar till teamet</Text>
-          <TextInput style={[st.input, { minHeight: 90 }]} value={reply} onChangeText={setReply} multiline maxLength={MAX_TEXT} textAlignVertical="top" accessibilityLabel="Ditt svar till teamet" accessibilityLabelledBy={`fbr${k.id}`} />
-          <Text style={st.small}>{admin ? 'Svaret skickas direkt till teamet.' : 'Svaret granskas av en administratör innan det skickas vidare.'}</Text>
+          <Text style={st.label} nativeID={`fbr${k.id}`}>{t('Ditt svar till teamet')}</Text>
+          <TextInput style={[st.input, { minHeight: 90 }]} value={reply} onChangeText={setReply} multiline maxLength={MAX_TEXT} textAlignVertical="top" accessibilityLabel={t('Ditt svar till teamet')} accessibilityLabelledBy={`fbr${k.id}`} />
+          <Text style={st.small}>{admin ? t('Svaret skickas direkt till teamet.') : t('Svaret granskas av en administratör innan det skickas vidare.')}</Text>
           {error ? <Text style={st.err}>{error}</Text> : null}
-          <View style={st.row}><Button label={busy ? 'Skickar…' : 'Skicka svaret'} kind="primary" disabled={busy} onPress={send} /></View>
+          <View style={st.row}><Button label={busy ? t('Skickar…') : t('Skicka svaret')} kind="primary" disabled={busy} onPress={send} /></View>
         </View>
       ) : null}
-      <Fold label="Teknisk information som bifogades" open={showCtx} onToggle={() => setShowCtx((v) => !v)}><ContextList c={k.context} /></Fold>
+      <Fold label={t('Teknisk information som bifogades')} open={showCtx} onToggle={() => setShowCtx((v) => !v)}><ContextList c={k.context} /></Fold>
     </View>
   );
 }
@@ -213,25 +214,25 @@ export function TicketsScreen({ navigation, user }: Props<'Tickets'> & { user: U
   const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {
     try { setList((await myTickets()).tickets); setError(''); }
-    catch (e: any) { setError(errText(e, 'Kunde inte hämta dina ärenden')); }
+    catch (e: any) { setError(errText(e, t('Kunde inte hämta dina ärenden'))); }
   }, []);
   // Hämtas på nytt när man kommer tillbaka från formuläret
   useFocusEffect(useCallback(() => { load(); }, [load]));
-  const newBtn = <Button small label="Nytt ärende" icon="add" kind="primary" onPress={() => navigation.navigate('Feedback', {})} />;
+  const newBtn = <Button small label={t('Nytt ärende')} icon="add" kind="primary" onPress={() => navigation.navigate('Feedback', {})} />;
   return (
     <View style={st.root}>
-      <Header title="Mina ärenden" onBack={() => navigation.goBack()} right={newBtn} />
+      <Header title={t('Mina ärenden')} onBack={() => navigation.goBack()} right={newBtn} />
       {error && !list ? <ErrorState error={error} onRetry={load} /> : !list ? <Loading /> : (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={st.body} keyboardShouldPersistTaps="handled"
             refreshControl={<RefreshControl refreshing={refreshing} tintColor={C.accent} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}>
-            <Text style={st.dim}>Här ser du det du har skickat in, vad som händer med det och teamets svar. Bara du ser dina ärenden.</Text>
+            <Text style={st.dim}>{t('Här ser du det du har skickat in, vad som händer med det och teamets svar. Bara du ser dina ärenden.')}</Text>
             {note ? <Text style={st.ok} accessibilityLiveRegion="polite">{note}</Text> : null}
             {list.length ? list.map((k) => <TicketCard key={`${k.id}-${k.updated}`} k={k} admin={!!user?.is_admin} onReplied={(m) => { setNote(m); load(); }} />) : (
               <View style={[st.panel, { alignItems: 'center' }]}>
                 <Ionicons name="chatbubbles-outline" size={32} color={C.dim} />
-                <Text style={st.h3}>Inga ärenden än</Text>
-                <Text style={[st.dim, { textAlign: 'center' }]}>Har du en idé eller är det något som inte fungerar? Tryck på Nytt ärende.</Text>
+                <Text style={st.h3}>{t('Inga ärenden än')}</Text>
+                <Text style={[st.dim, { textAlign: 'center' }]}>{t('Har du en idé eller är det något som inte fungerar? Tryck på Nytt ärende.')}</Text>
               </View>
             )}
           </ScrollView>

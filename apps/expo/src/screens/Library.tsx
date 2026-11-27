@@ -8,35 +8,37 @@ import { api, ensureImageToken, type MediaItem } from '../api';
 import { ErrorState, Loading, Empty } from '../components/ui';
 import { Grid } from './Main';
 import type { Props } from '../nav';
+import { t } from '../i18n';
 
-const SORTS = [['title', 'Titel'], ['added', 'Senast tillagt'], ['year', 'År']] as const;
+const SORTS = ['title', 'added', 'year'] as const;
+const sortLabel = (k: (typeof SORTS)[number]) => (k === 'title' ? t('Titel') : k === 'added' ? t('Senast tillagt') : t('År'));
 
 export default function LibraryScreen({ navigation, route }: Props<'Library'>) {
   const insets = useSafeAreaInsets();
-  const [sort, setSort] = useState<(typeof SORTS)[number][0]>('title');
+  const [sort, setSort] = useState<(typeof SORTS)[number]>('title');
   const [items, setItems] = useState<MediaItem[] | null>(null);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     setItems(null);
     try { await ensureImageToken(); const r = await api<{ items: MediaItem[] }>(`/api/libraries/${route.params.id}/items?sort=${sort}`); setItems(r.items); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta biblioteket'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta biblioteket')); }
   }, [route.params.id, sort]);
   useEffect(() => { load(); }, [load]);
   return (
     <View style={[st.root, { paddingTop: insets.top }]}>
       <View style={st.top}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Tillbaka" style={st.back}><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Tillbaka')} style={st.back}><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
         <Text style={st.title} numberOfLines={1}>{route.params.name}</Text>
       </View>
       <View style={st.body}>
         <View style={st.sorts}>
-          {SORTS.map(([k, label]) => (
+          {SORTS.map((k) => (
             <Pressable key={k} onPress={() => setSort(k)} style={[st.chip, sort === k && st.chipOn]} accessibilityRole="button" accessibilityState={{ selected: sort === k }}>
-              <Text style={[st.chipText, sort === k && { color: C.accent }]}>{label}</Text>
+              <Text style={[st.chipText, sort === k && { color: C.accent }]}>{sortLabel(k)}</Text>
             </Pressable>
           ))}
         </View>
-        {error ? <ErrorState error={error} onRetry={load} /> : !items ? <Loading /> : !items.length ? <Empty text="Biblioteket är tomt." />
+        {error ? <ErrorState error={error} onRetry={load} /> : !items ? <Loading /> : !items.length ? <Empty text={t('Biblioteket är tomt.')} />
           : <Grid items={items} open={(it) => navigation.push('Item', { id: it.id })} />}
       </View>
     </View>

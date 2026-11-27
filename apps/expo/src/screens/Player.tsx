@@ -20,6 +20,7 @@ import * as off from '../offline';
 import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
+import { t } from '../i18n';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
 
@@ -101,7 +102,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
           const eps = show?.children || [], i = eps.findIndex((e) => e.id === it.id);
           if (live && i >= 0 && eps[i + 1]) setNext(nextOf(eps[i + 1]));
         }
-      } catch (e: any) { if (live) { setError(e?.message || 'Uppspelningen kunde inte startas'); setStartFailed(true); } }
+      } catch (e: any) { if (live) { setError(e?.message || t('Uppspelningen kunde inte startas')); setStartFailed(true); } }
     })();
     return () => { live = false; };
   }, [id, start, player, local]);
@@ -116,31 +117,31 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   }, [status, start, player, pb]);
 
   const send = useCallback(async (force = false) => {
-    const t = player.currentTime || 0, d = player.duration || item?.duration || 0;
-    if (!pb || !(t > 0) || !(d > 0)) return;
-    if (!force && Math.abs(t - lastSent.current) < PROGRESS_EVERY) return;
-    lastSent.current = t;
-    if (local) { await sendLocal(t, d); return; }
+    const secs = player.currentTime || 0, d = player.duration || item?.duration || 0;
+    if (!pb || !(secs > 0) || !(d > 0)) return;
+    if (!force && Math.abs(secs - lastSent.current) < PROGRESS_EVERY) return;
+    lastSent.current = secs;
+    if (local) { await sendLocal(secs, d); return; }
     try {
-      const r = await api<{ stop?: boolean | string; error?: string }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: t, duration: d } });
+      const r = await api<{ stop?: boolean | string; error?: string }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } });
       // Servern kan stoppa uppspelningen (föräldraöversikten, skärmtid, administratören)
-      if (r?.stop && !closed.current) { player.pause(); setError(typeof r.stop === 'string' ? r.stop : r.error || 'Uppspelningen stoppades'); }
+      if (r?.stop && !closed.current) { player.pause(); setError(typeof r.stop === 'string' ? r.stop : r.error || t('Uppspelningen stoppades')); }
     } catch {}
   }, [player, pb, item, id, local]);
 
   /** Nedladdad titel: till servern när den svarar, annars i telefonen (skickas med "at" senare) och skärmtiden räknas här */
-  const sendLocal = useCallback(async (t: number, d: number) => {
-    const done = d > 0 && (t / d > 0.92 || (d - t < 120 && t > 60));
+  const sendLocal = useCallback(async (secs: number, d: number) => {
+    const done = d > 0 && (secs / d > 0.92 || (d - secs < 120 && secs > 60));
     const now = Date.now(), played = beat.current ? (now - beat.current) / 1000 : 0;
     beat.current = player.playing ? now : 0;
     try {
-      const r = await api<{ stop?: boolean | string; error?: string; screenTime?: any }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: t, duration: d }, timeout: 6000 });
-      off.savePosition('movie', id, t, { sent: true, done });
+      const r = await api<{ stop?: boolean | string; error?: string; screenTime?: any }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d }, timeout: 6000 });
+      off.savePosition('movie', id, secs, { sent: true, done });
       off.noteScreen(r?.screenTime || { limited: false });
-      if (r?.stop && !closed.current) { player.pause(); setError(r?.screenTime?.allowed === false ? r.screenTime.message || 'Skärmtiden är slut för i dag.' : typeof r.stop === 'string' ? r.stop : r.error || 'Uppspelningen stoppades'); }
+      if (r?.stop && !closed.current) { player.pause(); setError(r?.screenTime?.allowed === false ? r.screenTime.message || t('Skärmtiden är slut för i dag.') : typeof r.stop === 'string' ? r.stop : r.error || t('Uppspelningen stoppades')); }
     } catch (err: any) {
-      if (err?.status !== 0) return; // servern svarade (t.ex. 403): inget att spara här
-      off.savePosition('movie', id, t, { done });
+      if (err?.status !== 0) return; // servern svarade (secs.ex. 403): inget att spara här
+      off.savePosition('movie', id, secs, { done });
       off.countOffline(played);
       const g = off.screenGate(false);
       if (!g.allowed && !closed.current) { player.pause(); setError(g.message); }
@@ -161,25 +162,25 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   // Stängning: sista framsteget och stopp av strömmen på servern
   useEffect(() => () => {
     closed.current = true;
-    const t = player.currentTime || 0, d = player.duration || 0;
+    const secs = player.currentTime || 0, d = player.duration || 0;
     if (local) {
       // Sparas i telefonen först (appen kan stängas innan servern svarat), skickas sedan
-      if (t > 0 && d > 0) { off.savePosition('movie', id, t, { done: t / d > 0.92 || (d - t < 120 && t > 60) }); off.syncSoon(300); }
+      if (secs > 0 && d > 0) { off.savePosition('movie', id, secs, { done: secs / d > 0.92 || (d - secs < 120 && secs > 60) }); off.syncSoon(300); }
       return;
     }
-    if (t > 0 && d > 0) api(`/api/items/${id}/progress`, { method: 'POST', body: { position: t, duration: d } }).catch(() => {});
+    if (secs > 0 && d > 0) api(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } }).catch(() => {});
     api(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
   }, [id, player, local]);
 
   const intro = pb?.intro && pos >= pb.intro.start && pos < pb.intro.end - 1 ? pb.intro : null;
   // Undertexter (nedladdade): tryck för att byta mellan spåren och av
   const ccBtn = subs.length ? (
-    <Pressable onPress={() => setSubIdx((i) => (i + 1 < subs.length ? i + 1 : -1))} style={st.cc} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Undertexter: ${subIdx >= 0 ? subs[subIdx].label : 'av'}. Tryck för att byta.`}>
-      <Ionicons name="text" size={16} color="#fff" /><Text style={st.ccText} numberOfLines={1}>{subIdx >= 0 ? subs[subIdx].label : 'Av'}</Text>
+    <Pressable onPress={() => setSubIdx((i) => (i + 1 < subs.length ? i + 1 : -1))} style={st.cc} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Undertexter: {v}. Tryck för att byta.', { v: subIdx >= 0 ? subs[subIdx].label : t('av') })}>
+      <Ionicons name="text" size={16} color="#fff" /><Text style={st.ccText} numberOfLines={1}>{subIdx >= 0 ? subs[subIdx].label : t('Av')}</Text>
     </Pressable>
   ) : null;
   const cue = subIdx >= 0 && subs[subIdx] ? cueAt(subs[subIdx].cues, pos) : '';
-  const msg = error || (status === 'error' ? playerError?.message || 'Uppspelningen misslyckades' : '');
+  const msg = error || (status === 'error' ? playerError?.message || t('Uppspelningen misslyckades') : '');
   const failed = !!msg && (startFailed || status === 'error');
   // Till Feedback: titeln som spelas och felet (förval och teknisk information i felrapporten)
   useEffect(() => { notePlayback(id, failed ? msg : ''); }, [id, failed, msg]);
@@ -191,7 +192,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       {(status === 'loading' || !pb) && !msg ? (
         <View style={st.center} pointerEvents="none">
           <ActivityIndicator color={C.accent} size="large" />
-          <Text style={st.wait}>{pb?.mode === 'transcode' ? 'Servern förbereder strömmen…' : 'Laddar…'}</Text>
+          <Text style={st.wait}>{pb?.mode === 'transcode' ? t('Servern förbereder strömmen…') : t('Laddar…')}</Text>
         </View>
       ) : null}
       {msg ? (
@@ -199,26 +200,26 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
           <Ionicons name="alert-circle-outline" size={40} color={C.err} />
           <Text style={st.msg}>{msg}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
-            {failed ? <Button label="Rapportera felet" icon="chatbox-ellipses-outline" onPress={() => navigation.replace('Feedback', { kind: 'bug', area: 'uppspelning' })} /> : null}
-            <Button label="Stäng" kind="primary" onPress={() => navigation.goBack()} />
+            {failed ? <Button label={t('Rapportera felet')} icon="chatbox-ellipses-outline" onPress={() => navigation.replace('Feedback', { kind: 'bug', area: 'uppspelning' })} /> : null}
+            <Button label={t('Stäng')} kind="primary" onPress={() => navigation.goBack()} />
           </View>
         </View>
       ) : null}
       {chrome || msg ? (
         <View style={[st.top, { paddingTop: insets.top + 6, paddingLeft: insets.left + 6 }]} pointerEvents="box-none">
-          <Pressable onPress={() => navigation.goBack()} style={st.close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Tillbaka"><Ionicons name="chevron-back" size={24} color="#fff" /></Pressable>
+          <Pressable onPress={() => navigation.goBack()} style={st.close} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Tillbaka')}><Ionicons name="chevron-back" size={24} color="#fff" /></Pressable>
           <Text style={st.title} numberOfLines={1}>{route.params.title || item?.title || local?.entry.title || ''}</Text>
-          {local ? <Ionicons name="download" size={18} color={C.ok} accessibilityLabel="Spelas från telefonen" /> : null}
+          {local ? <Ionicons name="download" size={18} color={C.ok} accessibilityLabel={t('Spelas från telefonen')} /> : null}
           {ccBtn}
         </View>
       ) : (
-        <Pressable onPress={() => navigation.goBack()} style={[st.close, st.closeFloat, { top: insets.top + 6, left: insets.left + 6 }]} hitSlop={10} accessibilityRole="button" accessibilityLabel="Tillbaka">
+        <Pressable onPress={() => navigation.goBack()} style={[st.close, st.closeFloat, { top: insets.top + 6, left: insets.left + 6 }]} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Tillbaka')}>
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </Pressable>
       )}
       {!(chrome || msg) && ccBtn ? <View style={{ position: 'absolute', top: insets.top + 11, right: insets.right + 12 }}>{ccBtn}</View> : null}
       {cue && !msg ? <View style={[st.subWrap, { bottom: insets.bottom + 70 }]} pointerEvents="none"><Text style={st.subText}>{cue}</Text></View> : null}
-      {intro ? <Button label="Hoppa över intro" kind="primary" small onPress={() => { player.currentTime = intro.end; }} style={[st.skip, { bottom: insets.bottom + 90, right: insets.right + 16 }]} /> : null}
+      {intro ? <Button label={t('Hoppa över intro')} kind="primary" small onPress={() => { player.currentTime = intro.end; }} style={[st.skip, { bottom: insets.bottom + 90, right: insets.right + 16 }]} /> : null}
     </View>
   );
 }

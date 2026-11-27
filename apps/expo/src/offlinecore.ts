@@ -1,6 +1,7 @@
 // Nedladdning för offline – logiken utan telefonens filsystem: posterna i Nedladdat, kön, positioner som väntar på att
-// skickas, val av lokal fil, undertexter och skärmtid utan nät. Inga importer: testas med Node (test/expo-offline.test.js).
-// Filerna, nedladdningen och serveranropen sköter offline.ts.
+// skickas, val av lokal fil, undertexter och skärmtid utan nät. Bara i18n.ts importeras (inget från telefonen): testas
+// med Node (test/expo-offline.test.js). Filerna, nedladdningen och serveranropen sköter offline.ts.
+import { fmtNum, t } from './i18n';
 
 export type Kind = 'movie' | 'episode' | 'book';
 export type DlState = 'queued' | 'preparing' | 'downloading' | 'paused' | 'error' | 'done';
@@ -44,14 +45,14 @@ export interface QualityOption { q: string; label: string; hint: string; bytes: 
 /** Kvaliteterna som går att välja för en titel (inga steg över filmens egen höjd, utom 480 som alltid finns) */
 export function qualityOptions(height?: number | null, duration?: number | null): QualityOption[] {
   const all: QualityOption[] = [
-    { q: '480', label: '480p', hint: 'minst – räcker på telefonen', bytes: estimateBytes('480', duration) },
-    { q: '720', label: '720p', hint: 'skarpare', bytes: estimateBytes('720', duration) },
-    { q: '1080', label: '1080p', hint: 'för surfplatta', bytes: estimateBytes('1080', duration) },
-    { q: 'orig', label: 'Full upplösning', hint: 'störst', bytes: 0 },
+    { q: '480', label: '480p', hint: t('minst – räcker på telefonen'), bytes: estimateBytes('480', duration) },
+    { q: '720', label: '720p', hint: t('skarpare'), bytes: estimateBytes('720', duration) },
+    { q: '1080', label: '1080p', hint: t('för surfplatta'), bytes: estimateBytes('1080', duration) },
+    { q: 'orig', label: t('Full upplösning'), hint: t('störst'), bytes: 0 },
   ];
   return all.filter((o) => o.q === '480' || o.q === 'orig' || !height || +o.q <= Math.max(480, height));
 }
-export const qualityLabel = (q: string) => (q === 'orig' ? 'Full upplösning' : q + 'p');
+export const qualityLabel = (q: string) => (q === 'orig' ? t('Full upplösning') : q + 'p');
 
 // ---------- poster ----------
 interface VideoLike { id: number; kind: string; title: string; year?: number | null; showTitle?: string; show?: number; season?: number; episode?: number; duration?: number | null; position?: number; watched?: boolean }
@@ -59,7 +60,7 @@ export function videoEntry(it: VideoLike, q: string, now = Date.now()): DlEntry 
   const ep = it.kind === 'episode';
   return {
     key: keyOf(it.kind, it.id), kind: ep ? 'episode' : 'movie', id: it.id, title: it.title,
-    sub: ep ? [it.showTitle || '', it.season != null && it.episode != null ? `S${it.season} · A${it.episode}` : ''].filter(Boolean).join(' · ') : it.year ? String(it.year) : '',
+    sub: ep ? [it.showTitle || '', it.season != null && it.episode != null ? t('S{s} · A{e}', { s: it.season, e: it.episode }) : ''].filter(Boolean).join(' · ') : it.year ? String(it.year) : '',
     show: ep && it.show ? { id: it.show, title: it.showTitle || '' } : null, season: it.season ?? null, episode: it.episode ?? null,
     q, state: 'queued', prep: 0, got: 0, size: 0, error: null, files: [{ name: keyOf(it.kind, it.id) + '.mp4', size: 0, done: false }], subs: [],
     duration: it.duration || 0, position: it.watched ? 0 : it.position || 0, added: now,
@@ -87,14 +88,14 @@ export function afterRestart(e: DlEntry): DlEntry { return e.state === 'download
 /** Andel klar (0–1) och en text, t.ex. "Servern förbereder filen 40 %" eller "Laddar ner 300 MB av 1,2 GB" */
 export function progressOf(e: DlEntry): { part: number; text: string } {
   if (e.state === 'done') return { part: 1, text: fmtSize(e.size) };
-  if (e.state === 'error') return { part: 0, text: e.error || 'Nedladdningen misslyckades' };
+  if (e.state === 'error') return { part: 0, text: e.error || t('Nedladdningen misslyckades') };
   const files = e.files.length || 1, doneFiles = e.files.filter((f) => f.done).length;
   const part = e.size > 0 ? Math.min(1, e.got / e.size) : files > 1 ? doneFiles / files : 0;
-  const amount = e.size > 0 ? `${fmtSize(e.got)} av ${fmtSize(e.size)}` : e.got > 0 ? fmtSize(e.got) : '';
-  if (e.state === 'paused') return { part, text: ['Pausad', amount].filter(Boolean).join(' · ') };
-  if (e.state === 'queued') return { part, text: e.error || 'Väntar på sin tur' };
-  if (e.state === 'preparing') return { part: 0, text: `Servern förbereder filen ${Math.round(e.prep || 0)} %` };
-  return { part, text: ['Laddar ner', amount || (files > 1 ? `${doneFiles} av ${files} filer` : '')].filter(Boolean).join(' ') };
+  const amount = e.size > 0 ? t('{got} av {size}', { got: fmtSize(e.got), size: fmtSize(e.size) }) : e.got > 0 ? fmtSize(e.got) : '';
+  if (e.state === 'paused') return { part, text: [t('Pausad'), amount].filter(Boolean).join(' · ') };
+  if (e.state === 'queued') return { part, text: e.error || t('Väntar på sin tur') };
+  if (e.state === 'preparing') return { part: 0, text: t('Servern förbereder filen {p} %', { p: Math.round(e.prep || 0) }) };
+  return { part, text: [t('Laddar ner'), amount || (files > 1 ? t('{done} av {n} filer', { done: doneFiles, n: files }) : '')].filter(Boolean).join(' ') };
 }
 
 // ---------- fortsätt en avbruten nedladdning ----------
@@ -235,10 +236,11 @@ export function screenGate(c: ScreenCache | null, d: Date, audio = false): { all
     if (f <= e) { inWindow = nowMin >= f && nowMin < e; if (inWindow && until != null) windowLeft = Math.round((e - nowMin) * 60); }
     else { inWindow = nowMin >= f || nowMin < e; if (inWindow && until != null) windowLeft = Math.round(((nowMin >= f ? e + 1440 : e) - nowMin) * 60); }
   }
-  if (remaining != null && remaining <= 0) return { allowed: false, left: 0, message: 'Tiden är slut för i dag. Fråga en vuxen om du behöver mer tid.' };
+  if (remaining != null && remaining <= 0) return { allowed: false, left: 0, message: t('Tiden är slut för i dag. Fråga en vuxen om du behöver mer tid.') };
   if (!inWindow) {
-    const win = s.from && s.until ? `mellan ${s.from} och ${until != null ? hhmm(until) : s.until}` : s.from ? `från ${s.from}` : `fram till ${until != null ? hhmm(until) : s.until}`;
-    return { allowed: false, left: 0, message: `Det går inte att titta just nu. I dag går det att titta ${win}.` };
+    const to = until != null ? hhmm(until) : s.until;
+    const win = s.from && s.until ? t('mellan {from} och {to}', { from: s.from, to }) : s.from ? t('från {from}', { from: s.from }) : t('fram till {to}', { to });
+    return { allowed: false, left: 0, message: t('Det går inte att titta just nu. I dag går det att titta {win}.', { win }) };
   }
   const left = remaining == null ? windowLeft : windowLeft == null ? Math.round(remaining) : Math.min(Math.round(remaining), windowLeft);
   return { allowed: true, left, message: '' };
@@ -254,7 +256,7 @@ export const accessVerdict = (status: number) => (status === 403 || status === 4
 // ---------- storlek ----------
 export function fmtSize(b: number): string {
   if (!(b > 0)) return '0 MB';
-  if (b >= 1e9) return (b / 1e9).toFixed(b >= 1e10 ? 0 : 1).replace('.', ',') + ' GB';
+  if (b >= 1e9) { const d = b >= 1e10 ? 0 : 1; return fmtNum(b / 1e9, { minimumFractionDigits: d, maximumFractionDigits: d }) + ' GB'; }
   return Math.max(1, Math.round(b / 1e6)) + ' MB';
 }
 /** Utrymmet som nedladdningarna tar (klara och påbörjade) */

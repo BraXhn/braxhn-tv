@@ -6,7 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { C } from './src/theme';
-import { api, currentServer, listProfiles, loadServers, rememberProfile, selectServer, servers, setProfile, setUnauthorizedHandler, signOut, goHomeIfHere, type Server, type UserInfo } from './src/api';
+import { api, currentServer, listProfiles, loadPref, loadServers, rememberProfile, selectServer, servers, setProfile, setUnauthorizedHandler, signOut, goHomeIfHere, type Server, type UserInfo } from './src/api';
 import type { Stack as StackParams } from './src/nav';
 import Login from './src/screens/Login';
 import Servers from './src/screens/Servers';
@@ -26,6 +26,7 @@ import { startView } from './src/offlinecore';
 import { confirm } from './src/components/download';
 import { FeedbackScreen, TicketsScreen } from './src/screens/Feedback';
 import { noteRoute } from './src/feedback';
+import { lang, onLangChange, setLangChoice, t, type LangChoice } from './src/i18n';
 
 /** Skärmen som syns just nu (förvalet i Feedback följer den) */
 const focused = (s: any): string => { const r = s?.routes?.[s.index ?? 0]; return r?.state ? focused(r.state) : r?.name || ''; };
@@ -42,6 +43,10 @@ export default function App() {
   // Servern svarade inte vid start och profilen har något nedladdat: appen öppnar Nedladdat
   const [offlineStart, setOfflineStart] = useState(false);
   const [, redraw] = useState(0);
+  // Språket: valet under Konto (sparat i telefonen) läses före allt annat. Ett byte ritar om appen och öppnar Konto.
+  const [langKey, setLangKey] = useState(lang);
+  const [afterLang, setAfterLang] = useState(false);
+  useEffect(() => onLangChange(() => { setLangKey(lang); setAfterLang(true); }), []);
 
   /** Öppnar den valda servern: kontrollerar inloggningen och hämtar vem som är inloggad. Direkt efter inloggningen
    *  visas Vem tittar? när kontot har flera profiler (som webben). */
@@ -96,7 +101,7 @@ export default function App() {
       if (servers.length > 1) setState('pick'); else { setAgain(sv); setState('add'); }
     };
     // Nedladdat tas bort vid utloggning – fråga först
-    if (sv && off.hasServerDownloads(sv.id)) confirm('Logga ut?', 'Allt som laddats ner från den här servern tas bort från telefonen. Du kan ladda ner det igen när du loggat in.', 'Logga ut och ta bort', () => { go(); });
+    if (sv && off.hasServerDownloads(sv.id)) confirm(t('Logga ut?'), t('Allt som laddats ner från den här servern tas bort från telefonen. Du kan ladda ner det igen när du loggat in.'), t('Logga ut och ta bort'), () => { go(); });
     else await go();
   }, []);
 
@@ -105,29 +110,29 @@ export default function App() {
     if (!u) { setState('in'); return; }
     resetAudio(false); // Profiles sparade före bytet; den nya profilen får sin egen kö
     off.closeScope(); // den nya profilen har sina egna nedladdningar
-    setUser(u); setState('loading');
+    setUser(u); setState('loading'); setAfterLang(false); // ny profil börjar på startsidan
     await enter(false);
   }, [enter]);
 
   useEffect(() => {
     // Inloggningen gäller inte längre: nedladdningarna ligger kvar och syns igen när samma profil loggar in
     setUnauthorizedHandler(() => { const sv = currentServer(); resetAudio(); off.closeScope(); signOut(); setUser(null); setAgain(sv); setState('add'); });
-    start();
+    loadPref('bx.lang').then((v) => setLangChoice((v || '') as LangChoice)).catch(() => {}).then(() => { setAfterLang(false); start(); });
     return () => setUnauthorizedHandler(null);
   }, [start]);
 
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={{ flex: 1, backgroundColor: C.bg }} key={langKey /* nytt språk: allt ritas om med de nya texterna */}>
         {state === 'loading' ? <Loading />
-          : state === 'add' ? <Login key={again?.id || 'ny'} again={again} onDone={() => enter(true)} onCancel={servers.length > (again ? 1 : 0) ? () => { setAgain(null); setState('pick'); } : undefined} />
+          : state === 'add' ? <Login key={again?.id || 'new'} again={again} onDone={() => enter(true)} onCancel={servers.length > (again ? 1 : 0) ? () => { setAgain(null); setState('pick'); } : undefined} />
           : state === 'profiles' ? <Profiles current={user?.name || ''} onDone={afterProfile} />
           : state === 'pick' ? <Servers onPick={open} onAdd={() => { setAgain(null); setState('add'); }} onChanged={() => (servers.length ? redraw((n) => n + 1) : setState('add'))} />
           : (
           <NavigationContainer theme={theme} onStateChange={(s) => noteRoute(focused(s))} key={`${user?.id || 0}${offlineStart ? '-off' : ''}` /* ny profil: börja om på startsidan */}>
             <Stack.Navigator initialRouteName={offlineStart ? 'Downloads' : 'Main'} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}>
-              <Stack.Screen name="Main">{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); off.closeScope(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
+              <Stack.Screen name="Main" initialParams={afterLang ? { tab: 'account' } : undefined}>{(p) => <Main {...p} user={user} onLogout={logout} onSwitch={() => { resetAudio(); off.closeScope(); setState('pick'); }} onProfiles={() => setState('profiles')} onAdd={() => { setAgain(null); setState('add'); }} />}</Stack.Screen>
               <Stack.Screen name="Library" component={LibraryScreen} />
               <Stack.Screen name="Item" component={ItemScreen} />
               <Stack.Screen name="Player" component={PlayerScreen} options={{ animation: 'fade', orientation: 'all', gestureEnabled: false }} />

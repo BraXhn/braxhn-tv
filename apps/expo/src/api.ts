@@ -1,8 +1,9 @@
-// Anrop till BraXhn TV-servern: adress, inloggning (token i enhetens säkra lagring), fel på begriplig svenska
+// Anrop till BraXhn TV-servern: adress, inloggning (token i enhetens säkra lagring), begripliga fel på appens språk
 // och adresser till bilder. Samma API som iOS- och Android-apparna (test/contracts/apps.json i repot).
 import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { isLocalUrl, pickLocal, type LocalInfo } from './localpick';
+import { acceptLanguage, t } from './i18n';
 
 export class ApiError extends Error {
   status: number; data: any;
@@ -21,6 +22,10 @@ const store = {
     try { v == null ? await SecureStore.deleteItemAsync(k) : await SecureStore.setItemAsync(k, v); } catch {}
   },
 };
+
+/** Inställningar i telefonen som inte hör till en server (t.ex. språket, bx.lang) */
+export const loadPref = (k: string) => store.get(k);
+export const savePref = (k: string, v: string | null) => store.set(k, v);
 
 // userId = profilen som är inloggad (från /api/status eller profilbytet); bildtoken sparas per profil.
 // saved = adressen i serverlistan; server = adressen som används just nu: den sparade, eller serverns adress på
@@ -102,7 +107,7 @@ export const listProfiles = () => api<{ current: number; profiles: Profile[] }>(
  *  när en barnprofil byter till en profil utan PIN med högre åldersgräns – då krävs huvudkontots lösenord). */
 export async function switchProfile(id: number, secret: { pin?: string; password?: string } = {}): Promise<UserInfo> {
   const r = await api<{ token: string; user: UserInfo }>('/api/profiles/switch', { method: 'POST', body: { id, ...secret } });
-  if (!r?.token || !r.user) throw new ApiError('Kunde inte byta profil – försök igen.');
+  if (!r?.token || !r.user) throw new ApiError(t('Kunde inte byta profil – försök igen.'));
   session.token = r.token;
   if (currentId) await store.set(tokenKey(currentId), r.token);
   await rememberProfile(r.user.name);
@@ -118,17 +123,17 @@ export async function signOut() {
 
 function netError(e: any): ApiError {
   const m = String(e?.message || e);
-  if (/abort|timed? ?out/i.test(m)) return new ApiError('Servern svarade inte i tid – försök igen.');
-  return new ApiError('Kunde inte ansluta till servern. Kontrollera adressen och att telefonen är på samma nät. Utanför hemmet behövs en https-adress.');
+  if (/abort|timed? ?out/i.test(m)) return new ApiError(t('Servern svarade inte i tid – försök igen.'));
+  return new ApiError(t('Kunde inte ansluta till servern. Kontrollera adressen och att telefonen är på samma nät. Utanför hemmet behövs en https-adress.'));
 }
 function httpText(code: number): string {
-  if (code === 401) return 'Inloggningen gäller inte längre – logga in igen.';
-  if (code === 404) return 'Finns inte på servern (404). Servern kan vara äldre än appen.';
-  if (code === 429) return 'För många försök – vänta en stund och försök igen.';
-  if (code === 502 || code === 504) return `Servern svarar inte (${code}). Via BraXhn Relay kan hemservern vara avstängd.`;
-  if (code === 503) return 'Servern är tillfälligt otillgänglig – försök igen om en stund.';
-  if (code === 507) return 'Serverns disk är full – säg till den som sköter servern.';
-  return `Servern svarade ${code}`;
+  if (code === 401) return t('Inloggningen gäller inte längre – logga in igen.');
+  if (code === 404) return t('Finns inte på servern (404). Servern kan vara äldre än appen.');
+  if (code === 429) return t('För många försök – vänta en stund och försök igen.');
+  if (code === 502 || code === 504) return t('Servern svarar inte ({code}). Via BraXhn Relay kan hemservern vara avstängd.', { code });
+  if (code === 503) return t('Servern är tillfälligt otillgänglig – försök igen om en stund.');
+  if (code === 507) return t('Serverns disk är full – säg till den som sköter servern.');
+  return t('Servern svarade {code}', { code });
 }
 
 let onUnauthorized: (() => void) | null = null;
@@ -136,8 +141,9 @@ export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: any; server?: string; auth?: boolean; timeout?: number } = {}): Promise<T> {
   const base = opts.server ?? session.server;
-  if (!base) throw new ApiError('Ingen server är vald.');
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (!base) throw new ApiError(t('Ingen server är vald.'));
+  // Accept-Language: servern svarar med fel och hyllnamn på appens språk (om profilen inte valt ett eget i webben)
+  const headers: Record<string, string> = { Accept: 'application/json', 'Accept-Language': acceptLanguage() };
   const sent = opts.auth !== false ? session.token : '';
   if (sent) headers.Authorization = 'Bearer ' + sent;
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -263,7 +269,7 @@ export function resumeAt(pos?: number | null, dur?: number | null): number {
   const p = pos || 0, d = dur && dur > 0 ? dur : 1e9;
   return p > 0 && p >= Math.min(120, d * 0.25) ? p : 0;
 }
-export const sxe = (it: MediaItem) => (it.season != null && it.episode != null ? `S${it.season} · A${it.episode}` : '');
+export const sxe = (it: MediaItem) => (it.season != null && it.episode != null ? t('S{s} · A{e}', { s: it.season, e: it.episode }) : '');
 export function fmtDur(s?: number | null): string {
   if (!s || s <= 0) return '';
   const m = Math.round(s / 60);

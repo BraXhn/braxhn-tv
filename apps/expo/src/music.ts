@@ -6,6 +6,7 @@ import { AppState } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { absolute, api, ApiError, audioCaps, session } from './api';
 import * as off from './offline';
+import { t } from './i18n';
 
 // ---------- typer (det appen använder ur serverns svar) ----------
 export interface Track {
@@ -126,7 +127,7 @@ function onStatus(st: AudioStatus) {
     p.dur = t?.duration || (fileDur ? fileDur + c.offset : 0);
   }
   const err = (st as any).error;
-  if (err && !st.playing) p.error = 'Det gick inte att spela – kontrollera nätet och försök igen.';
+  if (err && !st.playing) p.error = t('Det gick inte att spela – kontrollera nätet och försök igen.');
   set(p);
   if (st.playing && S.error && !err) set({ error: '' });
   if (S.mode === 'music' && st.playing) preloadNext();
@@ -155,29 +156,29 @@ async function saveQueue(final = false) {
 const queueSoon = () => { if (!Q.owner || !Q.touched) return; clearTimeout(Q.timer); Q.timer = setTimeout(saveQueue, 1000); };
 
 async function loadTrack(i: number, at = 0, play = true) {
-  const t = S.queue[i]; if (!t) return;
+  const tr = S.queue[i]; if (!tr) return;
   restored = false;
-  set({ idx: i, pos: at, dur: t.duration || 0, error: '', stopped: '', buffering: play });
-  const key = 'm' + t.id;
+  set({ idx: i, pos: at, dur: tr.duration || 0, error: '', stopped: '', buffering: play });
+  const key = 'm' + tr.id;
   // Nästa låt är redan laddad: ta den
   if (pre && pre.key === key && at === 0) {
     const p = pre; pre = null;
     drop(cur); cur = null;
     attach(p.player, key, 0, 0, play);
-    if (play) played(t.id);
+    if (play) played(tr.id);
     queueSoon();
     return;
   }
   const g = ++gen;
   drop(cur); cur = null;
   let url: string;
-  try { url = await trackUrl(t.id); } catch (e: any) { if (g === gen) set({ error: e?.message || 'Kunde inte spela låten', playing: false, buffering: false }); return; }
+  try { url = await trackUrl(tr.id); } catch (e: any) { if (g === gen) set({ error: e?.message || t('Kunde inte spela låten'), playing: false, buffering: false }); return; }
   if (g !== gen) return;
   // Omkodat (formatet spelas inte direkt): servern börjar på rätt ställe, positionen räknas från där
-  const ss = !direct(t.codec) && at > 0 ? Math.floor(at) : 0;
+  const ss = !direct(tr.codec) && at > 0 ? Math.floor(at) : 0;
   const player = createAudioPlayer({ uri: ss ? url + '&ss=' + ss : url }, { updateInterval: 500 });
   attach(player, key, ss, ss ? 0 : at, play);
-  if (play) played(t.id);
+  if (play) played(tr.id);
   queueSoon();
 }
 /** Lyssningen räknas (historik, ListenBrainz/Last.fm) – som webben, när en låt startar */
@@ -272,7 +273,7 @@ export function removeAt(i: number) {
 /** Låtradio: liknande låtar efter den som spelas (servern väljer med ljudanalysen, POST /api/music/radio) */
 export async function startRadio(seed: Radio['seed'], name: string) {
   const r = await api<{ trackList: Track[] }>('/api/music/radio', { method: 'POST', body: { ...seed, count: 25 } });
-  if (!r?.trackList?.length) throw new ApiError('Hittade inga liknande låtar än – ljudanalysen kan behöva mer tid.');
+  if (!r?.trackList?.length) throw new ApiError(t('Hittade inga liknande låtar än – ljudanalysen kan behöva mer tid.'));
   await playTracks(r.trackList, 0, { radio: { seed, name } });
 }
 async function moreRadio() {
@@ -323,7 +324,7 @@ export async function playBook(bid: number, from?: number) {
   const b = await api<BookInfo & { position?: number; speed?: number; finished?: boolean; files: BookFile[] }>(`/api/audiobooks/book/${bid}/play?a=${ca}`);
   dropAll();
   bookFiles = (b.files || []).map((f) => ({ ...f, url: absolute(f.url) }));
-  if (!bookFiles.length) throw new ApiError('Boken har inga ljudfiler.');
+  if (!bookFiles.length) throw new ApiError(t('Boken har inga ljudfiler.'));
   const pos = from ?? (b.finished ? 0 : b.position || 0);
   set({ ...EMPTY, mode: 'book', book: { id: b.id, title: b.title, author: b.author, narrator: b.narrator, cover: b.cover, duration: b.duration, chapters: b.chapters || [] },
     pos, dur: b.duration || 0, rate: b.speed || 1 });
@@ -410,7 +411,7 @@ async function progress(final = false, played?: boolean) {
   if (r?.stop && S.playing) {
     try { cur?.player.pause(); } catch {}
     const st = r.screenTime;
-    set({ playing: false, stopped: st && st.allowed === false ? st.message || 'Skärmtiden är slut för i dag.' : 'Uppspelningen stoppades av en vuxen.' });
+    set({ playing: false, stopped: st && st.allowed === false ? st.message || t('Skärmtiden är slut för i dag.') : t('Uppspelningen stoppades av en vuxen.') });
   }
 }
 

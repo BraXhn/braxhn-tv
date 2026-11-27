@@ -13,6 +13,7 @@ import { Cover, Header, MiniPlayer, s as as } from '../components/audio';
 import { DownloadBook } from '../components/download';
 import { st } from './Music';
 import type { Props, Stack } from '../nav';
+import { locale, t } from '../i18n';
 
 type Nav = NavigationProp<Stack>;
 interface Book { id: number; title: string; author?: string | null; narrator?: string | null; duration?: number | null; cover?: boolean; position?: number; finished?: boolean; series?: string | null; seriesNo?: string | null }
@@ -24,7 +25,7 @@ function useLoad<T>(path: string) {
   const [error, setError] = useState('');
   const reload = useCallback(async () => {
     try { await ensureImageToken(); setData(await api<T>(path)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta listan'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta listan')); }
   }, [path]);
   // Hämtas igen när man kommer tillbaka: positionen kan ha ändrats
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
@@ -53,7 +54,7 @@ export function BooksSection({ lib }: { lib: Library }) {
   const [w, setW] = useState(0);
   if (error && !data) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  if (!data.books.length) return <Empty text="Inga ljudböcker ännu." />;
+  if (!data.books.length) return <Empty text={t('Inga ljudböcker ännu.')} />;
   const cols = Math.max(2, Math.floor((w - 14) / (140 + 14)));
   const cw = w ? Math.floor((w - 14 * (cols + 1)) / cols) : 0;
   return (
@@ -62,11 +63,11 @@ export function BooksSection({ lib }: { lib: Library }) {
         contentContainerStyle={{ padding: 14, gap: 18 }} columnWrapperStyle={{ gap: 14 }}
         ListHeaderComponent={data.continue.length ? (
           <View style={{ marginHorizontal: -14 }}>
-            <Text style={st.h2}>Fortsätt lyssna</Text>
+            <Text style={st.h2}>{t('Fortsätt lyssna')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}>
               {data.continue.map((b) => <BookCard key={b.id} b={b} width={130} />)}
             </ScrollView>
-            <Text style={[st.h2, { marginTop: 22, marginBottom: 0 }]}>Alla böcker</Text>
+            <Text style={[st.h2, { marginTop: 22, marginBottom: 0 }]}>{t('Alla böcker')}</Text>
           </View>
         ) : undefined}
         renderItem={({ item }) => <BookCard b={item} width={cw} />} /> : null}
@@ -79,7 +80,7 @@ export function BookScreen({ navigation, route }: Props<'Book'>) {
   const { data: b, error, reload } = useLoad<BookDetail>(`/api/audiobooks/book/${route.params.id}`);
   const [err, setErr] = useState('');
   const playingThis = useNowPlayingPart((x) => x.mode === 'book' && x.book?.id === route.params.id);
-  const start = (from?: number) => playBook(route.params.id, from).then(() => setErr('')).catch((e) => setErr(e?.message || 'Boken gick inte att spela'));
+  const start = (from?: number) => playBook(route.params.id, from).then(() => setErr('')).catch((e) => setErr(e?.message || t('Boken gick inte att spela')));
   return (
     <View style={[st.root, { paddingTop: insets.top }]}>
       <Header title={b?.title || ''} onBack={() => navigation.goBack()} />
@@ -90,21 +91,21 @@ export function BookScreen({ navigation, route }: Props<'Book'>) {
               <Cover uri={b.cover ? bookCoverUrl(b.id, 600) : null} size={200} icon="book-outline" />
               <Text style={st.h1}>{b.title}</Text>
               {b.author ? <Text style={st.artistLink}>{b.author}</Text> : null}
-              <Text style={st.meta}>{[b.narrator ? `Uppläsare: ${b.narrator}` : '', b.series ? `${b.series}${b.seriesNo ? ' ' + b.seriesNo : ''}` : '', fmtDur(b.duration)].filter(Boolean).join(' · ')}</Text>
-              {b.finished ? <Text style={st.meta}>Utläst</Text> : b.position ? <Text style={st.meta}>{`${fmtDur(left(b))} kvar`}</Text> : null}
+              <Text style={st.meta}>{[b.narrator ? t('Uppläsare: {v}', { v: b.narrator }) : '', b.series ? `${b.series}${b.seriesNo ? ' ' + b.seriesNo : ''}` : '', fmtDur(b.duration)].filter(Boolean).join(' · ')}</Text>
+              {b.finished ? <Text style={st.meta}>{t('Utläst')}</Text> : b.position ? <Text style={st.meta}>{t('{v} kvar', { v: fmtDur(left(b)) })}</Text> : null}
             </View>
             <View style={st.btns}>
               {b.position && !b.finished ? (<>
-                <Button kind="primary" icon="play" label={`Fortsätt från ${fmtTime(b.position)}`} onPress={() => start()} />
-                <Button label="Börja om" onPress={() => start(0)} />
-              </>) : <Button kind="primary" icon="play" label={playingThis ? 'Spelas nu' : 'Spela'} onPress={() => start(b.finished ? 0 : undefined)} />}
+                <Button kind="primary" icon="play" label={t('Fortsätt från {v}', { v: fmtTime(b.position) })} onPress={() => start()} />
+                <Button label={t('Börja om')} onPress={() => start(0)} />
+              </>) : <Button kind="primary" icon="play" label={playingThis ? t('Spelas nu') : t('Spela')} onPress={() => start(b.finished ? 0 : undefined)} />}
             </View>
             {err ? <Text style={[st.dim, { color: C.err, paddingHorizontal: 14 }]}>{err}</Text> : null}
             <DownloadBook id={b.id} cover={!!b.cover} />
             {b.description ? <Text style={bs.desc}>{b.description.replace(/<[^>]+>/g, '')}</Text> : null}
-            {b.chapters.length > 1 ? <Text style={[st.h2, { marginTop: 18 }]}>Kapitel</Text> : null}
+            {b.chapters.length > 1 ? <Text style={[st.h2, { marginTop: 18 }]}>{t('Kapitel')}</Text> : null}
             {b.chapters.length > 1 ? b.chapters.map((c, i) => (
-              <Pressable key={i} onPress={() => start(c.start)} style={({ pressed }) => [as.row, pressed && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={`Spela från ${c.title}`}>
+              <Pressable key={i} onPress={() => start(c.start)} style={({ pressed }) => [as.row, pressed && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={t('Spela från {v}', { v: c.title })}>
                 <View style={as.num}><Text style={as.numT}>{i + 1}</Text></View>
                 <Text style={[as.rowT, { flex: 1, fontWeight: '500' }]} numberOfLines={2}>{c.title}</Text>
                 <Text style={as.rowD}>{fmtTime(c.start)}</Text>
@@ -119,13 +120,13 @@ export function BookScreen({ navigation, route }: Props<'Book'>) {
 }
 
 // ---------- poddar ----------
-const pubDate = (s?: number | null) => (s ? new Date(s * 1000).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const pubDate = (s?: number | null) => (s ? new Date(s * 1000).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 function EpisodeRow({ e, showPod }: { e: Episode; showPod?: boolean }) {
   const [err, setErr] = useState('');
   const on = useNowPlayingPart((x) => x.mode === 'podcast' && x.episode?.id === e.id);
-  const sub = [showPod ? e.podcastTitle : '', pubDate(e.published), e.played ? 'Lyssnat' : e.position ? `${fmtDur(left(e))} kvar` : fmtDur(e.duration)].filter(Boolean).join(' · ');
+  const sub = [showPod ? e.podcastTitle : '', pubDate(e.published), e.played ? t('Lyssnat') : e.position ? t('{v} kvar', { v: fmtDur(left(e)) }) : fmtDur(e.duration)].filter(Boolean).join(' · ');
   return (
-    <Pressable onPress={() => playEpisode(e.id).then(() => setErr('')).catch((x) => setErr(x?.message || 'Avsnittet gick inte att spela'))} style={({ pressed }) => [as.row, pressed && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={`Spela ${e.title}`}>
+    <Pressable onPress={() => playEpisode(e.id).then(() => setErr('')).catch((x) => setErr(x?.message || t('Avsnittet gick inte att spela')))} style={({ pressed }) => [as.row, pressed && { backgroundColor: C.bg2 }]} accessibilityRole="button" accessibilityLabel={t('Spela {title}', { title: e.title })}>
       {showPod ? <Cover uri={podImageUrl(e.podcast, 120)} size={48} icon="mic" /> : <Ionicons name={on ? 'volume-high' : e.played ? 'checkmark-circle' : 'play-circle-outline'} size={26} color={on || !e.played ? C.accent : C.dim} />}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[as.rowT, on && { color: C.accent }, e.played && !on && { color: C.dim }]} numberOfLines={2}>{e.title}</Text>
@@ -141,20 +142,20 @@ export function PodcastsSection() {
   const nav = useNavigation<Nav>();
   if (error && !data) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  if (!data.podcasts.length) return <Empty text="Inga poddar ännu. Poddar läggs till i webbgränssnittet." />;
+  if (!data.podcasts.length) return <Empty text={t('Inga poddar ännu. Poddar läggs till i webbgränssnittet.')} />;
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-      <Text style={[st.h2, { marginTop: 14 }]}>Poddar</Text>
+      <Text style={[st.h2, { marginTop: 14 }]}>{t('Poddar')}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}>
         {data.podcasts.map((p) => (
           <Pressable key={p.id} style={{ width: 120 }} onPress={() => nav.navigate('Podcast', { id: p.id })} accessibilityRole="button" accessibilityLabel={p.title}>
             <Cover uri={podImageUrl(p.id, 300)} size={120} icon="mic" />
             <Text style={as.cardT} numberOfLines={2}>{p.title}</Text>
-            {p.unplayed ? <Text style={as.cardS}>{p.unplayed} nya</Text> : null}
+            {p.unplayed ? <Text style={as.cardS}>{t('{n} nya', { n: p.unplayed })}</Text> : null}
           </Pressable>
         ))}
       </ScrollView>
-      {data.latest.length ? <Text style={[st.h2, { marginTop: 22 }]}>Nya avsnitt</Text> : null}
+      {data.latest.length ? <Text style={[st.h2, { marginTop: 22 }]}>{t('Nya avsnitt')}</Text> : null}
       {data.latest.map((e) => <EpisodeRow key={e.id} e={e} showPod />)}
     </ScrollView>
   );
@@ -176,7 +177,7 @@ export function PodcastScreen({ navigation, route }: Props<'Podcast'>) {
                 {p.author ? <Text style={st.meta}>{p.author}</Text> : null}
                 {p.description ? <Text style={[bs.desc, { paddingHorizontal: 0 }]} numberOfLines={4}>{p.description.replace(/<[^>]+>/g, '')}</Text> : null}
               </View>}
-            ListEmptyComponent={<Text style={[st.dim, { padding: 24 }]}>Inga avsnitt än.</Text>}
+            ListEmptyComponent={<Text style={[st.dim, { padding: 24 }]}>{t('Inga avsnitt än.')}</Text>}
             renderItem={({ item }) => <EpisodeRow e={item} />} />
         )}
       </View>

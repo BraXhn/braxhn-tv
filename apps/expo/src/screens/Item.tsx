@@ -10,6 +10,7 @@ import { api, ensureImageToken, fmtDur, fmtTime, resumeAt, sxe, warmPlay, type I
 import { Art, Button, ErrorState, Loading, Shelf } from '../components/ui';
 import { DownloadSeason, DownloadVideo, EpisodeDownload } from '../components/download';
 import type { Props } from '../nav';
+import { t, tn } from '../i18n';
 
 export default function ItemScreen({ navigation, route }: Props<'Item'>) {
   const insets = useSafeAreaInsets();
@@ -18,7 +19,7 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
   const [season, setSeason] = useState<number | null>(null);
   const load = useCallback(async () => {
     try { await ensureImageToken(); setIt(await api<ItemDetail>('/api/items/' + route.params.id)); setError(''); }
-    catch (e: any) { setError(e?.message || 'Kunde inte hämta titeln'); }
+    catch (e: any) { setError(e?.message || t('Kunde inte hämta titeln')); }
   }, [route.params.id]);
   // Hämtas på nytt efter uppspelning: positionen och "sedd" har ändrats
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -26,11 +27,11 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
   const play = (x: MediaItem, start: number) => navigation.push('Player', { id: x.id, start, title: x.kind === 'episode' ? `${x.showTitle || ''} · ${sxe(x)}` : x.title });
   const seasons = useMemo(() => [...new Set((it?.children || []).map((c) => c.season ?? 0))].sort((a, b) => a - b), [it]);
   const curSeason = season ?? it?.next?.season ?? seasons[0] ?? null;
-  const act = async (path: string, body: any) => { try { await api(path, { method: 'POST', body }); await load(); } catch (e: any) { setError(e?.message || 'Det gick inte'); } };
+  const act = async (path: string, body: any) => { try { await api(path, { method: 'POST', body }); await load(); } catch (e: any) { setError(e?.message || t('Det gick inte')); } };
 
   const back = (
     <View style={st.top}>
-      <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Tillbaka" style={st.back}><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
+      <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Tillbaka')} style={st.back}><Ionicons name="chevron-back" size={24} color={C.text} /></Pressable>
       <Text style={st.topTitle} numberOfLines={1}>{it?.title || ''}</Text>
     </View>
   );
@@ -43,7 +44,7 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
   const pos = resumeAt(it.position, it.duration);
   const nx = it.next || null;
   const nxPos = nx ? resumeAt(nx.position, nx.duration) : 0;
-  const facts = [it.year, show ? (it.seasons ? `${it.seasons} ${it.seasons === 1 ? 'säsong' : 'säsonger'}` : '') : fmtDur(it.duration), show && it.episodes ? `${it.episodes} avsnitt` : '', !show && it.height ? `${it.height}p` : '', it.cert].filter(Boolean);
+  const facts = [it.year, show ? (it.seasons ? tn(it.seasons, '1 säsong', '{n} säsonger') : '') : fmtDur(it.duration), show && it.episodes ? tn(it.episodes, '1 avsnitt', '{n} avsnitt') : '', !show && it.height ? `${it.height}p` : '', it.cert].filter(Boolean);
   return (
     <View style={[st.root, { paddingTop: insets.top }]}>
       {back}
@@ -57,13 +58,13 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
           </View>
         </View>
         <View style={st.actions}>
-          {show ? (nx ? <Button kind="primary" icon="play" label={`${nxPos > 0 ? 'Fortsätt' : 'Spela'} ${sxe(nx)}`} onPressIn={() => warmPlay(nx.id, nxPos)} onPress={() => play(nx, nxPos)} /> : null)
+          {show ? (nx ? <Button kind="primary" icon="play" label={nxPos > 0 ? t('Fortsätt {v}', { v: sxe(nx) }) : t('Spela {v}', { v: sxe(nx) })} onPressIn={() => warmPlay(nx.id, nxPos)} onPress={() => play(nx, nxPos)} /> : null)
             : pos > 0 ? (<>
-              <Button kind="primary" icon="play" label={`Fortsätt från ${fmtTime(pos)}`} onPressIn={() => warmPlay(it.id, pos)} onPress={() => play(it, pos)} />
-              <Button label="Börja om" onPressIn={() => warmPlay(it.id, 0)} onPress={() => play(it, 0)} />
-            </>) : <Button kind="primary" icon="play" label="Spela" onPressIn={() => warmPlay(it.id, 0)} onPress={() => play(it, 0)} />}
-          {!show ? <Button label={it.watched ? 'Markera som osedd' : 'Markera som sedd'} onPress={() => act(`/api/items/${it.id}/watched`, { watched: !it.watched })} /> : null}
-          <Button label={it.inWatchlist ? '✓ Min lista' : '+ Min lista'} onPress={() => act(`/api/items/${it.id}/watchlist`, { add: !it.inWatchlist })} />
+              <Button kind="primary" icon="play" label={t('Fortsätt från {v}', { v: fmtTime(pos) })} onPressIn={() => warmPlay(it.id, pos)} onPress={() => play(it, pos)} />
+              <Button label={t('Börja om')} onPressIn={() => warmPlay(it.id, 0)} onPress={() => play(it, 0)} />
+            </>) : <Button kind="primary" icon="play" label={t('Spela')} onPressIn={() => warmPlay(it.id, 0)} onPress={() => play(it, 0)} />}
+          {!show ? <Button label={it.watched ? t('Markera som osedd') : t('Markera som sedd')} onPress={() => act(`/api/items/${it.id}/watched`, { watched: !it.watched })} /> : null}
+          <Button label={it.inWatchlist ? '✓ ' + t('Min lista') : '+ ' + t('Min lista')} onPress={() => act(`/api/items/${it.id}/watchlist`, { add: !it.inWatchlist })} />
         </View>
         {!show ? <View style={{ paddingHorizontal: 14 }}><DownloadVideo it={it} /></View> : null}
         {error ? <Text style={st.err}>{error}</Text> : null}
@@ -75,21 +76,21 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.seasons}>
                 {seasons.map((n) => (
                   <Pressable key={n} onPress={() => setSeason(n)} style={[st.chip, curSeason === n && st.chipOn]} accessibilityRole="button" accessibilityState={{ selected: curSeason === n }}>
-                    <Text style={[st.chipText, curSeason === n && { color: C.accent }]}>{n === 0 ? 'Specialer' : `Säsong ${n}`}</Text>
+                    <Text style={[st.chipText, curSeason === n && { color: C.accent }]}>{n === 0 ? t('Specialer') : t('Säsong {n}', { n })}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
-            ) : <Text style={st.h2}>{curSeason === 0 ? 'Specialer' : `Säsong ${curSeason}`}</Text>}
-            <DownloadSeason eps={epsOf(curSeason)} label={curSeason === 0 ? 'specialerna' : `säsong ${curSeason}`} />
+            ) : <Text style={st.h2}>{curSeason === 0 ? t('Specialer') : t('Säsong {n}', { n: curSeason })}</Text>}
+            <DownloadSeason eps={epsOf(curSeason)} label={curSeason === 0 ? t('specialerna') : t('säsong {n}', { n: curSeason })} />
             {epsOf(curSeason).map((e) => {
               const p = resumeAt(e.position, e.duration);
               return (
                 <Pressable key={e.id} style={({ pressed }) => [st.ep, pressed && { backgroundColor: C.bg2 }]} onPressIn={() => warmPlay(e.id, p)} onPress={() => play(e, p)}
-                  accessibilityRole="button" accessibilityLabel={`Spela avsnitt ${e.episode}: ${e.title}`}>
+                  accessibilityRole="button" accessibilityLabel={t('Spela avsnitt {n}: {title}', { n: e.episode, title: e.title })}>
                   <Art it={e} land width={132} />
                   <View style={{ flex: 1, gap: 3 }}>
                     <Text style={st.epT} numberOfLines={2}>{e.episode}. {e.title}</Text>
-                    <Text style={st.facts}>{[fmtDur(e.duration), p > 0 ? `fortsätt från ${fmtTime(p)}` : ''].filter(Boolean).join(' · ')}</Text>
+                    <Text style={st.facts}>{[fmtDur(e.duration), p > 0 ? t('fortsätt från {v}', { v: fmtTime(p) }) : ''].filter(Boolean).join(' · ')}</Text>
                   </View>
                   <EpisodeDownload it={e} />
                   <Ionicons name="play-circle" size={30} color={C.accent} />
@@ -98,7 +99,7 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
             })}
           </View>
         ) : null}
-        <Shelf title="Liknande" items={it.similar || []} onOpen={(x) => navigation.push('Item', { id: x.id })} />
+        <Shelf title={t('Liknande')} items={it.similar || []} onOpen={(x) => navigation.push('Item', { id: x.id })} />
       </ScrollView>
     </View>
   );

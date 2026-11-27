@@ -9,6 +9,7 @@ import { C, R } from '../theme';
 import { removeServer, serverLabel, servers, type Server } from '../api';
 import { Button } from '../components/ui';
 import * as off from '../offline';
+import { t } from '../i18n';
 
 export default function Servers({ onPick, onAdd, onChanged }: { onPick: (sv: Server) => void; onAdd: () => void; onChanged: () => void }) {
   const [asking, setAsking] = useState(''); // servern som "Ta bort?" visas för
@@ -19,31 +20,31 @@ export default function Servers({ onPick, onAdd, onChanged }: { onPick: (sv: Ser
           <Image source={require('../../assets/logo.png')} style={st.logo} />
           <Text style={st.brandText}>BraXhn TV</Text>
         </View>
-        <Text style={st.h2}>Välj server</Text>
+        <Text style={st.h2}>{t('Välj server')}</Text>
         {servers.map((sv) => (
           <View key={sv.id} style={st.row}>
-            <Pressable style={({ pressed }) => [st.pick, pressed && { opacity: 0.7 }]} onPress={() => onPick(sv)} accessibilityRole="button" accessibilityLabel={`Öppna ${serverLabel(sv)} som ${sv.user}`}>
+            <Pressable style={({ pressed }) => [st.pick, pressed && { opacity: 0.7 }]} onPress={() => onPick(sv)} accessibilityRole="button" accessibilityLabel={t('Öppna {server} som {user}', { server: serverLabel(sv), user: sv.user })}>
               <View style={st.icon}><Ionicons name="server-outline" size={20} color={C.accent} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={st.name} numberOfLines={1}>{serverLabel(sv)}</Text>
-                <Text style={st.sub} numberOfLines={1}>{sv.user}{sv.profile && sv.profile !== sv.user ? ` · profil ${sv.profile}` : ''}</Text>
+                <Text style={st.sub} numberOfLines={1}>{sv.user}{sv.profile && sv.profile !== sv.user ? ' · ' + t('profil {name}', { name: sv.profile }) : ''}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={C.dim} />
             </Pressable>
             {asking === sv.id ? (
               <View style={st.confirm}>
-                {off.hasServerDownloads(sv.id) ? <Text style={{ color: C.dim, fontSize: 13 }}>Det nedladdade tas också bort.</Text> : null}
-                <Button small kind="danger" label="Ta bort" onPress={async () => { off.removeServer(sv.id); await removeServer(sv.id); setAsking(''); onChanged(); }} />
-                <Button small label="Avbryt" onPress={() => setAsking('')} />
+                {off.hasServerDownloads(sv.id) ? <Text style={{ color: C.dim, fontSize: 13 }}>{t('Det nedladdade tas också bort.')}</Text> : null}
+                <Button small kind="danger" label={t('Ta bort')} onPress={async () => { off.removeServer(sv.id); await removeServer(sv.id); setAsking(''); onChanged(); }} />
+                <Button small label={t('Avbryt')} onPress={() => setAsking('')} />
               </View>
             ) : (
-              <Pressable style={st.trash} onPress={() => setAsking(sv.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Ta bort ${serverLabel(sv)}`}>
+              <Pressable style={st.trash} onPress={() => setAsking(sv.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Ta bort {v}', { v: serverLabel(sv) })}>
                 <Ionicons name="trash-outline" size={20} color={C.dim} />
               </Pressable>
             )}
           </View>
         ))}
-        <Button label="Lägg till server" icon="add" onPress={onAdd} style={{ marginTop: 8 }} />
+        <Button label={t('Lägg till server')} icon="add" onPress={onAdd} style={{ marginTop: 8 }} />
       </ScrollView>
     </SafeAreaView>
   );

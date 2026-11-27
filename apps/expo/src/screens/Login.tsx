@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { C, R } from '../theme';
 import { ApiError, addServer, api, normalizeServer, serverLabel, type Server } from '../api';
 import { Button } from '../components/ui';
+import { t } from '../i18n';
 
 export default function Login({ onDone, onCancel, again }: { onDone: () => void; onCancel?: () => void; again?: Server | null }) {
   const [server, setSrv] = useState(again?.url || '');
@@ -19,19 +20,19 @@ export default function Login({ onDone, onCancel, again }: { onDone: () => void;
 
   async function submit() {
     const url = normalizeServer(server);
-    if (!url) return setError('Skriv serverns adress, t.ex. 192.168.1.10 eller tv.example.com');
-    if (!name.trim() || !password) return setError('Skriv namn och lösenord');
+    if (!url) return setError(t('Skriv serverns adress, t.ex. 192.168.1.10 eller tv.example.com'));
+    if (!name.trim() || !password) return setError(t('Skriv namn och lösenord'));
     setBusy(true); setError('');
     try {
       // Kontrollera först att adressen går till en BraXhn TV-server – då blir felet begripligt
       const st = await api<{ name?: string; needsSetup?: boolean }>('/api/status', { server: url, auth: false, timeout: 10000 });
-      if (st.needsSetup) throw new ApiError('Servern är inte installerad än. Öppna den i en webbläsare och gör klart installationen först.');
+      if (st.needsSetup) throw new ApiError(t('Servern är inte installerad än. Öppna den i en webbläsare och gör klart installationen först.'));
       const r = await api<{ token: string; user?: { name: string } }>('/api/login', { server: url, auth: false, method: 'POST', body: { name: name.trim(), password, app: true, ...(code ? { code: code.trim() } : {}) } });
       await addServer(url, r.user?.name || name.trim(), r.token);
       onDone();
     } catch (e: any) {
       if (e?.data?.need2fa) { setNeed2fa(true); setError(code ? e.message : ''); }
-      else setError(e?.message || 'Inloggningen misslyckades');
+      else setError(e?.message || t('Inloggningen misslyckades'));
     } finally { setBusy(false); }
   }
 
@@ -44,23 +45,23 @@ export default function Login({ onDone, onCancel, again }: { onDone: () => void;
             <Text style={st.brandText}>BraXhn TV</Text>
           </View>
           <View style={st.panel}>
-            <Text style={st.h2}>{again ? `Logga in på ${serverLabel(again)}` : 'Lägg till server'}</Text>
-            <Text style={st.label}>Serverns adress</Text>
-            <TextInput style={st.input} value={server} onChangeText={setSrv} placeholder="192.168.1.10 eller tv.example.com" placeholderTextColor={C.dim}
-              autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="next" accessibilityLabel="Serverns adress" />
-            <Text style={st.label}>Namn</Text>
-            <TextInput style={st.input} value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} textContentType="username" autoComplete="username" returnKeyType="next" accessibilityLabel="Namn" />
-            <Text style={st.label}>Lösenord</Text>
-            <TextInput style={st.input} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" autoComplete="current-password" returnKeyType="go" onSubmitEditing={submit} accessibilityLabel="Lösenord" />
+            <Text style={st.h2}>{again ? t('Logga in på {v}', { v: serverLabel(again) }) : t('Lägg till server')}</Text>
+            <Text style={st.label}>{t('Serverns adress')}</Text>
+            <TextInput style={st.input} value={server} onChangeText={setSrv} placeholder={t('192.168.1.10 eller tv.example.com')} placeholderTextColor={C.dim}
+              autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="next" accessibilityLabel={t('Serverns adress')} />
+            <Text style={st.label}>{t('Namn')}</Text>
+            <TextInput style={st.input} value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} textContentType="username" autoComplete="username" returnKeyType="next" accessibilityLabel={t('Namn')} />
+            <Text style={st.label}>{t('Lösenord')}</Text>
+            <TextInput style={st.input} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" autoComplete="current-password" returnKeyType="go" onSubmitEditing={submit} accessibilityLabel={t('Lösenord')} />
             {need2fa ? (<>
-              <Text style={st.label}>Kod från din autentiseringsapp</Text>
-              <TextInput style={st.input} value={code} onChangeText={setCode} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" autoFocus returnKeyType="go" onSubmitEditing={submit} accessibilityLabel="Kod från din autentiseringsapp" />
+              <Text style={st.label}>{t('Kod från din autentiseringsapp')}</Text>
+              <TextInput style={st.input} value={code} onChangeText={setCode} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" autoFocus returnKeyType="go" onSubmitEditing={submit} accessibilityLabel={t('Kod från din autentiseringsapp')} />
             </>) : null}
             {error ? <Text style={st.err} accessibilityRole="alert">{error}</Text> : null}
-            <Button label={busy ? 'Loggar in…' : again ? 'Logga in' : 'Lägg till'} kind="primary" onPress={submit} disabled={busy} style={{ marginTop: 16 }} />
-            {onCancel ? <Button label="Avbryt" onPress={onCancel} disabled={busy} style={{ marginTop: 10 }} /> : null}
+            <Button label={busy ? t('Loggar in…') : again ? t('Logga in') : t('Lägg till')} kind="primary" onPress={submit} disabled={busy} style={{ marginTop: 16 }} />
+            {onCancel ? <Button label={t('Avbryt')} onPress={onCancel} disabled={busy} style={{ marginTop: 10 }} /> : null}
           </View>
-          <Text style={st.help}>Hemma räcker serverns IP-adress. Utanför hemmet behövs en https-adress, t.ex. via BraXhn Relay.</Text>
+          <Text style={st.help}>{t('Hemma räcker serverns IP-adress. Utanför hemmet behövs en https-adress, t.ex. via BraXhn Relay.')}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
