@@ -220,7 +220,8 @@ t('glapplöst: MP3 med kodarfördröjning – ingen tystnad i skarven', async ()
   // MP3 är förstörande – ett glapp på ett enda sampel ger ändå residual ≈ amplituden
   assert.ok(res.max < 0.1, `skarv i MP3: residual ${res.max.toFixed(4)} vid ${(res.at - a) / SR} s`);
   const want = Math.round((2.0113 + 2.5) * SR);
-  assert.ok(Math.abs((b - a + 1) - want) < SR * 0.01, `längd ${b - a + 1} mot ${want} sampel (fördröjning/utfyllnad kvar?)`);
+  // Kvar fördröjning/utfyllnad gör ljudet längre (> 10 ms fäller). Kortare: inspelningen kan tappa ~20 ms i början under belastning
+  { const d = (b - a + 1) - want; assert.ok(d > -SR * 0.025 && d < SR * 0.01, `längd ${b - a + 1} mot ${want} sampel (fördröjning/utfyllnad kvar?)`); }
   assert.deepEqual(errors, []);
   await close();
 });

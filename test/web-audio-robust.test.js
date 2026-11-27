@@ -287,7 +287,8 @@ t('samplingsfrekvens: ljudsammanhanget får låtens takt – 48 kHz-album utan f
   if (!st.handovers) assert.ok(res.max < 0.005, `skarven: residual ${res.max.toFixed(4)} vid ${((res.at - a) / 48000).toFixed(3)} s (${JSON.stringify(st)})`);
   // Längden mäts på inspelningen, som kan tappa några ms i början när datorn är hårt belastad (hela testsviten) –
   // skarven själv mäts provexakt ovan, så här räcker det att ingen låt saknas eller spelas två gånger
-  assert.ok(Math.abs((b - a + 1) - 6 * 48000) < 48000 * (st.handovers ? 0.025 : 0.015), `längd ${b - a + 1} (${JSON.stringify(st)})`);
+  // Inspelningen kan tappa upp till ~20 ms i början under belastning (kortare), men för långt betyder en låt för mycket
+  { const d = (b - a + 1) - 6 * 48000; assert.ok(d > -48000 * 0.025 && d < 48000 * (st.handovers ? 0.025 : 0.005), `längd ${b - a + 1} (${JSON.stringify(st)})`); }
   assert.deepEqual(P.errors, []);
   await P.close();
 });
