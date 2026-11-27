@@ -49,12 +49,14 @@ import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) -> Unit) {
+fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) -> Unit, onReport: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var item by remember(req) { mutableStateOf<MediaItem?>(null) }
     var pb by remember(req) { mutableStateOf<Playback?>(null) }
     var error by remember(req) { mutableStateOf<String?>(null) }
+    // Till Feedback: titeln och felet (förval och teknisk information i en felrapport)
+    LaunchedEffect(req.id, error) { Feedback.notePlayback(req.id, error) }
     var skip by remember(req) { mutableStateOf<String?>(null) } // "pre" | "recap" | "intro" | "next"
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
@@ -496,7 +498,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 Spacer(Modifier.height(6.dp))
                 Text(text, color = Color.LightGray, fontSize = 15.sp)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { report(final = true); onClose() }, modifier = Modifier.height(52.dp).focusRequester(closeFocus).focusRing(RoundedCornerShape(26.dp))) { Text(tr(R.string.close), fontSize = 17.sp) }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Uppspelningen gick inte (inte ett stopp från skärmtiden eller en vuxen): felet går att rapportera
+                    if (error != null && stopped == null && onReport != null)
+                        OutlinedButton(onClick = { report(final = true); onReport() }, modifier = Modifier.height(52.dp).focusRing(RoundedCornerShape(26.dp))) { Text(tr(R.string.feedback_report_problem), fontSize = 17.sp) }
+                    Button(onClick = { report(final = true); onClose() }, modifier = Modifier.height(52.dp).focusRequester(closeFocus).focusRing(RoundedCornerShape(26.dp))) { Text(tr(R.string.close), fontSize = 17.sp) }
+                }
             }
             // Fjärrkontrollen: fokus på Stäng, så att OK stänger (annars ligger fokus kvar i spelaren bakom)
             LaunchedEffect(head, text) { runCatching { closeFocus.requestFocus() } }

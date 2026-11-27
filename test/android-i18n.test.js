@@ -65,6 +65,8 @@ const SWEDISH = new RegExp(`[åäöÅÄÖ]|(?<![\\p{L}\\d])(${SV_WORDS.join('|')
 /** Svenska som får stå kvar i Kotlin-koden: inget användaren ser. Varje undantag måste fortfarande behövas. */
 const ALLOWED = [
   { file: 'Offline.kt', text: 'Automatisk synk misslyckades: \0', why: 'loggrad (Log.w), syns inte för användaren' },
+  { file: 'FeedbackCore.kt', text: 'musik', why: 'områdets nyckel i API:t (AREAS i server/support.js), namnet står i strings.xml' },
+  { file: 'FeedbackCore.kt', text: 'ljud', why: 'områdets nyckel i API:t (AREAS i server/support.js), namnet står i strings.xml' },
 ];
 
 test('Kotlin-tolken: hittar strängar, hoppar över kommentarer och delar upp mallar', () => {

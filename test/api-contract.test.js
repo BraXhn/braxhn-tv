@@ -308,10 +308,17 @@ after(async () => { await srv?.stop(); feed?.close(); fs.rmSync(ROOT, { recursiv
 // Bearer-header (AVPlayer/bildladdning använder token i adressen), token = annan apptoken
 const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', $replik: 'Hej', get $kanaler() { return String(S.channel); },
   get $från() { return String(Math.floor(Date.now() / 1000) - 3600); }, get $till() { return String(Math.floor(Date.now() / 1000) + 3 * 3600); }, get $har() { return `${S.ep3},99999999`; },
-  get $program() { return S.program; }, get $profil() { return S.admin; }, get $artist() { return S.artist; } };
-const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
+  get $program() { return S.program; }, get $profil() { return S.admin; }, get $artist() { return S.artist; }, get $film() { return S.film; } };
+const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : Array.isArray(v) ? v.map(sub) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
 const playbackQ = (app, i = 0) => new URLSearchParams([C.endpoints['GET /api/items/:id/playback'][app].query].flat()[i]).toString();
 const json = async (app, p) => ok(await call(app, 'GET', p), p);
+/** Ett eget ärende där teamet (API-nyckel med behörigheten support) bett om mer information – id:t */
+async function needInfoTicket(app) {
+  const id = ok(await call(app, 'POST', '/api/support', { body: { kind: 'idea', area: 'annat', text: 'Kontrakt: svar på en fråga' } }), 'ärende').id;
+  const key = ok(await srv.req('/api/apikeys', { method: 'POST', body: { name: `Kontrakt ${app} ${id}`, scopes: ['support'] } }), 'nyckel').key;
+  ok(await call(app, 'POST', `/api/v1/support/${id}`, { auth: false, headers: { 'x-api-key': key }, body: { status: 'needinfo', reply: 'Vilken film gäller det?' } }), 'fråga');
+  return id;
+}
 async function streamCases(app, want) {
   const out = [];
   for (const q of [C.endpoints['GET /api/items/:id/playback'][app].query].flat().filter(q => q.info !== '1')) {
@@ -453,6 +460,15 @@ const CASES = {
   'GET /api/iptv/vod/:id': () => [{ p: { id: S.vodMovie } }, { p: { id: S.vodSeries } }],
   'GET /api/iptv/vod/:id/:kind.jpg': (app) => [{ url: `/api/iptv/vod/${S.vodMovie}/cover.jpg?t=${TOK[app + 'Img']}`, auth: false }],
   'GET /api/iptv/episodes/:eid/image.jpg': (app) => [{ url: `/api/iptv/episodes/${S.vodEp}/image.jpg?t=${TOK[app + 'Img']}`, auth: false }],
+  // Feedback och felrapporter (Android: Feedback.kt). Inloggningen är administratörens, så ärendet är godkänt direkt och
+  // teamet (en API-nyckel med behörigheten support) kan be om mer information innan appen svarar
+  // Senaste uppspelningen (lastPlayback) är en film ur biblioteket – inte IPTV, som saknar titel i items
+  'POST /api/support/context': async (app) => { ok(await call(app, 'GET', `/api/items/${S.film}/playback?${playbackQ(app)}`), 'uppspelning'); return [{}]; },
+  'POST /api/support': () => [{}],
+  // Ett ärende där teamet svarat, så att svaren (thread) finns i listan
+  'GET /api/support': async (app) => { await needInfoTicket(app); return [{}]; },
+  'GET /api/support/count': () => [{}],
+  'POST /api/support/:id/reply': async (app) => [{ p: { id: await needInfoTicket(app) } }],
   // Utloggning med en egen inloggning, så att apparnas token gäller för resten av testet
   'POST /api/logout': async (app) => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }]
 };

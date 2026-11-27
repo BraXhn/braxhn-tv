@@ -68,6 +68,9 @@ sealed class Screen {
     /** kind: "extra" (extramaterial), "vod"/"vodep" (IPTV-film/avsnitt), "catchup" (program ur kanalens arkiv) */
     data class Stream(val kind: String, val id: Int, val title: String, val start: Double = 0.0) : Screen()
     data object Profiles : Screen()
+    /** Feedback och felrapporter (Feedback.kt): kind/area = förval, t.ex. från spelaren vid ett fel */
+    data class SendFeedback(val kind: String? = null, val area: String? = null) : Screen()
+    data object Tickets : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -120,9 +123,14 @@ fun AppRoot() {
     BackHandler(enabled = stack.size > 1) { pop() }
     val link by DeepLink.item.collectAsState()
     LaunchedEffect(link) { link?.let { id -> DeepLink.item.value = null; stack.add(Screen.Detail(id)) } }
+    // Förvalet i Feedback följer skärmen man var på
+    LaunchedEffect(current) { Feedback.noteScreen(current::class.simpleName.orEmpty()) }
+    val car = isCar(LocalContext.current)
 
     if (current is Screen.Play) {
-        PlayerScreen(current, onClose = pop, onPlay = { stack[stack.lastIndex] = it })
+        // Rapportera felet: spelaren byts mot Feedback (inte i bilen – där finns bara Mina ärenden)
+        PlayerScreen(current, onClose = pop, onPlay = { stack[stack.lastIndex] = it },
+            onReport = if (car) null else ({ stack[stack.lastIndex] = Screen.SendFeedback("bug", "uppspelning") }))
         return
     }
     if (current is Screen.LivePlay) { LivePlayerScreen(current, onClose = pop, onPlay = push); return }
@@ -135,13 +143,13 @@ fun AppRoot() {
             Spacer(Modifier.height(12.dp))
             Icon(Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(40.dp))
             Spacer(Modifier.height(20.dp))
-            NavigationRailItem(selected = stack.first() == Screen.Home && current !is Screen.Search && current !is Screen.Settings,
+            NavigationRailItem(selected = stack.first() == Screen.Home && current !is Screen.Search && current !is Screen.Settings && current !is Screen.SendFeedback && current != Screen.Tickets,
                 onClick = { stack.clear(); stack.add(Screen.Home) }, icon = { Icon(Icons.Filled.Home, null) }, label = { Text(tr(R.string.nav_home)) })
             NavigationRailItem(selected = current == Screen.Search, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Search) },
                 icon = { Icon(Icons.Filled.Search, null) }, label = { Text(tr(R.string.nav_search)) })
             if (hasLive) NavigationRailItem(selected = current == Screen.Live || current == Screen.Recordings, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Live) },
                 icon = { Icon(Icons.Filled.LiveTv, null) }, label = { Text(tr(R.string.nav_live)) })
-            NavigationRailItem(selected = current == Screen.Settings || current == Screen.Profiles, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
+            NavigationRailItem(selected = current == Screen.Settings || current == Screen.Profiles || current is Screen.SendFeedback || current == Screen.Tickets, onClick = { stack.clear(); stack.add(Screen.Home); stack.add(Screen.Settings) },
                 icon = { Icon(Icons.Filled.Settings, null) }, label = { Text(tr(R.string.nav_settings)) })
         }
         Column(Modifier.fillMaxSize()) {
@@ -158,6 +166,8 @@ fun AppRoot() {
                 is Screen.Recordings -> RecordingsScreen(onPlay = push)
                 is Screen.Profiles -> ProfilesScreen()
                 is Screen.VodDetail -> VodDetailScreen(current.id, push)
+                is Screen.SendFeedback -> FeedbackScreen(current, onTickets = { stack[stack.lastIndex] = Screen.Tickets }, onClose = pop)
+                is Screen.Tickets -> TicketsScreen(onNew = { stack[stack.lastIndex] = Screen.SendFeedback() })
                 is Screen.Play, is Screen.LivePlay, is Screen.Stream -> {}
             }
         }
@@ -483,6 +493,9 @@ fun SettingsScreen(push: (Screen) -> Unit) {
                 confirmButton = { TextButton(onClick = { confirmLogout = false; scope.launch { Api.logout() } }) { Text(tr(R.string.logout_confirm_button)) } },
                 dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text(tr(R.string.cancel)) } })
         }
+        // Feedback och felrapporter (Feedback.kt): i bilen bara Mina ärenden
+        item { Text(tr(R.string.feedback_section), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
+        item { FeedbackEntry(push) }
         item { Text(tr(R.string.settings_downloads), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp)) }
         item { DownloadsList(push) }
         item { Text(tr(R.string.settings_parked), color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp)) }

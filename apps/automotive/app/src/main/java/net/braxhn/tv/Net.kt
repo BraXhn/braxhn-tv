@@ -38,7 +38,7 @@ import javax.net.ssl.SSLHandshakeException
 
 /** Det appen behöver veta om profilen: barnprofil (inga poddar, rätt text vid Stoppa) och nedladdningsrätt */
 object Session {
-    val kid = MutableStateFlow(false)
+    val kid = MutableStateFlow(false); val admin = MutableStateFlow(false) // admin: texterna i Feedback (Feedback.kt)
     val canDownload = MutableStateFlow(true)
     /** Stöd projektet: serverns donationslänk (donateUrl i /api/status), bara en https-adress till PayPal – annars null */
     val donateUrl = MutableStateFlow<String?>(null)
@@ -49,7 +49,7 @@ object Session {
         val st = runCatching { Api.get<ServerStatus>("/api/status") }.getOrNull() ?: return
         donateUrl.value = safeDonateUrl(st.donateUrl)
         val u = st.user ?: return
-        kid.value = u.kid
+        kid.value = u.kid; admin.value = u.isAdmin == 1
         canDownload.value = u.canDownload
         // Utan nät: positioner sparas per profil och skärmtiden följer senaste statusen (OfflineSync)
         OfflineSync.rememberUser(u.id); Downloads.open() // nedladdningarna gäller profilen (Offline.kt)
@@ -63,7 +63,7 @@ object Session {
     }
 
     /** Glöm profilens läge (utloggning, profilbyte) tills nästa refresh() */
-    fun reset() { kid.value = false; canDownload.value = true }
+    fun reset() { kid.value = false; canDownload.value = true; admin.value = false }
 }
 
 /** Donationslänken används bara om den är https till paypal.com/paypal.me (inget annat öppnas från serverns fält) */
