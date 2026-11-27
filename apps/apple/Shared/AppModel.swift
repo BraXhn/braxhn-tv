@@ -8,7 +8,7 @@ final class AppModel: ObservableObject {
     /// Den sparade adressen (ändras bara av inloggningen). Förfrågningarna går till apiBase (Hemma.swift).
     @Published var server: String = UserDefaults.standard.string(forKey: "server") ?? "" { didSet { if server != oldValue { resetHome() } } }
     @Published private(set) var token: String? = Keychain.read("token")
-    @Published var user: UserInfo?
+    @Published var user: UserInfo? { didSet { OfflineProfile.changed(self) } } // nedladdningar och köade positioner per profil
     /// Kortlivad token som bara gäller bilder (bild-URL:er kan inte skicka Authorization-header). Sparas i nyckelringen
     /// per server och profil (ImageTokenBook längst ned i filen) och förnyas bara när den snart går ut eller servern svarar 401.
     @Published private(set) var imageToken: String?
@@ -224,10 +224,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Rapporterar tittarstatus. Svaret kan säga att uppspelningen ska stoppas (Föräldraöversiktens/administratörens
-    /// Stoppa eller skärmtiden) – då anropas onStop med svaret. Fel ignoreras (nästa rapport försöker igen).
+    /// Stoppa eller skärmtiden) – då anropas onStop med svaret. Utan svar sparas positionen och skickas senare med at.
     func reportProgress(id: Int, position: Double, duration: Double, onStop: ((ProgressReply) -> Void)? = nil) {
         Task {
-            guard let data = try? await post("/api/items/\(id)/progress", ["position": position, "duration": duration]),
+            guard let data = await PendingPositions.shared.post(self, kind: ProgressQueue.item, id: id, position: position, duration: duration),
                   let r = try? JSONDecoder().decode(ProgressReply.self, from: data), r.stop == true else { return }
             onStop?(r)
         }

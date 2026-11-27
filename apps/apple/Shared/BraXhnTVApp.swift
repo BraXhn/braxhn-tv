@@ -11,14 +11,18 @@ struct BraXhnTVApp: App {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
-                #if os(iOS)
-                // Återanslut till nedladdningarnas bakgrundssession direkt vid start
-                .onAppear { _ = Downloads.shared }
-                // Automatisk offline-synk vid start och när appen kommer till förgrunden
-                .task { await Downloads.shared.autoSync(model: model) }
+                // Nedladdningarna (iPhone/iPad) och köade positioner gäller profilen som är inloggad (Offline.swift);
+                // på iPhone/iPad återansluter det också till nedladdningarnas bakgrundssession direkt vid start
+                .onAppear { OfflineProfile.changed(model) }
+                // Köade positioner skickas och den automatiska offline-synken körs när appen kommer till förgrunden
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                    PendingPositions.shared.flush()
+                    #if os(iOS)
                     Task { await Downloads.shared.autoSync(model: model) }
+                    #endif
                 }
+                #if os(iOS)
+                .task { await Downloads.shared.autoSync(model: model) }
                 #endif
         }
     }

@@ -17,6 +17,14 @@
   tills filmen spelar igen, och "Förbereder…" syns bara om det tar mer än 1,5 s (då efter tiden). Samma position gäller
   under omstarten för Casta, fjärrstyrningen och det lilla fönstret. Provat i Chrome; inte i Safari, AirPlay eller på
   en riktig Chromecast.
+- **Nedladdningar i appen för iPhone och iPad gäller en profil.** Förut hade appen en gemensam lista för alla profiler
+  och servrar, och utloggning rörde den inte – en barnprofil kunde spela en vuxens nedladdade filmer utan nät, där
+  åldersgränsen inte gäller. Nu har varje profil sin egen lista och mapp, som i Android- och Expo-appen, och efter
+  profilbyte eller utloggning visas bara den nya profilens. Det som laddats ner före uppdateringen flyttas till
+  profilen som var inloggad (går det inte att veta får huvudkontot det). *Logga ut* frågar först och tar då bort allt
+  som laddats ner från servern. När servern svarar tas titlar bort som profilen inte får se längre, och allt om
+  profilen inte får ladda ner. Positioner som inte kommer fram (utan nät) sparas och skickas när nätet är tillbaka,
+  och servern behåller ett senare framsteg från en annan enhet. Inte byggt i Xcode eller provat på riktig iPad än.
 - **Expo-appen vet vad servern redan har kodat när du spolar.** Förut gissade appen ur det som var laddat i telefonen,
   så en spolning dit servern redan hade kodat kunde starta om strömmen i onödan (och en spolning bakåt dit servern
   hade städat bort stycken kunde vänta på ett helt sexsekundersstycke). Nu frågar appen servern var fjärde sekund

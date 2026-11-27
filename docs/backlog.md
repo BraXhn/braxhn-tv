@@ -49,22 +49,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
   `server/http/router.js` släpper igenom en beacon från samma sida – kontrollera först).
 - **Klart när:** ett test stänger sidan under en omkodning och visar att ffmpeg-processen är borta inom 2 s.
 
-### 3. iOS/tvOS-appen: nedladdningar per server och profil, och positioner utan nät
-
-- **Vad:** appens nedladdningar har en gemensam lista och mapp för alla servrar och profiler (`DownloadRecord` utan
-  server och profil, `Downloads/index.json` i `apps/apple/Shared/Offline.swift`), och `logout()` i `AppModel.swift`
-  rör dem inte. Positionen skickas bara direkt (`reportProgress` med `try?`), så det som spelas utan nät försvinner.
-  Gör som Android-appen i 1.5.0 och Expo-appen: lista och mapp per server och profil, flytt av gamla nedladdningar
-  till profilen som är inloggad, fråga vid *Logga ut*, borttagning när kontot inte får ladda ner eller titeln inte
-  får ses längre, och en kö med `at` för positioner (filmer och böcker; poddar när servern tar emot `at`).
-- **Varför:** en barnprofil på familjens iPad ser och kan spela en vuxens nedladdade filmer utan nät – åldersgränsen
-  gäller inte där. Två servrar med samma titel-id blandas också ihop.
-- **Filer:** `apps/apple/Shared/Offline.swift`, `apps/apple/Shared/AppModel.swift`, `apps/apple/Shared/Player.swift`,
-  `apps/apple/Shared/Listen.swift`; reglerna kan följa `DownloadCore.kt` och `OfflineCore.kt` i Android-appen.
-- **Klart när:** reglerna är testade (statiskt som `test/apple-seek.test.js`, eller i ett Swift-test i `apple.yml`),
-  bygget går igenom, och provet på riktig iPad står under *Bara Anton kan göra*.
-
-### 4. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
+### 3. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
 
 - **Vad:** Safaris egen HLS (`nativeHls` i `web/js/player/caps.js`) spolar fortfarande inom den gamla spellistan och
   väntar på ett helt 6 s-segment. `seekRestarts` i `web/js/player/video.js` körs bara med hls.js. Gör som iOS-appen:
@@ -76,7 +61,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** testet visar en ny ström med `xs` vid målet för `nhls=1`, och Anton har provat på en riktig iPhone
   (se *Bara Anton kan göra*).
 
-### 5. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 4. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -87,7 +72,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 6. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
+### 5. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
 
 - **Vad:** appen gissar fortfarande ur bufferten (`readyGuess` i `apps/apple/Shared/SeekCore.swift`) och väntar 0,6 s
   på nästa steg vid varje spolning, även med reglaget på iPhone. Fråga `/api/stream/:id/hls/ready` medan strömmen
@@ -99,7 +84,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
   `apple.yml` går igenom.
 
-### 7. Utanför hemmet: förstarta omkodningen redan vid /playback
+### 6. Utanför hemmet: förstarta omkodningen redan vid /playback
 
 - **Vad:** med automatisk kvalitet utanför hemmet (`d.abr` i `server/routes/playback.js`) startas ingen ffmpeg förrän
   spelaren valt steg och bett om ett segment – `st.prewarm` hoppas över när `d.abr` är sant. Förstarta steget som
@@ -110,7 +95,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** tid till första segment utanför hemmet är mätt före och efter, och steget som förstartades används
   (inte en andra ffmpeg för ett annat steg).
 
-### 8. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 7. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 - **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
   fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
@@ -126,7 +111,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
   kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
 
-### 9. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+### 8. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
 - **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
   först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
@@ -139,7 +124,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
   nedräkningen; `test/expo-i18n.test.js` är grön.
 
-### 10. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 9. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -256,6 +241,15 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-27: iOS/tvOS-appen: nedladdningar per server och profil, och positioner utan nät, gren
+  `team/apple-offline-2026-11-27`. Lista och mapp per profil (`Downloads/<server>-<profil>/`), profilen sparad per
+  inloggning (fingeravtryck) så att rätt lista syns utan nät, flytt av de gamla nedladdningarna (Android-appens regler,
+  huvudkontot när det inte går att veta), nedladdning som blir klar hamnar hos profilen som startade den, *Logga ut*
+  frågar och tar bort serverns nedladdningar, borttagning när profilen inte får ladda ner eller se titeln (403/404,
+  var sjätte timme) och en kö med `at` för filmer, avsnitt, ljudböcker och poddar. Reglerna i `OfflineCore.swift`
+  (bara Foundation); `test/apple-offline.test.js` (9 fall, statiskt). `OfflineCore.swift` kompilerad och provad med
+  Swift 6.0.3 på Linux (48 kontroller, bl.a. Android-testets fall för flytten), `Offline.swift` typkontrollerad där
+  med påhittade SwiftUI/Network-typer. **Inte provat:** bygget i `apple.yml` och en riktig iPad.
 - 2026-11-27: Tidslinjen står på målet när webbspelaren startar om strömmen, gren `team/webb-spola-2026-11-27`.
   `holdTime()` i `web/js/player/video.js` låter videons `currentTime` ge målet från `load()` tills den nya strömmen har
   data där (eller spelar), så tidslinjen, tiden, skärmläsaren, Casta, fjärrstyrningen, minispelaren och ett nytt byte
@@ -511,6 +505,10 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 **Riktiga enheter**
 
+- **Prova iOS-appens nedladdningar per profil** på iPad: installera den nya versionen över den gamla med en
+  nedladdad film (filmen ska finnas kvar för samma profil), byt till en barnprofil (ska inte se den), titta en stund
+  på en nedladdad film i flygplansläge, slå av flygplansläget (positionen ska synas i webben) och logga ut (frågan,
+  sedan borta).
 - **iPhone (Safari):** börja på en film, stäng, öppna igen – fortsätter den på rätt ställe direkt? Spola långt fram i
   en film som kodas om och säg ungefär hur länge det tar innan bilden kommer.
 - **Appen för iPhone, iPad och Apple TV** (bygg med `apple.yml`): Fortsätt titta och spolning långt fram i en omkodad

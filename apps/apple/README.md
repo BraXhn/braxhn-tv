@@ -27,6 +27,20 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - tydliga felmeddelanden: ingen anslutning, fel adress, certifikatfel, för många försök (429), full disk/databasfel
   (507/503 med serverns förklaring) och en server som inte svarar via BraXhn Relay
 - nedladdning visas bara för konton som får ladda ner
+- nedladdningar (iPhone/iPad) gäller en server och profil, som i Android- och Expo-appen: varje profil har sin mapp
+  (`Downloads/<server>-<profil>/`) och lista, så en barnprofil ser inte vad en vuxen laddat ner, och efter profilbyte
+  eller utloggning visas bara den nya profilens. Vilken profil som är inloggad sparas per inloggning, så rätt lista
+  visas även när servern inte svarar. En nedladdning som blir klar när en annan profil är inloggad hamnar hos den som
+  startade den. *Logga ut* frågar först om något laddats ner från servern och tar då bort allt därifrån (alla
+  profiler); loggas appen ut för att servern inte godtar inloggningen längre ligger nedladdningarna kvar och syns igen
+  när profilen loggar in. När servern svarar tas allt bort om profilen inte får ladda ner längre, och nedladdade
+  titlar som profilen inte får se (403) eller som inte finns kvar (404), högst var sjätte timme
+- nedladdningar från äldre versioner (en gemensam lista) flyttas till profilen som var inloggad när appen uppdaterades;
+  gick det inte att veta får huvudkontot dem (som Android-appen)
+- positioner som inte kommer fram (inget nät, serverfel) sparas per server och profil och skickas med `at` när nätet
+  kommer tillbaka, när appen kommer till förgrunden och efter nästa lyckade rapport – filmer, avsnitt, ljudböcker och
+  poddar. Servern behåller då ett senare framsteg från en annan enhet (för poddar bara när servern tar emot `at`).
+  Reglerna: `Shared/OfflineCore.swift`
 - feedback och felrapporter (Inställningar → *Skicka feedback* och *Mina ärenden*), som knappen *Feedback* i webben:
   typ, *Gäller* (förvalt efter skärmen du var på), meddelande och teknisk information med *Visa vad som skickas med*.
   *Mina ärenden* visar status och teamets svar, och där svarar du när teamet ber om mer information. Går en film inte
@@ -118,8 +132,10 @@ appen att installera alls. Därför är det inte byggt – hellre en app som all
 Workflowet `.github/workflows/apple.yml` kompilerar båda målen på GitHubs macOS-maskiner vid varje push, utan signering. Koden är skriven och granskad, men **har inte kompilerats** i miljön där den skapades eftersom Xcode saknades där. Kör workflowet, eller bygg i Xcode, och rätta eventuella kompileringsfel.
 
 Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`), Feedbacks regler (`FeedbackCore` i `Feedback.swift`),
-de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`) och spolningen (`SeekCore`) är rena typer utan nät och
+de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`), spolningen (`SeekCore`) och nedladdningarna per profil
+med kön för positioner (`OfflineCore.swift`) är rena typer utan nät och
 vyer, så att ett testmål kan läggas till för dem utan att något annat behöver ändras. `test/apple-i18n.test.js` (Node,
 utan Xcode) kontrollerar att varje svensk text i koden har en engelsk rad i `en.lproj/Localizable.strings` och att
 Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser är desamma som i Expo- och
-Android-appen.
+Android-appen; `test/apple-offline.test.js` att nedladdningarnas och köns regler är Android-appens och att appen
+använder dem (profilens lista, utloggningen, kön med `at`).

@@ -357,12 +357,13 @@ final class SpokenPlayer: ObservableObject {
         lastSave = Date()
         let pos = final ? tr.duration : position
         guard final || pos > 5 else { return }
-        let path = tr.kind == .book ? "/api/audiobooks/book/\(tr.id)/progress" : "/api/podcasts/episodes/\(tr.id)/progress"
-        let body: [String: Any] = ["position": pos, "speed": Double(speed)]
+        let kind = tr.kind == .book ? ProgressQueue.book : ProgressQueue.pod // utan svar: skickas senare med at (Offline.swift)
+        let sp = Double(speed), dur = tr.duration
         let id = tr.id, gen = trackGen
         Task { [weak self] in
             // Skärmtiden kan vara slut (även för ljud, om föräldern valt det): servern svarar stop – pausa och säg varför
-            guard let data = try? await model.post(path, body), let r = try? JSONDecoder().decode(ProgressReply.self, from: data),
+            guard let data = await PendingPositions.shared.post(model, kind: kind, id: id, position: pos, duration: dur, speed: sp),
+                  let r = try? JSONDecoder().decode(ProgressReply.self, from: data),
                   r.stop == true, let self, self.trackGen == gen, self.track?.id == id, self.playing else { return }
             self.pause()
             model.notice = model.stopText(r)

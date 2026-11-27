@@ -123,6 +123,12 @@
 "Fortsätt" = "Resume";
 "Pågår" = "In progress";
 "Inget nedladdat. Öppna en film eller ett avsnitt och välj Ladda ner." = "Nothing downloaded. Open a movie or an episode and choose Download.";
+"Nedladdning går när servern har svarat en gång efter inloggningen. Försök igen om en stund." = "Downloading works once the server has answered after you signed in. Try again in a moment.";
+"Logga ut?" = "Sign out?";
+"Nedladdningarna togs bort eftersom profilen inte får ladda ner längre." = "The downloads were removed because this profile may no longer download.";
+"Togs bort eftersom profilen inte får se dem längre: %@" = "Removed because this profile may no longer watch them: %@";
+"Logga ut och ta bort" = "Sign out and remove";
+"Allt som laddats ner från den här servern tas bort från enheten. Du kan ladda ner det igen när du loggat in." = "Everything downloaded from this server is removed from the device. You can download it again after signing in.";
 "Varje profil har egen tittarhistorik, Min lista och åldersgräns. Profiler skapas och ändras i webben." = "Each profile has its own watch history, watchlist and age limit. Profiles are created and changed in the web app.";
 "Byt profil" = "Switch profile";
 "Huvudkonto" = "Main account";

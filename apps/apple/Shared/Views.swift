@@ -403,6 +403,7 @@ struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage("nightMode") private var nightMode = false
     @AppStorage("clearDialog") private var clearDialog = false
+    @State private var askLogout = false
     private let qualities: [(key: String, name: String)] = [("auto", "Automatisk"), ("orig", "Original"), ("1080", "1080p"), ("720", "720p"), ("480", "480p"), ("360", "360p")]
     private let langs: [(key: String, name: String)] = [("", "Inga"), ("sv", "Svenska"), ("en", "Engelska"), ("no", "Norska"), ("da", "Danska"), ("fi", "Finska")]
 
@@ -445,7 +446,15 @@ struct SettingsView: View {
             // Feedback och Mina ärenden (FeedbackViews.swift)
             FeedbackSection()
             Section {
-                Button("Logga ut", role: .destructive) { model.logout() }
+                Button("Logga ut", role: .destructive) {
+                    if OfflineProfile.hasDownloads(model) { askLogout = true } else { Task { await OfflineProfile.signOut(model) } }
+                }
+                .confirmationDialog("Logga ut?", isPresented: $askLogout, titleVisibility: .visible) {
+                    Button("Logga ut och ta bort", role: .destructive) { Task { await OfflineProfile.signOut(model) } }
+                    Button("Avbryt", role: .cancel) {}
+                } message: {
+                    Text("Allt som laddats ner från den här servern tas bort från enheten. Du kan ladda ner det igen när du loggat in.")
+                }
             }
             Section { Text("BraXhn TV – fri mediaserver utan prenumeration").font(.footnote).foregroundStyle(.secondary) }
             #if DONATION_LINK && os(iOS)
