@@ -4661,4 +4661,6 @@ self.BX_I18N = {
   "Provet är klart.": "The test is done.",
   "Samma orsak som ovan.": "Same cause as above.",
   "Ett prov pågår redan": "A test is already running",
+  // server/stream.js – en ström som ersatts vid spolning eller kvalitetsbyte
+  "Uppspelningen har startats om på ett annat ställe": "Playback was restarted at another point",
 };
