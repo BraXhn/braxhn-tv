@@ -12,6 +12,16 @@
   bildtoken per användare, så en app som startades ofta kunde knuffa ut de andra apparnas – och deras bilder slutade
   visas. Nu sparas token säkert i nyckelringen per server och profil och förnyas bara när mindre än ett dygn är kvar,
   eller när servern säger att den inte gäller längre.
+- **Spolning i en omkodad film går fortare även i Expo- och Android-appen.** Spolar du långt fram eller bak i en film
+  som servern kodar om startar appen nu om strömmen där du spolade till, med korta stycken i början, som webbspelaren –
+  i stället för att vänta tills servern kodat ett helt sexsekundersstycke. Den gamla omkodningen stoppas direkt.
+  Ljudspår, undertext och paus behålls. Spolning inom det som redan är laddat, eller dit servern redan har kodat, går
+  som förut, och remux och direktuppspelning påverkas inte. På Google TV samlas fjärrkontrollens snabbspolning: fem
+  tryck i rad blir en omstart vid det sista målet. Expo-appen börjar nu också *Fortsätt titta* direkt på rätt ställe på
+  Android, utan att först hämta början av filmen. Uppmätt mot servern som telefonens spelare gör (1080p, 4 kärnor):
+  2,1–2,4 s → 0,7–0,8 s tills stycket med målet har kommit; avkodningen i telefonen kommer till. I Expo-appens webbläge
+  spolar den som förut (Chromes egen spelare hämtar början först, och då blev det långsammare). Inte provat på riktig
+  telefon, TV eller bil.
 - **Expo-appen på engelska.** Appen följer telefonens språk – svenska om telefonen är på svenska, annars engelska, som
   Android-appen – och under *Konto → Språk* kan du välja *Telefonens språk*, *Svenska* eller *English*. Alla texter
   (380) är översatta; de som också finns i webben (156) har exakt samma engelska. Plural (*1 episode / 3 episodes*),
@@ -24,7 +34,7 @@
   Chrome på en 1080p-film (4 kärnor): 2,7–4,6 s → 0,9–1,1 s till bild. Spolning inom det som redan är laddat, eller dit
   servern redan har kodat, går som förut. Den gamla omkodningen stoppas direkt, så den tar inte processorn från den nya.
   Med grafikkort är första stycket 2 s (inte provat med riktigt grafikkort). Gäller webbspelaren; Safari på iPhone och
-  apparna spolar som förut.
+  iPhone-/Apple TV-appen spolar som förut (Expo- och Android-appen: se ovan).
 - **Uppspelningen startar en aning tidigare i webben.** Spelaren ber servern starta filmen samtidigt som den hämtar
   titelns uppgifter, i stället för efteråt (förut 40–150 ms efter klicket).
 - **Feedback och felrapporter i Expo- och Android-appen.** Samma som knappen *Feedback* i webben: välj *Förslag eller

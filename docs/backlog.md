@@ -116,8 +116,14 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   segmentet (`d.abr` i `server/routes/playback.js`). Steget som mastern listar först kunde förstartas.
 - Spolning i en omkodning laddar om strömmen: under ~1 s visar tidslinjen 0:00 och "Förbereder…" (videoelementet kopplas
   om). Positionen kunde visas från målet medan den nya strömmen startar (`load()` i `web/js/player/video.js`).
-- Safaris egen HLS (iPhone) och apparna spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan bilden
-  kommer. Apparna kunde göra som webben (ny `/playback` med `start=` och `prev=`).
+- Safaris egen HLS (iPhone) och iOS/tvOS-appen spolar fortfarande inom den gamla spellistan: 6 s-segmentet kodas innan
+  bilden kommer. De kunde göra som webben (ny `/playback` med `start=` och `prev=`).
+- Expo-appen ser inte `X-Seg-Ready` (expo-video visar inga svarshuvuden) och gissar vad servern har kodat ur bufferten –
+  en spolning dit servern redan kodat startar ibland om i onödan. Ett huvud på spellistan eller ett eget anrop utan
+  sidoeffekter (en `HEAD` på ett segment startar en omkodning) skulle ge appen samma svar som webben (`server/stream.js`).
+- Expo-appens webbläge spolar utan omstart: Chromes HLS-spelare hämtar segment 0 och 1 i varje ny ström innan den går
+  till målet (bryr sig inte om `EXT-X-START` eller `#t=`), och servern startar då om ffmpeg vid 0. Med hls.js i
+  webbläget gick det att göra som webbspelaren (`apps/expo/src/screens/Player.tsx`).
 
 **Från arbetspasset 2026-11-24 (sett men inte gjort)**
 - Rena tidsmätningar av start, spolning och kvalitetsbyte på en obelastad maskin (skriptet från passet mätte under last).
@@ -197,6 +203,16 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `app` – fel form tas bort, versionen får inte vara en IP-adress (`test/support.test.js`, fall 12). Kontraktet har
   Android-appens fem nya anrop. Expo i webbläget mot en egen server med Playwright (390×844). **Inte provat:** på riktig
   telefon, Google TV eller bil; Android-appen är inte kompilerad här (ingen Android SDK).
+- 2026-11-27: Spolning i en omkodning i Expo- och Android-appen, gren `team/app-spola-2026-11-27`. Samma regler som
+  webben (`seekcore.ts`, `SeekCore.kt`): spolning utanför bufferten startar om strömmen vid målet med `start=` och
+  `prev=`. Expo märker spolningen som ett hopp i positionen (var 0,25 s), gissar vad servern har kodat och skickar
+  `nhls=1` även på Android (`EXT-X-START`); inte i webbläget (Chromes HLS hämtar början först – uppmätt 2,4–2,8 s →
+  2,9–3,7 s, långsammare). Android: `SeekingPlayer` (ForwardingPlayer runt ExoPlayer) fångar tidslinjen, snabbspolning
+  och fjärrkontrollen före ExoPlayer, `X-Seg-Ready` läses med en `TransferListener`, fjärrkontrollens steg samlas
+  (0,6 s). Uppmätt mot servern som en spelare som följer `EXT-X-START` (1080p H.264 10 bitar, 4 kärnor): segmentet med
+  målet 2,1–2,4 s → 0,67–0,80 s. `test/expo-seek.test.js`, `SeekCoreTest.kt` (körd med Gradle på JVM här), kontraktet
+  har `prev` och `/stop?pid=&replaced=1`. **Inte provat:** riktig telefon, Google TV, bil; Android-appen är inte
+  kompilerad här (ingen Android SDK).
 - 2026-11-27: Spolning i en omkodning och tidig `/playback`, gren `team/spola-2026-11-27`. Spolning utanför bufferten
   laddar om strömmen från målet med korta segment där (`seekRestart`/`seekRestarts`, `prev=` → `dropPlayback`,
   `X-Seg-Ready`); `play()` skickar `/playback` samtidigt som titelns uppgifter hämtas (`earlyPlayback`/`earlyFits`).
