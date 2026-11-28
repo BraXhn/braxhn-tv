@@ -264,9 +264,10 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 - 2026-11-28: iOS/tvOS-appen följer *Spela nästa avsnitt automatiskt* (iOS-delen av punkt 1), gren
   `team/apple-nasta-2026-11-28`. Fel: `ended()` i `Player.swift` startade alltid nästa avsnitt och läste inte
   `autoNext`. Nu `NextCore.swift` (bara Foundation): `plan` = webbens `nextPlan` (0–60 s, decimaler kapas, 8 s utan
-  `autoNext`; `countdown` som heltal, decimaltal eller text), `end` = av → spelaren stängs (som Android-grenen), 0 s →
-  direkt, annars kortet *Nästa avsnitt om N s* med *Spela nu*/*Avbryt* (`NextCard`; Apple TV: fokus på *Spela nu*,
-  `onExitCommand` = Avbryt, spelarvyn tas bort medan kortet syns). Förvärmning med `Start.warm(…, start: 0)` när
+  `autoNext`; `countdown` som heltal, decimaltal eller text), `end` som Android-appens `SkipCore.atEnd`: inget nästa
+  avsnitt → spelaren stängs, på och 0 s → direkt, på → kortet *Nästa avsnitt om N s* med *Spela nu*/*Avbryt*, av eller
+  okänt (nedladdad titel utan `/playback`) → kortet *Nästa avsnitt* utan nedräkning med *Spela nu*/*Stäng*
+  (`NextCard`; Apple TV: fokus på *Spela nu*, `onExitCommand` = Avbryt/Stäng, spelarvyn tas bort medan kortet syns). Förvärmning med `Start.warm(…, start: 0)` när
   eftertexterna börjar och varje sekund i nedräkningen (samma fråga som `load(…, cinema: true)`). Knapparna för
   sammanfattning och eftertexter fanns redan. `test/apple-next.test.js` (6 fall; fallet för `ended()` faller på main),
   `autoNext` i `Playback.ios` i kontraktet. **Inte provat:** kompilering (bara i `apple.yml`) och riktig enhet.

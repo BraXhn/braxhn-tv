@@ -65,8 +65,11 @@ final class PlayerController: ObservableObject {
     @Published private(set) var stopNotice: String?
     /// Felet kan försökas igen (strömmen avbröts under uppspelningen)
     @Published private(set) var canRetry = false
-    /// Avsnittet är slut och nästa startar om så här många sekunder (kortet med Spela nu och Avbryt; NextCore). nil = inget kort
+    /// Kortet när avsnittet är slut (NextCore): nästa startar om så här många sekunder, eller 0 när kortet inte räknar
+    /// ner (nextAuto = false: valet är av eller inte känt). nil = inget kort
     @Published private(set) var nextIn: Int?
+    /// Kortet räknar ner till nästa avsnitt (Spela nu och Avbryt); false = utan nedräkning (Spela nu och Stäng)
+    @Published private(set) var nextAuto = false
     /// Skärmtiden kvar idag (ScreenLeftCore): först appens senast kända status, sedan serverns svar på varje
     /// framstegsrapport och utan nät appens egen räkning. nil = ingen skärmtid eller ingen gräns idag. VoiceOver läser
     /// upp varningen när den syns och när minuten ändras.
@@ -444,6 +447,7 @@ final class PlayerController: ObservableObject {
         nextTask?.cancel()
         nextTask = nil
         nextIn = nil
+        nextAuto = false
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -588,15 +592,16 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    /// Avsnittet är slut: kontots val Spela nästa avsnitt automatiskt (autoNext i /playback, NextCore.end). Av eller
-    /// inget nästa avsnitt: spelaren stängs. 0 s: nästa direkt. Annars kortet "Nästa avsnitt om N s".
+    /// Avsnittet är slut: kontots val Spela nästa avsnitt automatiskt (autoNext i /playback, NextCore.end). Inget
+    /// nästa avsnitt: spelaren stängs. På och 0 s: nästa direkt. På: kortet "Nästa avsnitt om N s". Av, eller inte känt
+    /// (nedladdad titel, ingen /playback): kortet "Nästa avsnitt" utan nedräkning.
     private func ended() {
         guard !closed, nextIn == nil else { return }
         stopReporting()
-        switch NextCore.end(pb?.autoNext, hasNext: item?.nextId != nil) {
+        switch NextCore.end(pb?.autoNext, hasNext: item?.nextId != nil, known: pb != nil) {
         case .close: onFinished?()
         case .next: playNext()
-        case .card(let seconds): showNext(seconds)
+        case .card(let seconds, let auto): showNext(seconds, auto: auto)
         }
     }
 
@@ -871,7 +876,7 @@ struct PlayerContent: View {
             }
             // Avsnittet är slut: nästa avsnitt om N s, med Spela nu och Avbryt (NextCore)
             if let n = ctrl.nextIn, ctrl.error == nil, ctrl.stopNotice == nil {
-                NextCard(seconds: n, play: { ctrl.playNext() }, cancel: { ctrl.cancelNext() })
+                NextCard(seconds: n, auto: ctrl.nextAuto, play: { ctrl.playNext() }, cancel: { ctrl.cancelNext() })
             }
             if ctrl.slowStart && ctrl.error == nil && ctrl.stopNotice == nil {
                 // Omkodning med grafikkort kan ta ~10 s till första bilden – säg det, så att ingen startar om
@@ -958,24 +963,26 @@ struct PlayerContent: View {
     }
 }
 
-/// Kortet när avsnittet är slut: "Nästa avsnitt om N s" med Spela nu och Avbryt (NextCore.swift, som webben och
-/// Expo-appen). Apple TV: fokus på Spela nu när kortet visas, fjärrkontrollens Menu = Avbryt.
+/// Kortet när avsnittet är slut (NextCore.swift, som webben, Expo- och Android-appen): "Nästa avsnitt om N s" med
+/// Spela nu och Avbryt, eller utan nedräkning (valet av eller inte känt) "Nästa avsnitt" med Spela nu och Stäng.
+/// Apple TV: fokus på Spela nu när kortet visas, fjärrkontrollens Menu = Avbryt/Stäng.
 struct NextCard: View {
     let seconds: Int
+    let auto: Bool
     let play: () -> Void
     let cancel: () -> Void
     @FocusState private var focusPlay: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(String(format: L("Nästa avsnitt om %d s"), max(0, seconds)))
+            Text(auto ? String(format: L("Nästa avsnitt om %d s"), max(0, seconds)) : L("Nästa avsnitt"))
                 .font(.headline)
                 .monospacedDigit()
             HStack(spacing: 16) {
                 Button(action: play) { Label("Spela nu", systemImage: "play.fill") }
                     .buttonStyle(.borderedProminent)
                     .focused($focusPlay)
-                Button("Avbryt", action: cancel)
+                Button(auto ? L("Avbryt") : L("Stäng"), action: cancel)
                     .buttonStyle(.bordered)
             }
         }
@@ -1185,11 +1192,15 @@ extension PlayerController {
         Start.warm(model, id: next, start: 0, audio: nil, subtitle: nil)
     }
 
-    /// Kortet "Nästa avsnitt om N s": räknar ner varje sekund (och håller förvärmningen vid liv), sedan nästa avsnitt
-    fileprivate func showNext(_ seconds: Int) {
+    /// Kortet "Nästa avsnitt om N s": räknar ner varje sekund (och håller förvärmningen vid liv), sedan nästa avsnitt.
+    /// auto = false: kortet "Nästa avsnitt" står kvar utan nedräkning tills Spela nu eller Stäng.
+    fileprivate func showNext(_ seconds: Int, auto: Bool) {
         nextTask?.cancel()
+        nextTask = nil
         warmNext()
+        nextAuto = auto
         nextIn = NextCore.Countdown(seconds: seconds).left
+        guard auto else { return }
         let gen = generation
         nextTask = Task { [weak self] in
             var cd = NextCore.Countdown(seconds: seconds)
@@ -1213,7 +1224,8 @@ extension PlayerController {
         load(itemId: next, at: 0, audio: nil, subtitle: nil)
     }
 
-    /// Avbryt: kortet försvinner och spelaren står kvar i slutet (Stäng eller Menu på Apple TV går tillbaka)
+    /// Avbryt eller Stäng: kortet försvinner och spelaren står kvar i slutet, som webben (krysset, eller Menu igen på
+    /// Apple TV, går tillbaka)
     func cancelNext() {
         nextTask?.cancel()
         nextTask = nil

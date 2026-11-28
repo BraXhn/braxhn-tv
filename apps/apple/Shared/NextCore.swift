@@ -4,10 +4,12 @@ import Foundation
 // *Spela nästa avsnitt automatiskt* kommer i svaret från /playback: autoNext = { enabled, countdown }
 // (server/routes/playback.js). Samma regler som webben (nextPlan i web/js/player/autoskip.js), Expo-appen
 // (nextPlan i apps/expo/src/skipcore.ts) och Android-appen (SkipCore.kt):
-// - valet är av: spelaren stängs när avsnittet är slut (inget nästa avsnitt)
-// - 0 s: nästa avsnitt startar direkt
-// - annars kortet "Nästa avsnitt om N s" med Spela nu och Avbryt (Apple TV: fokus på Spela nu, Menu = Avbryt)
-// - utan autoNext i svaret (äldre server, nedladdad titel utan /playback) gäller 8 s som förut
+// - inget nästa avsnitt: spelaren stängs
+// - valet är på och 0 s: nästa avsnitt startar direkt
+// - valet är på: kortet "Nästa avsnitt om N s" med Spela nu och Avbryt (Apple TV: fokus på Spela nu, Menu = Avbryt)
+// - valet är av: kortet "Nästa avsnitt" utan nedräkning, med Spela nu och Stäng (Apple TV: Menu = Stäng)
+// - utan autoNext i svaret från en äldre server gäller 8 s som förut; en nedladdad titel har ingen /playback, och då
+//   är valet inte känt: kortet utan nedräkning (en barnprofil med valet av får aldrig nästa avsnitt av sig självt)
 // Nästa avsnitt förvärms (/playback?warm=1, Start.warm) när eftertexterna börjar och under nedräkningen, med samma fråga
 // som uppspelningen sedan skickar. Anropen: Player.swift. Testas statiskt i test/apple-next.test.js.
 
@@ -56,17 +58,20 @@ enum NextCore {
 
     /// Vad spelaren gör när avsnittet är slut
     enum End: Equatable {
-        /// Valet är av eller inget nästa avsnitt: spelaren stängs
+        /// Inget nästa avsnitt: spelaren stängs
         case close
-        /// 0 s: nästa avsnitt direkt
+        /// Valet är på och 0 s: nästa avsnitt direkt
         case next
-        /// Kortet "Nästa avsnitt om N s" med Spela nu och Avbryt
-        case card(seconds: Int)
+        /// Kortet: auto = "Nästa avsnitt om N s" med Spela nu och Avbryt; annars "Nästa avsnitt" utan nedräkning med
+        /// Spela nu och Stäng (seconds = 0)
+        case card(seconds: Int, auto: Bool)
     }
 
-    static func end(_ n: AutoNext?, hasNext: Bool) -> End {
-        guard let p = plan(n, hasNext: hasNext), p.auto else { return .close }
-        return p.seconds == 0 ? .next : .card(seconds: p.seconds)
+    /// Som webben och Android-appens SkipCore.atEnd. known = false: valet är inte känt (nedladdad titel utan /playback)
+    static func end(_ n: AutoNext?, hasNext: Bool, known: Bool = true) -> End {
+        guard let p = plan(n, hasNext: hasNext) else { return .close }
+        guard known, p.auto else { return .card(seconds: 0, auto: false) }
+        return p.seconds == 0 ? .next : .card(seconds: p.seconds, auto: true)
     }
 
     /// Nedräkningen i kortet: left sekunder kvar. tick() varje sekund; true = starta nästa avsnitt nu.

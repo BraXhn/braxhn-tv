@@ -13,7 +13,8 @@
   alltid direkt när ett avsnitt tog slut, även när en förälder stängt av valet för att barnet inte ska fastna i en
   serie. Nu visas kortet *Nästa avsnitt om … s* med *Spela nu* och *Avbryt* efter kontots nedräkning, som i webben och
   Expo-appen; på Apple TV står fokus på *Spela nu* och fjärrkontrollens Menu avbryter. Med 0 s startar nästa avsnitt
-  direkt, och är valet av stängs spelaren. Nästa avsnitt förbereds på servern redan när eftertexterna börjar, så att
+  direkt. Är valet av visas kortet *Nästa avsnitt* utan nedräkning, med *Spela nu* och *Stäng*, och det gör det också
+  för en nedladdad titel där appen inte vet vad kontot valt. Nästa avsnitt förbereds på servern redan när eftertexterna börjar, så att
   det startar fortare. Inte byggt eller provat på enhet här (byggs i GitHub Actions).
 - **Appen för iPhone, iPad och Apple TV visar hur mycket skärmtid som är kvar.** För en profil med skärmtid och en
   gräns i dag visar spelaren *12 min kvar idag* (på Apple TV när filmen är pausad), och de sista fem minuterna syns

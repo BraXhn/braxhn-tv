@@ -11,8 +11,10 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - knappen *Hoppa över intro* och *Nästa avsnitt* (på Apple TV visas den i spelarens egna kontroller)
 - nästa avsnitt efter kontots val *Spela nästa avsnitt automatiskt* (`autoNext` i `/playback`, som webben och de
   andra apparna): när avsnittet är slut visas kortet *Nästa avsnitt om … s* med *Spela nu* och *Avbryt* (på Apple TV
-  med fokus på *Spela nu*, och fjärrkontrollens Menu är *Avbryt*). 0 s startar nästa direkt, och är valet av stängs
-  spelaren. En äldre server utan `autoNext` ger 8 s som förut. Nästa avsnitt förbereds på servern (`/playback?warm=1`,
+  med fokus på *Spela nu*, och fjärrkontrollens Menu är *Avbryt*). 0 s startar nästa direkt. Är valet av visas kortet
+  *Nästa avsnitt* utan nedräkning, med *Spela nu* och *Stäng* (Menu = *Stäng*); spelaren stängs bara när det inte finns
+  något nästa avsnitt. En äldre server utan `autoNext` ger 8 s som förut, men en nedladdad titel (ingen `/playback`,
+  valet okänt) får kortet utan nedräkning – en barnprofil med valet av får aldrig nästa avsnitt av sig självt. Nästa avsnitt förbereds på servern (`/playback?warm=1`,
   samma fråga som uppspelningen) när eftertexterna börjar och under nedräkningen. Reglerna: `Shared/NextCore.swift`
 - skärmtiden kvar i spelaren, som webben, Android- och Expo-appen: för en profil med skärmtid och en gräns i dag visar
   iPhone och iPad *12 min kvar idag* i spelarens överkant (*⏱ 12 min kvar* på en smal skärm), Apple TV när filmen är
