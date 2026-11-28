@@ -1,6 +1,13 @@
 # Ändringar
 
 ## Ej utgiven
+- **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
+  hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
+  flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren
+  troligast börjar med (det som passar din uppmätta uppkoppling). I testet med 120 ms fördröjning per rundresa kom
+  första biten av filmen 0,35–0,4 s fortare (till exempel 0,4 s i stället för 0,75 s). Väljer spelaren ett annat
+  steg stoppas det förberedda direkt, så att servern inte kodar två gånger. Inte provat på riktigt mobilnät eller i
+  apparna på enhet.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

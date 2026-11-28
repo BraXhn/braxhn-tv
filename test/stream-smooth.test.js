@@ -153,6 +153,46 @@ test('hls.js i Chromium: den riktiga biblioteksversionen tar emot inställningar
   } finally { await browser.close(); }
 });
 
+// Utanför hemmet förstartar /playback steget som mastern listar först (abrStartQuery). Webbspelaren ger hls.js 80 % av
+// den uppmätta bandbredden (samma bw som /playback fick, video.js) – då ska hls.js börja på samma steg.
+test('hls.js i Chromium: startsteget är steget som mastern listar först (det som förstartas vid /playback)', { skip: !chromium && 'Playwright saknas' }, async () => {
+  const st = await import('../server/stream.js');
+  const item = { id: 1, duration: 600, size: 0, streams: JSON.stringify([{ index: 0, type: 'video', codec: 'h264', width: 1920, height: 1080 }]) };
+  const masterFor = (bw) => {
+    const q = new URLSearchParams({ mode: 'transcode', q: '1080', abr: '1', pid: 'abcd1234', ...(bw ? { sbw: String(bw) } : {}) });
+    let body = ''; const res = { req: { headers: {} }, setHeader() {}, writeHead() { return res; }, end(b) { body = String(b ?? ''); } };
+    st.serveMaster(res, item, q);
+    return { body, start: st.abrStartQuery(item, q).get('q') };
+  };
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    const masters = {};
+    await page.route('http://hemma.test/**', (r) => {
+      const u = new URL(r.request().url());
+      if (u.pathname.endsWith('/master.m3u8')) return r.fulfill({ body: masters[u.searchParams.get('bw')].body, contentType: 'application/vnd.apple.mpegurl' });
+      return r.fulfill({ status: 404, body: '' });
+    });
+    await page.goto('http://hemma.test/');
+    await page.setContent('<!doctype html><video style="width:1920px;height:1080px"></video>');
+    await page.addScriptTag({ content: fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'vendor', 'hls.min.js'), 'utf8') });
+    const src = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'js', 'player', 'hlsconfig.js'), 'utf8').replace(/export /g, '');
+    for (const bw of [1500, 2500, 4000, 6000, 8000, 12000, 30000]) {
+      masters[bw] = masterFor(bw);
+      const picked = await page.evaluate(([code, bw]) => new Promise(ok => {
+        const m = new Function(`${code}; return { hlsConfig, abrClass };`)();
+        const hls = new Hls(m.hlsConfig({ start: 0, est: bw * 1000 * 0.8, Abr: m.abrClass(Hls) })); // som video.js
+        hls.on(Hls.Events.LEVEL_LOADING, (_, d) => { ok(new URL(d.url).searchParams.get('q')); hls.destroy(); });
+        setTimeout(() => ok('ingen'), 5000);
+        hls.attachMedia(document.querySelector('video'));
+        hls.loadSource('http://hemma.test/master.m3u8?bw=' + bw);
+      }), [src, bw]);
+      assert.equal(masters[bw].body.match(/index\.m3u8\?\S+/)[0].match(/[?&]q=(\d+)/)[1], masters[bw].start, `mastern listar det förstartade steget först (${bw} kbit/s)`);
+      assert.equal(picked, masters[bw].start, `hls.js börjar på det förstartade steget (${bw} kbit/s)`);
+    }
+  } finally { await browser.close(); }
+});
+
 // ---------- orsaken vid hack ----------
 test('hack: orsaken väljs ur serverns och spelarens mätvärden', () => {
   const now = 1e6;

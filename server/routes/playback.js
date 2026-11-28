@@ -240,11 +240,13 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
   const preroll = c.q.get('info') !== '1' && !queued && c.q.get('cinema') === '1' && main.kind === 'movie' && startAt < 1
     ? await prerollFor(c, main, needTok) : [];
   if (c.res.writableEnded || c.req.destroyed) return;
-  // Starta ffmpeg redan nu (inte vid anpassningsbar kvalitet – där väljer spelaren steg först, och inte när trailers
-  // spelas först – då hämtar spelaren filmen på nytt efteråt)
+  // Starta ffmpeg redan nu (inte när trailers spelas först – då hämtar spelaren filmen på nytt efteråt).
+  // Anpassningsbar kvalitet (utanför hemmet): steget som mastern listar först – det spelaren troligast börjar med
+  // (Safari/AVPlayer tar första varianten, hls.js samma steg efter bandbredden). Väljer spelaren ett annat steg
+  // stoppas det förstartade när det stegets första segment begärs (samma pid, ensureCapacity i stream.js).
   // Snabbstart: väck disken direkt och räkna träff/miss i startcachen (före ffmpeg, som kan läsa ur den)
   if (!info) prestart.notePlay(it, startAt, d.mode);
-  if (hp && !info && !d.abr && !preroll.length) st.prewarm(it, hp, c.user.id, startAt);
+  if (hp && !info && !preroll.length) st.prewarm(it, d.abr ? st.abrStartQuery(it, hp) : hp, c.user.id, startAt);
   if (warm) {
     // Inget förvärms när trailers spelas först, vid anpassningsbar kvalitet eller när en bildundertext ska brännas in
     // (klienten väljer den först när den har spårlistan). Direktuppspelning behöver ingen ström – disken väcks ovan.

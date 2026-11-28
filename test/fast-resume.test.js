@@ -413,6 +413,96 @@ t('första segmentet vid omkodning är 1 s och kommer fortare än med 2 s (tidsm
   assert.ok(ny < 4000, `första segmentet på ${Math.round(ny)} ms`);
 });
 
+// Utanför hemmet med automatisk kvalitet (ABR) listar mastern flera steg. Förut startades ingen ffmpeg förrän
+// spelaren valt steg och bett om första segmentet – start utanför hemmet tog då flera rundresor + ffmpeg-start längre
+// än hemma. Nu förstartas steget som mastern listar först redan vid /playback.
+const FAR = { 'x-forwarded-for': '81.2.3.4' };
+const masterSteps = (text, base) => [...text.matchAll(/#EXT-X-STREAM-INF:[^\n]*\n(\S+)/g)].map(m => new URL(m[1], base));
+t('utanför hemmet med automatisk kvalitet: steget som mastern listar först förstartas vid /playback', async () => {
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(heavy.id, x.user); st.stopUserSessions(it.id, x.user); x.reqAt = 0; } };
+  const H = { ...A(), ...FAR };
+  for (const [q, first] of [['', '1080'], ['&bw=3000', '480'], ['&bw=20000', '1080']]) {
+    stopAll();
+    const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode${q}`, { headers: H })).json();
+    assert.equal(pb.mode, 'transcode'); assert.match(pb.url, /[?&]abr=1(&|$)/, 'flera steg utanför hemmet');
+    const steps = masterSteps(await (await fetch(new URL(pb.url, B), { headers: H })).text(), new URL(pb.url, B));
+    assert.ok(steps.length >= 2, 'mastern har flera steg');
+    assert.equal(steps[0].searchParams.get('q'), first, `mastern listar ${first} först (${q || 'utan mätning'})`);
+    const mine = sessions().filter(x => x.d.pid === pidOf(pb.url));
+    assert.deepEqual(mine.map(x => [x.d.q, !!x.proc]), [[first, true]], `ffmpeg igång för steget ${first} och inget annat (${q || 'utan mätning'})`);
+  }
+  // Hemma: ett steg, förstartat som förut
+  stopAll();
+  const home = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode`, { headers: A() })).json();
+  assert.doesNotMatch(home.url, /[?&]abr=1/);
+  assert.ok(sessions().some(x => x.d.pid === pidOf(home.url) && x.proc), 'hemma förstartas som förut');
+  stopAll();
+});
+
+t('utanför hemmet med automatisk kvalitet: första segmentet kommer fortare med förstarten (tidsmått, omväxlande körningar)', async () => {
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(heavy.id, x.user); st.stopUserSessions(it.id, x.user); x.reqAt = 0; } };
+  const H = { ...A(), ...FAR };
+  // En spelare utanför hemmet: /playback → master → stegets spellista → första segmentet, med en rundresa (RTT, som
+  // via reläet eller mobilnätet) före varje nästa begäran. cold = samma adresser utan förstart (queue=1 ger samma svar
+  // men startar ingen ffmpeg – som /playback med ABR gjorde förut).
+  const RTT = 120;
+  const run = async (cold) => {
+    stopAll(); await sleep(200);
+    const t0 = performance.now();
+    const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode&bw=3000${cold ? '&queue=1' : ''}`, { headers: H })).json();
+    await sleep(RTT);
+    const mu = new URL(pb.url, B);
+    const step = masterSteps(await (await fetch(mu, { headers: H })).text(), mu)[0];
+    await sleep(RTT);
+    const seg = new URL(/^seg-\S+/m.exec(await (await fetch(step, { headers: H })).text())[0], step);
+    await sleep(RTT);
+    const r = await fetch(seg, { headers: H });
+    const len = (await r.arrayBuffer()).byteLength;
+    assert.equal(r.status, 200); assert.ok(len > 1000);
+    return performance.now() - t0;
+  };
+  const a = [], b = [];
+  for (let i = 0; i < 3; i++) { a.push(await run(false)); b.push(await run(true)); }
+  stopAll();
+  const med = (x) => [...x].sort((p, q) => p - q)[1];
+  const ny = med(a), gammal = med(b);
+  console.log(`utanför hemmet (ABR, 480p ur 720p 10 bitar, RTT ${RTT} ms): /playback → första segmentet ${Math.round(ny)} ms med förstart, ${Math.round(gammal)} ms utan (${a.map(Math.round)} / ${b.map(Math.round)})`);
+  assert.ok(ny < gammal - 150, `med förstart ${Math.round(ny)} ms ska vara tydligt före utan ${Math.round(gammal)} ms`);
+});
+
+t('utanför hemmet med automatisk kvalitet: väljer spelaren ett annat steg stoppas det förstartade', async () => {
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(heavy.id, x.user); st.stopUserSessions(it.id, x.user); x.reqAt = 0; } };
+  stopAll();
+  const H = { ...A(), ...FAR };
+  // Förstartat steg 480 (bw=3000); spelaren (t.ex. ExoPlayer med egen bandbreddsgissning) börjar i stället på 360
+  const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode&bw=3000`, { headers: H })).json();
+  const pid = pidOf(pb.url), mu = new URL(pb.url, B);
+  const steps = masterSteps(await (await fetch(mu, { headers: H })).text(), mu);
+  const pre = sessions().find(x => x.d.pid === pid);
+  assert.ok(pre?.proc && pre.d.q === '480', 'steget 480 förstartat');
+  const other = steps.find(u => u.searchParams.get('q') === '360');
+  const seg = new URL(/^seg-\S+/m.exec(await (await fetch(other, { headers: H })).text())[0], other);
+  // Hur länge två omkodningar för samma uppspelning är igång, räknat från begäran av det andra stegets segment
+  const procs = () => sessions().filter(x => x.d.pid === pid && x.proc).length;
+  assert.ok(pre.proc && !pre.done, 'det förstartade steget kodar fortfarande när spelaren väljer ett annat');
+  const t0 = performance.now();
+  let two = 0;
+  const iv = setInterval(() => { if (procs() > 1) two = performance.now() - t0; }, 10);
+  const r = await fetch(seg, { headers: H }); await r.arrayBuffer();
+  assert.equal(r.status, 200);
+  const segMs = performance.now() - t0;
+  while (performance.now() - t0 < 3000 && procs() > 1) await sleep(10);
+  clearInterval(iv);
+  console.log(`annat steg än det förstartade: två omkodningar högst ${Math.round(two)} ms (segmentet kom efter ${Math.round(segMs)} ms)`);
+  assert.equal(procs(), 1, 'två omkodningar för samma uppspelning efter 3 s');
+  assert.deepEqual(sessions().filter(x => x.d.pid === pid && x.proc).map(x => x.d.q), ['360'], 'bara steget spelaren valde kodas');
+  assert.ok(!pre.proc, 'det förstartade steget är stoppat');
+  stopAll();
+});
+
 test('väntan på ett segment vaknar när ffmpeg skapar nästa fil, inte först efter tidsgränsen', async () => {
   const dir = fs.mkdtempSync(path.join(ROOT, 'vakna-'));
   const s = { dir };

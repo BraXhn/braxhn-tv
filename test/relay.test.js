@@ -223,6 +223,27 @@ test('HLS: spellista och segment genom reläet', { skip: !hasFfmpeg && 'ffmpeg s
   assert.equal((await req(R, `/api/stream/${FILM_ID}/hls/seg-3.ts?${q}`, { raw: true })).status, 409, 'den stoppade uppspelningen startar ingen ny omkodning');
 });
 
+test('/playback genom reläet med automatisk kvalitet: omkodningen förstartas på steget som mastern listar först', { skip: !hasFfmpeg && 'ffmpeg saknas' }, async () => {
+  const st = await import('../server/stream.js');
+  const pb = await req(R, `/api/items/${FILM_ID}/playback?force=transcode`);
+  assert.equal(pb.status, 200);
+  assert.equal(pb.data.remote, true, 'via reläet: utanför hemmet');
+  assert.match(pb.data.url, /[?&]abr=1(&|$)/, 'automatisk kvalitet med steg');
+  const pid = new URL(pb.data.url, R).searchParams.get('pid');
+  const mine = [...st._slots.sessions.values()].filter(x => x.d.pid === pid);
+  assert.equal(mine.length, 1, 'en förstartad omkodning, inte en per steg');
+  assert.ok(mine[0].proc || mine[0].done, 'ffmpeg startad redan vid /playback');
+  const master = await req(R, pb.data.url);
+  const first = /^index\.m3u8\?\S+/m.exec(master.data)[0];
+  assert.equal(new URLSearchParams(first.split('?')[1]).get('q'), mine[0].d.q, 'samma steg som mastern listar först');
+  const base = pb.data.url.replace(/master\.m3u8.*$/, '');
+  const seg = /^seg-\S+/m.exec((await req(R, base + first)).data)[0];
+  const r = await req(R, base + seg, { raw: true });
+  assert.equal(r.status, 200); assert.equal(r.data[0], 0x47, 'MPEG-TS');
+  assert.equal([...st._slots.sessions.values()].filter(x => x.d.pid === pid).length, 1, 'segmentet kom från den förstartade omkodningen');
+  await req(R, `/api/stream/${FILM_ID}/stop`, { method: 'POST', body: {}, headers: { origin: R } });
+});
+
 test('SSE (Spela på…): händelser kommer fram direkt och strömmen hålls öppen', { timeout: 40000 }, async () => {
   const key = 'relatestnyckel-000001';
   const events = [];

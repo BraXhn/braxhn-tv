@@ -992,18 +992,30 @@ function subsMedia(it, query, d) {
   if (subs.length) attr = ',SUBTITLES="subs"';
   return { m, attr };
 }
-// Flera varianter: vald kvalitet först (Apple-enheter startar på första varianten), sedan fallande
-function serveAbrMaster(res, it, query, d) {
-  const subs = subsMedia(it, query, d);
-  let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + startTag(it, d) + subs.m;
-  // Steget som ryms i den uppmätta bandbredden först – iPhone/Safari börjar på första varianten och byter
-  // annars ner först efter att ha fastnat på ett för tungt steg
+// Mastern listar steget som ryms i den uppmätta bandbredden (sbw) först – iPhone/Safari börjar på första varianten
+// och byter annars ner först efter att ha fastnat på ett för tungt steg. hls.js väljer samma steg: webbspelaren ger
+// den 80 % av samma mätning som bandbreddsgissning (video.js), och hls.js tar det högsta steg som ryms i gissningen.
+function abrOrder(it, d) {
   let vs = abrVariants(it, d);
   if (d.startBw) {
     const fit = vs.find(x => x.bw <= d.startBw * 1000 * 0.8) || vs[vs.length - 1];
     vs = [fit, ...vs.filter(x => x !== fit)];
   }
-  for (const x of vs) {
+  return vs;
+}
+/** ABR: strömadressen (hlsParams) för steget som mastern listar först – det spelaren troligast börjar med och som
+ *  /playback förstartar. Annat än ABR: adressen oförändrad. */
+export function abrStartQuery(it, query) {
+  const d = normParams(readParams(query));
+  if (!(d.abr && d.mode === 'transcode')) return query;
+  const q = new URLSearchParams(query); q.set('q', abrOrder(it, d)[0].q);
+  return q;
+}
+// Flera varianter: vald kvalitet först (Apple-enheter startar på första varianten), sedan fallande
+function serveAbrMaster(res, it, query, d) {
+  const subs = subsMedia(it, query, d);
+  let m = '#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n' + startTag(it, d) + subs.m;
+  for (const x of abrOrder(it, d)) {
     const params = new URLSearchParams(query); params.delete('hlssubs'); params.set('q', x.q);
     m += `#EXT-X-STREAM-INF:BANDWIDTH=${x.bw},RESOLUTION=${x.w}x${x.h}${subs.attr}\nindex.m3u8?${params}\n`;
   }
@@ -1500,7 +1512,9 @@ function sessionFor(it, query, userId) {
     // En förvärmd ström som inte passade (annat ljudspår, annan kvalitet): den nya tar över
     for (const x of [...sessions.values()]) if (x.user === userId && x.item === it.id && x.warm) dropWarm(x);
     const prev = [...sessions.values()].find(x => x.user === userId && x.item === it.id && !x.firstLogged && t - x.created < 60e3);
-    if (prev && d.mode === 'transcode') {
+    // Ett ABR-steg som förstartades vid /playback men som spelaren aldrig bad om (ingen reqAt, samma pid): spelaren
+    // valde ett annat steg från början – den gav inte upp
+    if (prev && d.mode === 'transcode' && !(d.pid && prev.d.pid === d.pid && !prev.reqAt)) {
       restarts.n++;
       if (t - restarts.at > 60e3) {
         restarts.at = t;

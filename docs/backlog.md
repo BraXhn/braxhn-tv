@@ -74,18 +74,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
   `apple.yml` går igenom.
 
-### 5. Utanför hemmet: förstarta omkodningen redan vid /playback
-
-- **Vad:** med automatisk kvalitet utanför hemmet (`d.abr` i `server/routes/playback.js`) startas ingen ffmpeg förrän
-  spelaren valt steg och bett om ett segment – `st.prewarm` hoppas över när `d.abr` är sant. Förstarta steget som
-  mastern listar först (det spelaren oftast börjar med).
-- **Varför:** utanför hemmet är varje rundresa dyr (relä, mobilnät); start av en omkodad film är den långsammaste
-  starten i dag. Kontrollera först hur mycket det ger med `test/fast-resume.test.js` och en strypt anslutning.
-- **Filer:** `server/routes/playback.js`, `server/stream.js` (`prewarm`), `web/js/player/hlsconfig.js` (startsteget).
-- **Klart när:** tid till första segment utanför hemmet är mätt före och efter, och steget som förstartades används
-  (inte en andra ffmpeg för ett annat steg).
-
-### 6. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 5. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 - **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
   fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
@@ -101,7 +90,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
   kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
 
-### 7. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+### 6. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
 - **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
   först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
@@ -114,7 +103,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
   nedräkningen; `test/expo-i18n.test.js` är grön.
 
-### 8. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 7. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -231,6 +220,15 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
+  `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
+  först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`
+  (720p 10 bitar → 480p, processorn, 120 ms per rundresa, fyra körningar på en delad maskin): `/playback` → första
+  segmentet på median 385–600 ms mot 715–960 ms utan förstart (350–400 ms snabbare varje gång). hls.js väljer samma startsteg som mastern listar först när webben skickat `bw` (testat i
+  Chromium mot den inbäddade hls.js för 1,5–30 Mbit/s). Väljer spelaren ett annat steg stoppas det förstartade i samma
+  ögonblick som det stegets ffmpeg startar (aldrig två samtidigt vid mätning var 10:e ms). Genom reläet: `relay.test.js`. **Inte provat:** riktig
+  mobilanslutning, Safari/AVPlayer/ExoPlayer på enhet. Utan `bw` (apparna) listas taket först; ExoPlayer och hls.js
+  kan då börja lägre, och förstarten blir en kort förvärmning som stoppas.
 - 2026-11-27: Webbspelaren stoppar omkodningen när fliken eller TV-webbläsaren stängs (förut punkt 2), gren
   `team/flik-stopp-2026-11-27`. `pagehide` utan `persisted` skickar `/api/stream/:id/stop?pid=&gone=1` med
   `sendBeacon` (reserv: `fetch` med `keepalive`); inte vid bfcache, utan `pid` eller via AirPlay. `gone=1` gör att en
