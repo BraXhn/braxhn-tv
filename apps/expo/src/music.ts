@@ -138,7 +138,7 @@ function onStatus(st: AudioStatus) {
 // ---------- musik ----------
 /** Kön sparas på servern (server/musicqueue.js) – samma kö som webben visar efter omladdning eller på en annan enhet.
  *  owner = profilen kön hör till; touched = någon har spelat på den här enheten (en kö som bara visas skrivs inte). */
-const Q = { owner: 0, touched: false, timer: 0 as any, last: 0 };
+const Q = { owner: 0, touched: false, timer: 0 as any, last: 0, inflight: null as Promise<unknown> | null };
 async function saveQueue(final = false) {
   clearTimeout(Q.timer); Q.timer = 0;
   if (S.mode !== 'music' || !Q.owner || !Q.touched || !S.queue.length || Q.owner !== session.userId) return;
@@ -146,8 +146,10 @@ async function saveQueue(final = false) {
   let ids = S.queue.map((t) => t.id), idx = S.idx;
   if (ids.length > 1000) { const from = Math.max(0, Math.min(idx - 200, ids.length - 1000)); ids = ids.slice(from, from + 1000); idx -= from; }
   const owner = Q.owner;
+  const req = api('/api/me/queue', { method: 'PUT', body: { uid: owner, ids, idx, pos: Math.round(S.pos * 10) / 10, repeat: S.repeat, radio: S.radio }, timeout: final ? 8000 : 20000 });
+  Q.inflight = req.catch(() => {});
   try {
-    await api('/api/me/queue', { method: 'PUT', body: { uid: owner, ids, idx, pos: Math.round(S.pos * 10) / 10, repeat: S.repeat, radio: S.radio }, timeout: final ? 8000 : 20000 });
+    await req;
   } catch (e) {
     // 409 = en annan profil är inloggad nu: den här kön hör inte till den – stäng spelaren utan att röra serverns kö
     if (e instanceof ApiError && e.status === 409 && owner === Q.owner) { Q.owner = 0; stopAll(); }
@@ -285,37 +287,79 @@ async function moreRadio() {
   } catch {}
 }
 
-/** Vid start: visa den sparade kön (från webben eller förra gången) pausad på platsen. Inget händer om något spelar. */
+/** Vid start: visa den sparade kön (från webben eller förra gången) pausad på platsen. Inget händer om något spelar.
+ *  Spelades en ljudbok eller ett poddavsnitt sist visas det i stället (restoreSpoken). */
 export async function restoreQueue() {
   const uid = session.userId;
   if (!uid || S.mode) return;
-  let q: { tracks: Track[]; idx: number; pos: number; repeat: boolean; radio: Radio | null };
+  let q: { tracks: Track[]; idx: number; pos: number; repeat: boolean; radio: Radio | null; spoken?: { kind: string; id: number; position?: number } | null };
   try { q = await api('/api/me/queue'); } catch { return; }
+  if (q?.spoken) return restoreSpoken(q.spoken, uid);
   if (S.mode || uid !== session.userId || !q?.tracks?.length) return;
   const i = Math.max(0, Math.min(q.idx | 0, q.tracks.length - 1));
   Q.owner = uid; Q.touched = false;
   set({ ...EMPTY, mode: 'music', queue: q.tracks, idx: i, repeat: !!q.repeat, radio: q.radio?.seed ? q.radio : null, pos: Math.max(0, +q.pos || 0), dur: q.tracks[i].duration || 0 });
   restored = true;
 }
-let restored = false; // kön är visad men ingen ljudfil laddad än: Spela laddar låten på sparad plats
+// Kön (eller boken/avsnittet) är visad men ingen ljudfil laddad än: Spela laddar den på sparad plats. Så länge
+// skickas inget framsteg (progress), så att varken skärmtid eller lyssnad tid räknas för en bok som bara visas.
+let restored = false;
+
+// Var talet börjar: den sparade positionen, utom när mindre än 30 s är kvar (då från början) – som webben
+const spokenStart = (pos: number, dur: number) => (pos > 0 && dur > 0 && dur - pos > 30 ? pos : 0);
+/**
+ * Boken eller avsnittet från förra gången (eller från webben), pausat på profilens position. Hämtar bara titeln
+ * (kapitel, längd) – ingen ljudfil laddas och inget framsteg skickas förrän man trycker Spela (toggle).
+ */
+async function restoreSpoken(sp: { kind: string; id: number }, uid: number) {
+  const busy = () => !!S.mode || uid !== session.userId;
+  if (busy() || !Number.isSafeInteger(sp.id) || sp.id <= 0) return;
+  try {
+    if (sp.kind === 'book') {
+      const b = await api<BookInfo & { position?: number; speed?: number; finished?: boolean }>(`/api/audiobooks/book/${sp.id}`);
+      if (busy()) return; // något hann börja spela, eller profilen byttes, medan titeln hämtades
+      set({ ...EMPTY, mode: 'book', book: { id: b.id, title: b.title, author: b.author, narrator: b.narrator, cover: b.cover, duration: b.duration, chapters: b.chapters || [] },
+        pos: b.finished ? 0 : spokenStart(b.position || 0, b.duration || 0), dur: b.duration || 0, rate: b.speed || 1 });
+    } else if (sp.kind === 'podcast') {
+      const e = await api<EpisodeInfo & { position?: number; played?: boolean }>(`/api/podcasts/episodes/${sp.id}`);
+      if (busy()) return;
+      set({ ...EMPTY, mode: 'podcast', episode: { id: e.id, podcast: e.podcast, podcastTitle: e.podcastTitle, title: e.title, duration: e.duration },
+        pos: e.played ? 0 : spokenStart(e.position || 0, e.duration || 0), dur: e.duration || 0 });
+    } else return;
+  } catch { return; } // titeln finns inte längre (eller nätet svarar inte): inget visas
+  Q.owner = uid; Q.touched = false;
+  restored = true;
+}
 
 // ---------- ljudböcker och poddar ----------
 let bookFiles: BookFile[] = [];
 const P = { timer: 0 as any, last: 0, sent: 0, beat: 0 };
 
-/** Lämnar musiken innan en bok eller ett avsnitt startar: kön sparas, och tas sedan bort som i webben (talet tar över) */
+/** Lämnar boken eller avsnittet innan något annat startar: positionen sparas (inte för en bok som bara visas) */
 async function leaveSpoken() {
   if (S.mode === 'book' || S.mode === 'podcast') await progress(true);
 }
+/** Lämnar musiken innan en bok eller ett avsnitt startar: inget osparat från musiken skickas (det kunde skriva över
+ *  boken i kön) – boken ersätter kön på servern när den startar (spokenQueue) */
 async function leaveMusic() {
   if (S.mode !== 'music') return;
-  if (Q.owner && Q.owner === session.userId) api('/api/me/queue', { method: 'DELETE' }).catch(() => {});
   Q.owner = 0; Q.touched = false; clearTimeout(Q.timer);
+}
+/** Boken eller avsnittet ersätter musikkön på servern (PUT /api/me/queue med spoken), som i webben: appen efter omstart
+ *  och webben visar det pausat på profilens position. Väntar in en kö som redan är på väg, så att den inte skriver över. */
+function spokenQueue(kind: 'book' | 'podcast', id: number) {
+  const uid = session.userId;
+  if (!uid) return;
+  Q.owner = uid; Q.touched = false; clearTimeout(Q.timer); Q.timer = 0;
+  const before = Q.inflight || Promise.resolve();
+  const req = before.then(() => (uid === session.userId ? api('/api/me/queue', { method: 'PUT', body: { uid, ids: [], spoken: { kind, id } }, timeout: 8000 }) : null)).catch(() => {});
+  Q.inflight = req;
 }
 
 /** Spelar en ljudbok där profilen slutade (positionen sparas på servern). En nedladdad bok spelas från telefonen. */
 export async function playBook(bid: number, from?: number) {
   await leaveSpoken(); await leaveMusic();
+  restored = false;
   await audioMode();
   const local = off.localBook(bid);
   if (local) return playLocalBook(local, from);
@@ -325,6 +369,7 @@ export async function playBook(bid: number, from?: number) {
   dropAll();
   bookFiles = (b.files || []).map((f) => ({ ...f, url: absolute(f.url) }));
   if (!bookFiles.length) throw new ApiError(t('Boken har inga ljudfiler.'));
+  spokenQueue('book', b.id);
   const pos = from ?? (b.finished ? 0 : b.position || 0);
   set({ ...EMPTY, mode: 'book', book: { id: b.id, title: b.title, author: b.author, narrator: b.narrator, cover: b.cover, duration: b.duration, chapters: b.chapters || [] },
     pos, dur: b.duration || 0, rate: b.speed || 1 });
@@ -346,6 +391,7 @@ async function playLocalBook(local: NonNullable<ReturnType<typeof off.localBook>
     try { const b = await api<{ position?: number; finished?: boolean }>(`/api/audiobooks/book/${e.id}`, { timeout: 4000 }); pos = b.finished ? 0 : b.position || 0; } catch {}
   }
   if (from != null) pos = from;
+  spokenQueue('book', e.id); // utan nät går det inte fram (då står kön kvar som den var på servern)
   dropAll();
   bookFiles = local.files.map((f) => ({ id: f.id, offset: f.offset, duration: f.duration, codec: null, url: f.uri, local: true }));
   localBook = e.id;
@@ -375,12 +421,14 @@ export const chapterAt = (pos: number): Chapter | null => {
 };
 
 /** Spelar ett poddavsnitt där profilen slutade */
-export async function playEpisode(eid: number) {
+export async function playEpisode(eid: number, from?: number) {
   await leaveSpoken(); await leaveMusic();
+  restored = false;
   await audioMode();
   const [e, p] = await Promise.all([api<EpisodeInfo & { position?: number; played?: boolean }>(`/api/podcasts/episodes/${eid}`), api<{ url: string }>(`/api/podcasts/episodes/${eid}/play`)]);
   dropAll(); bookFiles = []; localBook = 0;
-  const pos = e.played ? 0 : e.position || 0;
+  spokenQueue('podcast', e.id);
+  const pos = from ?? (e.played ? 0 : e.position || 0);
   set({ ...EMPTY, mode: 'podcast', episode: { id: e.id, podcast: e.podcast, podcastTitle: e.podcastTitle, title: e.title, duration: e.duration }, pos, dur: e.duration || 0 });
   P.sent = Date.now();
   attach(createAudioPlayer({ uri: absolute(p.url) }, { updateInterval: 500 }), 'p' + e.id, 0, pos, true);
@@ -389,6 +437,7 @@ export async function playEpisode(eid: number) {
 /** Positionen till servern. Svaret kan säga stop (skärmtiden slut eller en vuxen stoppade) – då pausar spelaren. */
 async function progress(final = false, played?: boolean) {
   clearTimeout(P.timer); P.timer = 0;
+  if (restored) return; // en återställd bok som inte startats räknas inte (skärmtid, lyssnad tid)
   const pos = S.pos;
   P.sent = Date.now();
   let r: { stop?: boolean; screenTime?: { allowed?: boolean; message?: string } } | null = null;
@@ -423,6 +472,16 @@ export async function toggle() {
   if (S.mode === 'music') {
     Q.touched = true;
     if (restored || !cur) { restored = false; await loadTrack(S.idx, S.pos); return; }
+  } else if (restored) {
+    // Återställd bok/avsnitt: startar nu på den sparade (eller flyttade) platsen, som när man väljer det i listan
+    try {
+      if (S.mode === 'book' && S.book) await playBook(S.book.id, S.pos);
+      else if (S.mode === 'podcast' && S.episode) await playEpisode(S.episode.id, S.pos);
+    } catch (e: any) {
+      if (!cur) restored = true; // inget startade: boken står kvar pausad, Spela försöker igen
+      set({ error: e?.message || t('Det gick inte att spela – kontrollera nätet och försök igen.') });
+    }
+    return;
   } else if (!cur) {
     if (S.mode === 'book') { playBookAt(S.pos, true); return; }
   }
@@ -442,6 +501,7 @@ export function pause() {
 export function seek(to: number) {
   if (!S.mode) return;
   const p = Math.max(0, S.dur ? Math.min(to, S.dur - 0.5) : to);
+  if (restored && S.mode !== 'music') { set({ pos: p }); return; } // pausad efter omstart: bara platsen flyttas
   if (S.mode === 'book') { playBookAt(p, S.playing); return; }
   if (S.mode === 'music') {
     Q.touched = true;
@@ -461,11 +521,14 @@ export function setRate(rate: number) {
   if (S.mode === 'book') progress();
 }
 
-/** Stänger spelaren (krysset): musikens kö tas bort på servern, som när webbens spelare stängs */
+/** Stänger spelaren (krysset): kön tas bort på servern (även en bok eller ett avsnitt), som när webbens spelare stängs */
 export async function close() {
-  if (S.mode === 'music') await leaveMusic();
-  else await progress(true);
+  if (S.mode && S.mode !== 'music') await progress(true);
+  const owner = Q.owner;
+  Q.owner = 0; Q.touched = false; clearTimeout(Q.timer);
   stopAll();
+  // Efter en kö som är på väg (t.ex. boken som just startade), så att den inte kommer tillbaka
+  if (owner && owner === session.userId) Q.inflight = (Q.inflight || Promise.resolve()).then(() => api('/api/me/queue', { method: 'DELETE' })).catch(() => {});
 }
 /** Stoppar och tömmer utan att röra serverns kö (profilbyte, utloggning, 409) */
 function stopAll() {

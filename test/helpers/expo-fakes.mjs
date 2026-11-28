@@ -64,10 +64,27 @@ export class DownloadTask {
 }
 export const Paths = { document: new Directory('mem:/doc'), get availableDiskSpace() { return globalThis.__free ?? 50e9; } };
 
+// ---------- expo-audio ----------
+// Spelarna som skapats (en per ljudfil): testet ser vilka filer som laddats och om de spelar
+export const audioState = { players: [], reset() { this.players.length = 0; } };
+export async function setAudioModeAsync() {}
+export function createAudioPlayer(source, opts) {
+  const p = {
+    source, opts, playing: false, isLoaded: false, rate: 1, at: 0, removed: false, listeners: [],
+    addListener(_ev, fn) { this.listeners.push(fn); return { remove() {} }; },
+    play() { this.playing = true; }, pause() { this.playing = false; },
+    async seekTo(t) { this.at = t; }, setPlaybackRate(r) { this.rate = r; },
+    setActiveForLockScreen() {}, clearLockScreenControls() {}, remove() { this.removed = true; this.playing = false; },
+  };
+  audioState.players.push(p);
+  return p;
+}
+
 // ---------- appens api.ts ----------
 export class ApiError extends Error { constructor(m, status = 0, data = null) { super(m); this.status = status; this.data = data; } }
 export const session = { server: '', saved: '', token: 'tok', userId: 1, imgToken: 'img', imgUntil: 0 };
 export const audioCaps = () => 'mp3,aac,flac';
+export const absolute = (u) => (/^https?:/.test(u) ? u : session.server + u);
 export const imageUrl = (id, type, w) => `${session.server}/api/image/${id}/${type}?w=${w}`;
 export function leaveHome() { if (session.saved) session.server = session.saved; }
 export async function api(path, opts = {}) { fsState.apiCalls.push({ path, method: opts.method || 'GET', body: opts.body }); return fsState.api(path, opts); }

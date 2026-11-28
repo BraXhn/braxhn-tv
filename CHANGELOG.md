@@ -30,7 +30,13 @@
   laddades om eller telefonen rensade fliken, och man fick leta upp boken igen. Nu står boken eller avsnittet kvar
   pausat på platsen där du slutade – även i en ny flik och på en annan enhet, och bara för profilen som lyssnade, som
   musikkön. Inget räknas (skärmtid, lyssnad tid) och inget laddas förrän du trycker Spela; hopp bakåt och framåt flyttar
-  bara platsen. ✕ tar bort den. Expo-appen visar den inte än.
+  bara platsen. ✕ tar bort den. Expo-appen gör nu likadant (se nedan).
+- **Expo-appen minns ljudboken och poddavsnittet.** Förut tog appen bort kön på servern när en bok eller ett avsnitt
+  startade, så efter en bok i telefonen syntes den varken i appen efter omstart eller i webbens minispelare. Nu sparas
+  boken eller avsnittet i kön när det startar, och när appen startar igen står det pausat i minispelaren på platsen där
+  du slutade – per profil, och samma sak i webbappen. Inget räknas (skärmtid, lyssnad tid) och ingen fil laddas förrän
+  du trycker Spela; hopp flyttar bara platsen. En nedladdad bok spelas från telefonen. ✕ tar bort den ur kön (som i
+  webben). Provat i appens webbläge; inte på en riktig telefon.
 - **Kortet i slutet av ett avsnitt visar vilket avsnitt som kommer.** Webbspelaren sa bara *Nästa avsnitt om N s*.
   Nu står nästa avsnitts namn, nummer (*S1 · A2*) och bild på kortet, så att man ser om nästa avsnitt börjar en ny
   säsong och kan välja att stanna. Med fjärrkontroll eller tangentbord har *Spela nu* fokus och pilarna går till

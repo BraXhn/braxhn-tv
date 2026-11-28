@@ -305,6 +305,15 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   före): direkt + HLS med samma profil, appstopp från annan och samma adress, Chrome (`pid`, `keepalive`, `pagehide`).
   Kvar: `act.clientStop`/`screen.stopped` gäller profil + titel, inte enhet (se Idéer).
 
+- 2026-11-28: Expo-appen minns ljudboken och poddavsnittet i kön (backloggens punkt 6 i `team/backlogg3-2026-11-28`),
+  gren `team/expo-spoken-2026-11-28`. `apps/expo/src/music.ts`: en bok eller ett avsnitt som startar ger
+  `PUT /api/me/queue` med `spoken` (`spokenQueue`, efter en musikkö som är på väg) i stället för `DELETE`;
+  `restoreQueue` med `spoken` visar titeln pausad (`restoreSpoken`, positionen under 30 s före slutet ger 0 som
+  webben) utan `/play`, ljudfil eller `/progress` förrän Spela; hopp flyttar bara platsen; ✕ tar bort kön.
+  `test/expo-spoken.test.js` (9 fall, `music.ts` med låtsad `expo-audio`): 7 faller på `main`, alla går igenom nu.
+  Webbläget med Playwright mot en egen server (390×844, Chrome): bok vid 154 s → omladdning visar den pausad på 154 s,
+  inga ström-, `/play`- eller `/progress`-anrop på 20 s, 15 s bakåt ger 139 s, Spela fortsätter därifrån; webbappens
+  minispelare visar boken. **Inte provat:** riktig telefon (Expo Go), låsskärmen, nedladdad bok utanför Node-testet.
 - 2026-11-28: Android-appen följer *Spela nästa avsnitt automatiskt* (punkt 1, iOS kvar), gren
   `team/android-nasta-2026-11-28`. `SkipCore.kt` (JVM-test `SkipCoreTest.kt`, samma fall som `test/expo-skip.test.js`):
   knapparna och nedräkningen för sammanfattning, intro och eftertexter (`autoSkip`), `next` som webbens `nextPlan` och

@@ -147,6 +147,11 @@ hamnar du också här.
   appen går i bakgrunden. När appen startar visas den pausad där du var, och samma kö syns i webbappen (och tvärtom).
   En kö som bara visas skrivs inte, så den enhet du senast spelade på vinner. Stänger du spelaren med ✕ tas kön bort.
   Byter du profil eller loggar ut sparas kön på den gamla profilen och spelaren stängs.
+- **Ljudboken eller poddavsnittet står kvar.** När en bok eller ett avsnitt startar ersätter det kön på servern
+  (`PUT /api/me/queue` med `spoken`). När appen startar igen – eller i webbappen, på en annan enhet – visas det pausat
+  på platsen där profilen slutade (under 30 sekunder kvar: från början). Ingen ljudfil laddas och inget räknas
+  (skärmtid, lyssnad tid) förrän du trycker Spela; hopp bakåt och framåt flyttar bara platsen. En nedladdad bok spelas
+  från telefonen när du trycker Spela. ✕ tar bort den ur kön.
 - **Nästa låt laddas i förväg** (en andra spelare, när under 30 sekunder återstår), så att bytet går fort. Det är inte
   helt glapplöst som i webben: det kan bli ett kort uppehåll mellan låtarna.
 - **Ljudformat:** appen säger till servern vad telefonen spelar (iPhone: MP3, AAC, FLAC; Android: dessutom Opus och
@@ -305,7 +310,8 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
 - Testerna för nedladdningen ligger i repots `test/expo-offline.test.js` och körs med Node (22.18 eller senare läser
   TypeScript): `node --test test/expo-offline.test.js` i repots rot. `offlinecore.ts` testas direkt, `offline.ts` med ett
   låtsat filsystem och en låtsad server (`test/helpers/expo-loader.mjs`, `expo-fakes.mjs`) – telefonens riktiga filsystem
-  och nedladdning provas inte där.
+  och nedladdning provas inte där. `test/expo-spoken.test.js` provar boken och avsnittet i kön (`music.ts` med en
+  låtsad `expo-audio`).
 - Paket utöver mallen: `expo-audio` (ljudspelaren, låsskärmen och bakgrundsljudet) och `expo-file-system` (filerna i
   Nedladdat och nedladdningen med paus, fortsätt och förlopp – ingår i Expo Go). Lägg till paket med
   `npx expo install`, så att versionen passar Expo SDK.

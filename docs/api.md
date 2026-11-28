@@ -573,8 +573,8 @@ med mellan enheter. Apparna kan använda samma adresser.
   profilbyte). Tom `ids` tar bort kön. Fel: 400, högst 64 kB.
 - `PUT /api/me/queue` `{ ids: [], spoken: { kind: 'book' | 'podcast', id }, uid }`: boken eller avsnittet ersätter
   musiken (webben gör det när talet startar; positionen sparas som vanligt med `/progress`). En vanlig kö tar bort det.
-- `DELETE /api/me/queue` tar bort kön (webben gör det när spelaren stängs med ✕; Expo-appen också när en bok eller ett
-  avsnitt tar över).
+- `DELETE /api/me/queue` tar bort kön (webben och Expo-appen gör det när spelaren stängs med ✕). Expo-appen sparar en
+  bok eller ett avsnitt med `spoken` när det startar, som webben.
 
 ## Bibliotekets filter: `/api/libraries/:id/items`, `/facets`, `/shuffle`
 
