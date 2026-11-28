@@ -1,6 +1,5 @@
 package net.braxhn.tv
 
-import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -11,8 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.net.HttpURLConnection
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.URL
+import kotlin.concurrent.thread
 
 class BwCoreTest {
     @Test fun materBaraUtanforHemmet() {
@@ -91,30 +92,35 @@ class BwCoreTest {
         assertNull("misslyckad mätning", BwCore.forPlay(true, null, 0, { 0 }, waitMs = 200))
     }
 
-    /** En lokal server som skickar provet med en bestämd takt (som en strypt anslutning) och 150 ms svarstid */
+    /**
+     * En lokal server som skickar provet med en bestämd takt (som en strypt anslutning) och 150 ms svarstid. Bara
+     * java.net (com.sun.net.httpserver finns inte på Androids classpath för enhetstester).
+     */
     private fun throttled(kbps: Int, block: (String) -> Unit) {
-        val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/speedtest") { ex ->
-            Thread.sleep(150)
-            val total = 4096 * 1024L
-            ex.responseHeaders.add("Content-Type", "application/octet-stream")
-            ex.sendResponseHeaders(200, total)
-            val chunk = ByteArray(8192)
-            val t0 = System.nanoTime()
-            var sent = 0L
+        val srv = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        val t = thread(isDaemon = true) {
             runCatching {
-                ex.responseBody.use { out ->
+                srv.accept().use { sock ->
+                    // Läs frågan fram till den tomma raden
+                    val inp = sock.getInputStream()
+                    var tail = 0
+                    while (tail != 0x0d0a0d0a) { val b = inp.read(); if (b < 0) break; tail = (tail shl 8) or b }
+                    Thread.sleep(150)
+                    val total = 4096 * 1024L
+                    val out = sock.getOutputStream()
+                    out.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: $total\r\nConnection: close\r\n\r\n".toByteArray())
+                    val chunk = ByteArray(8192)
+                    val t0 = System.nanoTime()
+                    var sent = 0L
                     while (sent < total) {
                         out.write(chunk); out.flush(); sent += chunk.size
-                        val due = sent * 8 / kbps // ms när så mycket ska ha gått iväg
-                        val waitMs = due - (System.nanoTime() - t0) / 1_000_000
+                        val waitMs = sent * 8 / kbps - (System.nanoTime() - t0) / 1_000_000 // ms när så mycket ska ha gått iväg
                         if (waitMs > 0) Thread.sleep(waitMs)
                     }
                 }
             }
         }
-        srv.start()
-        try { block("http://127.0.0.1:${srv.address.port}/api/speedtest?kb=4096") } finally { srv.stop(0) }
+        try { block("http://127.0.0.1:${srv.localPort}/api/speedtest?kb=4096") } finally { srv.close(); t.join(2000) }
     }
 
     @Test fun matningMotStryptServerGerDessTakt() {
