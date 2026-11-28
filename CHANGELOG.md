@@ -1,6 +1,12 @@
 # Ändringar
 
 ## Ej utgiven
+- **Appen för iPhone, iPad och Apple TV mäter uppkopplingen utanför hemmet.** Förut visste servern inte hur snabbt
+  nätet var när appen användes via BraXhn Relay eller mobilnätet: en film som behövde kodas om började på högsta
+  kvaliteten och kunde hacka de första minuterna. Nu mäter appen i bakgrunden när den öppnas (4 MB, högst en
+  sekund, som webben) och under uppspelningen, och servern börjar på en kvalitet som ryms och går upp när nätet
+  klarar det. Starten väntar aldrig på mätningen; en mätning gäller i 10 minuter och bara på samma nät. Hemma mäts
+  ingenting. Inte provat på riktig enhet eller på ett riktigt mobilnät.
 - **Android-appen följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt alltid direkt när ett
   avsnitt tog slut, även om en förälder stängt av valet. Nu visas kortet *Nästa avsnitt om 8 s* med *Spela nu* och
   *Avbryt* (sekunderna följer kontots val, 0 = direkt), och när valet är av kortet *Nästa avsnitt* utan nedräkning,

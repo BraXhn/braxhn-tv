@@ -152,9 +152,9 @@ test('förvärmning av nästa avsnitt: när eftertexterna börjar och under nedr
   assert.match(warm, /Start\.warm\(model, id: next, start: 0, audio: nil, subtitle: nil\)/);
   // Samma fråga: Start.warm bygger den med Start.query(..., cinema: true), och nästa avsnitt spelas från början med
   // load(..., cinema: true) som standard – samma Start.query i start()
-  assert.match(start, /StartCore\.warmQuery\(query\(model, audio: audio, subtitle: subtitle, start: start, cinema: true\)\)/);
+  assert.match(start, /StartCore\.warmQuery\(query\(model, audio: audio, subtitle: subtitle, start: start, cinema: true, bw: bw\)\)/);
   assert.match(player, /func load\(itemId: Int, at start: Double, audio: Int\?, subtitle: SubtitleTrack\?, cinema: Bool = true\)/);
-  assert.match(player, /let q = Start\.query\(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema\)/);
+  assert.match(player, /let q = Start\.query\(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema, bw: Bandwidth\.forPlay\(model, id: itemId\)\)/);
   // Knappen Nästa avsnitt under eftertexterna spelar på samma sätt
   assert.match(body(player, 'func skip()'), /else if let next = item\?\.nextId \{\s*load\(itemId: next, at: 0, audio: nil, subtitle: nil\)/);
   assert.ok(contract.endpoints['GET /api/items/:id/playback?warm=1'].ios, 'warm=1 för ios i kontraktet');

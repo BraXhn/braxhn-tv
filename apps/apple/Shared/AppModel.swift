@@ -171,6 +171,7 @@ final class AppModel: ObservableObject {
             remote = s.remote ?? false
             donateURL = safeDonateURL(s.donateUrl)
             if s.user == nil { logout() } else { await refreshImageToken() }
+            Bandwidth.kick(self)
         }
     }
 
@@ -181,6 +182,8 @@ final class AppModel: ObservableObject {
         user = u
         remote = s.remote ?? false
         donateURL = safeDonateURL(s.donateUrl)
+        // Utanför hemmet nu (t.ex. efter ett byte av nät): mät uppkopplingen i bakgrunden (Bandwidth.swift)
+        Bandwidth.kick(self)
     }
 
     func logout() {

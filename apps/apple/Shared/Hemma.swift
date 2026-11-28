@@ -32,6 +32,9 @@ final class HomeState {
     var lastCheck = Date.distantPast
     /// Nätets generation när hemadressen bekräftades: byts nätet gäller beviset inte längre
     var netGen = 0
+    /// Prov som pågår: så länge mäts inte uppkopplingen (Bandwidth.kick) – appen kan vara hemma fast servern ännu
+    /// ser anslutningen via den sparade adressen
+    var checking = 0
     let net = HomeNet()
 }
 
@@ -126,7 +129,13 @@ extension AppModel {
     func checkHome(force: Bool = false) {
         guard force || Date().timeIntervalSince(home.lastCheck) > 30 else { return }
         home.lastCheck = Date()
-        Task { await checkHomeNow() }
+        Task {
+            home.checking += 1
+            await checkHomeNow()
+            home.checking -= 1
+            // Utanför hemmet: mät uppkopplingen i bakgrunden nu, inte när filmen startar (Bandwidth.swift)
+            Bandwidth.kick(self)
+        }
     }
 
     /// Byter till serverns hemadress när appen är hemma, annars tillbaka till den sparade. true = hemadressen används.

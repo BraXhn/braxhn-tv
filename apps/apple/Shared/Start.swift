@@ -16,8 +16,9 @@ enum Start {
     /// Hela frågan till /playback för en uppspelning från början eller en position. Samma för förvärmningen och
     /// uppspelningen (Player.swift), så att servern kan ta över den förvärmda strömmen. subtitle: bara en bildundertext
     /// skickas (AppModel.capabilities), textundertexter väljer spelaren själv. cinema: false vid en omstart mitt i.
-    static func query(_ model: AppModel, audio: Int?, subtitle: SubtitleTrack?, start: Double, cinema: Bool) -> [URLQueryItem] {
-        model.capabilities(audio: audio, subtitle: subtitle) + model.comfortQuery() + StartCore.playExtras(start: start, cinema: cinema)
+    /// bw: uppkopplingen utanför hemmet (Bandwidth.forPlay) – samma värde i förvärmningen och uppspelningen.
+    static func query(_ model: AppModel, audio: Int?, subtitle: SubtitleTrack?, start: Double, cinema: Bool, bw: Int?) -> [URLQueryItem] {
+        model.capabilities(audio: audio, subtitle: subtitle) + model.comfortQuery() + StartCore.playExtras(start: start, cinema: cinema) + BwCore.query(bw)
     }
 
     /// /playback?warm=1 – tyst; servern svarar { warm, mode } och räknar inget som uppspelning
@@ -26,8 +27,11 @@ enum Start {
         #if os(iOS)
         if Downloads.shared.localURL(for: id) != nil { return } // en nedladdad titel spelas från enheten
         #endif
-        let q = StartCore.warmQuery(query(model, audio: audio, subtitle: subtitle, start: start, cinema: true))
+        // bw: samma som uppspelningen sedan skickar (BwCore.playBw); utan mätning inget, och då gäller serverns gissning
+        let bw = Bandwidth.forPlay(model, id: id)
+        let q = StartCore.warmQuery(query(model, audio: audio, subtitle: subtitle, start: start, cinema: true, bw: bw))
         guard log.take(StartCore.key(id: id, q), now: Date().timeIntervalSince1970) else { return }
+        Bandwidth.didWarm(id: id, bw: bw)
         Task { let _: WarmReply? = try? await model.get("/api/items/\(id)/playback", q) }
     }
 
