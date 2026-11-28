@@ -149,25 +149,115 @@ class OfflineCoreTest {
     private val st = ScreenStatus(limited = true, day = "2026-11-26", daily = 60, used = 1800.0, extra = 0, remaining = 1800.0,
         from = "07:00", until = "19:00", audio = false)
 
+    /** Spelar n bitar om step sekunder från from (som spelarens rapport var tionde sekund) */
+    private fun play(c0: ScreenCache?, from: ZonedDateTime, n: Int, step: Long = 10, audio: Boolean = false): ScreenCache? {
+        var c = c0
+        for (i in 1..n) c = ScreenClock.addOffline(c, from.plusSeconds(i * step), step.toDouble(), audio)
+        return c
+    }
+
     @Test fun tidKvarOchOfflineTid() {
         assertEquals(ScreenGate(true, null), ScreenClock.gate(null, nov(12)))
         assertTrue(ScreenClock.gate(ScreenClock.fresh(ScreenStatus(limited = false)), nov(12)).allowed)
         assertTrue(ScreenClock.gate(ScreenClock.fresh(null), nov(12)).allowed)
         var c: ScreenCache? = ScreenClock.fresh(st)
         assertEquals(ScreenGate(true, 1800), ScreenClock.gate(c, nov(12)))
-        // 20 minuter utan nät, högst 45 s per gång
-        repeat(40) { c = ScreenClock.addOffline(c, nov(12), 30.0) }
-        assertEquals(1200.0, c!!.offSeconds, 0.0)
-        assertEquals(1245.0, ScreenClock.addOffline(c, nov(12), 600.0)!!.offSeconds, 0.0)
-        assertEquals(600L, ScreenClock.gate(c, nov(12)).left)
-        repeat(20) { c = ScreenClock.addOffline(c, nov(12), 30.0) }
-        val out = ScreenClock.gate(c, nov(12))
+        // 20 minuter utan nät från 12:00: en post som växer
+        c = play(c, nov(12), 120)
+        assertEquals(listOf(ScreenEntry("o" + nov(12).toEpochSecond(), nov(12).toEpochSecond(), 1200.0)), c!!.entries)
+        assertEquals(600L, ScreenClock.gate(c, nov(12, 20)).left)
+        // Högst 45 s per gång: ett glapp på tio minuter räknas inte som tittande
+        val big = ScreenClock.addOffline(c, nov(12, 30), 600.0)!!
+        assertEquals(1245.0, big.offSeconds(nov(12).toLocalDate(), zone), 0.0)
+        c = play(c, nov(12, 20), 60)
+        val out = ScreenClock.gate(c, nov(12, 30))
         assertEquals(ScreenGate(false, 0, "limit", usedMinutes = 60, totalMinutes = 60, weekday = 4), out) // torsdag
-        // En ny status från servern ersätter tiden som räknats i appen
-        assertEquals(0.0, ScreenClock.fresh(st).offSeconds, 0.0)
-        // Ingen skärmtid: ingen tid räknas
-        val free = ScreenClock.fresh(ScreenStatus(limited = false))
-        assertEquals(free, ScreenClock.addOffline(free, nov(12), 30.0))
+        // En ny status från servern ersätter appens räkning men inte posterna som servern inte har fått
+        assertEquals(1800.0, ScreenClock.fresh(st, c!!.entries).offSeconds(nov(12).toLocalDate(), zone), 0.0)
+        assertTrue(ScreenClock.gate(ScreenClock.fresh(st.copy(remaining = 3600.0), c.entries), nov(12, 30)).allowed)
+        // Ingen skärmtid enligt statusen: ingen gräns, men posten sparas (servern avgör)
+        val free = play(ScreenClock.fresh(ScreenStatus(limited = false)), nov(12), 3)
+        assertEquals(30.0, free!!.entries.single().seconds, 0.0)
+        assertTrue(ScreenClock.gate(free, nov(12)).allowed)
+        assertNull(ScreenClock.addOffline(null, nov(12), 30.0))
+    }
+
+    @Test fun enPostPerUppspelning() {
+        val c0 = ScreenClock.fresh(st)
+        // Paus (en minut utan bitar): en ny post med eget id
+        var c = play(c0, nov(12), 6)
+        c = play(c, nov(12, 2), 6)
+        assertEquals(2, c!!.entries.size)
+        assertEquals(listOf(60.0, 60.0), c.entries.map { it.seconds })
+        assertEquals(nov(12, 2).toEpochSecond(), c.entries[1].at)
+        assertTrue(c.entries[0].id != c.entries[1].id)
+        // Posten växer med samma id och början; bitar som kommer lite sent (nätfelet tog tid) hänger ihop
+        val id = c.entries[1].id
+        c = ScreenClock.addOffline(c, nov(12, 3).plusSeconds(12), 10.0)
+        assertEquals(id, c!!.entries[1].id)
+        assertEquals(72.0, c.entries[1].seconds, 0.0)
+        // Ljud och video i var sin post
+        c = ScreenClock.addOffline(c, nov(12, 3).plusSeconds(20), 8.0, audio = true)
+        assertEquals(true, c!!.entries.last().audio)
+        assertEquals(3, c.entries.size)
+        // Spelar man länge börjar en ny post varje timme, som börjar där den förra slutade (ingen tid två gånger)
+        val long = play(c0, nov(14), 450) // 75 minuter
+        assertEquals(listOf(3600.0, 900.0), long!!.entries.map { it.seconds })
+        assertEquals(long.entries[0].end, long.entries[1].at.toDouble(), 0.0)
+        assertEquals(4500.0, long.offSeconds(nov(14).toLocalDate(), zone), 0.0)
+        // Klockan ställd bakåt: ingen negativ tid, och nästa bit ger en ny post utan överlapp
+        val back = ScreenClock.addOffline(long, nov(14, 30), 10.0)!!
+        assertEquals(long.entries, back.entries)
+    }
+
+    @Test fun koenTillServern() {
+        var c = play(ScreenClock.fresh(st), nov(12), 6)
+        c = play(c, nov(12, 5), 6)
+        val sent = ScreenClock.batch(c!!.entries)
+        assertEquals(2, sent.size)
+        // Medan anropet pågår växer den senaste posten: den tas inte bort, utan skickas igen (servern räknar det nya)
+        val grown = ScreenClock.addOffline(c, nov(12, 6).plusSeconds(10), 10.0)!!
+        val left = ScreenClock.ack(grown.entries, sent, sent.map { it.id })
+        assertEquals(listOf(grown.entries[1]), left)
+        assertEquals(70.0, left.single().seconds, 0.0)
+        // Det servern inte listar i done (till exempel över 200 poster) stannar kvar
+        assertEquals(c.entries, ScreenClock.ack(c.entries, sent, emptyList()))
+        assertEquals(listOf(c.entries[1]), ScreenClock.ack(c.entries, sent, listOf(c.entries[0].id)))
+        // Högst 200 per anrop, de äldsta först
+        var many: ScreenCache? = ScreenClock.fresh(st)
+        repeat(250) { i -> many = ScreenClock.addOffline(many, nov(8).plusSeconds(i * 120L), 10.0) }
+        assertEquals(250, many!!.entries.size)
+        assertEquals(many!!.entries.take(200), ScreenClock.batch(many!!.entries))
+        // Äldre än 60 dygn sparas inte
+        val old = ScreenClock.addOffline(ScreenClock.fresh(st), nov(12).minusDays(61), 10.0)
+        assertEquals(emptyList<ScreenEntry>(), ScreenClock.addOffline(old, nov(12), 10.0)!!.entries.dropLast(1))
+    }
+
+    @Test fun flyttFranSummanPerDag() {
+        // I dag 26 november kl 12:00, 25 minuter sparade: en post som slutar nu
+        val now = nov(12)
+        val e = ScreenClock.migrate("2026-11-26", 1500.0, now)
+        assertEquals(listOf(ScreenEntry("m2026-11-26-0", now.toEpochSecond() - 1500, 1500.0)), e)
+        // Samma tid kvar som förut
+        assertEquals(1500.0, ScreenClock.fresh(st, e).offSeconds(now.toLocalDate(), zone), 0.0)
+        assertEquals(300L, ScreenClock.gate(ScreenClock.fresh(st, e), now).left)
+        // Samma flytt igen ger samma id (servern räknar dem inte två gånger)
+        assertEquals(e.map { it.id }, ScreenClock.migrate("2026-11-26", 1500.0, now.plusMinutes(5)).map { it.id })
+        // En tidigare dag: sist på den dagen, i poster om högst en timme
+        val y = ScreenClock.migrate("2026-11-25", 5400.0, now)
+        assertEquals(listOf(3600.0, 1800.0), y.map { it.seconds })
+        assertEquals(nov(0).toEpochSecond().toDouble(), y.last().end, 0.0)
+        assertEquals(0.0, ScreenClock.fresh(st, y).offSeconds(now.toLocalDate(), zone), 0.0)
+        // Mer tid än dagen hittills rymmer: bara från midnatt
+        assertEquals(1800.0, ScreenClock.migrate("2026-11-26", 7200.0, nov(0, 30)).sumOf { it.seconds }, 0.0)
+        // Vintertid: 25 oktober har 25 timmar, posten slutar vid midnatt i riktig tid
+        val oct = ScreenClock.migrate("2026-10-25", 600.0, now)
+        assertEquals(at(2026, 10, 26, 0).toEpochSecond().toDouble(), oct.single().end, 0.0)
+        // Inget sparat, fel form eller en dag i framtiden
+        assertEquals(emptyList<ScreenEntry>(), ScreenClock.migrate(null, 600.0, now))
+        assertEquals(emptyList<ScreenEntry>(), ScreenClock.migrate("2026-11-26", 0.0, now))
+        assertEquals(emptyList<ScreenEntry>(), ScreenClock.migrate("x", 600.0, now))
+        assertEquals(emptyList<ScreenEntry>(), ScreenClock.migrate("2026-11-27", 600.0, now))
     }
 
     @Test fun klockslag() {
@@ -189,12 +279,13 @@ class OfflineCoreTest {
         // Tid som räknats utan nät i går påverkar inte i dag
         val y = ScreenClock.addOffline(ScreenClock.fresh(st), nov(12), 40.0)
         assertEquals(3600L, ScreenClock.gate(y, nov(12, 0, 27)).left)
-        // Spelar över midnatt utan nät: tiden efter midnatt räknas på den nya dagen
+        // Spelar över midnatt utan nät: en post, men tiden efter midnatt räknas på den nya dagen
         var c: ScreenCache? = ScreenClock.fresh(st.copy(from = null, until = null))
         c = ScreenClock.addOffline(c, at(2026, 11, 26, 23, 59, 50), 30.0)
         c = ScreenClock.addOffline(c, at(2026, 11, 27, 0, 0, 10), 20.0)
-        assertEquals("2026-11-27", c!!.offDay)
-        assertEquals(3580L, ScreenClock.gate(c, at(2026, 11, 27, 0, 0, 10)).left)
+        assertEquals(1, c!!.entries.size)
+        assertEquals(10.0, c.offSeconds(at(2026, 11, 27, 0).toLocalDate(), zone), 0.0)
+        assertEquals(3590L, ScreenClock.gate(c, at(2026, 11, 27, 0, 0, 10)).left)
     }
 
     @Test fun manadsOchArsskifte() {

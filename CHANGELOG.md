@@ -1,6 +1,17 @@
 # Ändringar
 
 ## Ej utgiven
+- **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om
+  just det, så profilens språkval gällde inte: ett barn kunde få engelskt tal fast profilen vill ha svenskt. Nu väljer
+  titelsidan samma spår som webben (profilens språk, aldrig kommentar eller syntolkning), och väljer du inget eget får
+  servern välja – både när strömmen förbereds på Google TV och när filmen startar, så att den förberedda strömmen
+  används. Ett eget val på titelsidan gäller som förut. Inte provat på riktig enhet.
+- **Android-appen lämnar in skärmtid som spelats utan nät.** När nätet kommer tillbaka skickar appen tiden från
+  nedladdade filmer som spelats utan nät till servern, som räknar den på dagen den spelades. Förut försvann tiden när
+  serverns räkning tog över, och barnet fick dagens tid en gång till. Appen sparar en post per uppspelning, så att
+  inget räknas två gånger om den skickas igen, och tid som sparats av en äldre version av appen följer med. Ljudböcker
+  och poddar räknas fortfarande inte utan nät. Inte provat på riktig enhet; Expo-appen och appen för iPhone och iPad
+  lämnar inte in tiden än.
 - **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
   hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
   flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren
@@ -37,7 +48,8 @@
   räknade appen tiden själv, men när nätet kom tillbaka tog serverns räkning över och tiden från resan försvann – barnet
   fick dagens tid en gång till. Nu tar servern emot tiden i efterhand (`POST /api/screentime/offline`) och räknar den på
   dagen den spelades, en gång även om appen skickar den flera gånger, och aldrig mer än vad som kan ha hunnit spelas.
-  Det gäller bara profiler med skärmtid, och tiden kan bara öka. Apparna använder det inte än.
+  Det gäller bara profiler med skärmtid, och tiden kan bara öka. Android-appen använder det (se ovan), Expo-appen och
+  appen för iPhone och iPad inte än.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

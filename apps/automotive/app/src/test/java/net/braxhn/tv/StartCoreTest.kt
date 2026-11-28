@@ -25,6 +25,36 @@ class StartCoreTest {
         assertEquals(mapOf("cinema" to "1", "start" to null), StartCore.playExtras(0.6, false)) // under 1 s = från början
     }
 
+    private data class Track(val index: Int, val default: Boolean = false)
+    private fun pick(defaultAudio: Int?, tracks: List<Track>?) = StartCore.titleAudio(defaultAudio, tracks, { it.index }, { it.default })
+
+    @Test fun ljudspaaretFoljerProfilensSprak() {
+        // Filens förvalda spår är engelskt (1), profilen vill ha svenska (2, defaultAudio i titelns svar)
+        val tracks = listOf(Track(1, default = true), Track(2))
+        // Felet: förut valdes filens förvalda spår och skickades till /playback som audio=1
+        assertEquals(1, (tracks.firstOrNull { it.default } ?: tracks.firstOrNull())?.index)
+        assertEquals(2, pick(2, tracks))
+        // Utan förval (äldre server) eller med ett förval som inte finns i listan: filens förvalda, annars det första
+        assertEquals(1, pick(null, tracks))
+        assertEquals(1, pick(7, tracks))
+        assertEquals(3, pick(null, listOf(Track(3), Track(4))))
+        assertNull(pick(2, emptyList()))
+        assertNull(pick(2, null))
+    }
+
+    @Test fun forvalOchEgetValIFragan() {
+        // Förvalet skickas inte: servern väljer profilens språk, samma ström i förvärmningen och uppspelningen
+        assertNull(StartCore.playAudio(2, 2))
+        assertNull(StartCore.playAudio(null, null))
+        // Ett eget val på titelsidan skickas
+        assertEquals(1, StartCore.playAudio(1, 2))
+        // Förvärmningen och uppspelningen får samma fråga (samma nyckel) med samma val
+        val q = { a: Int? -> caps.minus("audio") + ("audio" to a?.toString()) + StartCore.playExtras(0.0, false) }
+        val warm = StartCore.warmQuery(q(StartCore.playAudio(2, 2)))
+        assertEquals(StartCore.key(5, q(StartCore.playAudio(2, 2)) + ("warm" to "1")), StartCore.key(5, warm))
+        assertFalse(warm.containsKey("audio") && warm["audio"] != null)
+    }
+
     @Test fun forvarmningenSkickarSammaFragaSomUppspelningen() {
         val play = caps + StartCore.playExtras(754.9, false)
         val warm = StartCore.warmQuery(play)

@@ -536,7 +536,11 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
     LaunchedEffect(it.id) { if (tv) { delay(150); runCatching { playFocus.requestFocus() } } }
 
     var season by remember(it.id) { mutableIntStateOf(it.next?.season ?: it.children?.firstOrNull()?.season ?: 1) }
-    var audio by remember(it.id) { mutableStateOf((it.audio?.firstOrNull { a -> a.default == true } ?: it.audio?.firstOrNull())?.index) }
+    // Ljudspåret: profilens förval som webben (StartCore.titleAudio). Det skickas bara om man valt ett annat – annars
+    // väljer servern, så att förvärmningen och uppspelningen får samma ström (StartCore.playAudio)
+    val presetAudio = remember(it.id) { StartCore.titleAudio(it.defaultAudio, it.audio, { a -> a.index }, { a -> a.default == true }) }
+    var audio by remember(it.id) { mutableStateOf(presetAudio) }
+    val playAudio = StartCore.playAudio(audio, presetAudio)
     // Min lista (inWatchlist saknas hos äldre servrar – då visas ingen knapp)
     var inList by remember(it.id) { mutableStateOf(it.inWatchlist == true) }
     val toggleList: () -> Unit = {
@@ -569,10 +573,10 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
                             if (pos > 30) {
-                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, pos, audio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.continue_at, formatTime(pos)), fontSize = 17.sp) }
-                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).warmOnFocus(it.id, 0.0, audio, sub)) { Text(tr(R.string.start_over)) }
+                                Button(onClick = { push(Screen.Play(it.id, pos, playAudio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, pos, playAudio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.continue_at, formatTime(pos)), fontSize = 17.sp) }
+                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, playAudio, sub)) }, Modifier.height(56.dp).warmOnFocus(it.id, 0.0, playAudio, sub)) { Text(tr(R.string.start_over)) }
                             } else {
-                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, 0.0, audio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.play), fontSize = 17.sp) }
+                                Button(onClick = { push(Screen.Play(it.id, 0.0, playAudio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, 0.0, playAudio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.play), fontSize = 17.sp) }
                             }
                             OutlinedButton(onClick = { scope.launch { runCatching { Api.setWatched(it.id, it.watched != true) }; reload++ } }, Modifier.height(56.dp)) {
                                 Text(tr(if (it.watched == true) R.string.mark_unwatched else R.string.mark_watched))

@@ -88,21 +88,26 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
 - **Klart när:** varningen syns i apparna (Expo i webbläget, de andra byggda i GitHub Actions), och tio minuters paus
   ger högst en halv minut i Safari.
 
-### 6. Apparna lämnar in skärmtiden från tid utan nät
+### 6. Expo och iOS lämnar in skärmtiden från tid utan nät
 
 - **Vad:** när nätet kommer tillbaka skickar apparna tiden som räknats utan nät till `POST /api/screentime/offline`
   (`docs/api.md`): en post per uppspelning `{ id, at, seconds, audio }` med ett fast `device`, och tar bort det som står
-  i `done`. Android `ScreenClock` (`OfflineCore.kt`, kön i `OfflineSync.kt`), Expo `addOfflineTime`/`screenGate`
-  (`src/offlinecore.ts`, `src/offline.ts`), iOS `ScreenClock` i `apps/apple/Shared/OfflineCore.swift` (finns inte än – byggs med
-  posterna från början). Android och Expo sparar i dag bara summan per dag (`offDay`/`offSeconds`, `off`), som inte går
-  att skicka två gånger utan att räknas dubbelt – de behöver spara när varje uppspelning började.
-- **Varför:** servern kan nu ta emot tiden, men ingen app skickar den; tiden från en flygresa försvinner fortfarande
-  när serverns status ersätter appens räkning.
-- **Filer:** `apps/automotive/.../OfflineCore.kt`, `OfflineSync.kt`, `apps/expo/src/offlinecore.ts`, `src/offline.ts`,
-  `apps/apple/Shared/OfflineCore.swift`, `test/contracts/apps.json` (anropet läggs i kontraktet i samma commit).
-- **Klart när:** `OfflineCoreTest.kt`, `test/expo-offline.test.js` och `test/apple-offline.test.js` har fall för en
-  post som skickas två gånger och en uppspelning över midnatt, och `/api/screentime` visar tiden från flygplansläget
-  efter att nätet kommit tillbaka (Expo i webbläget).
+  i `done`. **Android är klart** (`ScreenClock.addOffline`/`ack`/`migrate` i `OfflineCore.kt`, kön och anropet i
+  `OfflineSync.kt` `flushScreen`, fall i `OfflineCoreTest.kt`, anropet i `test/contracts/apps.json`) – följ samma
+  regler. Kvar: Expo `addOfflineTime`/`screenGate` (`src/offlinecore.ts`, `src/offline.ts`) och iOS `ScreenClock` i
+  `apps/apple/Shared/OfflineCore.swift`, som båda sparar bara summan per dag (`offDay`/`offSeconds`, `off`). Det som
+  behövs i båda: posten växer med samma id tills en paus (mer än 15 s) eller en timme, ta bara bort en post ur kön om
+  den inte vuxit sedan den skickades, låt poster servern inte fått räknas av från tiden kvar även efter en ny status,
+  flytta den sparade summan till poster sist på sin dag, och lägg till `ios` under endpointen i kontraktet.
+- **Varför:** Android lämnar nu in tiden; i Expo och på iPhone/iPad försvinner tiden från en flygresa fortfarande när
+  serverns status ersätter appens räkning.
+- **Filer:** `apps/expo/src/offlinecore.ts`, `src/offline.ts`, `apps/apple/Shared/OfflineCore.swift`, `Offline.swift`,
+  `test/contracts/apps.json`.
+- **Klart när:** `test/expo-offline.test.js` och `test/apple-offline.test.js` har fall för en post som skickas två
+  gånger, en post som växer medan den skickas och en uppspelning över midnatt, och `/api/screentime` visar tiden från
+  flygplansläget efter att nätet kommit tillbaka (Expo i webbläget).
+- **Också kvar i Android:** ljudböcker och poddar räknas inte utan nät (ljudspelaren `MusicService.kt` lämnar bara
+  positionen; `OfflineSync.playedOffline(audio = true)` finns).
 
 ## Idéer
 

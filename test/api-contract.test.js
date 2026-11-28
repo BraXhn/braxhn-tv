@@ -306,7 +306,7 @@ after(async () => { await srv?.stop(); feed?.close(); fs.rmSync(ROOT, { recursiv
 // ---------------- vilka konkreta anrop varje endpoint provas med ----------------
 // p = sökvägsparametrar, url = färdig adress (från ett tidigare svar, som apparna gör), auth: false = ingen
 // Bearer-header (AVPlayer/bildladdning använder token i adressen), token = annan apptoken
-const VARS = { $namn: 'admin', $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', $replik: 'Hej', get $kanaler() { return String(S.channel); },
+const VARS = { $namn: 'admin', get $nyss() { return Math.floor(Date.now() / 1000) - 120; }, $lösenord: PW, $sök: 'Film', $musiksök: 'Låt', $replik: 'Hej', get $kanaler() { return String(S.channel); },
   get $från() { return String(Math.floor(Date.now() / 1000) - 3600); }, get $till() { return String(Math.floor(Date.now() / 1000) + 3 * 3600); }, get $har() { return `${S.ep3},99999999`; },
   get $program() { return S.program; }, get $profil() { return S.admin; }, get $artist() { return S.artist; }, get $film() { return S.film; } };
 const sub = (v) => typeof v === 'string' && v.startsWith('$') ? VARS[v] : Array.isArray(v) ? v.map(sub) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)])) : v;
@@ -445,15 +445,9 @@ const CASES = {
   'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
   // Skärmtid (Android sparar den för uppspelning utan nät): huvudkontot utan regler och en barnprofil med regler
-  'GET /api/screentime': async () => {
-    const own = ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token;
-    // Profilen skapas en gång (båda apparna provar endpointen)
-    const kidOf = async () => ok(await call('android', 'GET', '/api/profiles', { token: own }), 'profiler').profiles.find(x => x.name === 'Skärmtid');
-    if (!(await kidOf())) ok(await call('android', 'POST', '/api/profiles', { body: { name: 'Skärmtid', maxAge: 11 }, token: own }), 'profil');
-    const kid = await kidOf();
-    ok(await call('android', 'PUT', `/api/screentime/${kid.id}`, { body: { daily: 600, from: '00:00', until: '23:59' }, token: own }), 'skärmtid');
-    return [{}, { token: ok(await call('android', 'POST', '/api/profiles/switch', { body: { id: kid.id }, token: own }), 'profilbyte').token }];
-  },
+  'GET /api/screentime': async () => [{}, { token: await screenKid() }],
+  // Skärmtid utan nät (Android lämnar in den i efterhand): huvudkontot (screenTime null) och barnprofilen med regler
+  'POST /api/screentime/offline': async () => [{}, { token: await screenKid() }],
   // Android: betyg, temamusik, extramaterial, repliksökning och undertextsynk
   'PUT /api/items/:id/rating': () => [{ p: { id: S.film } }],
   'GET /api/items/:id/theme': () => [{ p: { id: S.show } }],
@@ -486,6 +480,16 @@ const CASES = {
   // Utloggning med en egen inloggning, så att apparnas token gäller för resten av testet
   'POST /api/logout': async (app) => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }]
 };
+
+/** Inloggning för en barnprofil med skärmtid (skapas en gång – flera endpoints och båda apparna använder den) */
+async function screenKid() {
+  const own = ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token;
+  const kidOf = async () => ok(await call('android', 'GET', '/api/profiles', { token: own }), 'profiler').profiles.find(x => x.name === 'Skärmtid');
+  if (!(await kidOf())) ok(await call('android', 'POST', '/api/profiles', { body: { name: 'Skärmtid', maxAge: 11 }, token: own }), 'profil');
+  const kid = await kidOf();
+  ok(await call('android', 'PUT', `/api/screentime/${kid.id}`, { body: { daily: 600, from: '00:00', until: '23:59' }, token: own }), 'skärmtid');
+  return ok(await call('android', 'POST', '/api/profiles/switch', { body: { id: kid.id }, token: own }), 'profilbyte').token;
+}
 
 const t = (name, fn) => test(name, { skip: !hasFfmpeg && 'ffmpeg saknas', timeout: 120000 }, fn);
 

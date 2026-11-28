@@ -161,6 +161,8 @@
     "ScreenTimeState.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:33 (utan nät: OfflineSync.kt, OfflineCore.kt)",
       "optional": { "allowed": "boolean", "message": "string", "limited": "boolean", "day": "string", "daily": "integer", "used": "number",
         "extra": "integer", "remaining": "number", "from": "string", "until": "string", "audio": "boolean" } },
+    "ScreenOffline.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/OfflineSync.kt:29 (OfflineResult)",
+      "optional": { "added": "number", "done": ["string"], "stop": "boolean", "screenTime": "@ScreenTimeState.android" } },
     "ServerStatus.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:38",
       "optional": { "needsSetup": "boolean", "version": "string", "user": "@UserInfo.android", "donateUrl": "string" } },
     "LoginResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:39",
@@ -194,7 +196,7 @@
         "season": "integer", "episode": "integer", "show": "integer", "showTitle": "string",
         "position": "number", "watched": "boolean", "episodes": "integer", "watchedEpisodes": "integer",
         "intro": "@Marker.android", "credits": "number", "children": ["@MediaItem.android"], "next": "@ItemRef.android",
-        "audio": ["@AudioStream.android"], "subtitles": ["@SubtitleTrack.android"], "nextId": "integer", "prevId": "integer",
+        "audio": ["@AudioStream.android"], "subtitles": ["@SubtitleTrack.android"], "defaultAudio": "integer", "nextId": "integer", "prevId": "integer",
         "cast": ["@CastMember.android"], "inWatchlist": "boolean", "onThisDay": "@DayNote.android",
         "userRating": "number", "extras": ["@ExtraFile.android"], "theme": "@ThemeInfo.android" } },
     "HomeRow.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:92",
@@ -501,6 +503,8 @@
     "GET /api/screentime": {
       "ios": { "källa": "apps/apple/Shared/Offline.swift:246 (OfflineScreen.refresh: sparas för nedladdade titlar utan nät)", "svar": "@ScreenStatus.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:56 (sparas för uppspelning utan nät, OfflineSync.kt)", "svar": "@ScreenTimeState.android" } },
+    "POST /api/screentime/offline": {
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/OfflineSync.kt:212-232 (flushScreen: kön med skärmtid utan nät, ScreenClock i OfflineCore.kt)", "body": { "device": "c0ffee00-0000-4000-8000-000000000001", "entries": [{ "id": "o1795000000", "at": "$nyss", "seconds": 30.5, "audio": false }] }, "svar": "@ScreenOffline.android" } },
     "POST /api/items/:id/watched": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:137", "body": { "watched": false }, "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:295", "body": { "watched": false }, "svar": null } },

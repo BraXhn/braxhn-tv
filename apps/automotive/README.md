@@ -27,7 +27,7 @@ En Kotlin-app (Jetpack Compose och Media3/ExoPlayer) för bilar med **Android Au
 - **egna betyg** (tryck på en stjärna, igen för en halv, en gång till för att ta bort), **extramaterial** och **temamusik** (enligt *Mitt konto* i webben, låg volym, tonas ut) på titelsidan
 - **repliksökning**: fliken *Repliker* i sökningen spelar från strax före repliken
 - **familjefiltret** och **syntolkning** visas i spelaren; markerade scener hoppas över. *Synka automatiskt* i undertextmenyn för undertextfiler
-- byte av ljudspår och undertexter under uppspelning, kapitel
+- byte av ljudspår och undertexter under uppspelning, kapitel. Titelsidan väljer ljudspåret efter profilens språk (`defaultAudio` i titelns svar, som webben), inte filens förvalda spår; väljer man inget eget låter appen servern välja, så att förvärmningen och uppspelningen får samma ström (`StartCore.titleAudio`/`playAudio`)
 - **snabb spolning i omkodade filmer**: spolar du utanför det som är laddat startar spelaren om strömmen där du spolade till, med korta stycken där, så att bilden kommer på ungefär en sekund i stället för 3–4 (se nedan)
 - musik, **ljudböcker och poddar i bilens mediaspelare** (får användas under körning)
 - offline-nedladdning
@@ -81,11 +81,18 @@ Nedladdade filmer och avsnitt spelas från filen under *Inställningar → Nedla
 - **Skärmtid utan nät:** appen använder den senaste statusen från servern (tid kvar i dag och klockslagen, hämtas när
   startsidan öppnas och var tionde sekund under uppspelning) och räknar själv tiden som spelas utan nät. När tiden är
   slut eller klockslaget passerat stoppar spelaren med samma besked som servern ger, och filmen startar inte.
+- **Skärmtiden lämnas in i efterhand:** appen sparar en post per uppspelning utan nät (`{ id, at, seconds, audio }`,
+  `ScreenClock` i `OfflineCore.kt`; en paus eller en timme ger en ny post, posten växer med samma id) och skickar dem
+  till `POST /api/screentime/offline` när nätet kommer tillbaka, samtidigt som positionskön (`OfflineSync.kt`). Det
+  servern listar i `done` tas bort (utom en post som vuxit under tiden), och svarets `screenTime` blir den nya
+  statusen. Poster som servern inte fått räknas fortsatt av från tiden kvar, även efter en ny status. Summan per dag
+  som äldre appversioner sparade blir poster sist på den dagen (fram till uppdateringen om det var i dag). En server
+  utan anropet (äldre version, svarar 404) får inga fler försök förrän appen startas om.
 
 Det här **kan inte** upprätthållas utan nät:
 
-- Tiden som spelats utan nät räknas bara i appen. Servern räknar inte framsteg som skickas i efterhand (med `at`),
-  så den tiden syns inte i föräldraöversikten och minskar inte tiden kvar på andra enheter.
+- Tiden som spelats utan nät syns i föräldraöversikten och på andra enheter först när appen har fått nät och lämnat in
+  den. Ljudböcker och poddar räknas inte utan nät i appen (ljudspelaren lämnar bara positionen).
 - En ny dag utan nät gäller samma dagliga gräns och klockslag som senast, utan extra tid – veckodagarnas egna regler och
   ändringar som en vuxen gjort efteråt känner appen inte till förrän den har nät igen.
 - En vuxen kan inte stoppa uppspelningen på distans, och en åldersgräns som sänkts gäller nedladdade titlar först när

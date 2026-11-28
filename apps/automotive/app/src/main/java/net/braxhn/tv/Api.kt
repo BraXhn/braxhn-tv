@@ -78,6 +78,8 @@ fun castLine(cast: List<CastMember>?): String? {
     val intro: Marker? = null, val credits: Double? = null,
     val children: List<MediaItem>? = null, val next: ItemRef? = null,
     val audio: List<AudioStream>? = null, val subtitles: List<SubtitleTrack>? = null,
+    /** Ljudspåret som profilens val ger (index i audio; saknas hos äldre servrar) */
+    val defaultAudio: Int? = null,
     val nextId: Int? = null, val prevId: Int? = null,
     val cast: List<CastMember>? = null, val inWatchlist: Boolean? = null, val onThisDay: DayNote? = null, val userRating: Double? = null, val extras: List<ExtraFile>? = null, val theme: ThemeInfo? = null
 ) {

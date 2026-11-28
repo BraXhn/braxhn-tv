@@ -160,7 +160,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     if (!final && r.stop && item?.id == id) stoppedByServer(r)
                 } else {
                     OfflineSync.savePosition(id, pos, dur, atMs = started) // en senare sparad position vinner
-                    if (offline) { val g = OfflineSync.playedOffline(secs); if (!final && req.id == id) stoppedOffline(g) }
+                    if (offline) { val g = OfflineSync.playedOffline(secs, started); if (!final && req.id == id) stoppedOffline(g) }
                 }
             }
             if (final) Api.appScope.launch { send() }

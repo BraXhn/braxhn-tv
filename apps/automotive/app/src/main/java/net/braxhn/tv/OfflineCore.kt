@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.util.Locale
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToLong
@@ -89,15 +90,32 @@ object ResumePoint {
 // ---------- skärmtid utan nät ----------
 // Servern räknar skärmtiden (server/screentime.js) och säger stopp i svaret på framstegen. Utan nät följer appen den
 // senaste statusen den fick (GET /api/screentime eller screenTime i framstegssvaret) och räknar själv tiden som spelats
-// utan kontakt. Servern räknar inte framsteg som skickas i efterhand (med at), så den tiden finns bara i appen.
+// utan kontakt – en post per uppspelning (ScreenEntry). Posterna lämnas in med POST /api/screentime/offline när nätet
+// kommer tillbaka (OfflineSync.kt); servern räknar varje sekund en gång, så samma post kan skickas igen och får växa.
 
 /** Serverns status (GET /api/screentime, screenTime i framstegssvaret). remaining och used i sekunder, daily i minuter. */
 data class ScreenStatus(
     val limited: Boolean = false, val day: String? = null, val daily: Int? = null, val used: Double = 0.0, val extra: Int = 0,
     val remaining: Double? = null, val from: String? = null, val until: String? = null, val audio: Boolean = false
 )
-/** Senaste statusen och tiden som spelats utan kontakt sedan dess (för dagen offDay, yyyy-MM-dd) */
-data class ScreenCache(val status: ScreenStatus, val offDay: String? = null, val offSeconds: Double = 0.0)
+
+/**
+ * Tid som spelats utan kontakt och som servern inte har fått: id stabilt (samma id när posten växer), at = när
+ * uppspelningen började (Unix-sekunder), seconds = hur länge den pågick (väggklocka, utan pauser), audio = ljud.
+ */
+data class ScreenEntry(val id: String, val at: Long, val seconds: Double, val audio: Boolean = false) {
+    val end: Double get() = at + seconds
+}
+
+/** Senaste statusen och posterna som servern inte har fått än (de räknas av från statusens tid kvar) */
+data class ScreenCache(val status: ScreenStatus, val entries: List<ScreenEntry> = emptyList()) {
+    /** Sekunder som spelats utan kontakt på dagen day (yyyy-MM-dd), delat vid midnatt i riktig tid */
+    fun offSeconds(day: java.time.LocalDate, zone: java.time.ZoneId, audio: Boolean = status.audio): Double {
+        val a = day.atStartOfDay(zone).toEpochSecond().toDouble()
+        val b = day.plusDays(1).atStartOfDay(zone).toEpochSecond().toDouble()
+        return entries.filter { audio || !it.audio }.sumOf { max(0.0, min(b, it.end) - max(a, it.at.toDouble())) }
+    }
+}
 
 /**
  * Får profilen spela nu? left = sekunder kvar (null = ingen gräns). reason "limit" (dagens tid slut) eller "window"
@@ -112,19 +130,81 @@ data class ScreenGate(
 object ScreenClock {
     /** Längsta glapp som räknas på en gång (som servern: längre glapp är paus eller avbrott) */
     const val CAP = 45.0
+    /** En post blir högst så här lång – sedan börjar en ny (servern tar högst 4 timmar per post) */
+    const val ENTRY_MAX = 3600.0
+    /** Börjar nästa bit senare än så efter postens slut har det varit en paus: en ny post */
+    const val GAP = 15.0
+    /** Högst så många poster per anrop (som servern; resten skickas nästa gång) */
+    const val SEND_MAX = 200
+    /** Fler poster än så sparas inte (de äldsta släpps) */
+    const val KEEP_MAX = 1000
+    /** Äldre än så räknar servern inte (60 dygn) */
+    const val KEEP_SECONDS = 60 * 86400L
     private val OK = ScreenGate(true, null)
 
     fun localDay(t: ZonedDateTime): String = t.toLocalDate().toString() // yyyy-MM-dd, som serverns localDay
 
-    /** Ny status från servern: den räknade tiden ersätter det som räknats i appen. null/saknas = ingen skärmtid. */
-    fun fresh(status: ScreenStatus?): ScreenCache = ScreenCache(status ?: ScreenStatus(limited = false))
+    /** Ny status från servern: den räknade tiden ersätter appens, posterna servern inte fått räknas fortfarande av */
+    fun fresh(status: ScreenStatus?, entries: List<ScreenEntry> = emptyList()): ScreenCache =
+        ScreenCache(status ?: ScreenStatus(limited = false), entries)
 
-    /** Lägger till tid som spelats utan kontakt, på dagen den spelades (högst CAP sekunder per gång) */
-    fun addOffline(c: ScreenCache?, now: ZonedDateTime, seconds: Double): ScreenCache? {
-        if (c == null || !c.status.limited || !(seconds > 0)) return c
-        val day = localDay(now)
-        val prev = if (c.offDay == day) c.offSeconds else 0.0
-        return c.copy(offDay = day, offSeconds = prev + min(CAP, seconds))
+    /**
+     * seconds spelades fram till now utan kontakt (högst CAP per gång). Hänger biten ihop med senaste posten (samma
+     * slag, ingen paus, posten kortare än ENTRY_MAX) växer den posten till now, annars börjar en ny. Posterna sparas
+     * även när statusen säger ingen skärmtid – servern avgör (reglerna kan ha ändrats sedan).
+     */
+    fun addOffline(c: ScreenCache?, now: ZonedDateTime, seconds: Double, audio: Boolean = false): ScreenCache? {
+        if (c == null || !(seconds > 0)) return c
+        val nowS = now.toInstant().toEpochMilli() / 1000.0
+        val start = nowS - min(CAP, seconds)
+        val last = c.entries.lastOrNull()
+        val list = c.entries.toMutableList()
+        if (last != null && last.audio == audio && start <= last.end + GAP && nowS > last.at && nowS - last.at <= ENTRY_MAX) {
+            list[list.size - 1] = last.copy(seconds = max(last.seconds, nowS - last.at))
+        } else {
+            val at = floor(if (last != null) max(start, last.end) else start).toLong()
+            if (nowS - at <= 0) return c
+            var id = "o$at"
+            var k = 1
+            while (list.any { it.id == id }) id = "o$at-${k++}"
+            list.add(ScreenEntry(id, at, nowS - at, audio))
+        }
+        val oldest = nowS - KEEP_SECONDS
+        return c.copy(entries = list.filter { it.end >= oldest }.takeLast(KEEP_MAX))
+    }
+
+    /** Posterna som skickas nu (de äldsta först, högst SEND_MAX) */
+    fun batch(entries: List<ScreenEntry>): List<ScreenEntry> = entries.take(SEND_MAX)
+
+    /**
+     * Svaret på POST /api/screentime/offline: det servern listar i done tas bort – utom en post som vuxit sedan den
+     * skickades (den skickas igen; servern räknar bara det nya).
+     */
+    fun ack(entries: List<ScreenEntry>, sent: List<ScreenEntry>, done: Collection<String>): List<ScreenEntry> {
+        val ok = done.toHashSet()
+        return entries.filter { e -> !(e.id in ok && sent.any { it == e }) }
+    }
+
+    /**
+     * Flytt från äldre appversioner, som bara sparade summan för en dag (offDay, off sekunder). Tiden finns inte
+     * hos servern, men inte heller när den spelades: den läggs sist på dagen den hör till (fram till now om det är i
+     * dag), i poster om högst ENTRY_MAX, med id som inte ändras om flytten görs igen. Inget kan räknas två gånger:
+     * servern räknar varje sekund en gång, och nya poster börjar efter now.
+     */
+    fun migrate(offDay: String?, off: Double, now: ZonedDateTime): List<ScreenEntry> {
+        if (offDay == null || !(off > 0)) return emptyList()
+        val day = runCatching { java.time.LocalDate.parse(offDay) }.getOrNull() ?: return emptyList()
+        val dayStart = day.atStartOfDay(now.zone).toEpochSecond()
+        val end = min(now.toEpochSecond(), day.plusDays(1).atStartOfDay(now.zone).toEpochSecond())
+        if (end <= dayStart) return emptyList()
+        var at = end - min(off, (end - dayStart).toDouble()).toLong()
+        val out = mutableListOf<ScreenEntry>()
+        while (at < end) {
+            val len = min(ENTRY_MAX.toLong(), end - at)
+            out.add(ScreenEntry("m$offDay-${out.size}", at, len.toDouble()))
+            at += len
+        }
+        return out
     }
 
     /**
@@ -138,7 +218,7 @@ object ScreenClock {
         val today = now.toLocalDate()
         val day = today.toString()
         val same = s.day == day
-        val off = if (c.offDay == day) c.offSeconds else 0.0
+        val off = c.offSeconds(today, now.zone)
         val remaining = if (same) s.remaining?.let { it - off } else s.daily?.let { it * 60.0 - off }
         val from = toMin(s.from)
         var until = toMin(s.until)

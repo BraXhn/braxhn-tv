@@ -35,6 +35,23 @@ object StartCore {
         "start" to (if (start >= 1) start.toLong().toString() else null)
     )
 
+    /**
+     * Ljudspåret som titelsidan visar som valt: profilens förval (defaultAudio i titelns svar – samma regel som webben,
+     * web/js/player/video.js), annars filens förvalda spår, annars det första. Förut valdes filens förvalda spår, så
+     * profilens språk gällde inte (barn kunde få engelskt tal fast profilen vill ha svenskt).
+     */
+    fun <A> titleAudio(defaultAudio: Int?, tracks: List<A>?, index: (A) -> Int, isDefault: (A) -> Boolean): Int? {
+        if (tracks.isNullOrEmpty()) return null
+        return (tracks.firstOrNull { defaultAudio != null && index(it) == defaultAudio } ?: tracks.firstOrNull(isDefault) ?: tracks.first()).let(index)
+    }
+
+    /**
+     * Ljudspåret i frågan till /playback (förvärmningen och uppspelningen): inget när valet är titelsidans förval –
+     * då väljer servern profilens språk i den fil som spelas (server/routes/playback.js, även när titeln har flera
+     * versioner), samma ström som förvärmningen och Spela på avsnitt och Nedladdat ger. Ett eget val skickas.
+     */
+    fun playAudio(chosen: Int?, preset: Int?): Int? = chosen?.takeIf { it != preset }
+
     /** Förvärmningens fråga: uppspelningens fråga plus warm=1 (inget annat får skilja, då passar strömmen inte) */
     fun warmQuery(play: Map<String, String?>): Map<String, String?> = play + ("warm" to "1")
 

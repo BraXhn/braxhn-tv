@@ -669,6 +669,8 @@ nätet kommer tillbaka; förut ersatte serverns status appens räkning och tiden
   annan. Fungerar utanför hemmet och genom reläet. Profiler utan skärmtid får `200` med `added: 0` och `screenTime: null`.
 - Servern vet inte vad som räknats medan appen var ansluten: appen lämnar bara in tid den inte fått något svar för
   (framsteg som inte kom fram).
+- Används av Android-appen (`OfflineSync.kt` `flushScreen`, posterna i `OfflineCore.kt` `ScreenClock`); Expo och iOS
+  inte än.
 ## Undertexter i offline-filen (`/api/items/:id/offline`, `/api/stream/:id/offline-file`)
 
 Inga nya fält – anropen och svaren är desamma. MP4-filen som apparna laddar ner (`q` = 480/720/1080/orig) har nu

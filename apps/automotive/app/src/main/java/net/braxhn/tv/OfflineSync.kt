@@ -6,6 +6,7 @@ import android.net.Network
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.IOException
@@ -15,13 +16,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Uppspelning när servern inte svarar (reglerna i OfflineCore.kt): positioner som väntar på att skickas och skärmtiden
- * som räknas i appen. Båda sparas per server och profil. Kön skickas i ordning med at när nätet kommer tillbaka,
- * när appen öppnas och efter ett lyckat framstegsanrop.
+ * som räknas i appen (en post per uppspelning). Båda sparas per server och profil. Köerna skickas när nätet kommer
+ * tillbaka, när appen öppnas och efter ett lyckat framstegsanrop: positionerna i ordning med at, skärmtiden med
+ * POST /api/screentime/offline.
  */
 object OfflineSync {
     @Serializable private data class PendingJson(val id: Int, val pos: Long, val dur: Double = 0.0, val at: Long, val k: String = ProgressQueue.ITEM)
     @Serializable private data class PosJson(val id: Int, val pos: Double, val dur: Double = 0.0)
-    @Serializable private data class ScreenJson(val status: ScreenTimeState, val offDay: String? = null, val off: Double = 0.0)
+    @Serializable private data class EntryJson(val id: String, val at: Long, val seconds: Double, val audio: Boolean = false)
+    /** offDay/off: summan per dag från äldre appversioner – flyttas till entries när den läses (ScreenClock.migrate) */
+    @Serializable private data class ScreenJson(val status: ScreenTimeState, val offDay: String? = null, val off: Double = 0.0, val entries: List<EntryJson> = emptyList())
+    @Serializable private data class OfflineResult(val added: Double = 0.0, val done: List<String> = emptyList(), val stop: Boolean = false, val screenTime: ScreenTimeState? = null)
 
     private lateinit var ctx: Context
     private val prefs get() = ctx.getSharedPreferences("braxhn-offline", Context.MODE_PRIVATE)
@@ -29,6 +34,8 @@ object OfflineSync {
     private val lock = Any()
     /** Senast sparade skärmtidsstatus per server och profil (sparas bara när den ändras) */
     private val screens = HashMap<String, ScreenJson?>()
+    /** Servrar (server-profil) som saknar POST /api/screentime/offline (äldre version): inget nytt försök förrän appen startas om */
+    private val noOffline = HashSet<String>()
 
     fun init(c: Context) {
         ctx = c.applicationContext
@@ -88,7 +95,7 @@ object OfflineSync {
     /** Skickar väntande positioner i ordning (i bakgrunden; stannar vid första anropet utan svar) */
     fun flush() {
         val sc = scope() ?: return
-        if (synchronized(lock) { load(sc).isEmpty() } || !sending.compareAndSet(false, true)) return
+        if (synchronized(lock) { load(sc).isEmpty() && !screenWaiting(sc) } || !sending.compareAndSet(false, true)) return
         Api.appScope.launch {
             try { flushNow(sc) } finally { sending.set(false) }
         }
@@ -102,15 +109,21 @@ object OfflineSync {
     }
 
     private suspend fun flushNow(sc: String) {
+        if (flushPositions(sc)) flushScreen(sc)
+    }
+
+    /** true = hela kön skickades (servern svarade) */
+    private suspend fun flushPositions(sc: String): Boolean {
         for (p in synchronized(lock) { load(sc) }) {
-            if (scope() != sc) return // profilen eller servern byttes under tiden
+            if (scope() != sc) return false // profilen eller servern byttes under tiden
             val body = buildJsonObject { ProgressQueue.body(p).forEach { (k, v) -> put(k, v) } }
             val status = try { Api.post(ProgressQueue.path(p), body); 200 }
                 catch (e: ApiException) { e.code } // 0 = inget svar (felet kommer från netError eller utloggning)
                 catch (e: IOException) { 0 }
             synchronized(lock) { save(sc, ProgressQueue.ack(load(sc), p, status)) }
-            if (!ProgressQueue.keepGoing(status)) return
+            if (!ProgressQueue.keepGoing(status)) return false
         }
+        return true
     }
 
     // ---------- var en nedladdad titel ska börja ----------
@@ -136,15 +149,25 @@ object OfflineSync {
 
     // ---------- skärmtid ----------
 
+    private fun EntryJson.core() = ScreenEntry(id, at, seconds, audio)
+    private fun ScreenEntry.json() = EntryJson(id, at, seconds, audio)
+
     private fun loadScreen(sc: String): ScreenCache? {
-        val j = screens.getOrPut(sc) {
+        var j = screens.getOrPut(sc) {
             runCatching { prefs.getString("screen.$sc", null)?.let { Api.json.decodeFromString<ScreenJson>(it) } }.getOrNull()
         } ?: return null
-        return ScreenCache(j.status.toCore(), j.offDay, j.off)
+        if (j.off > 0 || j.offDay != null) {
+            // Äldre appversion: summan för en dag blir poster som kan lämnas in (en gång – sparas direkt i nya formen)
+            val moved = ScreenClock.migrate(j.offDay, j.off, ZonedDateTime.now()).map { it.json() }
+            j = ScreenJson(j.status, entries = moved + j.entries)
+            screens[sc] = j
+            prefs.edit().putString("screen.$sc", Api.json.encodeToString(j)).apply()
+        }
+        return ScreenCache(j.status.toCore(), j.entries.map { it.core() })
     }
 
     private fun saveScreen(sc: String, status: ScreenTimeState, c: ScreenCache) {
-        val j = ScreenJson(status, c.offDay, c.offSeconds)
+        val j = ScreenJson(status, entries = c.entries.map { it.json() })
         if (screens[sc] == j) return
         screens[sc] = j
         prefs.edit().putString("screen.$sc", Api.json.encodeToString(j)).apply()
@@ -154,7 +177,7 @@ object OfflineSync {
     fun noteScreen(st: ScreenTimeState?) {
         val sc = scope() ?: return
         val s = st ?: ScreenTimeState(limited = false)
-        synchronized(lock) { saveScreen(sc, s, ScreenClock.fresh(s.toCore())) }
+        synchronized(lock) { saveScreen(sc, s, ScreenClock.fresh(s.toCore(), loadScreen(sc)?.entries ?: emptyList())) }
     }
 
     /** Får profilen spela nu, utan kontakt med servern? */
@@ -163,15 +186,48 @@ object OfflineSync {
         return synchronized(lock) { ScreenClock.gate(loadScreen(sc), ZonedDateTime.now()) }
     }
 
-    /** Tid som spelats utan kontakt med servern: räknas på dagen och ger svaret om det får fortsätta */
-    fun playedOffline(seconds: Double): ScreenGate {
+    /**
+     * Tid som spelats utan kontakt med servern, fram till endMs (när framsteget skickades – inte när felet kom):
+     * sparas som en post som lämnas in senare, och ger svaret om det får fortsätta
+     */
+    fun playedOffline(seconds: Double, endMs: Long = System.currentTimeMillis(), audio: Boolean = false): ScreenGate {
         val sc = scope() ?: return ScreenGate(true, null)
-        val now = ZonedDateTime.now()
+        val end = java.time.Instant.ofEpochMilli(endMs).atZone(java.time.ZoneId.systemDefault())
         return synchronized(lock) {
-            val c = ScreenClock.addOffline(loadScreen(sc), now, seconds)
-            val j = screens[sc]
-            if (c != null && j != null) saveScreen(sc, j.status, c)
-            ScreenClock.gate(c, now)
+            val c = ScreenClock.addOffline(loadScreen(sc) ?: ScreenClock.fresh(null), end, seconds, audio)
+            if (c != null) saveScreen(sc, screens[sc]?.status ?: ScreenTimeState(limited = false), c)
+            ScreenClock.gate(c, ZonedDateTime.now(), audio)
+        }
+    }
+
+    private fun screenWaiting(sc: String): Boolean = sc !in noOffline && loadScreen(sc)?.entries?.isNotEmpty() == true
+
+    /** Enhetens id för skärmtidens poster (samma post från samma enhet får växa hos servern). Slumpat en gång. */
+    private fun deviceId(): String = prefs.getString("device", null) ?: java.util.UUID.randomUUID().toString().also { prefs.edit().putString("device", it).apply() }
+
+    /**
+     * Lämnar in skärmtiden som spelats utan kontakt (högst ScreenClock.SEND_MAX poster per anrop). Det servern listar
+     * i done tas bort ur kön, och svarets screenTime blir den nya statusen.
+     */
+    private suspend fun flushScreen(sc: String) {
+        repeat(10) {
+            if (scope() != sc) return
+            val sent = synchronized(lock) { if (screenWaiting(sc)) ScreenClock.batch(loadScreen(sc)!!.entries) else emptyList() }
+            if (sent.isEmpty()) return
+            val body = buildJsonObject {
+                put("device", deviceId())
+                put("entries", JsonArray(sent.map { e -> buildJsonObject { put("id", e.id); put("at", e.at); put("seconds", e.seconds); put("audio", e.audio) } }))
+            }
+            val r = try { Api.json.decodeFromString<OfflineResult>(Api.post("/api/screentime/offline", body)) }
+                catch (e: ApiException) { if (e.code == 404) synchronized(lock) { noOffline.add(sc) }; return }
+                catch (e: Exception) { return } // inget svar (eller ett svar som inte gick att läsa): nästa gång
+            if (scope() != sc) return
+            synchronized(lock) {
+                val c = loadScreen(sc) ?: return
+                val st = r.screenTime ?: ScreenTimeState(limited = false)
+                saveScreen(sc, st, ScreenClock.fresh(st.toCore(), ScreenClock.ack(c.entries, sent, r.done)))
+            }
+            if (r.done.isEmpty()) return
         }
     }
 
