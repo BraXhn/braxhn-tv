@@ -295,3 +295,14 @@
 "torsdagar" = "Thursdays";
 "fredagar" = "Fridays";
 "lördagar" = "Saturdays";
+
+/* Nästa avsnitt när avsnittet är slut (NextCard i Player.swift, NextCore.swift): samma ord som webben och Expo-appen */
+"Nästa avsnitt om %d s" = "Next episode in %d s";
+"Spela nu" = "Play now";
+
+/* Skärmtiden kvar i spelaren (ScreenLeftCore.swift): samma ord som webben, Android- och Expo-appen */
+"%@ kvar idag" = "%@ left today";
+"⏱ %@ kvar" = "⏱ %@ left";
+"%d h %d min" = "%d h %d min";
+"%d min" = "%d min";
+"Skärmtiden tar slut om %d min" = "Screen time runs out in %d min";

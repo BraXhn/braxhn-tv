@@ -226,16 +226,18 @@ final class AppModel: ObservableObject {
     /// Rapporterar tittarstatus. Svaret kan säga att uppspelningen ska stoppas (Föräldraöversiktens/administratörens
     /// Stoppa eller skärmtiden) – då anropas onStop med svaret. Utan svar sparas positionen och skickas senare med at;
     /// svarade servern inte alls (inget nät) anropas noAnswer. Svaret ger också skärmtidens status, som gäller när
-    /// nätet försvinner (iPhone/iPad, OfflineScreen).
+    /// nätet försvinner (iPhone/iPad, OfflineScreen), och onScreen får den (tiden kvar i spelaren, ScreenLeftCore).
     func reportProgress(id: Int, position: Double, duration: Double, onStop: ((ProgressReply) -> Void)? = nil,
-                        noAnswer: (() -> Void)? = nil) {
+                        noAnswer: (() -> Void)? = nil, onScreen: ((ScreenStatus?) -> Void)? = nil) {
         Task {
             guard let data = await PendingPositions.shared.post(self, kind: ProgressQueue.item, id: id, position: position,
                                                                 duration: duration, noAnswer: noAnswer) else { return }
-            #if os(iOS)
             // Saknas screenTime har profilen ingen skärmtid (servern skickar den bara när en gräns gäller)
-            if let ps = try? JSONDecoder().decode(ProgressScreen.self, from: data) { OfflineScreen.note(self, ps.screenTime) }
+            let screen = try? JSONDecoder().decode(ProgressScreen.self, from: data)
+            #if os(iOS)
+            if let ps = screen { OfflineScreen.note(self, ps.screenTime) }
             #endif
+            if let ps = screen { onScreen?(ps.screenTime) }
             guard let r = try? JSONDecoder().decode(ProgressReply.self, from: data), r.stop == true else { return }
             onStop?(r)
         }

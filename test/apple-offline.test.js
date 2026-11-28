@@ -225,7 +225,7 @@ test('nedladdningsspelaren räknar skärmtiden utan nät och stoppar med servern
   // Under uppspelningen: tiden räknas medan bilden rör sig; kommer framsteget inte fram räknas den som skärmtid
   assert.match(fn(player, 'tick'), /if isLocal \{ countLocal\(\) \}/);
   assert.match(fn(player, 'countLocal'), /player\.timeControlStatus == \.playing, let b = localBeat \{ localPlayed \+= min\(1, max\(0, now - b\)\) \}/);
-  assert.match(fn(player, 'tick'), /let secs = takeLocalPlayed\(\)[\s\S]*self\?\.playedOffline\(secs, play: play, id: id, gen: gen\)[\s\S]*noAnswer: noAnswer\)/);
+  assert.match(fn(player, 'tick'), /let secs = takeLocalPlayed\(\)[\s\S]*self\?\.playedOffline\(secs, play: play, id: id, gen: gen\)[\s\S]*noAnswer: noAnswer, onScreen:/);
   assert.match(fn(player, 'stopReporting'), /OfflineScreen\.played\(model, seconds: secs, play: play\)/, 'den sista biten räknas också');
   const po = fn(player, 'playedOffline');
   assert.match(po, /let g = OfflineScreen\.played\(model, seconds: secs, play: play\)/);
@@ -238,7 +238,8 @@ test('nedladdningsspelaren räknar skärmtiden utan nät och stoppar med servern
 
 test('skärmtidens status sparas per server och profil när servern svarar (som Android och Expo)', () => {
   // Svaret på framstegen (filmer och avsnitt) och GET /api/screentime när profilen blir känd
-  assert.match(fn(model, 'reportProgress'), /if let ps = try\? JSONDecoder\(\)\.decode\(ProgressScreen\.self, from: data\) \{ OfflineScreen\.note\(self, ps\.screenTime\) \}/);
+  // (svaret läses en gång: OfflineScreen sparar det på iPhone/iPad, spelaren visar tiden kvar – test/apple-screenleft.test.js)
+  assert.match(fn(model, 'reportProgress'), /let screen = try\? JSONDecoder\(\)\.decode\(ProgressScreen\.self, from: data\)\s*#if os\(iOS\)\s*if let ps = screen \{ OfflineScreen\.note\(self, ps\.screenTime\) \}/);
   assert.match(fn(off, 'changed'), /if model\.user != nil \{ Task \{ await OfflineScreen\.refresh\(model\) \} \}/);
   const r = fn(off, 'refresh');
   assert.match(r, /try\? await model\.get\("\/api\/screentime"\)/);

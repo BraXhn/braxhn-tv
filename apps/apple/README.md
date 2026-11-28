@@ -9,7 +9,17 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - serier med säsonger
 - val av ljudspår och undertext
 - knappen *Hoppa över intro* och *Nästa avsnitt* (på Apple TV visas den i spelarens egna kontroller)
-- automatiskt nästa avsnitt
+- nästa avsnitt efter kontots val *Spela nästa avsnitt automatiskt* (`autoNext` i `/playback`, som webben och de
+  andra apparna): när avsnittet är slut visas kortet *Nästa avsnitt om … s* med *Spela nu* och *Avbryt* (på Apple TV
+  med fokus på *Spela nu*, och fjärrkontrollens Menu är *Avbryt*). 0 s startar nästa direkt, och är valet av stängs
+  spelaren. En äldre server utan `autoNext` ger 8 s som förut. Nästa avsnitt förbereds på servern (`/playback?warm=1`,
+  samma fråga som uppspelningen) när eftertexterna börjar och under nedräkningen. Reglerna: `Shared/NextCore.swift`
+- skärmtiden kvar i spelaren, som webben, Android- och Expo-appen: för en profil med skärmtid och en gräns i dag visar
+  iPhone och iPad *12 min kvar idag* i spelarens överkant (*⏱ 12 min kvar* på en smal skärm), Apple TV när filmen är
+  pausad, och de sista fem minuterna syns *Skärmtiden tar slut om 4 min* hela tiden. VoiceOver läser upp varningen när
+  den syns och när minuten ändras. Tiden följer `screenTime.left` i svaret på framstegen (var tionde sekund medan filmen
+  spelar; en äldre server ger `remaining`) och appens egen räkning utan nät; en paus räknas inte, så tiden står still.
+  Reglerna: `Shared/ScreenLeftCore.swift`
 - tittarstatus som synkas med webben
 - AirPlay och bild-i-bild (iPhone/iPad)
 - HDR-filer spelas i HDR på enheter som klarar det, annars tonmappar servern
@@ -160,4 +170,7 @@ utan Xcode) kontrollerar att varje svensk text i koden har en engelsk rad i `en.
 Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser och frågan till `/hls/ready` är
 desamma som i Expo- och Android-appen; `test/apple-offline.test.js` att nedladdningarnas, köns och skärmtidens regler
 är Android-appens och att appen använder dem (profilens lista, utloggningen, kön med `at`, skärmtiden i
-nedladdningsspelaren, serverns besked och kön som lämnar in tiden utan nät).
+nedladdningsspelaren, serverns besked och kön som lämnar in tiden utan nät); `test/apple-next.test.js` att nästa
+avsnitt följer kontots val med webbens regler och förvärms med samma fråga; `test/apple-screenleft.test.js` att tiden
+kvar och varningen räknas och skrivs som i webben och Android-appen. Nästa avsnitt (`NextCore.swift`) och tiden kvar
+(`ScreenLeftCore.swift`) är också rena typer.

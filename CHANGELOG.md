@@ -9,6 +9,17 @@
   sammanfattning, intro och eftertexter av sig självt gäller också, med *Hoppar över intro… 3* och *Avbryt*. Nästa
   avsnitt förbereds på servern redan när eftertexterna börjar, så att det startar snabbare. Inte provat på riktig
   enhet; appen för iPhone, iPad och Apple TV gör fortfarande som förut.
+- **Appen för iPhone, iPad och Apple TV följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt
+  alltid direkt när ett avsnitt tog slut, även när en förälder stängt av valet för att barnet inte ska fastna i en
+  serie. Nu visas kortet *Nästa avsnitt om … s* med *Spela nu* och *Avbryt* efter kontots nedräkning, som i webben och
+  Expo-appen; på Apple TV står fokus på *Spela nu* och fjärrkontrollens Menu avbryter. Med 0 s startar nästa avsnitt
+  direkt, och är valet av stängs spelaren. Nästa avsnitt förbereds på servern redan när eftertexterna börjar, så att
+  det startar fortare. Inte byggt eller provat på enhet här (byggs i GitHub Actions).
+- **Appen för iPhone, iPad och Apple TV visar hur mycket skärmtid som är kvar.** För en profil med skärmtid och en
+  gräns i dag visar spelaren *12 min kvar idag* (på Apple TV när filmen är pausad), och de sista fem minuterna syns
+  *Skärmtiden tar slut om 4 min*, som i webben och de andra apparna. VoiceOver läser upp varningen när minuten ändras.
+  Tiden följer serverns räkning medan filmen spelar och appens egen räkning utan nät; en paus räknas inte. Förut
+  stoppades barnet utan förvarning. Inte byggt eller provat på enhet här.
 - **Tiden blinkar inte bort när webbspelaren laddar efter en spolning.** Har filmen redan spelat står tiden kvar
   med *Laddar…* efter sig, i stället för att bytas mot *Startar omkodning…*.
 - **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om
@@ -48,7 +59,7 @@
   spelar och appens egen räkning utan nät; en paus räknas inte, så tiden står still. I Expo-appen syns tiden kvar när
   filmen är pausad och varningen hela tiden. I bilen visas bara tiden kvar (gul de sista minuterna), ingen extra rad
   att läsa. Android-appen läser serverns nya fält `left` (en äldre server ger dagens tid kvar). Inte provat på
-  telefon, Google TV eller i bilen; iPhone, iPad och Apple TV kommer senare.
+  telefon, Google TV eller i bilen.
 - **Korta avsnitt räknas inte längre som sedda för tidigt.** Förut blev en titel sedd när mindre än 2 minuter var
   kvar, så ett avsnitt på 5 minuter blev sett efter 3:01 och ett på 3 minuter efter 1:01 – det försvann ur *Fortsätt
   titta* och började om från början. Nu räknas en titel som sedd när eftertexterna har börjat (om de har hittats eller

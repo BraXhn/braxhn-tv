@@ -73,7 +73,8 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ### 4. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
-Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
+Android-, Expo- och iOS/tvOS-appen är klara i koden (se *Klart*, 2026-11-28). Kvar: bygget av iOS/tvOS-appen i
+GitHub Actions och mätningen i Safari att paus inte räknas.
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i iOS/tvOS-appen. Fältet
   `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa (`AppModel.swift`).
@@ -260,6 +261,23 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   kort, av = stäng). Nästa avsnitt förvärms när
   eftertexterna börjar och under kortet (`Start.warm`, samma fråga som uppspelningen). `autoSkip`/`autoNext` i
   kontraktet. Inte byggt lokalt (ingen Android SDK) och inte provat på riktig enhet.
+- 2026-11-28: iOS/tvOS-appen följer *Spela nästa avsnitt automatiskt* (iOS-delen av punkt 1), gren
+  `team/apple-nasta-2026-11-28`. Fel: `ended()` i `Player.swift` startade alltid nästa avsnitt och läste inte
+  `autoNext`. Nu `NextCore.swift` (bara Foundation): `plan` = webbens `nextPlan` (0–60 s, decimaler kapas, 8 s utan
+  `autoNext`; `countdown` som heltal, decimaltal eller text), `end` = av → spelaren stängs (som Android-grenen), 0 s →
+  direkt, annars kortet *Nästa avsnitt om N s* med *Spela nu*/*Avbryt* (`NextCard`; Apple TV: fokus på *Spela nu*,
+  `onExitCommand` = Avbryt, spelarvyn tas bort medan kortet syns). Förvärmning med `Start.warm(…, start: 0)` när
+  eftertexterna börjar och varje sekund i nedräkningen (samma fråga som `load(…, cinema: true)`). Knapparna för
+  sammanfattning och eftertexter fanns redan. `test/apple-next.test.js` (6 fall; fallet för `ended()` faller på main),
+  `autoNext` i `Playback.ios` i kontraktet. **Inte provat:** kompilering (bara i `apple.yml`) och riktig enhet.
+- 2026-11-28: iOS/tvOS-appen visar skärmtiden kvar och varningen (iOS-delen av punkt 4), samma gren.
+  `ScreenLeftCore.swift` (bara Foundation) = webbens `playerLeft` och Android-appens `ScreenLeftCore.kt`: `left` ur
+  framstegssvaret (`remaining` från en äldre server), utan nät `ScreenClock.gate`; *12 min kvar idag* (*⏱ 12 min kvar*
+  på en smal skärm) i iPhone/iPads överkant, på Apple TV när filmen är pausad; *Skärmtiden tar slut om N min* de sista
+  fem minuterna; VoiceOver-uppläsning (`UIAccessibility.post(.announcement)`) när varningen syns och när minuten ändras.
+  `reportProgress` ger spelaren `screenTime` (`onScreen`, även på Apple TV), `ScreenStatus` tar emot `allowed` och
+  `left`. `test/apple-screenleft.test.js` (6 fall, webbens `playerLeft` jämförd var 7:e sekund upp till ett dygn),
+  `left` i `ScreenStatus.ios` i kontraktet. **Inte provat:** kompilering, riktig enhet, VoiceOver och mätningen i Safari.
 - 2026-11-28: iOS-appen lämnar in skärmtiden från tid utan nät (punkt 6, Android och Expo kvar), gren
   `team/apple-skarmtid-2026-11-28`. En post per uppspelning `{ id, at, seconds, audio }` per server och profil
   (`ScreenLog` i `OfflineCore.swift`): posten växer medan filmen spelar, en ny börjar efter mer än 120 s uppehåll eller

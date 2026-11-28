@@ -65,6 +65,19 @@ final class PlayerController: ObservableObject {
     @Published private(set) var stopNotice: String?
     /// Felet kan försökas igen (strömmen avbröts under uppspelningen)
     @Published private(set) var canRetry = false
+    /// Avsnittet är slut och nästa startar om så här många sekunder (kortet med Spela nu och Avbryt; NextCore). nil = inget kort
+    @Published private(set) var nextIn: Int?
+    /// Skärmtiden kvar idag (ScreenLeftCore): först appens senast kända status, sedan serverns svar på varje
+    /// framstegsrapport och utan nät appens egen räkning. nil = ingen skärmtid eller ingen gräns idag. VoiceOver läser
+    /// upp varningen när den syns och när minuten ändras.
+    @Published private(set) var screenLeft: ScreenLeftCore.Left? {
+        didSet {
+            guard ScreenLeftCore.announce(from: oldValue, to: screenLeft), let l = screenLeft else { return }
+            UIAccessibility.post(notification: .announcement, argument: ScreenLeftCore.texts(l, compact: false, tr: L).warn)
+        }
+    }
+    /// Filmen är pausad (Apple TV visar då tiden kvar, som när spelarens reglage syns)
+    @Published private(set) var paused = false
 
     private let model: AppModel
     private var item: MediaItem?
@@ -127,6 +140,8 @@ final class PlayerController: ObservableObject {
     private var localPlay = ""
     private var seekGen = 0
     private var seekRestarting = false
+    /// Nedräkningen till nästa avsnitt (kortet när avsnittet är slut)
+    private var nextTask: Task<Void, Never>?
 
     init(model: AppModel) {
         self.model = model
@@ -139,7 +154,11 @@ final class PlayerController: ObservableObject {
         // När bilden börjar röra sig är förberedelsen klar
         timeControl = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             let playing = p.timeControlStatus == .playing
-            Task { @MainActor [weak self] in self?.playStateChanged(playing) }
+            let paused = p.timeControlStatus == .paused
+            Task { @MainActor [weak self] in
+                self?.paused = paused
+                self?.playStateChanged(playing)
+            }
         }
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -166,6 +185,9 @@ final class PlayerController: ObservableObject {
         let gen = generation
         AudioFocus.willPlay(.video)
         let stopping = stopReporting()
+        // Tiden kvar direkt: appens senast kända status och tiden som räknats utan nät (iPhone/iPad sparar serverns
+        // svar, OfflineScreen); serverns svar tar över efter tio sekunder. Apple TV sparar inget: förra avsnittets står kvar.
+        if let l = ScreenLeftCore.ofGate(OfflineScreen.gateNow(model)) { screenLeft = l }
         #if os(iOS)
         // Nedladdad fil spelas direkt – utan att vänta på nätet
         if let local = Downloads.shared.localURL(for: itemId) {
@@ -185,6 +207,7 @@ final class PlayerController: ObservableObject {
             if !gate.allowed, await OfflineScreen.refresh(model) { gate = OfflineScreen.gateNow(model) }
             guard isLive(gen) else { return }
             if !gate.allowed { stopNotice = OfflineScreen.message(gate); return }
+            screenLeft = ScreenLeftCore.ofGate(gate)
             player.replaceCurrentItem(with: AVPlayerItem(url: local))
             reporting = true
             if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
@@ -418,6 +441,9 @@ final class PlayerController: ObservableObject {
         seekRestarting = false
         localPlayed = 0
         localBeat = nil
+        nextTask?.cancel()
+        nextTask = nil
+        nextIn = nil
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -528,6 +554,8 @@ final class PlayerController: ObservableObject {
         else if let i = intro, t >= i.start, t < i.end - 1 { skip = SkipKind.intro }
         else if let c = credits, item?.nextId != nil, t >= c, t < c + 60 { skip = SkipKind.next }
         if skip != skipTitle { skipTitle = skip }
+        // Eftertexterna går: nästa avsnitt förvärms (och hålls varmt) redan nu, som webben
+        if NextCore.warmsNext(skip: skip, nextKind: SkipKind.next) { warmNext() }
         // Tittarstatus var 10:e sekund
         if reporting, Date().timeIntervalSince(lastReport) > 10, t > 1, let id = currentId {
             lastReport = Date()
@@ -542,7 +570,9 @@ final class PlayerController: ObservableObject {
             }
             model.reportProgress(id: id, position: t, duration: duration, onStop: { [weak self] r in
                 Task { @MainActor [weak self] in self?.stoppedByServer(r, id: id, gen: gen) }
-            }, noAnswer: noAnswer)
+            }, noAnswer: noAnswer, onScreen: { [weak self] st in
+                Task { @MainActor [weak self] in self?.screenFromServer(st, id: id, gen: gen) }
+            })
         }
     }
 
@@ -558,11 +588,16 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// Avsnittet är slut: kontots val Spela nästa avsnitt automatiskt (autoNext i /playback, NextCore.end). Av eller
+    /// inget nästa avsnitt: spelaren stängs. 0 s: nästa direkt. Annars kortet "Nästa avsnitt om N s".
     private func ended() {
-        guard !closed else { return }
+        guard !closed, nextIn == nil else { return }
         stopReporting()
-        if let next = item?.nextId { load(itemId: next, at: 0, audio: nil, subtitle: nil) }
-        else { onFinished?() }
+        switch NextCore.end(pb?.autoNext, hasNext: item?.nextId != nil) {
+        case .close: onFinished?()
+        case .next: playNext()
+        case .card(let seconds): showNext(seconds)
+        }
     }
 
     /// Rapporterar slutposition och stänger serverns session – högst en gång per titel.
@@ -599,6 +634,8 @@ final class PlayerController: ObservableObject {
         settleTask = nil
         readyTask?.cancel()
         readyTask = nil
+        nextTask?.cancel()
+        nextTask = nil
         onFinished = nil
         stopReporting()
         clearPrerollObservers()
@@ -712,12 +749,16 @@ struct PlayerContent: View {
     let close: () -> Void
     /// Rapportera felet: Feedback med Något fungerar inte och Uppspelning förvalt
     @State private var report = false
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     var body: some View {
         ZStack {
-            // Vid fel eller stopp tas spelarvyn bort: på Apple TV får rutans knappar då fokus (annars behåller
-            // AVPlayerViewController fokus och Stäng/Försök igen går inte att nå med fjärrkontrollen)
-            if ctrl.error == nil && ctrl.stopNotice == nil {
+            // Vid fel eller stopp (och på Apple TV medan kortet för nästa avsnitt syns) tas spelarvyn bort: på Apple TV
+            // får rutans knappar då fokus (annars behåller AVPlayerViewController fokus och Stäng/Försök igen/Spela nu går
+            // inte att nå med fjärrkontrollen)
+            if ctrl.error == nil && ctrl.stopNotice == nil && !cardTakesFocus {
                 PlayerVC(player: ctrl.player, skipTitle: ctrl.skipTitle, onSkip: { ctrl.skip() }, ctrl: ctrl)
                     .ignoresSafeArea()
             }
@@ -742,6 +783,10 @@ struct PlayerContent: View {
                     Button { close() } label: { Image(systemName: "xmark").font(.title3.bold()).padding(10).background(.ultraThinMaterial, in: Circle()) }
                     Text(ctrl.title).font(.subheadline.weight(.semibold)).lineLimit(1).shadow(radius: 2)
                     Spacer()
+                    // Skärmtiden kvar idag (kort text på en smal skärm, som webben på telefonen)
+                    if let l = ctrl.screenLeft, ctrl.stopNotice == nil {
+                        leftPill(ScreenLeftCore.texts(l, compact: sizeClass == .compact, tr: L).pill, low: l.warn)
+                    }
                     Text(ctrl.status).font(.caption2).foregroundStyle(.secondary)
                     if ctrl.audioTracks.count > 1 || !ctrl.subtitleTracks.isEmpty || !ctrl.chapters.isEmpty || ctrl.canComfort {
                         Menu {
@@ -776,7 +821,7 @@ struct PlayerContent: View {
                 }
                 .padding()
                 Spacer()
-                if let s = ctrl.skipTitle {
+                if let s = ctrl.skipTitle, ctrl.nextIn == nil {
                     HStack {
                         Spacer()
                         if let pt = ctrl.prerollTitle {
@@ -797,6 +842,37 @@ struct PlayerContent: View {
                 }
             }
             #endif
+            #if os(tvOS)
+            // Apple TV: tiden kvar när filmen är pausad (då syns spelarens egna reglage)
+            if let l = ctrl.screenLeft, ctrl.paused, ctrl.error == nil, ctrl.stopNotice == nil, ctrl.nextIn == nil {
+                VStack {
+                    HStack {
+                        Spacer()
+                        leftPill(ScreenLeftCore.texts(l, compact: false, tr: L).pill, low: l.warn)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 50).padding(.trailing, 80)
+                .allowsHitTesting(false)
+            }
+            #endif
+            // Varningen de sista fem minuterna, även när filmen spelar. Texten byts bara när minuten ändras, och
+            // VoiceOver läser upp den då (PlayerController.screenLeft)
+            if let l = ctrl.screenLeft, l.warn, ctrl.error == nil, ctrl.stopNotice == nil {
+                VStack {
+                    Text(ScreenLeftCore.texts(l, compact: false, tr: L).warn)
+                        .font(.headline).foregroundStyle(.black)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Self.lowTime, in: Capsule())
+                        .padding(.top, warnTop)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+            // Avsnittet är slut: nästa avsnitt om N s, med Spela nu och Avbryt (NextCore)
+            if let n = ctrl.nextIn, ctrl.error == nil, ctrl.stopNotice == nil {
+                NextCard(seconds: n, play: { ctrl.playNext() }, cancel: { ctrl.cancelNext() })
+            }
             if ctrl.slowStart && ctrl.error == nil && ctrl.stopNotice == nil {
                 // Omkodning med grafikkort kan ta ~10 s till första bilden – säg det, så att ingen startar om
                 VStack {
@@ -836,6 +912,36 @@ struct PlayerContent: View {
 
     static func fmt(_ s: Double) -> String { formatTime(s) }
 
+    /// Varningens färg (som Android-appens LowTime och webbens .low)
+    static let lowTime = Color(red: 1, green: 0.78, blue: 0.35)
+
+    /// Apple TV: kortet med Spela nu tar bort spelarvyn medan det syns, annars behåller AVPlayerViewController fokus och
+    /// knapparna går inte att nå med fjärrkontrollen (som vid fel och stopp)
+    private var cardTakesFocus: Bool {
+        #if os(tvOS)
+        return ctrl.nextIn != nil
+        #else
+        return false
+        #endif
+    }
+
+    /// Tiden kvar idag i spelarens överkant (i varningens färg de sista fem minuterna)
+    private func leftPill(_ text: String, low: Bool) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold)).lineLimit(1)
+            .foregroundStyle(low ? Self.lowTime : .white)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Color.black.opacity(0.5), in: Capsule())
+    }
+
+    private var warnTop: CGFloat {
+        #if os(tvOS)
+        return 60
+        #else
+        return 64
+        #endif
+    }
+
     private var subtitleFont: Font {
         #if os(tvOS)
         return .system(size: 44, weight: .semibold)
@@ -848,6 +954,47 @@ struct PlayerContent: View {
         return 90
         #else
         return 60
+        #endif
+    }
+}
+
+/// Kortet när avsnittet är slut: "Nästa avsnitt om N s" med Spela nu och Avbryt (NextCore.swift, som webben och
+/// Expo-appen). Apple TV: fokus på Spela nu när kortet visas, fjärrkontrollens Menu = Avbryt.
+struct NextCard: View {
+    let seconds: Int
+    let play: () -> Void
+    let cancel: () -> Void
+    @FocusState private var focusPlay: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(String(format: L("Nästa avsnitt om %d s"), max(0, seconds)))
+                .font(.headline)
+                .monospacedDigit()
+            HStack(spacing: 16) {
+                Button(action: play) { Label("Spela nu", systemImage: "play.fill") }
+                    .buttonStyle(.borderedProminent)
+                    .focused($focusPlay)
+                Button("Avbryt", action: cancel)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(20)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.trailing, edge).padding(.bottom, edge)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        #if os(tvOS)
+        .onExitCommand(perform: cancel)
+        #endif
+        // Fokus (Apple TV) först när kortet finns i vyn
+        .onAppear { DispatchQueue.main.async { focusPlay = true } }
+    }
+
+    private var edge: CGFloat {
+        #if os(tvOS)
+        return 80
+        #else
+        return 110
         #endif
     }
 }
@@ -998,6 +1145,7 @@ extension PlayerController {
     /// lämnas in när nätet kommer tillbaka (PendingScreenTime)
     fileprivate func playedOffline(_ secs: Double, play: String, id: Int, gen: Int) {
         let g = OfflineScreen.played(model, seconds: secs, play: play)
+        if !closed, gen == generation, currentId == id { screenLeft = ScreenLeftCore.ofGate(g) }
         guard !g.allowed, !closed, gen == generation, currentId == id, isLocal, stopNotice == nil else { return }
         player.pause()
         stopReporting()
@@ -1023,6 +1171,59 @@ extension PlayerController {
         error = nil
         canRetry = false
         restart(audio: audio, subtitle: subtitle)
+    }
+}
+
+// MARK: - Nästa avsnitt (NextCore) och skärmtiden kvar (ScreenLeftCore)
+
+extension PlayerController {
+    /// Förvärm nästa avsnitt (/playback?warm=1) med samma fråga som uppspelningen sedan skickar: från början, inget
+    /// eget ljudspår eller undertext och bio-läget som servern avgör (playNext och skip spelar så). Start.warm frågar
+    /// högst var 15:e sekund och hoppar över en nedladdad titel, så det går att anropa ofta.
+    fileprivate func warmNext() {
+        guard !closed, let next = item?.nextId else { return }
+        Start.warm(model, id: next, start: 0, audio: nil, subtitle: nil)
+    }
+
+    /// Kortet "Nästa avsnitt om N s": räknar ner varje sekund (och håller förvärmningen vid liv), sedan nästa avsnitt
+    fileprivate func showNext(_ seconds: Int) {
+        nextTask?.cancel()
+        warmNext()
+        nextIn = NextCore.Countdown(seconds: seconds).left
+        let gen = generation
+        nextTask = Task { [weak self] in
+            var cd = NextCore.Countdown(seconds: seconds)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self, !self.closed, self.generation == gen, self.nextIn != nil else { return }
+                let go = cd.tick()
+                self.nextIn = cd.left
+                if go { self.playNext(); return }
+                self.warmNext()
+            }
+        }
+    }
+
+    /// Spela nu (eller nedräkningen är slut): nästa avsnitt från början, som skip() under eftertexterna
+    func playNext() {
+        nextTask?.cancel()
+        nextTask = nil
+        nextIn = nil
+        guard !closed, let next = item?.nextId else { onFinished?(); return }
+        load(itemId: next, at: 0, audio: nil, subtitle: nil)
+    }
+
+    /// Avbryt: kortet försvinner och spelaren står kvar i slutet (Stäng eller Menu på Apple TV går tillbaka)
+    func cancelNext() {
+        nextTask?.cancel()
+        nextTask = nil
+        nextIn = nil
+    }
+
+    /// screenTime i serverns svar på framstegen (saknas = ingen skärmtid för profilen)
+    fileprivate func screenFromServer(_ st: ScreenStatus?, id: Int, gen: Int) {
+        guard !closed, gen == generation, currentId == id else { return }
+        screenLeft = ScreenLeftCore.ofServer(st)
     }
 }
 

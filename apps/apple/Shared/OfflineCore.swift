@@ -198,7 +198,9 @@ enum DownloadAccess {
 // regler som Android-appens ScreenClock (OfflineCore.kt) och Expo-appens screenGate (offlinecore.ts).
 
 /// Serverns status (GET /api/screentime, screenTime i framstegssvaret). remaining och used i sekunder, daily i minuter.
-/// Fält som saknas (t.ex. { limited: false }) får sina standardvärden.
+/// Fält som saknas (t.ex. { limited: false }) får sina standardvärden. allowed och left (sekunder kvar: det som tar slut
+/// först av dagens tid och sluttiden; saknas hos äldre servrar) visar tiden kvar i spelaren (ScreenLeftCore) – räkningen
+/// utan nät (ScreenClock.gate) använder dem inte.
 struct ScreenStatus: Codable, Equatable {
     var limited: Bool
     var day: String?
@@ -209,9 +211,12 @@ struct ScreenStatus: Codable, Equatable {
     var from: String?
     var until: String?
     var audio: Bool
+    var allowed: Bool?
+    var left: Double?
 
     init(limited: Bool = false, day: String? = nil, daily: Int? = nil, used: Double = 0, extra: Int = 0,
-         remaining: Double? = nil, from: String? = nil, until: String? = nil, audio: Bool = false) {
+         remaining: Double? = nil, from: String? = nil, until: String? = nil, audio: Bool = false,
+         allowed: Bool? = nil, left: Double? = nil) {
         self.limited = limited
         self.day = day
         self.daily = daily
@@ -221,9 +226,11 @@ struct ScreenStatus: Codable, Equatable {
         self.from = from
         self.until = until
         self.audio = audio
+        self.allowed = allowed
+        self.left = left
     }
 
-    private enum CodingKeys: String, CodingKey { case limited, day, daily, used, extra, remaining, from, until, audio }
+    private enum CodingKeys: String, CodingKey { case limited, day, daily, used, extra, remaining, from, until, audio, allowed, left }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -241,6 +248,8 @@ struct ScreenStatus: Codable, Equatable {
         from = try? c.decodeIfPresent(String.self, forKey: .from)
         until = try? c.decodeIfPresent(String.self, forKey: .until)
         audio = (try? c.decodeIfPresent(Bool.self, forKey: .audio)) ?? false
+        allowed = try? c.decodeIfPresent(Bool.self, forKey: .allowed)
+        left = num(.left)
     }
 }
 

@@ -225,6 +225,8 @@ struct Playback: Decodable {
     let audioSelected: String?
     /// Bio-läge: trailers/förfilm före filmen (bara med cinema=1 och när bio-läget är på; Player.swift)
     let preroll: [PrerollEntry]?
+    /// Kontots val Spela nästa avsnitt automatiskt: { enabled, countdown } (saknas hos äldre servrar; NextCore.swift)
+    let autoNext: AutoNext?
 }
 
 struct Chapter: Decodable, Hashable, Identifiable {
