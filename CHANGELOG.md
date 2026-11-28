@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+
+## 1.5.1 – 2026-11-28
 - **En stängd film på en enhet stoppar inte längre samma film på en annan.** Två i familjen med samma profil som såg
   samma film på varsin enhet (till exempel TV:n och en dator) kunde få TV:ns film stoppad när datorn stängde sin, om
   datorn spelade filen direkt utan omkodning. Nu har även direktuppspelningen en egen märkning, så att bara den egna
