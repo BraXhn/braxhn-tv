@@ -29,6 +29,8 @@ export const timing = { wait: 4000, retry: 30000, save: 1500 };
 let scope = '';
 let list: DlEntry[] = [];
 let screen: ScreenCache | null = null;
+/** Telefonens id för skärmtid utan nät (servern låter samma post från samma enhet växa) – sparas per profil */
+let device = '';
 let notice = '';
 let version = 0;
 const listeners = new Set<() => void>();
@@ -58,7 +60,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 function persist(now = false) {
   if (!supported || !scope) return;
   clearTimeout(saveTimer);
-  const s = scope, data = JSON.stringify({ v: 1, list, screen });
+  const s = scope, data = JSON.stringify({ v: 1, list, screen, device });
   const go = () => { try { const d = dirOf(s); ensureDir(d); new File(d, 'list.json').writeSync(data); } catch (e) { console.warn('[offline] kunde inte spara listan', e); } };
   if (now) go(); else saveTimer = setTimeout(go, timing.save);
 }
@@ -88,10 +90,10 @@ export function openScope(serverId: string, user: { id: number; name: string; ki
   if (s === scope) return;
   closeScope();
   scope = s;
-  list = []; screen = null; notice = '';
+  list = []; screen = null; notice = ''; device = '';
   try {
     const f = new File(dirOf(s), 'list.json');
-    if (f.exists) { const j = JSON.parse(f.textSync()); list = Array.isArray(j?.list) ? j.list : []; screen = j?.screen || null; }
+    if (f.exists) { const j = JSON.parse(f.textSync()); list = Array.isArray(j?.list) ? j.list : []; screen = core.readScreen(j?.screen); device = typeof j?.device === 'string' ? j.device : ''; }
   } catch {}
   // En klar fil som försvunnit (telefonen rensade, appens data togs bort) tas bort ur listan
   const d = dirOf(s);
@@ -112,7 +114,7 @@ export function closeScope() {
   if (!scope) return;
   if (cur) { try { cur.task?.pause(); } catch {} cur = null; }
   persist(true);
-  scope = ''; list = []; screen = null; notice = '';
+  scope = ''; list = []; screen = null; notice = ''; device = '';
   emit();
 }
 
@@ -196,12 +198,12 @@ function dropFiles(s: string, e: DlEntry) {
   const d = dirOf(s);
   for (const n of [...e.files.map((f) => f.name), ...e.subs.map((x) => x.name), e.key + '.jpg']) { try { const f = new File(d, n); if (f.exists) f.delete(); } catch {} }
 }
-/** Tar bort allt som profilen laddat ner (utloggning) */
+/** Tar bort allt som profilen laddat ner (utloggning, Ta bort allt). Skärmtid som inte lämnats in finns kvar. */
 export function removeAll() {
   if (!scope) return;
   if (cur) { cur.cancelled = true; try { cur.task?.cancel(); } catch {} }
   try { const d = dirOf(scope); if (d.exists) d.delete(); } catch {}
-  list = []; screen = null;
+  list = []; screen = screen?.plays.length ? { ...screen, status: null } : null;
   emit(); persist(true);
 }
 /** Servern tas bort ur listan: alla dess profilers nedladdningar tas bort */
@@ -414,11 +416,12 @@ export function savePosition(kind: string, id: number, pos: number, o: { done?: 
 let syncing = false;
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
 export function syncSoon(ms = 2000) { clearTimeout(syncTimer); syncTimer = setTimeout(() => { syncPending().catch(() => {}); }, ms); }
-/** Skickar positioner som sparats utan nät – bara för profilen som är inloggad (token hör till den) */
+/** Skickar positioner och skärmtid som sparats utan nät – bara för profilen som är inloggad (token hör till den) */
 export async function syncPending() {
   if (syncing || !scope || !session.token) return;
   syncing = true;
   const my = scope;
+  let gone = false;
   try {
     for (const e of list.filter((x) => x.pending)) {
       if (scope !== my) break;
@@ -426,27 +429,39 @@ export async function syncPending() {
       if (!req) continue;
       let status = 0;
       try { await api(req.path, { method: 'POST', body: req.body, timeout: 10000 }); status = 200; } catch (err: any) { status = err?.status || 0; }
-      if (status === 0 || status === 401) break; // inget nät eller inte inloggad: nästa gång
+      if (status === 0 || status === 401) { gone = true; break; } // inget nät eller inte inloggad: nästa gång
       updateIn(my, e.key, (x) => core.ackSent(x, sent, status));
     }
+    if (!gone && scope === my) await syncScreen(my);
   } finally { syncing = false; }
 }
 export const pendingCount = () => core.pendingCount(list);
 
 // ---------- skärmtid ----------
-/** Senaste status från servern (GET /api/screentime eller screenTime i framstegssvaret) */
+/** Senaste status från servern (GET /api/screentime eller screenTime i framstegssvaret). Väntar tid utan nät skickas den. */
 export function noteScreen(status: ScreenStatus | null | undefined) {
   if (!scope || !status) return;
-  screen = core.freshScreen(status); persist();
+  screen = core.freshScreen(status, Date.now(), screen); persist();
+  if (screen?.plays.length && !syncing) syncSoon();
+}
+/** Lämnar in tiden som spelats utan nät (POST /api/screentime/offline) och tar bort det servern tagit emot */
+async function syncScreen(my: string) {
+  const req = core.offlineRequest(screen, device || (device = 'expo-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)));
+  if (!req) return;
+  const sent = req.body.entries.map((p) => ({ id: p.id, seconds: p.seconds }));
+  let r: { done?: string[]; stop?: boolean; screenTime?: ScreenStatus | null } | null = null;
+  try { r = await api(req.path, { method: 'POST', body: req.body, timeout: 10000 }); } catch { return; } // nästa gång
+  if (scope !== my) return;
+  screen = core.ackOffline(screen, sent, r); persist(true);
 }
 /** Hämtar statusen nu (kort väntan). false = servern svarade inte – då gäller den sparade */
 export async function refreshScreen(timeout = 4000): Promise<boolean> {
   try { noteScreen(await api<ScreenStatus>('/api/screentime', { timeout })); return true; } catch { return false; }
 }
 export const screenGate = (audio = false) => core.screenGate(screen, new Date(), audio);
-/** Tid som spelats utan kontakt med servern (räknas bara i telefonen) */
-export function countOffline(seconds: number) {
-  const n = core.addOfflineTime(screen, new Date(), seconds);
+/** Tid som spelats utan kontakt med servern (audio = ljudbok): räknas här och lämnas in när nätet är tillbaka */
+export function countOffline(seconds: number, audio = false) {
+  const n = core.addOfflineTime(screen, new Date(), seconds, audio);
   if (n !== screen) { screen = n; persist(); }
 }
 

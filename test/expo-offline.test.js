@@ -2,6 +2,7 @@
 // positioner som väntar på nätet, val av lokal fil, undertexter, skärmtid utan nät och vart appen startar utan nät.
 // Det som kräver en telefon (filsystemet, nedladdningen i bakgrunden, flygplansläge) provas inte här.
 // Node 22.18+ läser TypeScript utan byggsteg; äldre Node hoppar över testerna.
+process.env.TZ = 'Europe/Stockholm'; // som i Dockerfile – sommartid och vintertid provas i svensk tid
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -164,13 +165,15 @@ test('skärmtid utan nät: tid kvar, klockslag, ny dag och ljud', { skip }, () =
   assert.equal(c.screenGate(c.freshScreen({ limited: false }), at(12)).allowed, true);
   let cache = c.freshScreen(st, at(12).getTime());
   assert.deepEqual(c.screenGate(cache, at(12)), { allowed: true, left: 1800, message: '' });
-  // 20 minuter offline (räknas i högst 45 s per gång)
-  for (let i = 0; i < 40; i++) cache = c.addOfflineTime(cache, at(12), 30);
-  assert.equal(cache.off.seconds, 1200);
-  assert.equal(c.addOfflineTime(cache, at(12), 600).off.seconds, 1245, 'ett långt glapp räknas som högst 45 s');
-  assert.equal(c.screenGate(cache, at(12)).left, 600);
-  for (let i = 0; i < 20; i++) cache = c.addOfflineTime(cache, at(12), 30);
-  const out = c.screenGate(cache, at(12));
+  // 20 minuter offline (räknas i högst 45 s per gång), med 30 s mellan livstecknen
+  const tick = (i) => new Date(at(12).getTime() + i * 30000);
+  for (let i = 1; i <= 40; i++) cache = c.addOfflineTime(cache, tick(i), 30);
+  assert.equal(c.offlineSeconds(cache, at(12)), 1200);
+  assert.equal(cache.plays.length, 1, 'en uppspelning: en post som växer');
+  assert.equal(c.offlineSeconds(c.addOfflineTime(cache, tick(60), 600), at(12)), 1245, 'ett långt glapp räknas som högst 45 s');
+  assert.equal(c.screenGate(cache, tick(40)).left, 600);
+  for (let i = 41; i <= 60; i++) cache = c.addOfflineTime(cache, tick(i), 30);
+  const out = c.screenGate(cache, tick(60));
   assert.equal(out.allowed, false); assert.match(out.message, /Tiden är slut för i dag/);
   // Klockslag: före 07 och efter 19 nej; nära 19 begränsar klockan tiden kvar
   const fresh = c.freshScreen(st);
@@ -184,6 +187,7 @@ test('skärmtid utan nät: tid kvar, klockslag, ny dag och ljud', { skip }, () =
   assert.match(c.screenGate(ex, at(19, 10, 27)).message, /mellan 07:00 och 19:00/, 'nästa dag: ingen extra tid på kvällen');
   // Tid som räknats offline i går påverkar inte i dag
   const y = c.addOfflineTime(c.freshScreen(st), at(12), 40);
+  assert.equal(c.screenGate(y, at(12)).left, 1760);
   assert.equal(c.screenGate(y, at(12, 0, 27)).left, 3600);
   // Ljudböcker räknas bara när regeln gäller ljud
   const zero = c.freshScreen({ ...st, remaining: 0 });
@@ -195,6 +199,117 @@ test('skärmtid utan nät: tid kvar, klockslag, ny dag och ljud', { skip }, () =
   assert.equal(c.screenGate(night, at(1)).allowed, true);
   assert.equal(c.screenGate(night, at(12)).allowed, false);
   assert.equal(c.screenGate(night, at(1, 30)).left, 1800);
+});
+
+test('skärmtid utan nät: en post per uppspelning, ny efter paus och varje timme, delad vid midnatt', { skip }, () => {
+  const T = (h, m = 0, s = 0, day = 26) => new Date(2026, 10, day, h, m, s);
+  const sec = (d) => Math.round(d.getTime() / 1000);
+  const st = { limited: true, day: '2026-11-26', daily: 600, remaining: 36000, used: 0, extra: 0, from: null, until: null, audio: true };
+  let k = c.freshScreen(st, T(9).getTime());
+  k = c.addOfflineTime(k, T(10, 0, 30), 30, false, 'a');
+  k = c.addOfflineTime(k, T(10, 1), 30, false, 'nej');
+  assert.deepEqual(k.plays, [{ id: 'a', at: sec(T(10)), seconds: 60, audio: false }], 'posten växer, id:t står kvar');
+  // Paus i fem minuter: en ny post (tiden mellan räknas inte)
+  k = c.addOfflineTime(k, T(10, 6, 30), 30, false, 'b');
+  assert.deepEqual(k.plays.map((p) => [p.id, p.at, p.seconds]), [['a', sec(T(10)), 60], ['b', sec(T(10, 6)), 30]]);
+  // Ljudbok direkt efter: en egen post (audio)
+  k = c.addOfflineTime(k, T(10, 7), 30, true, 'c');
+  assert.equal(k.plays.at(-1).audio, true); assert.equal(k.plays.length, 3);
+  // Lång uppspelning: en ny post efter en timme
+  let h = c.freshScreen(st);
+  for (let i = 1; i <= 140; i++) h = c.addOfflineTime(h, new Date(T(12).getTime() + i * 30000), 30);
+  assert.deepEqual(h.plays.map((p) => p.seconds), [3600, 600]);
+  assert.equal(h.plays[1].at, h.plays[0].at + 3600, 'nästa post börjar där förra slutade');
+  assert.notEqual(h.plays[0].id, h.plays[1].id);
+  // Över midnatt: 23:50–00:10 räknas tio minuter var dag
+  let n = c.freshScreen(st);
+  for (let i = 1; i <= 40; i++) n = c.addOfflineTime(n, new Date(T(23, 50).getTime() + i * 30000), 30);
+  assert.equal(n.plays.length, 1);
+  assert.equal(c.offlineSeconds(n, T(23, 55)), 600);
+  assert.equal(c.offlineSeconds(n, T(8, 0, 0, 27)), 600);
+  // Profil utan skärmtid: inget räknas; ljud räknas inte när regeln inte gäller ljud; okänd status: räknas ändå
+  assert.equal(c.addOfflineTime(c.freshScreen({ limited: false }), T(12), 30).plays.length, 0);
+  assert.equal(c.addOfflineTime(c.freshScreen({ ...st, audio: false }), T(12), 30, true).plays.length, 0);
+  const u = c.addOfflineTime(null, T(12), 30);
+  assert.equal(u.status, null); assert.equal(u.plays[0].seconds, 30);
+  assert.equal(c.screenGate(u, T(12)).allowed, true, 'utan status ingen gräns');
+  // Sommartid (29 mars 2026): 01:59:30–03:00:30 enligt klockan är en verklig minut
+  let s = c.freshScreen(st);
+  s = c.addOfflineTime(s, new Date(2026, 2, 29, 1, 59, 30), 30, false, 's');
+  s = c.addOfflineTime(s, new Date(2026, 2, 29, 3, 0, 0), 30);
+  assert.deepEqual(s.plays.map((p) => p.seconds), [60], 'samma post över klockans hopp');
+  // Vintertid (25 oktober 2026): 02:59:30 sommartid → 02:00 vintertid är 30 verkliga sekunder
+  let w = c.freshScreen(st);
+  const w1 = new Date(2026, 9, 25, 0, 59, 30).getTime() + 2 * 3600e3; // 02:59:30 sommartid
+  w = c.addOfflineTime(w, new Date(w1), 30);
+  w = c.addOfflineTime(w, new Date(w1 + 30000), 30);
+  assert.equal(new Date(w1 + 30000).getHours(), 2, 'klockan har gått tillbaka');
+  assert.deepEqual(w.plays.map((p) => p.seconds), [60]);
+  // Poster äldre än 60 dagar sparas inte (servern tar inte emot dem)
+  const old = { status: st, at: 0, plays: [{ id: 'gl', at: sec(T(12, 0, 0, 1)) - 70 * 86400, seconds: 60, audio: false }] };
+  assert.deepEqual(c.addOfflineTime(old, T(12), 30, false, 'ny').plays.map((p) => p.id), ['ny']);
+});
+
+test('skärmtid utan nät: inlämningen, svaret och en post som växer under tiden', { skip }, () => {
+  const T = (h, m = 0, s = 0) => new Date(2026, 10, 26, h, m, s);
+  const st = { limited: true, day: '2026-11-26', daily: 60, remaining: 1800, used: 1800, extra: 0, from: null, until: null, audio: false };
+  assert.equal(c.offlineRequest(null, 'x'), null);
+  assert.equal(c.offlineRequest(c.freshScreen(st), 'x'), null, 'inget att lämna in');
+  let k = c.freshScreen(st);
+  k = c.addOfflineTime(k, T(10, 0, 30), 30, false, 'a');
+  k = c.addOfflineTime(k, T(11, 0, 30), 30, false, 'b');
+  const req = c.offlineRequest(k, 'tel-1');
+  assert.deepEqual(req, { path: '/api/screentime/offline', body: { device: 'tel-1', entries: [
+    { id: 'a', at: Math.round(T(10).getTime() / 1000), seconds: 30, audio: false },
+    { id: 'b', at: Math.round(T(11).getTime() / 1000), seconds: 30, audio: false }] } });
+  const sent = req.body.entries.map((p) => ({ id: p.id, seconds: p.seconds }));
+  // Medan svaret dröjer spelar b vidare
+  k = c.addOfflineTime(k, T(11, 1), 30);
+  assert.equal(c.screenGate(k, T(11, 1)).left, 1800 - 90);
+  const fresh = { ...st, used: 1860, remaining: 1740 };
+  const a = c.ackOffline(k, sent, { added: 60, done: ['a', 'b'], stop: false, screenTime: fresh }, T(11, 1).getTime());
+  assert.deepEqual(a.plays.map((p) => [p.id, p.seconds, p.sent]), [['b', 60, 30]], 'a borta, b kvar med det servern har');
+  assert.equal(c.offlineSeconds(a, T(11, 1)), 30, 'bara det nya räknas av från statusen');
+  assert.equal(c.screenGate(a, T(11, 1)).left, 1740 - 30);
+  assert.equal(c.offlineRequest(a, 'tel-1').body.entries[0].seconds, 60, 'hela posten skickas igen (servern räknar bara det nya)');
+  // Posten fortsätter växa efter svaret
+  const g = c.addOfflineTime(a, T(11, 1, 30), 30);
+  assert.equal(g.plays[0].seconds, 90); assert.equal(c.offlineSeconds(g, T(11, 2)), 60);
+  // Id som inte skickades rörs inte; ett done med okänt id gör inget
+  assert.equal(c.ackOffline(k, [{ id: 'a', seconds: 30 }], { done: ['a', 'zz'] }).plays.map((p) => p.id).join(), 'b');
+  // Bara 200 åt gången; resten står kvar och skickas nästa gång
+  let many = c.freshScreen(st);
+  for (let i = 0; i < 230; i++) many = c.addOfflineTime(many, new Date(T(1).getTime() + i * 60000), 30, false, 'p' + i);
+  const r2 = c.offlineRequest(many, 'x');
+  assert.equal(r2.body.entries.length, 200);
+  const left = c.ackOffline(many, r2.body.entries, { done: r2.body.entries.map((p) => p.id), screenTime: st });
+  assert.equal(left.plays.length, 30); assert.equal(left.plays[0].id, 'p200');
+  // screenTime null = profilen har ingen skärmtid längre; saknas = statusen står kvar
+  assert.deepEqual(c.ackOffline(k, sent, { done: [], screenTime: null }).status, { limited: false });
+  assert.equal(c.ackOffline(k, sent, { done: [] }).status, st);
+  assert.equal(c.ackOffline(k, sent, null), k, 'inget svar: inget ändras');
+  // Ny status från servern (GET /api/screentime) tar inte bort posterna som inte lämnats in
+  const f = c.freshScreen({ ...st, remaining: 1000 }, T(12).getTime(), k);
+  assert.equal(f.plays.length, 2); assert.equal(c.screenGate(f, T(12)).left, 1000 - 90);
+});
+
+test('skärmtid utan nät: den gamla sparade summan flyttas till en post, skräp tål', { skip }, () => {
+  const st = { limited: true, day: '2026-11-26', daily: 60, remaining: 1800, used: 1800, extra: 0, from: null, until: null, audio: false };
+  const m = c.readScreen({ status: st, at: 5, off: { day: '2026-11-26', seconds: 600 } });
+  assert.deepEqual(m.plays, [{ id: 'gammal-2026-11-26', at: new Date(2026, 10, 26).getTime() / 1000, seconds: 600, audio: false }]);
+  assert.equal(m.status, st); assert.equal(m.at, 5);
+  assert.equal(c.screenGate(m, new Date(2026, 10, 26, 12)).left, 1200, 'räknas fortfarande av samma dag');
+  assert.equal(c.screenGate(m, new Date(2026, 10, 27, 12)).left, 3600, 'inte nästa dag');
+  assert.equal(c.offlineRequest(m, 'x').body.entries[0].id, 'gammal-2026-11-26', 'lämnas in');
+  // Sparat igen och läst igen: ingen dubbelpost
+  const again = c.readScreen({ ...JSON.parse(JSON.stringify(m)), off: { day: '2026-11-26', seconds: 600 } });
+  assert.equal(again.plays.length, 1);
+  assert.deepEqual(c.readScreen(JSON.parse(JSON.stringify(m))), m, 'samma efter JSON');
+  assert.equal(c.readScreen({ status: st, off: null }).plays.length, 0);
+  assert.equal(c.readScreen({ status: st, off: { day: 'nonsens', seconds: 5 } }).plays.length, 0);
+  assert.equal(c.readScreen({ status: st, off: { day: '2026-11-26', seconds: -5 } }).plays.length, 0);
+  assert.equal(c.readScreen(null), null); assert.equal(c.readScreen('x'), null); assert.equal(c.readScreen({}), null);
+  assert.deepEqual(c.readScreen({ plays: [null, { id: 1 }, { id: 'ok', at: 10, seconds: 5, audio: 1, sent: 'x' }] }).plays, [{ id: 'ok', at: 10, seconds: 5, audio: true }]);
 });
 
 test('start utan nät och kontrollen mot servern', { skip }, () => {
@@ -239,6 +354,7 @@ function routes(path, o) {
   if ((m = /^\/api\/audiobooks\/book\/(\d+)\/offline/.exec(path))) return server.books[+m[1]];
   if ((m = /^\/api\/(items|audiobooks\/book)\/(\d+)$/.exec(path))) { const r = server.items[path]; if (r instanceof Error) throw r; return r || {}; }
   if (path === '/api/screentime') return { limited: false };
+  if (path === '/api/screentime/offline') { if (server.offline instanceof Error) throw server.offline; return server.offline ? server.offline(o) : { added: 0, done: [], stop: false, screenTime: null }; }
   if (/\/progress$/.test(path)) { if (server.progress instanceof Error) throw server.progress; return { watched: false }; }
   throw new Error('okänd sökväg ' + path);
 }
@@ -402,6 +518,36 @@ test('offline.ts: skärmtid utan nät följer senaste status och tiden som räkn
   assert.equal(off.screenGate().allowed, true);
 });
 
+test('offline.ts: tiden utan nät lämnas in när nätet är tillbaka och sparas mellan starter', { skip }, async () => {
+  const d = new Date(), st = { limited: true, day: c.localDay(d), daily: 60, extra: 0, used: 0, remaining: 3600, from: null, until: null, audio: true };
+  // Förra testets tid (90 s) lämnas in först: servern tar emot allt
+  server.offline = (o) => ({ added: 90, done: o.body.entries.map((e) => e.id), stop: false, screenTime: { limited: false } });
+  await off.syncPending();
+  off.noteScreen(st);
+  server.offline = new F.ApiError('Kunde inte ansluta', 0);
+  off.countOffline(30); off.countOffline(20, true);
+  assert.equal(off.screenGate().left, 3550);
+  await off.syncPending();
+  const calls = () => F.fsState.apiCalls.filter((x) => x.path === '/api/screentime/offline');
+  const first = calls().pop();
+  assert.equal(first.method, 'POST'); assert.match(first.body.device, /^expo-/);
+  assert.deepEqual(first.body.entries.map((e) => [e.seconds, e.audio]), [[30, false], [20, true]]);
+  assert.equal(off.screenGate().left, 3550, 'inget nät: ligger kvar');
+  // Appen startar om: posterna och enhetens id finns kvar
+  off.closeScope(); off.openScope('srv1', { id: 4, name: 'Kid', kid: true });
+  assert.equal(off.screenGate().left, 3550);
+  server.offline = (o) => ({ added: 50, done: o.body.entries.map((e) => e.id), stop: false, screenTime: { ...st, used: 50, remaining: 3550 } });
+  await off.syncPending();
+  const second = calls().pop();
+  assert.equal(second.body.device, first.body.device, 'samma enhet');
+  assert.deepEqual(second.body.entries.map((e) => e.id), first.body.entries.map((e) => e.id), 'samma id');
+  assert.equal(off.screenGate().left, 3550, 'serverns status, inget dras av två gånger');
+  const n = calls().length;
+  await off.syncPending();
+  assert.equal(calls().length, n, 'kön är tom: inget skickas');
+  server.offline = undefined;
+});
+
 test('offline.ts: start utan nät, kontrollen när servern svarar, utloggning', { skip }, async () => {
   // Profilbyte och sedan "appen startar utan nät": den senaste profilens lista visas, pågående köas igen
   server.st[15] = ready(15);
@@ -449,4 +595,20 @@ test('offline.ts: start utan nät, kontrollen när servern svarar, utloggning', 
   assert.equal(new F.Directory('mem:/doc/offline/srv1-5').exists, false);
   assert.equal(off.openLast('srv1'), null);
   assert.equal(new F.Directory('mem:/doc/offline/srv2-1').exists, true, 'den andra servern ligger kvar');
+});
+
+test('offline.ts: Ta bort allt tar inte bort skärmtid som inte lämnats in', { skip }, async () => {
+  off.openScope('srv2', { id: 1, name: 'X' });
+  off.noteScreen({ limited: true, day: c.localDay(new Date()), daily: 60, extra: 0, used: 0, remaining: 3600, from: null, until: null, audio: false });
+  server.offline = new F.ApiError('Kunde inte ansluta', 0);
+  off.countOffline(40);
+  off.removeAll();
+  assert.equal(off.count(), 0);
+  assert.equal(off.screenGate().allowed, true, 'statusen glöms');
+  off.closeScope(); off.openScope('srv2', { id: 1, name: 'X' });
+  let body = null;
+  server.offline = (o) => { body = o.body; return { added: 40, done: o.body.entries.map((e) => e.id), stop: false, screenTime: null }; };
+  await off.syncPending();
+  assert.deepEqual(body.entries.map((e) => e.seconds), [40], 'lämnas in efter omstart');
+  server.offline = undefined;
 });

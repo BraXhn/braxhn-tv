@@ -402,7 +402,7 @@ async function progress(final = false, played?: boolean) {
     // Nedladdad bok utan nät: positionen i telefonen (skickas senare), tiden räknas för skärmtiden, och den senaste
     // statusen från servern avgör om det får spelas vidare
     off.savePosition('book', lb, pos, { speed: S.rate });
-    if (beat) off.countOffline((Date.now() - beat) / 1000);
+    if (beat) off.countOffline((Date.now() - beat) / 1000, true);
     const g = off.screenGate(true);
     if (!g.allowed && S.playing) { try { cur?.player.pause(); } catch {} set({ playing: false, stopped: g.message }); }
     return;

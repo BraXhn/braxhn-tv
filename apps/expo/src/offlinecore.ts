@@ -198,21 +198,91 @@ export function cueAt(cues: Cue[], t: number): string {
 // ---------- skärmtid utan nät ----------
 // Servern räknar skärmtiden (server/screentime.js) och säger stopp i svaret på framstegen. Utan nät följer appen den
 // senaste statusen den fick (GET /api/screentime eller screenTime i framstegssvaret) och räknar själv tiden som spelats
-// utan kontakt. Servern räknar inte framsteg som skickas i efterhand (med at), så den tiden finns bara i telefonen.
+// utan kontakt: en post per uppspelning { id, at, seconds, audio } som växer medan den spelar (en ny post efter en paus
+// och minst varje timme). Posterna lämnas in när nätet är tillbaka (POST /api/screentime/offline) och tas bort när
+// svaret listar dem i done – tills dess räknas de av från statusen, eftersom servern inte känner till dem.
 export interface ScreenStatus {
   limited: boolean; day?: string; daily?: number | null; used?: number; extra?: number; remaining?: number | null;
   from?: string | null; until?: string | null; audio?: boolean; allowed?: boolean; reason?: string | null; message?: string | null;
 }
-export interface ScreenCache { status: ScreenStatus; at: number; off: { day: string; seconds: number } | null }
+/** En uppspelning utan nät: at = start (Unix-sekunder), seconds = väggklocka utan pauser, sent = sekunder servern redan har */
+export interface OffPlay { id: string; at: number; seconds: number; audio: boolean; sent?: number }
+/** status null = ingen status från servern ännu (tiden räknas ändå, så att den kan lämnas in) */
+export interface ScreenCache { status: ScreenStatus | null; at: number; plays: OffPlay[] }
 export const localDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const toMin = (s?: string | null) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s ?? '')); return m ? +m[1] * 60 + +m[2] : null; };
-/** Ny status från servern: den räknade tiden ersätter det som räknats i telefonen */
-export const freshScreen = (status: ScreenStatus | null | undefined, now = Date.now()): ScreenCache | null => (status && typeof status === 'object' ? { status, at: now, off: null } : null);
-/** Lägger till tid som spelats utan kontakt (högst 45 s per gång, som servern räknar glapp) */
-export function addOfflineTime(c: ScreenCache | null, d: Date, seconds: number): ScreenCache | null {
-  if (!c || !c.status?.limited || !(seconds > 0)) return c;
-  const day = localDay(d), prev = c.off && c.off.day === day ? c.off.seconds : 0;
-  return { ...c, off: { day, seconds: prev + Math.min(45, seconds) } };
+/** Högst så här länge räknas mellan två livstecken (som servern räknar glapp), och så lång blir en post högst */
+export const OFF_GAP = 45, OFF_PLAY_MAX = 3600, OFF_SEND_MAX = 200, OFF_KEEP_DAYS = 60;
+/** Ny status från servern: ersätter den sparade, men posterna som inte lämnats in finns kvar */
+export const freshScreen = (status: ScreenStatus | null | undefined, now = Date.now(), prev: ScreenCache | null = null): ScreenCache | null =>
+  (status && typeof status === 'object' ? { status, at: now, plays: prev?.plays || [] } : prev);
+/**
+ * Läser den sparade cachen (list.json). Äldre appar sparade bara en summa per dag ({ off: { day, seconds } }) – den
+ * blir en post som börjar vid midnatt den dagen (tiden spelades den dagen och servern har den inte). Skräp ger null.
+ */
+export function readScreen(raw: any): ScreenCache | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const status = raw.status && typeof raw.status === 'object' ? raw.status : null;
+  const plays: OffPlay[] = (Array.isArray(raw.plays) ? raw.plays : []).filter((p: any) => p && typeof p.id === 'string' && Number.isFinite(p.at) && Number.isFinite(p.seconds) && p.seconds > 0)
+    .map((p: any) => ({ id: p.id, at: p.at, seconds: p.seconds, audio: !!p.audio, ...(Number.isFinite(p.sent) && p.sent > 0 ? { sent: p.sent } : {}) }));
+  const o = raw.off, m = o && /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(o.day || ''));
+  if (m && Number.isFinite(o.seconds) && o.seconds > 0) {
+    const at = Math.floor(new Date(+m[1], +m[2] - 1, +m[3]).getTime() / 1000), id = 'gammal-' + o.day;
+    if (!plays.some((p) => p.id === id)) plays.unshift({ id, at, seconds: Math.round(o.seconds), audio: false });
+  }
+  if (!status && !plays.length) return null;
+  return { status, at: Number.isFinite(raw.at) ? raw.at : 0, plays };
+}
+let seq = 0;
+const newId = (at: number) => `${at.toString(36)}-${(++seq).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * Tid som spelats utan kontakt, fram till d (högst 45 s per gång). Hänger tiden ihop med förra posten (samma slag,
+ * inom 3 s) växer den, annars börjar en ny. Profiler som vi vet saknar skärmtid (eller ljud när regeln inte gäller
+ * ljud) räknas inte.
+ */
+export function addOfflineTime(c: ScreenCache | null, d: Date, seconds: number, audio = false, id?: string): ScreenCache | null {
+  const s = c?.status;
+  if (!(seconds > 0) || (s && (!s.limited || (audio && !s.audio)))) return c;
+  const end = Math.round(d.getTime() / 1000), start = end - Math.round(Math.min(OFF_GAP, seconds));
+  if (end <= start) return c;
+  const plays = (c?.plays || []).filter((p) => p.at > end - OFF_KEEP_DAYS * 86400); // servern tar inte emot äldre
+  const i = plays.length - 1, last = plays[i];
+  if (last && last.audio === audio && Math.abs(start - (last.at + last.seconds)) <= 3 && end - last.at <= OFF_PLAY_MAX) plays[i] = { ...last, seconds: end - last.at };
+  else plays.push({ id: id || newId(start), at: start, seconds: end - start, audio });
+  return { status: s || null, at: c?.at || 0, plays };
+}
+/** Sekunder utan nät som servern inte har, den dag d är (posterna delas vid midnatt; ljud bara när regeln gäller ljud) */
+export function offlineSeconds(c: ScreenCache | null, d: Date): number {
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+  const to = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() / 1000;
+  let sum = 0;
+  for (const p of c?.plays || []) {
+    if (p.audio && !c!.status?.audio) continue;
+    sum += Math.max(0, Math.min(to, p.at + p.seconds) - Math.max(from, p.at + (p.sent || 0)));
+  }
+  return sum;
+}
+/** Anropet som lämnar in posterna (högst 200 åt gången – resten nästa gång) */
+export function offlineRequest(c: ScreenCache | null, device: string): { path: string; body: { device: string; entries: { id: string; at: number; seconds: number; audio: boolean }[] } } | null {
+  const plays = (c?.plays || []).slice(0, OFF_SEND_MAX);
+  if (!plays.length) return null;
+  return { path: '/api/screentime/offline', body: { device, entries: plays.map((p) => ({ id: p.id, at: p.at, seconds: p.seconds, audio: p.audio })) } };
+}
+/**
+ * Svaret: posterna i done tas bort – utom en post som vuxit sedan den skickades (den spelar fortfarande): den finns
+ * kvar och servern räknar bara det nya nästa gång. screenTime ersätter statusen (null = profilen har ingen skärmtid).
+ */
+export function ackOffline(c: ScreenCache | null, sent: { id: string; seconds: number }[], r: { done?: unknown; screenTime?: ScreenStatus | null } | null, now = Date.now()): ScreenCache | null {
+  if (!c || !r) return c;
+  const done = new Set(Array.isArray(r.done) ? r.done.map(String) : []);
+  const was = new Map(sent.map((p) => [p.id, p.seconds]));
+  const plays = c.plays.flatMap((p) => {
+    if (!done.has(p.id) || !was.has(p.id)) return [p];
+    const s = was.get(p.id)!;
+    return p.seconds <= s ? [] : [{ ...p, sent: Math.max(p.sent || 0, s) }];
+  });
+  const status = r.screenTime === undefined ? c.status : r.screenTime || { limited: false };
+  return { status, at: r.screenTime === undefined ? c.at : now, plays };
 }
 /**
  * Får profilen spela nu, utan kontakt med servern? left = sekunder kvar (null = ingen gräns). Samma dag som statusen
@@ -224,7 +294,7 @@ export function screenGate(c: ScreenCache | null, d: Date, audio = false): { all
   const s = c?.status;
   if (!s || !s.limited || (audio && !s.audio)) return ok;
   const day = localDay(d), same = s.day === day;
-  const off = c!.off && c!.off.day === day ? c!.off.seconds : 0;
+  const off = offlineSeconds(c, d);
   const remaining = same ? (s.remaining == null ? null : s.remaining - off) : s.daily == null ? null : s.daily * 60 - off;
   const from = toMin(s.from);
   let until = toMin(s.until);
