@@ -57,9 +57,9 @@ test('frågan: cinema=1 vid start från början (servern avgör), start i hela s
   assert.match(body(core, 'static func key('), /"\\\(id\)\?" \+ query\.compactMap \{ q in q\.value\.map \{ "\\\(q\.name\)=\\\(\$0\)" \} \}\.sorted\(\)\.joined\(separator: "&"\)/);
   // Förvärmningen och uppspelningen bygger frågan på samma ställe
   const q = start.slice(start.indexOf('static func query('));
-  assert.match(q, /model\.capabilities\(audio: audio, subtitle: subtitle\) \+ model\.comfortQuery\(\) \+ StartCore\.playExtras\(start: start, cinema: cinema\)/);
+  assert.match(q, /model\.capabilities\(audio: audio, subtitle: subtitle\) \+ model\.comfortQuery\(\) \+ StartCore\.playExtras\(start: start, cinema: cinema\) \+ BwCore\.query\(bw\)/);
   const warm = start.slice(start.indexOf('static func warm('), start.indexOf('static func drop('));
-  assert.match(warm, /StartCore\.warmQuery\(query\(model, audio: audio, subtitle: subtitle, start: start, cinema: true\)\)/);
+  assert.match(warm, /StartCore\.warmQuery\(query\(model, audio: audio, subtitle: subtitle, start: start, cinema: true, bw: bw\)\)/);
   assert.match(warm, /log\.take\(StartCore\.key\(id: id, q\)/);
   assert.match(warm, /Downloads\.shared\.localURL\(for: id\) != nil \{ return \}/, 'en nedladdad titel förvärms inte');
   assert.match(warm, /model\.get\("\/api\/items\/\\\(id\)\/playback", q\)/, 'via model.get (apiBase/hemadressen)');
@@ -95,7 +95,7 @@ test('spelaren: /playback samtidigt med titeln, utan /api/me/cinema, och en str�
   const fn = player.slice(player.indexOf('beginPreparing(gen: gen)\n        retries = 0'), player.indexOf('// xs: spellistan'));
   // Titeln hämtas medan förra strömmens stopp går iväg; /playback skickas först när stoppet nått servern
   assert.match(fn, /let itemTask = Task[^\n]*model\.get\("\/api\/items\/\\\(itemId\)"\)[\s\S]*await stopping\?\.value[\s\S]*StartCore\.together\(/);
-  assert.match(fn, /let q = Start\.query\(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema\)/);
+  assert.match(fn, /let q = Start\.query\(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema, bw: Bandwidth\.forPlay\(model, id: itemId\)\)/);
   assert.match(fn, /playback: \{ \[model\] \(\) async throws -> Playback in try await model\.get\("\/api\/items\/\\\(itemId\)\/playback", q\) \}/);
   assert.match(fn, /drop: \{ \[model\] \(np: Playback\) in await Start\.drop\(model, id: itemId, np\) \}/);
   assert.match(fn, /guard isLive\(gen\) else \{[^}]*Start\.drop\(model, id: itemId, p\)/, 'ersatt eller stängd: den strömmen stoppas');

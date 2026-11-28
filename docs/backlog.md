@@ -26,6 +26,8 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ### 1. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
 
+- **Gjort:** iOS/tvOS-appen (2026-11-28, gren `team/apple-bw-2026-11-28`, se *Klart*). Kvar: Android och Expo, och
+  provet med `tc` nedan.
 - **Vad:** Android-, iOS/tvOS- och Expo-appen mäter inte uppkopplingen och skickar inte `bw` till `/playback` (sökt
   i `apps/`: inget `bw` i frågan och inget anrop till `/api/speedtest`; Windows-appen skickar `buf=1` och behöver det
   inte). Servern använder `bw` för att välja startsteget (`fitQ` via `remoteQuality`) och för att koda om en remux
@@ -314,6 +316,14 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   Webbläget med Playwright mot en egen server (390×844, Chrome): bok vid 154 s → omladdning visar den pausad på 154 s,
   inga ström-, `/play`- eller `/progress`-anrop på 20 s, 15 s bakåt ger 139 s, Spela fortsätter därifrån; webbappens
   minispelare visar boken. **Inte provat:** riktig telefon (Expo Go), låsskärmen, nedladdad bok utanför Node-testet.
+- 2026-11-28: iOS/tvOS-appen mäter uppkopplingen utanför hemmet och skickar `bw` (punkt 1, Android och Expo kvar),
+  gren `team/apple-bw-2026-11-28`. `BwCore.swift` (bara Foundation, statiskt test `test/apple-bw.test.js`): utanför
+  hemmet = `remote` i `/api/status` och inte via hemadressen; provet som webbens `sample()` (4 MB, högst 1 s, takten
+  efter första tredjedelen) i bakgrunden när appen öppnas, kommer tillbaka och när nätet byts, aldrig medan starten
+  väntar; AVPlayers `observedBitrate` ersätter provet; en mätning gäller 10 minuter och bara på samma nät och server.
+  Förvärmningen och uppspelningen skickar samma `bw` (förvärmningens värde i 20 s, även inget – appen förvärmer
+  också utan mätning, till skillnad från webben). Kontraktet har `bw` i `/playback` och `warm=1` för `ios` och `GET /api/speedtest`. Inte byggt här
+  (Swift kompileras i GitHub Actions), inte provat på enhet, via reläet eller med `tc`.
 - 2026-11-28: Android-appen följer *Spela nästa avsnitt automatiskt* (punkt 1, iOS kvar), gren
   `team/android-nasta-2026-11-28`. `SkipCore.kt` (JVM-test `SkipCoreTest.kt`, samma fall som `test/expo-skip.test.js`):
   knapparna och nedräkningen för sammanfattning, intro och eftertexter (`autoSkip`), `next` som webbens `nextPlan` och

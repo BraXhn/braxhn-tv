@@ -470,12 +470,13 @@
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:74, Player.swift:193 (nedladdad titel), :216 (samtidigt med /playback, StartCore.together)", "svar": "@MediaItem.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:531, PlayerScreen.kt:259, :277", "svar": "@MediaItem.android" } },
     "GET /api/items/:id/playback": {
-      "ios": { "källa": "apps/apple/Shared/Player.swift:228 (samtidigt med /api/items/:id på :216, StartCore.together; frågan: Start.swift:19-21 = förmågor AppModel.swift:206-224, nattläge/dialog AppModel.swift:362-367, cinema=1 vid start från början och start: StartCore.playExtras – servern avgör bio-läget; ljudspåret bara när det inte är titelsidans förval, StartCore.playAudio; tvOS skickar inte nhls; spolning i en omkodning: Player.swift seekRestart med start och prev=<förra strömmens pid>, sista varianten som på Apple TV – appen lägger själv till xs i strömmens adress, SeekCore.withStart)",
+      "ios": { "källa": "apps/apple/Shared/Player.swift:258 (samtidigt med /api/items/:id på :245, StartCore.together; frågan: Start.swift:20-21 = förmågor AppModel.swift:209-227, nattläge/dialog AppModel.swift:367-372, cinema=1 vid start från början och start: StartCore.playExtras – servern avgör bio-läget; bw (kbit/s) bara utanför hemmet med en färsk mätning, BwCore.query och Bandwidth.forPlay – samma som förvärmningen, sjätte varianten; ljudspåret bara när det inte är titelsidans förval, StartCore.playAudio; tvOS skickar inte nhls; spolning i en omkodning: Player.swift seekRestart med start och prev=<förra strömmens pid>, sista varianten som på Apple TV – appen lägger själv till xs i strömmens adress, SeekCore.withStart)",
         "query": [{ "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "night": "1", "dialog": "1", "cinema": "1" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0", "audio": "1", "start": "30" },
-                  { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "audio": "1", "start": "30", "prev": "0123abcd" }],
+                  { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "audio": "1", "start": "30", "prev": "0123abcd" },
+                  { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "cinema": "1", "bw": "2500" }],
         "svar": "@Playback.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:279 (samtidigt med /api/items/:id på :277, StartCore.together; frågan: Start.kt:28-31 = förmågor Api.kt:335-349 och TvOutput.kt (bitström, HDR), nattläge/dialog Api.kt:414, cinema=1 vid start från början och start: StartCore.playExtras – servern avgör bio-läget; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: femte varianten; :265 skickar info=1; spolning i en omkodning: :202 med start och prev=<förra strömmens pid>, sista varianten)",
         "query": [{ "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "hdr": "0" },
@@ -486,11 +487,12 @@
                   { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "audio": "1", "hdr": "0", "start": "30", "prev": "0123abcd" }],
         "svar": "@Playback.android" } },
     "GET /api/items/:id/playback?warm=1": {
-      "ios": { "källa": "apps/apple/Shared/Start.swift:31 (Apple TV: fokus en stund på Spela, Fortsätt, Börja om, nästa avsnitt eller ett avsnitt – warmOnFocus i Start.swift, DetailView.swift:164-239; iPhone/iPad: när titelsidan öppnas, DetailView.swift:89; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
+      "ios": { "källa": "apps/apple/Shared/Start.swift:35 (Apple TV: fokus en stund på Spela, Fortsätt, Börja om, nästa avsnitt eller ett avsnitt – warmOnFocus i Start.swift, DetailView.swift:164-239; iPhone/iPad: när titelsidan öppnas, DetailView.swift:89; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery, även bw, samma värde som uppspelningen, BwCore.playBw; svaret läses inte)",
         "query": [
           { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "cinema": "1", "warm": "1" },
           { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0", "start": "30", "warm": "1" },
-          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "audio": "1", "night": "1", "dialog": "1", "cinema": "1", "warm": "1" }
+          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "audio": "1", "night": "1", "dialog": "1", "cinema": "1", "warm": "1" },
+          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "cinema": "1", "bw": "2500", "warm": "1" }
         ],
         "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Start.kt:41 (fokus en stund på Spela, Fortsätt, Börja om eller ett avsnitt: warmOnFocus i Start.kt, MainActivity.kt:572-619; nästa avsnitt när eftertexterna börjar och under kortet i slutet: warmNext i PlayerScreen.kt:271, tredje varianten; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
@@ -500,6 +502,10 @@
           { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "cinema": "1", "warm": "1" }
         ],
         "svar": null } },
+    "GET /api/speedtest": {
+      "ios": { "källa": "apps/apple/Shared/Bandwidth.swift:59 (provet utanför hemmet: 4 MB, högst 1 s från första byte, takten efter första tredjedelen – BwCore.rate; i bakgrunden när appen öppnas, kommer tillbaka och när nätet byts, Hemma.swift:137, AppModel.swift:174, :186)",
+        "query": { "kb": "4096", "n": "1764300000000" },
+        "svar": { "media": "octet-stream" } } },
     "GET /api/stream/:id/direct": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge direct)", "svar": { "media": "^video/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:201 (Playback.url, läge direct)", "svar": { "media": "^video/" } } },

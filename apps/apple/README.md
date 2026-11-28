@@ -90,6 +90,15 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
   Ljudspåret på titelsidan är profilens förval (`defaultAudio`) och skickas inte till servern – den väljer profilens
   språk; ett eget val skickas. Samma regler som Android-appen. Reglerna: `Shared/StartCore.swift`, anropen:
   `Shared/Start.swift`
+- uppkopplingen utanför hemmet: när servern ser anslutningen som *utanför hemmet* och appen inte går via
+  hemadressen mäter appen i bakgrunden hur snabbt servern kan skicka hit (4 MB från `/api/speedtest`, högst 1 s,
+  takten efter första tredjedelen – som webben) när appen öppnas, kommer tillbaka och när nätet byts. Under
+  uppspelningen ersätts provet av AVPlayers egen mätning (`accessLog`, `observedBitrate`). Takten skickas som `bw`
+  till `/playback`, så att servern listar ett startsteg som ryms först (AVPlayer börjar på första varianten) och
+  förbereder just det. En mätning gäller i 10 minuter och bara på samma nät; utan färsk mätning skickas inget och
+  starten väntar aldrig på provet (då gäller serverns gissning). Förvärmningen och uppspelningen skickar samma `bw`
+  (förvärmningens värde i 20 s, även inget). Hemma mäts ingenting. Reglerna: `Shared/BwCore.swift`, anropen:
+  `Shared/Bandwidth.swift`
 
 ## Bygga och installera (kräver en Mac)
 
@@ -174,5 +183,6 @@ desamma som i Expo- och Android-appen; `test/apple-offline.test.js` att nedladdn
 är Android-appens och att appen använder dem (profilens lista, utloggningen, kön med `at`, skärmtiden i
 nedladdningsspelaren, serverns besked och kön som lämnar in tiden utan nät); `test/apple-next.test.js` att nästa
 avsnitt följer kontots val med webbens regler och förvärms med samma fråga; `test/apple-screenleft.test.js` att tiden
-kvar och varningen räknas och skrivs som i webben och Android-appen. Nästa avsnitt (`NextCore.swift`) och tiden kvar
-(`ScreenLeftCore.swift`) är också rena typer.
+kvar och varningen räknas och skrivs som i webben och Android-appen; `test/apple-bw.test.js` att uppkopplingen mäts
+som i webben, bara utanför hemmet, och att förvärmningen och uppspelningen skickar samma `bw`. Nästa avsnitt (`NextCore.swift`) och tiden kvar
+(`ScreenLeftCore.swift`) och uppkopplingen (`BwCore.swift`) är också rena typer.

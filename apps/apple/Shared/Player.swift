@@ -251,7 +251,8 @@ final class PlayerController: ObservableObject {
             // start: servern förstartar omkodningen där uppspelningen börjar; cinema=1 vid start från början – servern
             // ger trailers bara för filmer och när bio-läget är på. Undertexten väljs nedan ur titelns spårlista, men
             // en textundertext skickas aldrig till servern (bara en bildundertext som användaren valt).
-            let q = Start.query(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema)
+            // bw: uppkopplingen utanför hemmet, en färsk mätning (eller förvärmningens) – starten väntar aldrig på provet
+            let q = Start.query(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema, bw: Bandwidth.forPlay(model, id: itemId))
             let (it, p): (MediaItem, Playback) = try await StartCore.together(
                 item: { try await itemTask.value },
                 playback: { [model] () async throws -> Playback in try await model.get("/api/items/\(itemId)/playback", q) },
@@ -563,6 +564,8 @@ final class PlayerController: ObservableObject {
         // Tittarstatus var 10:e sekund
         if reporting, Date().timeIntervalSince(lastReport) > 10, t > 1, let id = currentId {
             lastReport = Date()
+            // Utanför hemmet: AVPlayers uppmätta takt ersätter provet (nästa start och spolning, Bandwidth.swift)
+            if !isLocal { Bandwidth.note(model, observedBitrate: player.currentItem?.accessLog()?.events.last?.observedBitrate) }
             let gen = generation
             let secs = takeLocalPlayed()
             let play = localPlay
@@ -1349,7 +1352,8 @@ extension PlayerController {
         mainStart = t
         playbackBegan = false
         retries = 0
-        var q = model.capabilities(audio: selectedAudio ?? audio, subtitle: subtitle) + model.comfortQuery()
+        // bw: takten som AVPlayer mätt under uppspelningen (Bandwidth.note), så att servern börjar på ett steg som ryms
+        var q = model.capabilities(audio: selectedAudio ?? audio, subtitle: subtitle) + model.comfortQuery() + BwCore.query(Bandwidth.fresh(model))
         q.append(URLQueryItem(name: "start", value: String(Int(t))))
         if let pid = SeekCore.pidOf(old.url) { q.append(URLQueryItem(name: "prev", value: pid)) }
         do {
