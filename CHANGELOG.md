@@ -12,6 +12,16 @@
   inget räknas två gånger om den skickas igen, och tid som sparats av en äldre version av appen följer med. Ljudböcker
   och poddar räknas fortfarande inte utan nät. Inte provat på riktig enhet; Expo-appen och appen för iPhone och iPad
   lämnar inte in tiden än.
+- **Expo-appen lämnar in skärmtid som spelats utan nät.** Förut räknade appen tiden själv men glömde den så fort
+  servern svarade igen, så ett barn som tittat på nedladdade filmer på resan fick dagens tid en gång till. Nu sparar
+  appen en post per uppspelning och skickar dem när nätet kommer tillbaka, tillsammans med positionerna; servern räknar
+  tiden på dagen den spelades och bara en gång. Tid som sparats av en äldre version av appen (en summa per dag) skickas
+  också. *Ta bort allt* i Nedladdat tar inte längre bort tid som inte lämnats in. Inte provat på riktig telefon.
+- **Expo-appen hoppar över sammanfattning och eftertexter och räknar ner till nästa avsnitt.** Spelaren hade bara
+  *Hoppa över intro* och bytte avsnitt först när filmen tagit slut. Nu finns också *Hoppa över sammanfattning* och
+  *Nästa avsnitt* när eftertexterna börjar, med kontots val för att hoppa över automatiskt (tre sekunders nedräkning
+  med *Avbryt*), och när avsnittet är slut kortet *Nästa avsnitt om … s* efter kontots val – som i webben. Nästa avsnitt
+  förbereds på servern redan när eftertexterna börjar. Provat i webbläget i Chrome; inte på riktig telefon.
 - **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
   hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
   flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren
@@ -54,8 +64,7 @@
   räknade appen tiden själv, men när nätet kom tillbaka tog serverns räkning över och tiden från resan försvann – barnet
   fick dagens tid en gång till. Nu tar servern emot tiden i efterhand (`POST /api/screentime/offline`) och räknar den på
   dagen den spelades, en gång även om appen skickar den flera gånger, och aldrig mer än vad som kan ha hunnit spelas.
-  Det gäller bara profiler med skärmtid, och tiden kan bara öka. Android-appen använder det (se ovan), Expo-appen och
-  appen för iPhone och iPad inte än.
+  Det gäller bara profiler med skärmtid, och tiden kan bara öka. Android-, Expo- och iOS-appen använder det (se ovan).
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

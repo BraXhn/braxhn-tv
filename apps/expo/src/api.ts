@@ -262,6 +262,9 @@ export interface HomeResponse { continue: MediaItem[]; rows: { title: string; li
 export interface Playback {
   mode: 'direct' | 'remux' | 'transcode'; url: string; duration: number | null; reasons?: string[]; quality?: string;
   intro?: { start: number; end: number } | null; credits?: number | null; remote?: boolean; audioSelected?: string | null;
+  /** Kontots val (/api/me/playback-prefs): hoppa över av sig själv, och nästa avsnitt efter nedräkningen */
+  recap?: { start: number; end: number } | null; autoSkip?: { intro?: boolean; recap?: boolean; credits?: boolean } | null;
+  autoNext?: { enabled: boolean; countdown: number } | null;
 }
 
 /** Var uppspelningen ska börja: som webben – under två minuter (eller en fjärdedel av korta klipp) börjar titeln om */

@@ -81,7 +81,12 @@ och sedan `npx expo install --fix`.
 - Bibliotek (filmer och serier) sorterade efter titel, senast tillagt eller år, och sökning.
 - Titelsidan: Spela, Fortsätt, Börja om, Markera som sedd, Min lista, säsonger och avsnitt.
 - Spelaren: telefonens egen spelare med helskärm och bild-i-bild. Den fortsätter där du slutade, skickar framsteg
-  till servern, hoppar över intro och går vidare till nästa avsnitt. Spolar du långt i en film som servern kodar om
+  till servern och har knappar för att hoppa över sammanfattning och intro och för nästa avsnitt när eftertexterna
+  börjar. Har kontot valt att hoppa över automatiskt (*Mitt konto → Uppspelning* i webben) visas först en nedräkning
+  på tre sekunder med *Avbryt* (den väntar medan filmen är pausad). När avsnittet är slut visas *Nästa avsnitt om … s*
+  med *Spela nu* och *Avbryt*, efter kontots val för nästa avsnitt (av: kortet utan nedräkning; 0 s: direkt). När
+  eftertexterna börjar och under nedräkningen förbereder servern redan nästa avsnitt (`warm=1` med samma fråga som
+  starten), så att det startar fortare. Samma regler som webbspelaren. Spolar du långt i en film som servern kodar om
   startar appen om strömmen där du spolade till, så att bilden kommer på ungefär en sekund (se *Spolning* nedan).
 - Musik, ljudböcker och poddar med minispelare, helskärmsspelare, kö som delas med webben och låsskärmens reglage.
 - Nedladdning av filmer, avsnitt och ljudböcker som spelas utan nät (se *Nedladdat* nedan).
@@ -212,12 +217,15 @@ Servern bestämmer, som för allt annat. Det här gäller:
 - **Skärmtid med nät:** som vanlig uppspelning – servern räknar tiden och kan säga stopp, även för en nedladdad fil.
 - **Skärmtid utan nät:** appen använder den senaste statusen från servern (tid kvar i dag och klockslagen) och räknar
   själv tiden som spelas utan nät. När tiden är slut eller klockslaget passerat pausar spelaren med en förklaring, och
-  filmen startar inte.
+  filmen startar inte. Tiden sparas som en post per uppspelning (när den började, hur länge, film eller ljudbok) och
+  lämnas in när nätet kommer tillbaka (`POST /api/screentime/offline`, tillsammans med positionerna). Servern räknar
+  den på dagen den spelades och bara en gång, så den syns i föräldraöversikten och minskar tiden kvar på andra enheter.
+  Det servern tagit emot tas bort ur telefonen; tills dess räknas det av från tiden kvar. *Ta bort allt* i Nedladdat tar
+  inte bort tid som inte lämnats in.
 
 Det här **kan inte** upprätthållas utan nät:
 
-- Tiden som spelats utan nät räknas bara i telefonen. Servern räknar inte framsteg som skickas i efterhand (med `at`),
-  så den tiden syns inte i föräldraöversikten och minskar inte tiden kvar på andra enheter.
+- Tiden som spelats utan nät räknas på servern först när nätet är tillbaka. Tills dess vet andra enheter inte om den.
 - En ny dag utan nät gäller samma dagliga gräns och klockslag som senast, utan extra tid – veckodagarnas egna regler och
   ändringar som en vuxen gjort efteråt känner appen inte till förrän den har nät igen.
 - En vuxen kan inte stoppa uppspelningen på distans, och en åldersgräns som sänkts gäller nedladdade titlar först när
@@ -277,6 +285,8 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   `src/components/download.tsx` (knapparna) och `src/screens/Downloads.tsx` (Nedladdat). Feedback: `src/feedback.ts`
   (texter, var man är, senaste uppspelningen, anropen) och `src/screens/Feedback.tsx` (formuläret och Mina ärenden).
   Spolning i en omkodning: `src/seekcore.ts` (reglerna, testas i repots `test/expo-seek.test.js`) och `src/screens/Player.tsx`.
+  Sammanfattning, intro, eftertexter och kortet för nästa avsnitt: `src/skipcore.ts` (reglerna, samma som webbens
+  `web/js/player/autoskip.js`; testas i repots `test/expo-skip.test.js`, som jämför med webben) och `src/screens/Player.tsx`.
 - **Texter:** skriv all text som syns på svenska i `t('…')` från `src/i18n.ts` (variabler `t('Säsong {n}', { n })`,
   plural `tn(n, '1 avsnitt', '{n} avsnitt')`) och lägg den engelska raden i `src/i18n-en.ts`. Finns texten redan i
   webbens `web/i18n/en.js` ska den engelska vara exakt densamma. Text som ska följa språket får inte ligga i en konstant

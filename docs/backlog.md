@@ -64,20 +64,7 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
 - **Klart när:** kontraktet har `GET /api/items/:id/playback?warm=1` även för `ios`, och bygget i GitHub Actions går
   igenom.
 
-### 4. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
-
-- **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
-  först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
-  nedräkning efter kontots val (`autoNext` i svaret från `/playback`), som webben (`web/js/player/autoskip.js`).
-  Android- och iOS/tvOS-appen har knapparna (`skip` i `PlayerScreen.kt` och `Player.swift`) men startar nästa avsnitt
-  direkt när filmen tar slut, utan nedräkning och utan att följa `autoNext` – samma regel kan tas med där.
-- **Varför:** serier i följd är det barnen tittar mest på; i dag går eftertexterna till slut i Expo-appen, och den
-  som stängt av *Spela nästa avsnitt automatiskt* får ändå nästa avsnitt i Android- och iOS-appen.
-- **Filer:** `apps/expo/src/screens/Player.tsx`, `apps/expo/src/i18n-en.ts`.
-- **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
-  nedräkningen; `test/expo-i18n.test.js` är grön.
-
-### 5. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 4. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -88,30 +75,11 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
 - **Klart när:** varningen syns i apparna (Expo i webbläget, de andra byggda i GitHub Actions), och tio minuters paus
   ger högst en halv minut i Safari.
 
-### 6. Expo och iOS lämnar in skärmtiden från tid utan nät
-
-- **Vad:** när nätet kommer tillbaka skickar apparna tiden som räknats utan nät till `POST /api/screentime/offline`
-  (`docs/api.md`): en post per uppspelning `{ id, at, seconds, audio }` med ett fast `device`, och tar bort det som står
-  i `done`. **Android är klart** (`ScreenClock.addOffline`/`ack`/`migrate` i `OfflineCore.kt`, kön och anropet i
-  `OfflineSync.kt` `flushScreen`, fall i `OfflineCoreTest.kt`, anropet i `test/contracts/apps.json`) – följ samma
-  regler. Kvar: Expo `addOfflineTime`/`screenGate` (`src/offlinecore.ts`, `src/offline.ts`) och iOS `ScreenClock` i
-  `apps/apple/Shared/OfflineCore.swift`, som båda sparar bara summan per dag (`offDay`/`offSeconds`, `off`). Det som
-  behövs i båda: posten växer med samma id tills en paus (mer än 15 s) eller en timme, ta bara bort en post ur kön om
-  den inte vuxit sedan den skickades, låt poster servern inte fått räknas av från tiden kvar även efter en ny status,
-  flytta den sparade summan till poster sist på sin dag, och lägg till `ios` under endpointen i kontraktet.
-- **iOS är också klart** (`ScreenLog` i `OfflineCore.swift`, `PendingScreenTime` i `Offline.swift`, fall i
-  `test/apple-offline.test.js`); kvar är Expo.
-- **Varför:** Android och iOS lämnar nu in tiden; i Expo försvinner tiden från en flygresa fortfarande när
-  serverns status ersätter appens räkning.
-- **Filer:** `apps/expo/src/offlinecore.ts`, `src/offline.ts`, `apps/apple/Shared/OfflineCore.swift`, `Offline.swift`,
-  `test/contracts/apps.json`.
-- **Klart när:** `test/expo-offline.test.js` och `test/apple-offline.test.js` har fall för en post som skickas två
-  gånger, en post som växer medan den skickas och en uppspelning över midnatt, och `/api/screentime` visar tiden från
-  flygplansläget efter att nätet kommit tillbaka (Expo i webbläget).
-- **Också kvar i Android:** ljudböcker och poddar räknas inte utan nät (ljudspelaren `MusicService.kt` lämnar bara
-  positionen; `OfflineSync.playedOffline(audio = true)` finns).
 
 ## Idéer
+
+- Skärmtid utan nät för ljudböcker och poddar: Android (`MusicService.kt`, `OfflineSync.playedOffline(audio = true)`
+  finns men anropas inte) och iOS (`Listen.swift`, `audio` alltid false) räknar bara video; Expo räknar ljudböcker.
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
@@ -230,6 +198,25 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   `screenTime`. Statiska fall i `apple-offline.test.js`, iOS i kontraktet för `POST /api/screentime/offline`. Samma
   regler speglade i JavaScript mot serverns `addOffline`: 30 min spelat med en paus och en inlämning mitt i gav 1800 s
   på servern, samma poster igen 0 s. Inte provat: kompilering (bara i `apple.yml`) och riktig iPhone i flygplansläge.
+- 2026-11-28: Expo-appen lämnar in skärmtid från tid utan nät (Expo-delen av punkt 5), gren
+  `team/expo-skarmtid-2026-11-28`. Fel: `freshScreen` ersatte summan per dag (`off`) med serverns status, så tiden
+  försvann när nätet kom tillbaka, och *Ta bort allt* tömde den. Nu: poster `{ id, at, seconds, audio }` per
+  uppspelning (växer inom 3 s från förra slutet, ny post efter paus och efter en timme, högst 45 s per livstecken,
+  äldre än 60 dagar sparas inte), `POST /api/screentime/offline` i `syncPending()` efter positionerna (högst 200 åt
+  gången, `device` = slumpat id per profil i `list.json`), `done` tas bort utom en post som vuxit (`sent`), svarets
+  `screenTime` gäller. Gamla `off` → en post vid midnatt den dagen. `test/expo-offline.test.js` 18 → 23 fall
+  (sommartid, vintertid, midnatt, svar medan posten växer, 200-gränsen, flytten); de nya fallen faller på main (6 av 23).
+  **Inte provat:** riktig telefon i flygplansläge; webbläget har inget filsystem och ingen nedladdning.
+- 2026-11-28: Expo-appen: sammanfattning, eftertexter och nedräkning till nästa avsnitt (förut punkt 4), samma gren.
+  `src/skipcore.ts` (`skipPlan`, `nextPlan`, `SKIP_DELAY`) är webbens `autoskip.js` i TypeScript, och
+  `test/expo-skip.test.js` jämför dem fall för fall. `Player.tsx`: knapp per del, nedräkning 3 s med *Avbryt* som väntar
+  vid paus, kortet *Nästa avsnitt om … s* / *Nästa avsnitt* med *Spela nu*, `warmPlay(next.id, next.start)` när
+  eftertexterna börjar, under kortets nedräkning och vid `onPressIn` (inte för ett nedladdat nästa avsnitt). Webbläget i
+  Chrome (Playwright, 390×844, två avsnitt på 40 s): sammanfattningen hoppades över efter nedräkningen, introt bara med
+  knappen, `warm=1` för avsnitt 2 när eftertexterna började och samma frågesträng i uppspelningen 9,6 s senare,
+  kortet räknade 5 → 3 → avsnitt 2; med automatisk överhoppning av eftertexter väntade nedräkningen under 2,5 s paus;
+  avsnitt 2 utan nästa stängde spelaren. **Inte provat:** telefonens egen spelare (helskärm, bild-i-bild).
+
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
   först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`

@@ -1,7 +1,9 @@
 // Spelaren: enhetens egen spelare (AVPlayer på iPhone, ExoPlayer på Android) med dess reglage, helskärm och bild-i-bild.
 // Appen frågar servern hur titeln ska spelas (/playback med startpositionen, så att strömmen förbereds där) samtidigt
 // som titelns uppgifter hämtas (startcore.ts), börjar på rätt ställe, skickar framsteg var 10:e sekund och vid
-// paus/stängning, och fortsätter med nästa avsnitt.
+// paus/stängning, och fortsätter med nästa avsnitt. Sammanfattning, intro och eftertexter har knappar (eftertexterna =
+// Nästa avsnitt), som trycks av sig själva efter en kort nedräkning när kontot valt det (skipcore.ts, som webben); när
+// eftertexterna börjar förvärms nästa avsnitt, och när avsnittet är slut visas kortet med nedräkning (autoNext).
 // En nedladdad titel spelas från telefonen (fungerar utan nät), med de nedladdade undertexterna ritade ovanpå bilden.
 // Positionen går till servern som vanligt när den svarar (skärmtiden räknas och kan säga stopp); utan nät sparas den i
 // telefonen och skickas med "at" senare, och den senaste skärmtidsstatusen avgör om det får spelas (offline.ts).
@@ -15,7 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
-import { absolute, api, playbackQuery, resumeAt, sxe, type ItemDetail, type MediaItem, type Playback } from '../api';
+import { absolute, api, playbackQuery, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem, type Playback } from '../api';
 import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
@@ -24,9 +26,16 @@ import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, READY_EVERY_MS, readyF
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
 import { startPlayback } from '../startcore';
+import { nextPlan, SKIP_DELAY, skipPlan, type SkipKind, type SkipPlan } from '../skipcore';
 import { t } from '../i18n';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
+/** Knappen och nedräkningens text per del (som webben) */
+const SKIP_TEXT: Record<SkipKind, () => [string, string]> = {
+  recap: () => [t('Hoppa över sammanfattning'), t('Hoppar över sammanfattningen…')],
+  intro: () => [t('Hoppa över intro'), t('Hoppar över intro…')],
+  credits: () => [t('Nästa avsnitt'), t('Nästa avsnitt startar…')],
+};
 const titleOf = (it: ItemDetail) => (it.kind === 'episode' ? `${it.showTitle || ''} – ${sxe(it)} ${it.title}` : it.title);
 
 // Omkodad ström: adressen, spellistans segment, segmentet där omkodningen på servern började, om bild har visats,
@@ -50,6 +59,13 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const [chrome, setChrome] = useState(true);
   const [pos, setPos] = useState(start);
   const lastSent = useRef(0), closed = useRef(false), ended = useRef(false);
+  // Nästa avsnitt är nedladdat (spelas från telefonen: inget att förvärma)
+  const nextLocal = useRef(false);
+  // Delar som hoppats över eller där nedräkningen avbrutits (högst en gång per uppspelning), nedräkningen som pågår och
+  // kortet när avsnittet är slut
+  const skipDone = useRef(new Set<string>());
+  const [skipCd, setSkipCd] = useState<{ kind: SkipKind; n: number } | null>(null);
+  const [endCard, setEndCard] = useState<{ auto: boolean; n: number } | null>(null);
   // Var och om spelaren ska börja när källan är redo (start, och efter en omstart vid en spolning)
   const want = useRef<{ t: number; play: boolean } | null>({ t: start, play: true });
   // Omkodad ström (Stream ovan)
@@ -91,6 +107,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         if (!live) return;
         setSubs(loaded); setSubIdx(loaded.findIndex((x) => x.forced));
         const nl = off.nextLocalEpisode(e);
+        nextLocal.current = !!nl;
         if (nl) setNext({ id: nl.id, start: startAt(nl), title: `${nl.show?.title || ''} · ${nl.sub.split(' · ').slice(1).join(' · ')}` });
         if (!reachable) return;
         // Servern svarar: titeln (nästa avsnitt) och intro/eftertexter (info=1 räknas inte som en ström)
@@ -288,14 +305,62 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       if (k.audio) { const x = player.availableAudioTracks.find((s) => same(k.audio, s)); if (x) player.audioTrack = x; }
     } catch {}
   });
+  // ---------- sammanfattning, intro, eftertexter och nästa avsnitt ----------
+  const plan = skipPlan(pb, pos, { hasNext: !!next, done: skipDone.current });
+  const planRef = useRef<SkipPlan | null>(null);
+  planRef.current = plan;
+  /** Förvärm nästa avsnitt (samma fråga som starten i startcore.ts, plus warm=1). warmPlay frågar högst var 15:e s. */
+  const warmNext = useCallback(() => { if (next && !nextLocal.current) warmPlay(next.id, next.start); }, [next]);
+  const openNext = useCallback(() => { if (next && !closed.current) navigation.replace('Player', next); }, [next, navigation]);
+  /** Till nästa avsnitt mitt i eftertexterna: positionen först (som när avsnittet tar slut) */
+  const goNext = useCallback(() => {
+    if (ended.current) return;
+    ended.current = true;
+    send(true).finally(openNext);
+  }, [send, openNext]);
+  const doSkip = useCallback((p: SkipPlan) => {
+    skipDone.current.add(p.kind); setSkipCd(null);
+    if (p.to === 'next') goNext(); else player.currentTime = p.to;
+  }, [goNext, player]);
+  // En ny del börjar: nedräkningen när kontot valt att hoppa över den, annars bara knappen
+  const planKey = plan ? `${plan.kind}:${plan.auto ? 1 : 0}` : '';
+  useEffect(() => { setSkipCd(plan?.auto ? { kind: plan.kind, n: SKIP_DELAY } : null); }, [planKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Eftertexterna går: nästa avsnitt förvärms (och hålls varmt) redan nu
+  useEffect(() => { if (plan?.to === 'next') warmNext(); }, [pos, plan?.to, warmNext]);
+  // Nedräkningen väntar medan spelaren är pausad
+  useEffect(() => {
+    if (!skipCd) return;
+    const iv = setInterval(() => { if (player.playing && !closed.current) setSkipCd((c) => (c ? { ...c, n: c.n - 1 } : c)); }, 1000);
+    return () => clearInterval(iv);
+  }, [skipCd?.kind, player]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!skipCd || skipCd.n > 0) return;
+    const p = planRef.current;
+    setSkipCd(null);
+    if (p && p.kind === skipCd.kind) doSkip(p);
+  }, [skipCd, doSkip]);
+  const cancelSkip = () => { if (skipCd) skipDone.current.add(skipCd.kind); setSkipCd(null); };
+
+  // Slut: kortet med nedräkning till nästa avsnitt (kontots val, autoNext), direkt med 0 s, annars tillbaka
   useEventListener(player, 'playToEnd', () => {
     if (ended.current) return;
     ended.current = true;
+    setSkipCd(null);
     send(true).finally(() => {
-      if (next && !closed.current) navigation.replace('Player', next);
-      else if (!closed.current) navigation.goBack();
+      if (closed.current) return;
+      const np = nextPlan(pb, !!next);
+      if (!np) { navigation.goBack(); return; }
+      if (np.auto && np.seconds === 0) { openNext(); return; }
+      warmNext();
+      setEndCard({ auto: np.auto, n: np.seconds });
     });
   });
+  useEffect(() => {
+    if (!endCard?.auto) return;
+    const iv = setInterval(() => { warmNext(); setEndCard((c) => (c ? { ...c, n: c.n - 1 } : c)); }, 1000);
+    return () => clearInterval(iv);
+  }, [endCard?.auto, warmNext]);
+  useEffect(() => { if (endCard?.auto && endCard.n <= 0) { setEndCard(null); openNext(); } }, [endCard, openNext]);
 
   // Stängning: sista framsteget och stopp av strömmen på servern
   useEffect(() => () => {
@@ -311,7 +376,6 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     api(`/api/stream/${id}/stop`, { method: 'POST' }).catch(() => {});
   }, [id, player, local]);
 
-  const intro = pb?.intro && pos >= pb.intro.start && pos < pb.intro.end - 1 ? pb.intro : null;
   // Undertexter (nedladdade): tryck för att byta mellan spåren och av
   const ccBtn = subs.length ? (
     <Pressable onPress={() => setSubIdx((i) => (i + 1 < subs.length ? i + 1 : -1))} style={st.cc} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Undertexter: {v}. Tryck för att byta.', { v: subIdx >= 0 ? subs[subIdx].label : t('av') })}>
@@ -359,7 +423,28 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       )}
       {!(chrome || msg) && ccBtn ? <View style={{ position: 'absolute', top: insets.top + 11, right: insets.right + 12 }}>{ccBtn}</View> : null}
       {cue && !msg ? <View style={[st.subWrap, { bottom: insets.bottom + 70 }]} pointerEvents="none"><Text style={st.subText}>{cue}</Text></View> : null}
-      {intro ? <Button label={t('Hoppa över intro')} kind="primary" small onPress={() => { player.currentTime = intro.end; }} style={[st.skip, { bottom: insets.bottom + 90, right: insets.right + 16 }]} /> : null}
+      {plan && !msg && !endCard ? (
+        <View style={[st.skip, { bottom: insets.bottom + 90, right: insets.right + 16 }]} pointerEvents="box-none">
+          {skipCd ? (
+            <View style={st.cd}>
+              <Text style={st.cdText}>{`${SKIP_TEXT[skipCd.kind]()[1]} ${Math.max(0, skipCd.n)}`}</Text>
+              <Button label={t('Avbryt')} small onPress={cancelSkip} />
+            </View>
+          ) : null}
+          <Button label={SKIP_TEXT[plan.kind]()[0]} icon="play-skip-forward" kind="primary" small
+            onPressIn={plan.to === 'next' ? warmNext : undefined} onPress={() => doSkip(plan)} />
+        </View>
+      ) : null}
+      {endCard && next && !msg ? (
+        <View style={[st.next, { bottom: insets.bottom + 90, right: insets.right + 16, left: insets.left + 16 }]}>
+          <Text style={st.nextHead}>{endCard.auto ? t('Nästa avsnitt om {n} s', { n: Math.max(0, endCard.n) }) : t('Nästa avsnitt')}</Text>
+          <Text style={st.nextTitle} numberOfLines={1}>{next.title}</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button label={t('Spela nu')} icon="play" kind="primary" small onPressIn={warmNext} onPress={() => { setEndCard(null); openNext(); }} />
+            <Button label={endCard.auto ? t('Avbryt') : t('Stäng')} small onPress={() => setEndCard(null)} />
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -374,7 +459,12 @@ const st = StyleSheet.create({
   close: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   closeFloat: { position: 'absolute', backgroundColor: 'rgba(0,0,0,.45)' },
   title: { color: '#fff', fontSize: 16, fontWeight: '700', flex: 1 },
-  skip: { position: 'absolute' },
+  skip: { position: 'absolute', alignItems: 'flex-end', gap: 8 },
+  cd: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(0,0,0,.7)' },
+  cdText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  next: { position: 'absolute', maxWidth: 420, alignSelf: 'flex-end', gap: 8, padding: 14, borderRadius: 14, backgroundColor: 'rgba(0,0,0,.8)' },
+  nextHead: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  nextTitle: { color: '#fff', fontSize: 14, opacity: 0.8 },
   subWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
   subText: { color: '#fff', fontSize: 18, lineHeight: 24, textAlign: 'center', backgroundColor: 'rgba(0,0,0,.6)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
   cc: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 34, paddingHorizontal: 10, borderRadius: 17, backgroundColor: 'rgba(255,255,255,.15)', maxWidth: 140 },
