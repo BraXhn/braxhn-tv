@@ -59,7 +59,13 @@ export function bindControls(cur, v) {
   v.addEventListener('pause', () => { if (!v.ended && v.readyState > 1) say(el, t('Pausad')); });
   v.addEventListener('play', () => { if (v.currentTime > 0.5) say(el, t('Spelar')); });
   // Visa att något händer medan servern startar en omkodning (kan ta en stund för stora filer)
-  const loading = () => { if (v.readyState < 3 && !cur.hold) ct.textContent = cur.pb?.mode === 'transcode' ? t('Startar omkodning…') : t('Laddar…'); };
+  // Har filmen redan spelat (spolning, byte av ström) står tiden kvar och "Laddar…" efter den – annars blinkar tiden bort
+  const loading = () => {
+    if (v.readyState >= 3 || cur.hold) return;
+    if (cur.playedOnce) { const d = dur(); ct.textContent = `${fmtTime(v.currentTime || 0)} / ${fmtTime(d)} · ${t('Laddar…')}`; return; }
+    ct.textContent = cur.pb?.mode === 'transcode' ? t('Startar omkodning…') : t('Laddar…');
+  };
+  v.addEventListener('playing', () => { cur.playedOnce = true; });
   v.addEventListener('waiting', loading); v.addEventListener('loadstart', loading);
   v.addEventListener('progress', () => { const d = dur(); if (d && v.buffered.length) q('#tbuf').style.width = Math.min(100, v.buffered.end(v.buffered.length - 1) / d * 100) + '%'; });
   const toggle = () => v.paused ? v.play().catch(() => {}) : v.pause();

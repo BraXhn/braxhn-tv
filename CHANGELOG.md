@@ -1,6 +1,8 @@
 # Ändringar
 
 ## Ej utgiven
+- **Tiden blinkar inte bort när webbspelaren laddar efter en spolning.** Har filmen redan spelat står tiden kvar
+  med *Laddar…* efter sig, i stället för att bytas mot *Startar omkodning…*.
 - **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om
   just det, så profilens språkval gällde inte: ett barn kunde få engelskt tal fast profilen vill ha svenskt. Nu väljer
   titelsidan samma spår som webben (profilens språk, aldrig kommentar eller syntolkning), och väljer du inget eget får
