@@ -88,7 +88,7 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
 - **Klart när:** varningen syns i apparna (Expo i webbläget, de andra byggda i GitHub Actions), och tio minuters paus
   ger högst en halv minut i Safari.
 
-### 9. Apparna lämnar in skärmtiden från tid utan nät
+### 6. Apparna lämnar in skärmtiden från tid utan nät
 
 - **Vad:** när nätet kommer tillbaka skickar apparna tiden som räknats utan nät till `POST /api/screentime/offline`
   (`docs/api.md`): en post per uppspelning `{ id, at, seconds, audio }` med ett fast `device`, och tar bort det som står
