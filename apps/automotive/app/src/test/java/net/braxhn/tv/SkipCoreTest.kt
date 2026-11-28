@@ -67,16 +67,19 @@ class SkipCoreTest {
     }
 
     @Test fun slutetIAndroidSpelaren() {
-        // Av: spelaren stängs (föräldern som stängt av ska inte få nästa avsnitt, varken med eller utan kort)
-        assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, false, "10", true), car = false).action)
-        assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, false, "10", true), car = true).action)
+        // Av: kortet utan nedräkning (som webben och Expo) – inget startar av sig självt
+        assertEquals(SkipCore.End(EndAction.CARD, 0, auto = false), SkipCore.atEnd(SkipCore.next(true, false, "10", true), car = false))
+        assertEquals("av med 0 s: också kortet, inte direkt", SkipCore.End(EndAction.CARD, 0, auto = false), SkipCore.atEnd(SkipCore.next(true, false, "0", true), car = false))
         assertEquals("inget nästa avsnitt", EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, true, "10", false), car = false).action)
+        assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, false, "10", false), car = false).action)
         // På: nedräkningen följer countdown
-        assertEquals(SkipCore.End(EndAction.CARD, 10), SkipCore.atEnd(SkipCore.next(true, true, "10", true), car = false))
-        assertEquals(SkipCore.End(EndAction.CARD, 25), SkipCore.atEnd(SkipCore.next(true, true, "25", true), car = false))
+        assertEquals(SkipCore.End(EndAction.CARD, 10, auto = true), SkipCore.atEnd(SkipCore.next(true, true, "10", true), car = false))
+        assertEquals(SkipCore.End(EndAction.CARD, 25, auto = true), SkipCore.atEnd(SkipCore.next(true, true, "25", true), car = false))
         assertEquals("0 s = direkt", EndAction.PLAY_NEXT, SkipCore.atEnd(SkipCore.next(true, true, "0", true), car = false).action)
-        assertEquals("äldre server: kortet med 8 s", SkipCore.End(EndAction.CARD, 8), SkipCore.atEnd(SkipCore.next(false, null, null, true), car = false))
-        // Bilen: inget kort, nästa avsnitt direkt när valet är på
+        assertEquals("äldre server: kortet med 8 s", SkipCore.End(EndAction.CARD, 8, auto = true), SkipCore.atEnd(SkipCore.next(false, null, null, true), car = false))
+        // Bilen: inget kort – nästa avsnitt direkt när valet är på, annars stängs spelaren
         assertEquals(EndAction.PLAY_NEXT, SkipCore.atEnd(SkipCore.next(true, true, "10", true), car = true).action)
+        assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, false, "10", true), car = true).action)
+        assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, true, "10", false), car = true).action)
     }
 }

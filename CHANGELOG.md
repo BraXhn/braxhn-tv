@@ -2,9 +2,10 @@
 
 ## Ej utgiven
 - **Android-appen följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt alltid direkt när ett
-  avsnitt tog slut, även om en förälder stängt av valet. Nu stängs spelaren när valet är av, och annars visas kortet
-  *Nästa avsnitt om 8 s* med *Spela nu* och *Avbryt* (sekunderna följer kontots val, 0 = direkt). På Google TV står
-  fokus på *Spela nu*. I bilen visas inget kort; nästa avsnitt startar direkt när valet är på. Valen att hoppa över
+  avsnitt tog slut, även om en förälder stängt av valet. Nu visas kortet *Nästa avsnitt om 8 s* med *Spela nu* och
+  *Avbryt* (sekunderna följer kontots val, 0 = direkt), och när valet är av kortet *Nästa avsnitt* utan nedräkning,
+  med *Spela nu* och *Stäng*, som på webben. På Google TV står fokus på *Spela nu*. I bilen visas inget kort: nästa
+  avsnitt startar direkt när valet är på, och spelaren stängs när det är av. Valen att hoppa över
   sammanfattning, intro och eftertexter av sig självt gäller också, med *Hoppar över intro… 3* och *Avbryt*. Nästa
   avsnitt förbereds på servern redan när eftertexterna börjar, så att det startar snabbare. Inte provat på riktig
   enhet; appen för iPhone, iPad och Apple TV gör fortfarande som förut.

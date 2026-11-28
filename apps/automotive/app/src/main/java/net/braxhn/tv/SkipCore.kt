@@ -66,17 +66,21 @@ object SkipCore {
     }
 
     enum class EndAction { CLOSE, PLAY_NEXT, CARD }
-    data class End(val action: EndAction, val seconds: Int = 0)
+    /** auto = kortet räknar ner seconds sekunder och startar nästa avsnitt; annars står det kvar utan nedräkning */
+    data class End(val action: EndAction, val seconds: Int = 0, val auto: Boolean = false)
 
     /**
-     * Vad Android-spelaren gör när avsnittet är slut. Av (Spela nästa avsnitt automatiskt) eller inget nästa avsnitt:
-     * spelaren stängs. 0 s: nästa avsnitt direkt. Annars kortet "Nästa avsnitt om N s" med Spela nu och Avbryt.
-     * I bilen visas inget kort (föraren ska inte få något nytt att läsa, och bilen pausar själv när den rullar):
-     * nästa avsnitt startar direkt när valet är på.
+     * Vad Android-spelaren gör när avsnittet är slut, som webben och Expo-appen. Inget nästa avsnitt: spelaren
+     * stängs. Valet på: 0 s = nästa avsnitt direkt, annars kortet "Nästa avsnitt om N s" med Spela nu och Avbryt.
+     * Valet av: kortet "Nästa avsnitt" utan nedräkning, med Spela nu och Stäng. I bilen visas inget kort (föraren ska
+     * inte få något nytt att läsa, och bilen pausar själv när den rullar): nästa avsnitt direkt när valet är på,
+     * annars stängs spelaren.
      */
     fun atEnd(n: Next?, car: Boolean): End = when {
-        n == null || !n.auto -> End(EndAction.CLOSE)
-        n.seconds == 0 || car -> End(EndAction.PLAY_NEXT)
-        else -> End(EndAction.CARD, n.seconds)
+        n == null -> End(EndAction.CLOSE)
+        car -> End(if (n.auto) EndAction.PLAY_NEXT else EndAction.CLOSE)
+        !n.auto -> End(EndAction.CARD, 0, auto = false)
+        n.seconds == 0 -> End(EndAction.PLAY_NEXT)
+        else -> End(EndAction.CARD, n.seconds, auto = true)
     }
 }

@@ -75,8 +75,10 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var plan by remember(req) { mutableStateOf<SkipCore.Plan?>(null) }
     var skipCd by remember(req) { mutableStateOf<Pair<SkipCore.Kind, Int>?>(null) }
     val skipDone = remember(req) { mutableSetOf<SkipCore.Kind>() }
-    // Kortet "Nästa avsnitt om N s" när avsnittet är slut (autoNext): sekunderna kvar, null = inget kort
+    // Kortet när avsnittet är slut (autoNext): sekunderna kvar, null = inget kort. endAuto = kortet räknar ner
+    // ("Nästa avsnitt om N s"); annars står "Nästa avsnitt" kvar utan nedräkning (valet är av)
     var endCard by remember(req) { mutableStateOf<Int?>(null) }
+    var endAuto by remember(req) { mutableStateOf(false) }
     val nextFocus = remember { FocusRequester() }
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
@@ -442,14 +444,14 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 if (state == Player.STATE_ENDED) {
                     report(final = true)
                     skipCd = null
-                    // Kontots val (autoNext i /playback): av = spelaren stängs, 0 s = direkt, annars kortet med
-                    // nedräkningen. I bilen inget kort (SkipCore.atEnd). Utan svar från servern gäller 8 s.
+                    // Kontots val (autoNext i /playback): på = kortet med nedräkningen (0 s = direkt), av = kortet utan
+                    // nedräkning. I bilen inget kort (SkipCore.atEnd). Utan svar från servern gäller 8 s.
                     val an = pb?.autoNext
                     val end = SkipCore.atEnd(SkipCore.next(an != null, an?.enabled, an?.countdown?.content, item?.nextId != null), car)
                     when (end.action) {
                         SkipCore.EndAction.CLOSE -> onClose()
                         SkipCore.EndAction.PLAY_NEXT -> playNext()
-                        SkipCore.EndAction.CARD -> { if (!offline) warmNext(); endCard = end.seconds }
+                        SkipCore.EndAction.CARD -> { if (!offline) warmNext(); endAuto = end.auto; endCard = end.seconds }
                     }
                 }
             }
@@ -499,8 +501,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     }
     // Kortet i slutet: en sekund i taget, nästa avsnitt hålls varmt. Väntar när appen ligger i bakgrunden (annars
     // skulle nästa avsnitt börja spela där); bild-i-bild räknas som synlig.
-    LaunchedEffect(endCard != null) {
-        if (endCard == null) return@LaunchedEffect
+    LaunchedEffect(endCard != null && endAuto) {
+        if (endCard == null || !endAuto) return@LaunchedEffect
         while (true) {
             delay(1000)
             if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) continue
@@ -697,11 +699,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 }
             }
         }
-        // Avsnittet är slut: "Nästa avsnitt om N s" med Spela nu och Avbryt (Avbryt lämnar spelaren kvar i slutet)
+        // Avsnittet är slut: "Nästa avsnitt om N s" med Spela nu och Avbryt, eller (valet av) "Nästa avsnitt" med
+        // Spela nu och Stäng. Avbryt/Stäng tar bort kortet och lämnar spelaren kvar i slutet, som webben
         endCard?.let { n ->
             Column(Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).widthIn(max = 460.dp)
                 .background(Surface2, RoundedCornerShape(14.dp)).padding(20.dp)) {
-                Text(tr(R.string.player_next_in, n), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                Text(if (endAuto) tr(R.string.player_next_in, n) else tr(R.string.player_next_episode), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 item?.showTitle?.let { st -> Text(st, color = Color.LightGray, fontSize = 15.sp, maxLines = 1) }
                 Spacer(Modifier.height(14.dp))
@@ -710,7 +713,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                         Icon(Icons.Filled.SkipNext, null); Text(" " + tr(R.string.player_play_now), fontSize = 17.sp)
                     }
                     OutlinedButton(onClick = { endCard = null }, modifier = Modifier.height(52.dp).focusRing(RoundedCornerShape(26.dp))) {
-                        Text(tr(R.string.cancel), fontSize = 17.sp)
+                        Text(tr(if (endAuto) R.string.cancel else R.string.close), fontSize = 17.sp)
                     }
                 }
             }

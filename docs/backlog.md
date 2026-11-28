@@ -30,15 +30,16 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
   `apps/apple/Shared/Player.swift`; inget `autoNext` i `apps/apple`). Svaret från `/playback` har
   `autoNext: { enabled, countdown }` och `autoSkip` (`server/routes/playback.js`). Gör som Android-appen
   (`SkipCore.kt`, klart 2026-11-28), webben (`nextPlan` i `web/js/player/autoskip.js`) och Expo-appen
-  (`src/skipcore.ts`): kortet *Nästa avsnitt om N s* med *Spela nu* och *Avbryt*, spelaren stängs när valet är av.
+  (`src/skipcore.ts`): kortet *Nästa avsnitt om N s* med *Spela nu* och *Avbryt*, och när valet är av kortet *Nästa
+  avsnitt* utan nedräkning (*Spela nu* och *Stäng*) – inget startar av sig självt.
   Förvärm nästa avsnitt (`/playback?warm=1`) när eftertexterna börjar – iOS saknar förvärmning helt (se punkt 5).
 - **Varför:** föräldern som stängt av *Spela nästa avsnitt automatiskt* för att barnet inte ska fastna i en serie får
   ändå nästa avsnitt på Apple TV, där barnen tittar mycket. Utan förvärmning börjar nästa avsnitt från noll med en ny
   omkodning.
 - **Filer:** `apps/apple/Shared/Player.swift`, `Models.swift`, `test/contracts/apps.json` (`autoNext`, `warm=1` från
   spelaren).
-- **Klart när:** ett test (`test/apple-*.test.js`) visar att `autoNext.enabled = false` stänger spelaren i slutet och
-  att nedräkningen följer `countdown`; bygget i GitHub Actions går igenom.
+- **Klart när:** ett test (`test/apple-*.test.js`) visar att `autoNext.enabled = false` inte startar nästa avsnitt
+  (kortet utan nedräkning) och att nedräkningen följer `countdown`; bygget i GitHub Actions går igenom.
 
 ### 2. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
 
@@ -255,7 +256,8 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 - 2026-11-28: Android-appen följer *Spela nästa avsnitt automatiskt* (punkt 1, iOS kvar), gren
   `team/android-nasta-2026-11-28`. `SkipCore.kt` (JVM-test `SkipCoreTest.kt`, samma fall som `test/expo-skip.test.js`):
   knapparna och nedräkningen för sammanfattning, intro och eftertexter (`autoSkip`), `next` som webbens `nextPlan` och
-  `atEnd` (av = spelaren stängs, 0 s = direkt, annars kortet; i bilen inget kort). Nästa avsnitt förvärms när
+  `atEnd` (på = kortet med nedräkning, 0 s = direkt; av = kortet utan nedräkning; inget nästa = stäng; i bilen inget
+  kort, av = stäng). Nästa avsnitt förvärms när
   eftertexterna börjar och under kortet (`Start.warm`, samma fråga som uppspelningen). `autoSkip`/`autoNext` i
   kontraktet. Inte byggt lokalt (ingen Android SDK) och inte provat på riktig enhet.
 - 2026-11-28: iOS-appen lämnar in skärmtiden från tid utan nät (punkt 6, Android och Expo kvar), gren
