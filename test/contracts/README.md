@@ -52,7 +52,7 @@ Varje typ och endpoint har `källa` med fil och rad i appen. Översikt:
 | Inloggning med kod (TV) | `AppModel.swift:220-245`, typer i `Models.swift:242-252` | `Api.kt:301-326`, typer i `Api.kt:369-371` |
 | Startsida, bibliotek, sök, titelsida | `Views.swift:290, 291, 351, 376`, `DetailView.swift:70`, typer i `Models.swift:21-193` (nya hyllor: `Home.swift:7-64`) | `MainActivity.kt:301, 303, 347, 371, 522` (betyg, extramaterial, temamusik, repliker och undertextsynk: `Features.kt:65-115, 210, 243, 327-344`), typer i `Api.kt:40-96` |
 | Uppspelning, undertexter, strömmar | `Player.swift:142-182, 409-412, 481`, förmågor `AppModel.swift:154-172` (nattläge/dialog `:291-296`, bio-läge `Player.swift:237-241`), typer i `Models.swift:195-226`, `Home.swift:66` | `PlayerScreen.kt:154-214`, förmågor `Api.kt:275-289`, typer i `Api.kt:97-104` |
-| Framsteg och sedd | `AppModel.swift:175`, `DetailView.swift:137` | `Api.kt:291-296` (svaret: `Net.kt:33-35`, stopp: `PlayerScreen.kt:106-151`, skärmtid `GET /api/screentime`: `Net.kt:56`, utan nät: `OfflineSync.kt`) |
+| Framsteg och sedd | `AppModel.swift:230`, `DetailView.swift:137` (skärmtid `GET /api/screentime` och utan nät: `OfflineScreen` i `Offline.swift`) | `Api.kt:291-296` (svaret: `Net.kt:33-35`, stopp: `PlayerScreen.kt:106-151`, skärmtid `GET /api/screentime`: `Net.kt:56`, utan nät: `OfflineSync.kt`) |
 | Bilder (`?t=` bildtoken) | `AppModel.swift:66-77` (401: `imageFailed`, `Views.swift` PosterCard) | `Api.kt:183-188` |
 | Offline och offline-synk | `Offline.swift:5-29, 140-148, 233` | `Offline.kt:21-27, 177-193, 363` (per profil: `DownloadCore.kt`) |
 | Lyssningsinställningar | `Listening.swift:6-55` | `Api.kt:25, 145-154` |

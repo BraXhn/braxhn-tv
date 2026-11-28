@@ -96,7 +96,8 @@ användaren utanför det som är buffrat startar klienten om strömmen vid måle
   titeln); fungerar via reläet och hemadressen. Anropet startar aldrig ffmpeg, skapar ingen session och förlänger inte
   strömmens liv, så det kan frågas ofta. Fråga **innan** användaren spolar: efter spolningen har spelaren redan bett om
   segmentet vid målet och servern har börjat koda där. Regeln för omstart: inte när målets segment `n` har
-  `från ≤ n ≤ till + 1`. Expo-appen frågar var 4:e sekund medan strömmen spelar (`apps/expo/src/seekcore.ts`).
+  `från ≤ n ≤ till + 1`. Expo-appen och iOS/tvOS-appen frågar var 4:e sekund medan strömmen spelar
+  (`apps/expo/src/seekcore.ts`, `apps/apple/Shared/SeekCore.swift`).
 
 ## Förvärmning: `warm=1` i `/api/items/:id/playback`
 

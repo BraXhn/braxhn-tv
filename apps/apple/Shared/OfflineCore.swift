@@ -1,8 +1,8 @@
 import Foundation
 
-// Nedladdningar per server och profil, och positioner som väntar på nätet – utan filer, nät eller SwiftUI. Samma
-// regler som Android-appen (apps/automotive/.../DownloadCore.kt och OfflineCore.kt ProgressQueue) och Expo-appen
-// (apps/expo/src/offlinecore.ts scopeOf, progressRequest, ackSent). Filerna, bakgrundssessionen och anropen sköter
+// Nedladdningar per server och profil, positioner som väntar på nätet och skärmtiden utan nät – utan filer, nät eller
+// SwiftUI. Samma regler som Android-appen (apps/automotive/.../DownloadCore.kt och OfflineCore.kt ProgressQueue och
+// ScreenClock) och Expo-appen (apps/expo/src/offlinecore.ts scopeOf, progressRequest, ackSent, screenGate). Filerna, bakgrundssessionen och anropen sköter
 // Offline.swift. Swift kompileras inte här: test/apple-offline.test.js kontrollerar reglerna statiskt.
 
 /// En nedladdad titel. file = filens namn i profilens mapp (Downloads/<server>-<profil>/)
@@ -188,4 +188,183 @@ enum DownloadAccess {
 
     /// Får kontot inte ladda ner längre (canDownload i /api/status) tas allt som profilen laddat ner bort
     static func removeAll(canDownload: Bool, count: Int) -> Bool { !canDownload && count > 0 }
+}
+
+// MARK: - Skärmtid utan nät
+
+// Servern räknar skärmtiden (server/screentime.js) och säger stopp i svaret på framstegen. Utan nät följer appen den
+// senaste statusen den fick (GET /api/screentime eller screenTime i framstegssvaret) och räknar själv tiden som spelats
+// utan kontakt. Servern räknar inte framsteg som skickas i efterhand (med at), så den tiden finns bara i appen. Samma
+// regler som Android-appens ScreenClock (OfflineCore.kt) och Expo-appens screenGate (offlinecore.ts).
+
+/// Serverns status (GET /api/screentime, screenTime i framstegssvaret). remaining och used i sekunder, daily i minuter.
+/// Fält som saknas (t.ex. { limited: false }) får sina standardvärden.
+struct ScreenStatus: Codable, Equatable {
+    var limited: Bool
+    var day: String?
+    var daily: Int?
+    var used: Double
+    var extra: Int
+    var remaining: Double?
+    var from: String?
+    var until: String?
+    var audio: Bool
+
+    init(limited: Bool = false, day: String? = nil, daily: Int? = nil, used: Double = 0, extra: Int = 0,
+         remaining: Double? = nil, from: String? = nil, until: String? = nil, audio: Bool = false) {
+        self.limited = limited
+        self.day = day
+        self.daily = daily
+        self.used = used
+        self.extra = extra
+        self.remaining = remaining
+        self.from = from
+        self.until = until
+        self.audio = audio
+    }
+
+    private enum CodingKeys: String, CodingKey { case limited, day, daily, used, extra, remaining, from, until, audio }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        /// Tal som servern skickar som heltal eller decimaltal
+        func num(_ k: CodingKeys) -> Double? {
+            if let i = try? c.decodeIfPresent(Int.self, forKey: k) { return Double(i) }
+            return try? c.decodeIfPresent(Double.self, forKey: k)
+        }
+        limited = (try? c.decodeIfPresent(Bool.self, forKey: .limited)) ?? false
+        day = try? c.decodeIfPresent(String.self, forKey: .day)
+        daily = num(.daily).map { Int($0.rounded()) }
+        used = num(.used) ?? 0
+        extra = num(.extra).map { Int($0.rounded()) } ?? 0
+        remaining = num(.remaining)
+        from = try? c.decodeIfPresent(String.self, forKey: .from)
+        until = try? c.decodeIfPresent(String.self, forKey: .until)
+        audio = (try? c.decodeIfPresent(Bool.self, forKey: .audio)) ?? false
+    }
+}
+
+/// Senaste statusen och tiden som spelats utan kontakt sedan dess (för dagen offDay, yyyy-MM-dd)
+struct ScreenCache: Codable, Equatable {
+    var status: ScreenStatus
+    var offDay: String? = nil
+    var offSeconds: Double = 0
+}
+
+/// Får profilen spela nu? left = sekunder kvar (nil = ingen gräns). reason "limit" (dagens tid slut) eller "window"
+/// (utanför klockslagen) när det inte går – med det som behövs för samma besked som servern ger: usedMinutes och
+/// totalMinutes ("du har tittat 60 av 60 minuter"), from/until och veckodagen (0 = söndag, som servern).
+struct ScreenGate: Equatable {
+    var allowed: Bool
+    var left: Int?
+    var reason: String? = nil
+    var usedMinutes = 0
+    var totalMinutes = 0
+    var from: String? = nil
+    var until: String? = nil
+    var weekday = 0
+}
+
+enum ScreenClock {
+    /// Längsta glapp som räknas på en gång (som servern: längre glapp är paus eller avbrott)
+    static let cap: Double = 45
+    static let ok = ScreenGate(allowed: true, left: nil)
+
+    /// Kalendern som dagarna och klockslagen räknas i: gregoriansk i enhetens tidszon (som serverns lokala tid)
+    static func calendar(_ zone: TimeZone = .current) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = zone
+        return c
+    }
+
+    /// yyyy-MM-dd, som serverns localDay
+    static func localDay(_ d: Date, _ cal: Calendar) -> String {
+        let c = cal.dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// Ny status från servern: den räknade tiden ersätter det som räknats i appen. nil/saknas = ingen skärmtid.
+    static func fresh(_ status: ScreenStatus?) -> ScreenCache { ScreenCache(status: status ?? ScreenStatus(limited: false)) }
+
+    /// Lägger till tid som spelats utan kontakt, på dagen den spelades (högst cap sekunder per gång)
+    static func addOffline(_ c: ScreenCache?, now: Date, seconds: Double, calendar cal: Calendar = ScreenClock.calendar()) -> ScreenCache? {
+        guard var c, c.status.limited, seconds > 0 else { return c }
+        let day = localDay(now, cal)
+        let prev = c.offDay == day ? c.offSeconds : 0
+        c.offDay = day
+        c.offSeconds = prev + min(cap, seconds)
+        return c
+    }
+
+    /**
+     * Samma dag som statusen gäller dess tid kvar och klockslag (med dagens extra tid); en ny dag samma dagliga gräns
+     * och klockslag utan extra tid – veckodagarnas egna regler känner appen inte till utan nät. Klockslagen följer
+     * väggklockan (som servern); tiden kvar till sluttiden räknas i riktig tid, så att sommartiden blir rätt.
+     */
+    static func gate(_ c: ScreenCache?, now: Date, calendar cal: Calendar = ScreenClock.calendar(), audio: Bool = false) -> ScreenGate {
+        guard let c else { return ok }
+        let s = c.status
+        if !s.limited || (audio && !s.audio) { return ok }
+        let day = localDay(now, cal)
+        let same = s.day == day
+        let off = c.offDay == day ? c.offSeconds : 0
+        let remaining: Double? = same ? s.remaining.map { $0 - off } : s.daily.map { Double($0) * 60 - off }
+        let from = toMin(s.from)
+        var until = toMin(s.until)
+        if let u = until, !same { until = max(0, u - s.extra) } // statusens sluttid har dagens extra tid
+        let hms = cal.dateComponents([.hour, .minute, .second], from: now)
+        let nowMin = Double((hms.hour ?? 0) * 60 + (hms.minute ?? 0)) + Double(hms.second ?? 0) / 60
+        var inWindow = true
+        var windowLeft: Int?
+        if from != nil || until != nil {
+            let f = from ?? 0
+            let e = until ?? 1440
+            if f <= e {
+                inWindow = nowMin >= Double(f) && nowMin < Double(e)
+                if inWindow, until != nil { windowLeft = secondsTo(now, days: 0, minutes: e, cal) }
+            } else { // över midnatt, t.ex. 20:00–02:00
+                inWindow = nowMin >= Double(f) || nowMin < Double(e)
+                if inWindow, until != nil { windowLeft = secondsTo(now, days: nowMin >= Double(f) ? 1 : 0, minutes: e, cal) }
+            }
+        }
+        let weekday = (cal.component(.weekday, from: now) + 6) % 7 // söndag = 0, som servern
+        if let r = remaining, r <= 0 {
+            let used = (same ? s.used : 0) + off
+            let total = (s.daily ?? 0) + (same ? s.extra : 0)
+            return ScreenGate(allowed: false, left: 0, reason: "limit", usedMinutes: Int((used / 60).rounded()), totalMinutes: total, weekday: weekday)
+        }
+        if !inWindow {
+            return ScreenGate(allowed: false, left: 0, reason: "window", from: s.from, until: until.map { hhmm($0) } ?? s.until, weekday: weekday)
+        }
+        let r = remaining.map { Int($0.rounded()) }
+        let left: Int?
+        if let r, let w = windowLeft { left = min(r, w) } else { left = r ?? windowLeft }
+        return ScreenGate(allowed: true, left: left)
+    }
+
+    /// "HH:MM" i minuter (nil om det inte är ett klockslag)
+    static func toMin(_ s: String?) -> Int? {
+        guard let s else { return nil }
+        let p = s.split(separator: ":", omittingEmptySubsequences: false)
+        guard p.count == 2, (1...2).contains(p[0].count), p[1].count == 2,
+              p[0].allSatisfy({ $0.isASCII && $0.isNumber }), p[1].allSatisfy({ $0.isASCII && $0.isNumber }),
+              let h = Int(p[0]), let m = Int(p[1]), h < 24, m < 60 else { return nil }
+        return h * 60 + m
+    }
+
+    static func hhmm(_ m: Int) -> String { String(format: "%02d:%02d", (m / 60) % 24, m % 60) }
+
+    /// Sekunder (riktig tid) från now till klockslaget minutes på dagen days dagar fram; 1440 = midnatt efter
+    static func secondsTo(_ now: Date, days: Int, minutes: Int, _ cal: Calendar) -> Int {
+        let start = cal.startOfDay(for: now)
+        guard let date = cal.date(byAdding: .day, value: days + (minutes >= 1440 ? 1 : 0), to: start) else { return 0 }
+        var end = date
+        if minutes < 1440 {
+            var dc = cal.dateComponents([.year, .month, .day], from: date)
+            dc.hour = minutes / 60
+            dc.minute = minutes % 60
+            end = cal.date(from: dc) ?? date
+        }
+        return max(0, Int(end.timeIntervalSince(now).rounded()))
+    }
 }

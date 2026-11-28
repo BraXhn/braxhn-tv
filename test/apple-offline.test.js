@@ -176,3 +176,90 @@ test('när servern svarar: utan rätten att ladda ner tas allt bort, och titler 
   assert.match(o, /case \.remove: if scope == sc \{ removeFrom\(sc, r\.id\) \}/);
   assert.match(fn(off, 'changed'), /if model\.user != nil \{ Task \{ await Downloads\.shared\.online\(model: model\) \} \}/);
 });
+
+// Skärmtid utan nät (felet: iOS-appen räknade ingen skärmtid när den spelade nedladdningar utan nät, så en barnprofil
+// kunde titta utan gräns i flygplansläge). Samma regler som Android-appens ScreenClock och Expo-appens screenGate.
+test('skärmtiden utan nät: samma regler som Android- och Expo-appen (ScreenClock i OfflineCore.swift)', () => {
+  // Högst 45 s per gång (som serverns glapp)
+  assert.match(core, /static let cap: Double = 45\b/); assert.match(ktcore, /const val CAP = 45\.0/); assert.match(ts, /Math\.min\(45, seconds\)/);
+  const add = fn(core, 'addOffline');
+  assert.match(add, /guard var c, c\.status\.limited, seconds > 0 else \{ return c \}/);
+  assert.match(add, /let prev = c\.offDay == day \? c\.offSeconds : 0/, 'en ny dag börjar om');
+  assert.match(add, /c\.offSeconds = prev \+ min\(cap, seconds\)/);
+  assert.match(ktcore, /val prev = if \(c\.offDay == day\) c\.offSeconds else 0\.0/);
+  // Ny status från servern ersätter det som räknats i appen; saknas status = ingen skärmtid
+  assert.match(core, /ScreenCache\(status: status \?\? ScreenStatus\(limited: false\)\)/);
+  assert.match(ktcore, /ScreenCache\(status \?: ScreenStatus\(limited = false\)\)/);
+  const g = fn(core, 'gate');
+  assert.match(g, /if !s\.limited \|\| \(audio && !s\.audio\) \{ return ok \}/);
+  // Samma dag: statusens tid kvar; ny dag: den dagliga gränsen utan extra tid
+  assert.match(g, /same \? s\.remaining\.map \{ \$0 - off \} : s\.daily\.map \{ Double\(\$0\) \* 60 - off \}/);
+  assert.match(ktcore, /if \(same\) s\.remaining\?\.let \{ it - off \} else s\.daily\?\.let \{ it \* 60\.0 - off \}/);
+  assert.match(g, /if let u = until, !same \{ until = max\(0, u - s\.extra\) \}/);
+  assert.match(ktcore, /if \(until != null && !same\) until = max\(0, until - s\.extra\)/);
+  // Klockslagen, även över midnatt (20:00–02:00), och tiden till sluttiden i riktig tid
+  assert.match(g, /inWindow = nowMin >= Double\(f\) && nowMin < Double\(e\)/);
+  assert.match(g, /inWindow = nowMin >= Double\(f\) \|\| nowMin < Double\(e\)/);
+  assert.match(g, /secondsTo\(now, days: nowMin >= Double\(f\) \? 1 : 0, minutes: e, cal\)/);
+  assert.match(fn(core, 'secondsTo'), /end\.timeIntervalSince\(now\)/);
+  // Beskedet: minuter tittade av dagens minuter, eller klockslagen; söndag = 0 som servern
+  assert.match(g, /let used = \(same \? s\.used : 0\) \+ off/);
+  assert.match(g, /let total = \(s\.daily \?\? 0\) \+ \(same \? s\.extra : 0\)/);
+  assert.match(g, /\(cal\.component\(\.weekday, from: now\) \+ 6\) % 7/);
+  assert.match(g, /if let r, let w = windowLeft \{ left = min\(r, w\) \} else \{ left = r \?\? windowLeft \}/);
+  // Dagen och klockan i en gregoriansk kalender i enhetens tidszon (serverns localDay är yyyy-MM-dd)
+  assert.match(core, /Calendar\(identifier: \.gregorian\)/);
+  assert.match(core, /String\(format: "%04d-%02d-%02d"/);
+  // Statusen avkodas även när fält saknas ({ limited: false }) eller är decimaltal
+  assert.match(core, /limited = \(try\? c\.decodeIfPresent\(Bool\.self, forKey: \.limited\)\) \?\? false/);
+});
+
+test('nedladdningsspelaren räknar skärmtiden utan nät och stoppar med serverns besked', () => {
+  const player = code(read(...SH, 'Player.swift'));
+  // Före start: den sparade statusen och tiden som räknats; säger den nej frågas servern först
+  const st = player.slice(player.indexOf('if let local = Downloads.shared.localURL(for: itemId)'));
+  const gate = st.indexOf('var gate = OfflineScreen.gateNow(model)'), play = st.indexOf('player.replaceCurrentItem(with: AVPlayerItem(url: local))');
+  assert.ok(gate > 0 && gate < play, 'skärmtiden prövas innan filen spelas');
+  assert.match(st, /if !gate\.allowed, await OfflineScreen\.refresh\(model\) \{ gate = OfflineScreen\.gateNow\(model\) \}/);
+  assert.match(st, /if !gate\.allowed \{ stopNotice = OfflineScreen\.message\(gate\); return \}/);
+  // Under uppspelningen: tiden räknas medan bilden rör sig; kommer framsteget inte fram räknas den som skärmtid
+  assert.match(fn(player, 'tick'), /if isLocal \{ countLocal\(\) \}/);
+  assert.match(fn(player, 'countLocal'), /player\.timeControlStatus == \.playing, let b = localBeat \{ localPlayed \+= min\(1, max\(0, now - b\)\) \}/);
+  assert.match(fn(player, 'tick'), /let secs = takeLocalPlayed\(\)[\s\S]*self\?\.playedOffline\(secs, id: id, gen: gen\)[\s\S]*noAnswer: noAnswer\)/);
+  assert.match(fn(player, 'stopReporting'), /OfflineScreen\.played\(model, seconds: secs\)/, 'den sista biten räknas också');
+  const po = fn(player, 'playedOffline');
+  assert.match(po, /let g = OfflineScreen\.played\(model, seconds: secs\)/);
+  assert.match(po, /guard !g\.allowed, !closed, gen == generation, currentId == id, isLocal, stopNotice == nil else \{ return \}/);
+  assert.match(po, /player\.pause\(\)\s*stopReporting\(\)\s*stopNotice = OfflineScreen\.message\(g\)/);
+  // noAnswer = servern svarade inte alls (status 0); ett svar som 403 räknas inte som tid utan nät
+  assert.match(fn(off, 'post'), /if status == 0 \{ noAnswer\?\(\) \}/);
+  assert.match(fn(model, 'reportProgress'), /duration: duration, noAnswer: noAnswer\)/);
+});
+
+test('skärmtidens status sparas per server och profil när servern svarar (som Android och Expo)', () => {
+  // Svaret på framstegen (filmer och avsnitt) och GET /api/screentime när profilen blir känd
+  assert.match(fn(model, 'reportProgress'), /if let ps = try\? JSONDecoder\(\)\.decode\(ProgressScreen\.self, from: data\) \{ OfflineScreen\.note\(self, ps\.screenTime\) \}/);
+  assert.match(fn(off, 'changed'), /if model\.user != nil \{ Task \{ await OfflineScreen\.refresh\(model\) \} \}/);
+  const r = fn(off, 'refresh');
+  assert.match(r, /try\? await model\.get\("\/api\/screentime"\)/);
+  assert.match(r, /guard key\(model\) == k else \{ return false \}/, 'profilbyte under tiden: statusen hör till den förra');
+  assert.match(fn(off, 'key'), /LoginPrint\.scope\(server: model\.server, token: model\.token\)\.map \{ "screen\." \+ \$0 \}/);
+  assert.match(fn(off, 'note'), /save\(k, ScreenClock\.fresh\(status\)\)/);
+  assert.match(fn(off, 'played'), /ScreenClock\.addOffline\(load\(k\), now: now, seconds: seconds\)[\s\S]*ScreenClock\.gate\(c, now: now\)/);
+  // Android och Expo gör samma sak: status från svaret och från GET /api/screentime
+  assert.match(read(...KT, 'PlayerScreen.kt'), /OfflineSync\.noteScreen\(r\.screenTime\)/);
+  assert.match(read('apps', 'expo', 'src', 'offline.ts'), /api<ScreenStatus>\('\/api\/screentime'/);
+});
+
+test('beskedet när tiden är slut är serverns (messageOf i server/screentime.js), på svenska och engelska', () => {
+  const srvSt = read('server', 'screentime.js');
+  const msg = fn(off, 'message');
+  const pairs = [
+    ['Tiden är slut för idag – du har tittat %d av %d minuter. Fråga en vuxen om du behöver mer tid.', 'Tiden är slut för idag – du har tittat {used} av {total} minuter. Fråga en vuxen om du behöver mer tid.'],
+    ['Det går inte att titta just nu. På %@ går det att titta %@.', 'Det går inte att titta just nu. På {days} går det att titta {win}.'],
+    ['mellan %@ och %@', 'mellan {from} och {until}'], ['från %@', 'från {from}'], ['fram till %@', 'fram till {until}'],
+  ];
+  for (const [sw, js] of pairs) { assert.ok(msg.includes(`L("${sw}")`), `Swift: ${sw}`); assert.ok(srvSt.includes(`'${js}'`), `servern: ${js}`); }
+  assert.match(srvSt, /DAYS_PL = \['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'\]/);
+  assert.match(msg, /\[L\("söndagar"\), L\("måndagar"\), L\("tisdagar"\), L\("onsdagar"\), L\("torsdagar"\), L\("fredagar"\), L\("lördagar"\)\]/);
+});

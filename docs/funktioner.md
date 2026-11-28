@@ -210,7 +210,7 @@ Tryck ? för en lista. `/` söker, i spelaren `j`/`l` eller pilarna ±10 s, `k`/
 
 ### Skärmtid
 
-Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer. Pausad uppspelning räknas inte (en paus kostar högst ett par sekunder). I webbspelaren syns tiden kvar i överkanten (*12 min kvar idag*), och de sista fem minuterna en varning mitt i bilden (*Skärmtiden tar slut om 4 min*) som syns även när kontrollerna är dolda; profiler utan skärmtid ser ingenting.
+Minuter per dag och tillåtna klockslag (per veckodag) för profiler, med extra tid för idag. Gäller i alla appar eftersom servern bestämmer. Nedladdade filmer som spelas utan nät (appen för iPhone/iPad, Android-appen och Expo-appen) räknas i appen efter den senaste skärmtiden från servern; servern räknar inte den tiden i efterhand. Pausad uppspelning räknas inte (en paus kostar högst ett par sekunder). I webbspelaren syns tiden kvar i överkanten (*12 min kvar idag*), och de sista fem minuterna en varning mitt i bilden (*Skärmtiden tar slut om 4 min*) som syns även när kontrollerna är dolda; profiler utan skärmtid ser ingenting.
 
 ### Föräldraöversikt
 

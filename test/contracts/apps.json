@@ -8,8 +8,13 @@
     "ServerStatus.ios": { "källa": "apps/apple/Shared/Models.swift:12",
       "required": { "needsSetup": "boolean", "version": "string" },
       "optional": { "user": "@UserInfo.ios", "publicUrl": "string", "remote": "boolean", "donateUrl": "string" } },
-    "ProgressReply.ios": { "källa": "apps/apple/Shared/Models.swift:264 (stopp och skärmtid: AppModel.swift:198-213, Listen.swift:355-371)",
-      "optional": { "stop": "boolean", "screenTime": { "optional": { "allowed": "boolean", "message": "string" } } } },
+    "ProgressReply.ios": { "källa": "apps/apple/Shared/Models.swift:268 (stopp och skärmtid: AppModel.swift:228-251, Listen.swift:355-371; hela skärmtidsstatusen: ProgressScreen i Offline.swift)",
+      "optional": { "stop": "boolean", "screenTime": "@ScreenStatus.ios" } },
+    "ScreenStatus.ios": { "källa": "apps/apple/Shared/Models.swift:273 (allowed, message) och OfflineCore.swift:202 (ScreenStatus, skärmtiden utan nät: OfflineScreen i Offline.swift; heltal eller decimaltal tas emot)",
+      "optional": { "allowed": "boolean", "message": "string", "limited": "boolean", "day": "string", "daily": "number", "used": "number",
+        "extra": "number", "remaining": "number", "from": "string", "until": "string", "audio": "boolean" } },
+    "ReadyInfo.ios": { "källa": "apps/apple/Shared/SeekCore.swift:104 (SeekCore.ReadyInfo)",
+      "optional": { "mode": "string", "from": "number", "to": "number", "encoding": "boolean", "segs": ["integer"] } },
     "LoginResponse.ios": { "källa": "apps/apple/Shared/Models.swift:21",
       "required": { "token": "string", "user": "@UserInfo.ios" } },
     "QuickConnectStart.ios": { "källa": "apps/apple/Shared/Models.swift:242",
@@ -477,6 +482,8 @@
     "GET /api/stream/:id/hls/master.m3u8": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:182 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:201 (Playback.url, läge remux/transcode)", "svar": { "media": "mpegurl" } } },
+    "GET /api/stream/:id/hls/ready": {
+      "ios": { "källa": "apps/apple/Shared/Player.swift:1057 (askReady: strömmens adress med /hls/ready, var 4:e sekund medan en omkodning spelar)", "svar": "@ReadyInfo.ios" } },
     "GET /api/stream/:id/subs/:sid": {
       "ios": { "källa": "apps/apple/Shared/Player.swift:409 (PlaybackSubtitle.url), :412 (Bearer, för nedladdade filer)", "svar": { "media": "^text/vtt" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:194 (PlaybackSubtitle.url)", "svar": { "media": "^text/vtt" } } },
@@ -484,24 +491,25 @@
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:66-77 (bildtoken i ?t=; 401 ger ny token: imageFailed, Views.swift PosterCard)", "svar": { "media": "^image/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:183-188 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
     "POST /api/items/:id/progress": {
-      "ios": { "källa": "apps/apple/Shared/AppModel.swift:230 (utan svar: köas och skickas senare med at, PendingPositions i Offline.swift)", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressReply.ios" },
+      "ios": { "källa": "apps/apple/Shared/AppModel.swift:230 (utan svar: köas och skickas senare med at, PendingPositions i Offline.swift; nedladdad titel utan nät: skärmtiden räknas i appen, OfflineScreen)", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressReply.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:292, PlayerScreen.kt:127-154 (utan svar: OfflineSync.kt, skickas senare med at)", "body": { "position": 4.5, "duration": 12 }, "svar": "@ProgressResult.android" } },
     "GET /api/screentime": {
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:246 (OfflineScreen.refresh: sparas för nedladdade titlar utan nät)", "svar": "@ScreenStatus.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:56 (sparas för uppspelning utan nät, OfflineSync.kt)", "svar": "@ScreenTimeState.android" } },
     "POST /api/items/:id/watched": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:137", "body": { "watched": false }, "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:295", "body": { "watched": false }, "svar": null } },
     "POST /api/items/:id/offline": {
-      "ios": { "källa": "apps/apple/Shared/Offline.swift:447 (svaret läses inte)", "body": { "q": "480" }, "svar": null },
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:532 (svaret läses inte)", "body": { "q": "480" }, "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Offline.kt:177 (svaret läses inte)", "body": { "q": "480" }, "svar": null } },
     "GET /api/items/:id/offline": {
-      "ios": { "källa": "apps/apple/Shared/Offline.swift:451", "query": [{ "q": "480" }, { "q": "720" }], "svar": "@OfflineStatus.ios" },
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:536", "query": [{ "q": "480" }, { "q": "720" }], "svar": "@OfflineStatus.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Offline.kt:181", "query": [{ "q": "480" }, { "q": "720" }], "svar": "@OfflineStatus.android" } },
     "GET /api/stream/:id/offline-file": {
-      "ios": { "källa": "apps/apple/Shared/Offline.swift:456 (OfflineStatus.url)", "svar": { "media": "^video/" } },
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:541 (OfflineStatus.url)", "svar": { "media": "^video/" } },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Offline.kt:181-193 (OfflineStatus.url)", "svar": { "media": "^video/" } } },
     "GET /api/offline/sync": {
-      "ios": { "källa": "apps/apple/Shared/Offline.swift:609", "query": { "have": "$har" }, "svar": "@SyncPlan.ios" },
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:747", "query": { "have": "$har" }, "svar": "@SyncPlan.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Offline.kt:363", "query": { "have": "$har" }, "svar": "@SyncPlan.android" } },
     "GET /api/me/listening": {
       "ios": { "källa": "apps/apple/Shared/Listening.swift:48", "svar": "@ListenPrefs.ios" },

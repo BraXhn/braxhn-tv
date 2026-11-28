@@ -47,19 +47,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 3. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
-
-- **Vad:** appen gissar fortfarande ur bufferten (`readyGuess` i `apps/apple/Shared/SeekCore.swift`) och väntar 0,6 s
-  på nästa steg vid varje spolning, även med reglaget på iPhone. Fråga `/api/stream/:id/hls/ready` medan strömmen
-  spelar, som Expo-appen gör (`readyFor` i `apps/expo/src/seekcore.ts`), och vänta bara på fler steg för
-  fjärrkontrollen.
-- **Varför:** onödiga omstarter och väntan vid spolning på iPhone, iPad och Apple TV.
-- **Filer:** `apps/apple/Shared/SeekCore.swift`, `apps/apple/Shared/Player.swift`, `test/apple-seek.test.js`,
-  `test/contracts/apps.json` (anropet för iOS).
-- **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
-  `apple.yml` går igenom.
-
-### 4. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 3. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 - **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
   fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
@@ -75,7 +63,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
   kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
 
-### 5. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+### 4. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
 - **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
   först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
@@ -88,7 +76,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
   nedräkningen; `test/expo-i18n.test.js` är grön.
 
-### 6. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 5. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -102,6 +90,10 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 ## Idéer
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
+
+- Skärmtid som räknats utan nät försvinner när appen får nät: servern räknar inte framsteg som skickas med `at`
+  (`server/routes/library.js`), och serverns status ersätter appens räkning i alla tre apparna. Ett anrop som tar emot
+  tid spelad utan nät (per dag, med tak) skulle göra att barnet inte får dagens tid en gång till efter flygresan.
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
 - Skärmtid: hls.js hämtar segment i upp till 60 s framåt även när filmen är pausad, och varje segment är ett
@@ -221,6 +213,17 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   finns plats under `limits()` och behåller samma förvärmda ström när samma val frågas igen. Chrome, median av tre
   (klick → första bild): remux 175–285 → 94–144 ms, omkodning 624–1122 → 298–360 ms
   (`test/web-next-episode.test.js`); reglerna i `test/fast-resume.test.js`.
+- 2026-11-28: iOS/tvOS-appen frågar servern vad som är kodat (förut punkt 4) och räknar skärmtid utan nät, gren
+  `team/apple-ready-2026-11-28`. Spolning: `GET /api/stream/:id/hls/ready` var 4:e sekund medan en omkodning spelar
+  (`askReady` i `Player.swift`), svaret gäller 8 s och bara om det frågades före spolningen (`readyFor`/`readyFrom` i
+  `SeekCore.swift`, samma regler som Expo); gissningen ur bufferten är kvar som reserv. Omstarten väntar 0,6 s på nästa
+  steg bara på Apple TV, 0,3 s på iPhone/iPad (reglaget ger ett hopp per mätning). Skärmtid: fel – nedladdningar
+  spelades utan gräns utan nät (inget räknades, `reportProgress` läste bara `stop`). Nu: senaste statusen per server
+  och profil (`GET /api/screentime` när profilen blir känd, `screenTime` i framstegssvaret), tiden räknas när
+  framsteget inte kommer fram och spelaren stoppar med serverns besked, även före start (`ScreenClock` i
+  `OfflineCore.swift` som Androids, `OfflineScreen` i `Offline.swift`). Statiska fall i `apple-seek.test.js` och
+  `apple-offline.test.js`, iOS i kontraktet för `/hls/ready` och `/api/screentime`. Inte provat: kompilering (bara i
+  `apple.yml`), riktig iPhone i flygplansläge och spolning med Apple TV:s fjärrkontroll.
 - 2026-11-27: Webbspelaren stoppar omkodningen när fliken eller TV-webbläsaren stängs (förut punkt 2), gren
   `team/flik-stopp-2026-11-27`. `pagehide` utan `persisted` skickar `/api/stream/:id/stop?pid=&gone=1` med
   `sendBeacon` (reserv: `fetch` med `keepalive`); inte vid bfcache, utan `pid` eller via AirPlay. `gone=1` gör att en

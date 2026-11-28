@@ -14,6 +14,16 @@
   avsnitt som måste kodas om förbereds bara när det egna avsnittet snart är slut och servern har plats för en
   omkodning till – förberedelsen stoppar aldrig någon annans ström. Mätt i Chrome (median av tre, från klicket till
   första bilden): remux 175–285 ms → 94–144 ms, omkodning 624–1122 ms → 298–360 ms.
+- **Skärmtiden gäller även nedladdade filmer utan nät i appen för iPhone och iPad.** Förut räknades ingen tid när
+  appen spelade en nedladdning utan nät, så en barnprofil kunde titta utan gräns i flygplansläge. Nu sparar appen den
+  senaste skärmtiden från servern för profilen, räknar själv tiden som spelas utan nät och stoppar filmen med samma
+  besked som servern ger när dagens tid är slut eller klockslaget har passerat – även innan filmen startar. Samma
+  regler som Android- och Expo-appen. När nätet kommer tillbaka skickas positionerna som förut, och serverns skärmtid
+  gäller igen. Inte provat på riktig iPhone eller iPad.
+- **Spolning i en omkodad film i appen för iPhone, iPad och Apple TV startar om mer sällan i onödan.** Appen frågar
+  nu servern vad som redan är klart medan filmen spelar, som Expo-appen, i stället för att bara gissa ur det som är
+  laddat. På iPhone och iPad väntar omstarten bara 0,3 s efter att du slutat dra i reglaget (förut 0,6 s, som för
+  Apple TV:s fjärrkontroll). Svarar servern inte gissar appen som förut. Inte provat på riktig enhet.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

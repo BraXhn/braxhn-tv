@@ -365,6 +365,17 @@ const CASES = {
   // Strömadresserna tas ur playback-svaret med appens förmågor (utom info=1, som bara visar läget)
   'GET /api/stream/:id/direct': (app) => streamCases(app, (pb) => pb.mode === 'direct'),
   'GET /api/stream/:id/hls/master.m3u8': (app) => streamCases(app, (pb) => pb.mode !== 'direct'),
+  // iOS frågar vad servern har klart med strömmens frågesträng (pid och mediatoken), utan inloggningen. Den första
+  // strömmen spelas (första segmentet hämtas), så att svaret har segment och sekunder
+  'GET /api/stream/:id/hls/ready': async (app) => {
+    const out = (await streamCases(app, (pb) => pb.mode !== 'direct')).map((c) => ({ url: c.url.replace('/hls/master.m3u8', '/hls/ready'), auth: false }));
+    if (out[0]) {
+      const idx = out[0].url.replace('/hls/ready', '/hls/index.m3u8');
+      const seg = /^[^#\s].*$/m.exec((await call(app, 'GET', idx, { auth: false })).data.toString())?.[0];
+      if (seg) await call(app, 'GET', new URL(seg, 'http://x' + idx).pathname + new URL(seg, 'http://x' + idx).search, { auth: false });
+    }
+    return out;
+  },
   'GET /api/stream/:id/subs/:sid': async (app) => {
     const pb = await json(app, `/api/items/${S.remux}/playback?${playbackQ(app)}`);
     const out = pb.subtitles.map(s => ({ url: s.url, auth: false }));
@@ -435,8 +446,10 @@ const CASES = {
   // Skärmtid (Android sparar den för uppspelning utan nät): huvudkontot utan regler och en barnprofil med regler
   'GET /api/screentime': async () => {
     const own = ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token;
-    ok(await call('android', 'POST', '/api/profiles', { body: { name: 'Skärmtid', maxAge: 11 }, token: own }), 'profil');
-    const kid = ok(await call('android', 'GET', '/api/profiles', { token: own }), 'profiler').profiles.find(x => x.name === 'Skärmtid');
+    // Profilen skapas en gång (båda apparna provar endpointen)
+    const kidOf = async () => ok(await call('android', 'GET', '/api/profiles', { token: own }), 'profiler').profiles.find(x => x.name === 'Skärmtid');
+    if (!(await kidOf())) ok(await call('android', 'POST', '/api/profiles', { body: { name: 'Skärmtid', maxAge: 11 }, token: own }), 'profil');
+    const kid = await kidOf();
     ok(await call('android', 'PUT', `/api/screentime/${kid.id}`, { body: { daily: 600, from: '00:00', until: '23:59' }, token: own }), 'skärmtid');
     return [{}, { token: ok(await call('android', 'POST', '/api/profiles/switch', { body: { id: kid.id }, token: own }), 'profilbyte').token }];
   },

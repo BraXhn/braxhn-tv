@@ -281,3 +281,17 @@
 "Svaret är mottaget och väntar på granskning." = "The reply has been received and is awaiting review.";
 "Teknisk information som bifogades" = "Technical information that was attached";
 "Rapportera felet" = "Report the problem";
+
+/* Skärmtiden utan nät (OfflineScreen i Offline.swift): samma besked som servern ger */
+"Tiden är slut för idag – du har tittat %d av %d minuter. Fråga en vuxen om du behöver mer tid." = "Time is up for today – you have watched %d of %d minutes. Ask a grown-up if you need more time.";
+"Det går inte att titta just nu. På %@ går det att titta %@." = "You can't watch right now. On %@ you can watch %@.";
+"mellan %@ och %@" = "between %@ and %@";
+"från %@" = "from %@";
+"fram till %@" = "until %@";
+"söndagar" = "Sundays";
+"måndagar" = "Mondays";
+"tisdagar" = "Tuesdays";
+"onsdagar" = "Wednesdays";
+"torsdagar" = "Thursdays";
+"fredagar" = "Fridays";
+"lördagar" = "Saturdays";

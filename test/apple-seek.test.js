@@ -40,3 +40,62 @@ test('spelaren: /playback med start och prev, ersatt ström stoppas med replaced
   // Bara omkodning bevakas (remux och direktuppspelning spolar som förut)
   assert.equal((player.match(/if p\.mode == "transcode" \{ watchStream\(/g) || []).length, 2);
 });
+
+// Serverns svar i stället för gissningen (backloggens punkt "fråga servern vad som är kodat"): samma fråga, samma
+// regler för ett färskt svar och samma tolkning av svaret som Expo-appen (seekcore.ts readyUrl/readyFrom/readyFor)
+test('vad servern har klart: /hls/ready som Expo-appen, gissningen bara som reserv', () => {
+  // Frågan: strömmens adress med /hls/ready (pid och mediatoken följer med)
+  assert.match(swift, /replacingOccurrences\(of: "\/hls\/master\.m3u8", with: "\/hls\/ready"\)/);
+  assert.match(ts, /master\.replace\('\/hls\/master\.m3u8', '\/hls\/ready'\)/);
+  // Var 4:e sekund, ett svar gäller 8 s
+  assert.match(swift, /static let readyEvery: Double = 4\b/); assert.match(swift, /static let readyFresh: Double = 8\b/);
+  assert.match(ts, /READY_EVERY_MS = 4000, READY_FRESH_MS = 8000/);
+  // Ett svar gäller bara om frågan skickades före spolningen och är färsk; annars gissningen
+  const rf = swift.slice(swift.indexOf('static func readyFor('));
+  assert.match(rf, /k\.at <= \(before \?\? now\), now - k\.at <= readyFresh \{ return k\.range \}/);
+  assert.match(rf, /return readyGuess\(frags, runSeg: runSeg, bufferedEnd: bufferedEnd\)/);
+  assert.match(ts, /known\.at <= before && now - known\.at <= READY_FRESH_MS\) return known\.range/);
+  // Svaret: segs [från, till] inom listan, annars sekunderna (från + 0,05, till − 0,05) som segment
+  const fr = swift.slice(swift.indexOf('static func readyFrom('));
+  assert.match(fr, /g\.count == 2, g\[0\] >= 0, g\[0\] <= g\[1\], g\[1\] <= last/);
+  assert.match(ts, /g\[0\] >= 0 && g\[0\] <= g\[1\] && g\[1\] <= last/);
+  assert.match(fr, /b0 > a0/); assert.match(ts, /r\.to > r\.from/);
+  assert.match(fr, /fragAt\(frags, a0 \+ 0\.05\), b = fragAt\(frags, b0 - 0\.05\)/);
+  assert.match(ts, /fragAt\(frags, r\.from \+ 0\.05\), b = fragAt\(frags, r\.to - 0\.05\)/);
+  // Beslutet och körningen efter en spolning använder svaret (inte bara gissningen); before = mätningen före hoppet
+  for (const f of ['static func decide(', 'static func runAfterSeek(']) {
+    const body = swift.slice(swift.indexOf(f), swift.indexOf('\n    }\n', swift.indexOf(f)));
+    assert.match(body, /readyFor\(frags, runSeg: runSeg, bufferedEnd: prev\.buf, known: known, now: now \?\? prev\.at, before: prev\.at\)/, f);
+    assert.ok(!/readyGuess\(/.test(body), `${f} gissar inte själv`);
+  }
+  assert.match(ts, /readyFor\(s\.frags, s\.runSeg, prev\.buf, s\.known, now, prev\.at\)/);
+  // Watch: svaret och mätningen går in i beslutet; efter en spolning utan omstart gäller svaret inte längre (seq)
+  const w = swift.slice(swift.indexOf('struct Watch'));
+  assert.match(w, /SeekCore\.decide\(base, t: now\.pos, frags: frags, runSeg: runSeg, started: started, known: known, now: now\.at\)/);
+  assert.match(w, /SeekCore\.runAfterSeek\(base, t: now\.pos, frags: frags, runSeg: runSeg, known: known, now: now\.at\)\s*pending = nil\s*before = nil[\s\S]{0,200}known = nil\s*seq \+= 1/);
+  assert.match(read('apps', 'expo', 'src', 'screens', 'Player.tsx'), /s\.known = null; s\.seq\+\+;/);
+  assert.match(w, /guard s == seq else \{ return \}\s*known = Known\(range: SeekCore\.readyFrom\(frags, r\), at: sentAt\)/);
+  assert.match(w, /var wantsReady: Bool \{ started && !frags\.isEmpty \}/);
+});
+
+test('spelaren frågar /hls/ready medan omkodningen spelar, och väntar bara på fjärrkontrollens steg', () => {
+  const ask = player.slice(player.indexOf('func askReady('), player.indexOf('func bufferedEnd('));
+  assert.match(ask, /w\.wantsReady, !seekRestarting, player\.timeControlStatus == \.playing/, 'bara när bilden rör sig, inte under en omstart');
+  assert.match(ask, /SeekCore\.readyURL\(cur\.absoluteString\)/, 'adressen som spelas nu (även efter byte från hemadressen)');
+  assert.match(ask, /timeoutInterval: 3\)/);
+  assert.match(ask, /let sent = ProcessInfo\.processInfo\.systemUptime/, 'samma klocka som mätningarna');
+  assert.match(ask, /seekWatch\?\.setReady\(r, sentAt: sent, seq: seq\)/);
+  assert.match(player, /at: ProcessInfo\.processInfo\.systemUptime,\s*playing:/);
+  const ws = player.slice(player.indexOf('func watchStream('), player.indexOf('func askReady('));
+  assert.match(ws, /Task\.sleep\(nanoseconds: UInt64\(SeekCore\.readyEvery \* 1_000_000_000\)\)/);
+  assert.match(ws, /self\.seekGen == sg, self\.seekWatch != nil else \{ return \}\s*await self\.askReady\(sg: sg\)/);
+  // Frågorna slutar vid omstart, ny titel och stängning
+  assert.match(player.slice(player.indexOf('func seekRestart(')), /seekWatch = nil\s*readyTask\?\.cancel\(\)/);
+  assert.equal((player.match(/readyTask\?\.cancel\(\)\s*readyTask = nil/g) || []).length, 3, 'resetState, close och seekRestart');
+  // Väntan på fler steg: 0,6 s på Apple TV (fjärrkontrollen), kort på iPhone/iPad (reglaget)
+  assert.match(swift, /static func settle\(remote: Bool\) -> Double \{ remote \? stepSettle : scrubSettle \}/);
+  assert.match(swift, /static let scrubSettle: Double = 0\.3\b/);
+  assert.match(player, /#if os\(tvOS\)\s*return SeekCore\.settle\(remote: true\)\s*#else\s*return SeekCore\.settle\(remote: false\)/);
+  assert.match(player, /let wait = PlayerController\.settle[\s\S]{0,120}Task\.sleep\(nanoseconds: UInt64\(wait \* 1_000_000_000\)\)/);
+  assert.ok(!/SeekCore\.stepSettle \* 1_000_000_000/.test(player), 'iPhone väntar inte 0,6 s');
+});

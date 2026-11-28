@@ -113,10 +113,16 @@ final class PlayerController: ObservableObject {
     /// Hemadressen slutade gälla (Hemma.swift) – filmen byter adress
     private var homeObserver: NSObjectProtocol?
     // Spolning i en omkodning (SeekCore, seekRestart nedan): strömmens segment och mätningar, omstarten som väntar på
-    // fler steg från fjärrkontrollen, omstartens nummer (en äldre som blir klar senare tar inte över) och om en omstart
-    // pågår (då är den gamla strömmen stoppad på servern och dess fel ska inte visas)
+    // fler steg från fjärrkontrollen, frågorna om vad servern har klart (/hls/ready), omstartens nummer (en äldre som
+    // blir klar senare tar inte över) och om en omstart pågår (då är den gamla strömmen stoppad på servern och dess fel
+    // ska inte visas)
     private var seekWatch: SeekCore.Watch?
     private var settleTask: Task<Void, Never>?
+    private var readyTask: Task<Void, Never>?
+    /// Nedladdad titel: sekunder som spelats sedan förra framsteget och förra mätningen (systemets uptime). Kommer
+    /// framsteget inte fram (inget nät) räknas tiden som skärmtid i appen (OfflineScreen).
+    private var localPlayed: Double = 0
+    private var localBeat: Double?
     private var seekGen = 0
     private var seekRestarting = false
 
@@ -169,6 +175,13 @@ final class PlayerController: ObservableObject {
             self.audio = nil
             title = rec?.title ?? ""
             status = "Offline"
+            // Skärmtiden först, utan att vänta på nätet: den senaste statusen från servern och tiden som spelats utan
+            // nät sedan dess (OfflineScreen). Säger den nej frågas servern (en vuxen kan ha gett mer tid); svarar den
+            // inte gäller den sparade.
+            var gate = OfflineScreen.gateNow(model)
+            if !gate.allowed, await OfflineScreen.refresh(model) { gate = OfflineScreen.gateNow(model) }
+            guard isLive(gen) else { return }
+            if !gate.allowed { stopNotice = OfflineScreen.message(gate); return }
             player.replaceCurrentItem(with: AVPlayerItem(url: local))
             reporting = true
             if start > 1 { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) }
@@ -398,9 +411,13 @@ final class PlayerController: ObservableObject {
         playbackBegan = false
         settleTask?.cancel()
         settleTask = nil
+        readyTask?.cancel()
+        readyTask = nil
         seekWatch = nil
         seekGen += 1
         seekRestarting = false
+        localPlayed = 0
+        localBeat = nil
     }
 
     private func metadata(_ it: MediaItem) -> [AVMetadataItem] {
@@ -499,6 +516,8 @@ final class PlayerController: ObservableObject {
         guard t.isFinite, !closed, prerollTitle == nil else { return }
         // Spolning i en omkodning: ett hopp utanför bufferten startar om strömmen vid målet
         if seekWatch != nil, !seekRestarting { observeSeek(t) }
+        // Nedladdad titel: tiden som spelas (räknas som skärmtid om framsteget inte kommer fram)
+        if isLocal { countLocal() }
         // Undertexter
         let st = t - subtitleOffset
         if let c = cues.last(where: { $0.start <= st }), st <= c.end { if subtitleText != c.text { subtitleText = c.text } }
@@ -513,9 +532,16 @@ final class PlayerController: ObservableObject {
         if reporting, Date().timeIntervalSince(lastReport) > 10, t > 1, let id = currentId {
             lastReport = Date()
             let gen = generation
-            model.reportProgress(id: id, position: t, duration: duration) { [weak self] r in
-                Task { @MainActor [weak self] in self?.stoppedByServer(r, id: id, gen: gen) }
+            let secs = takeLocalPlayed()
+            var noAnswer: (() -> Void)?
+            if isLocal {
+                noAnswer = { [weak self] in
+                    Task { @MainActor [weak self] in self?.playedOffline(secs, id: id, gen: gen) }
+                }
             }
+            model.reportProgress(id: id, position: t, duration: duration, onStop: { [weak self] r in
+                Task { @MainActor [weak self] in self?.stoppedByServer(r, id: id, gen: gen) }
+            }, noAnswer: noAnswer)
         }
     }
 
@@ -545,7 +571,15 @@ final class PlayerController: ObservableObject {
         if reporting {
             reporting = false
             let t = player.currentTime().seconds
-            if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration) }
+            let secs = takeLocalPlayed()
+            // Nedladdad titel utan nät: den sista biten räknas också som skärmtid (stoppar inget, spelaren stängs)
+            var noAnswer: (() -> Void)?
+            if isLocal {
+                noAnswer = { [model] in
+                    Task { @MainActor in _ = OfflineScreen.played(model, seconds: secs) }
+                }
+            }
+            if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration, noAnswer: noAnswer) }
         }
         guard serverSession else { return nil }
         serverSession = false
@@ -561,6 +595,8 @@ final class PlayerController: ObservableObject {
         loadTask = nil
         settleTask?.cancel()
         settleTask = nil
+        readyTask?.cancel()
+        readyTask = nil
         onFinished = nil
         stopReporting()
         clearPrerollObservers()
@@ -941,6 +977,30 @@ extension PlayerController {
         }
     }
 
+    /// Nedladdad titel: räknar tiden medan bilden rör sig (högst 1 s per mätning – ett längre glapp är en paus)
+    fileprivate func countLocal() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if player.timeControlStatus == .playing, let b = localBeat { localPlayed += min(1, max(0, now - b)) }
+        localBeat = now
+    }
+
+    /// Tiden som spelats sedan förra framsteget (nollställs)
+    fileprivate func takeLocalPlayed() -> Double {
+        let s = localPlayed
+        localPlayed = 0
+        return s
+    }
+
+    /// Framsteget för en nedladdad titel kom inte fram (inget nät): tiden räknas som skärmtid i appen, och är dagens
+    /// tid slut eller klockslaget passerat stoppar spelaren med samma besked som servern ger
+    fileprivate func playedOffline(_ secs: Double, id: Int, gen: Int) {
+        let g = OfflineScreen.played(model, seconds: secs)
+        guard !g.allowed, !closed, gen == generation, currentId == id, isLocal, stopNotice == nil else { return }
+        player.pause()
+        stopReporting()
+        stopNotice = OfflineScreen.message(g)
+    }
+
     /// Servern svarade stop på framstegsanropet: sluta spela och visa varför
     fileprivate func stoppedByServer(_ r: ProgressReply, id: Int, gen: Int) {
         guard !closed, gen == generation, currentId == id, stopNotice == nil else { return }
@@ -971,6 +1031,15 @@ extension PlayerController {
     fileprivate func watchStream(_ url: URL, from: Double) {
         seekWatch = SeekCore.Watch()
         let sg = seekGen
+        readyTask?.cancel()
+        // Vad servern har klart frågas i förväg, var 4:e sekund medan strömmen spelar (askReady)
+        readyTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(SeekCore.readyEvery * 1_000_000_000))
+                guard !Task.isCancelled, let self, self.seekGen == sg, self.seekWatch != nil else { return }
+                await self.askReady(sg: sg)
+            }
+        }
         guard let idx = URL(string: SeekCore.indexURL(url.absoluteString)) else { return }
         let req = URLRequest(url: idx, timeoutInterval: 10)
         Task { [weak self] in
@@ -980,6 +1049,23 @@ extension PlayerController {
             guard let self, self.seekGen == sg, self.seekWatch != nil else { return }
             self.seekWatch?.setFrags(SeekCore.parseFrags(txt), from: from)
         }
+    }
+
+    /// Frågar servern vad den har klart för strömmen som spelas (GET /api/stream/:id/hls/ready med strömmens
+    /// frågesträng: pid och mediatoken). Bara medan bilden rör sig och ingen omstart pågår; frågan startar aldrig
+    /// ffmpeg. Svarar servern inte (äldre server, inget nät) gäller gissningen i SeekCore.readyGuess.
+    fileprivate func askReady(sg: Int) async {
+        guard let w = seekWatch, w.wantsReady, !seekRestarting, player.timeControlStatus == .playing,
+              let cur = mainURL, let u = URL(string: SeekCore.readyURL(cur.absoluteString)) else { return }
+        let seq = w.seq
+        let sent = ProcessInfo.processInfo.systemUptime
+        var req = URLRequest(url: u, timeoutInterval: 3)
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let pair = try? await URLSession.shared.data(for: req),
+              (pair.1 as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(SeekCore.ReadyInfo.self, from: pair.0) else { return }
+        guard !closed, seekGen == sg else { return }
+        seekWatch?.setReady(r, sentAt: sent, seq: seq)
     }
 
     /// Slutet på bufferten där t ligger (t om inget är buffrat där)
@@ -994,9 +1080,9 @@ extension PlayerController {
     }
 
     /// Varje mätning (var 0,25 s och vid varje hopp i tiden): har användaren spolat utanför bufferten? Då startas
-    /// strömmen om vid målet när inget nytt steg kommit på SeekCore.stepSettle sekunder (Apple TV:s klick åt
-    /// höger/vänster, reglaget som drar). Ett nytt steg flyttar målet; hamnar det där spelaren klarar sig själv
-    /// behövs ingen omstart.
+    /// strömmen om vid målet när inget nytt steg kommit på en stund: 0,6 s på Apple TV (fjärrkontrollens klick åt
+    /// höger/vänster), 0,3 s på iPhone/iPad (reglaget som drar). Ett nytt steg flyttar målet; hamnar det där spelaren
+    /// klarar sig själv behövs ingen omstart.
     fileprivate func observeSeek(_ t: Double) {
         let now = SeekCore.Sample(pos: t, buf: bufferedEnd(t), at: ProcessInfo.processInfo.systemUptime,
                                   playing: player.timeControlStatus == .playing, rate: Double(player.rate))
@@ -1010,12 +1096,22 @@ extension PlayerController {
         case .restart:
             settleTask?.cancel()
             let gen = generation
+            let wait = PlayerController.settle
             settleTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(SeekCore.stepSettle * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 guard !Task.isCancelled, let self, self.generation == gen, let to = self.seekWatch?.pending else { return }
                 await self.seekRestart(to: to, gen: gen)
             }
         }
+    }
+
+    /// Väntan på nästa steg före en omstart (SeekCore.settle): bara Apple TV har fjärrkontrollens steg
+    fileprivate static var settle: Double {
+        #if os(tvOS)
+        return SeekCore.settle(remote: true)
+        #else
+        return SeekCore.settle(remote: false)
+        #endif
     }
 
     /// Spolning i en omkodning: strömmen startas om vid målet (/playback med start och prev). Servern ger korta
@@ -1026,6 +1122,8 @@ extension PlayerController {
         seekGen += 1
         let sg = seekGen
         seekWatch = nil
+        readyTask?.cancel()
+        readyTask = nil
         seekRestarting = true
         let play = player.timeControlStatus != .paused
         let rate = player.rate

@@ -94,6 +94,8 @@ enum OfflineProfile {
         // Nedladdningar från före profilerna som ingen profil kunde knytas till: huvudkontot får dem
         // Rätten att ladda ner och de nedladdade titlarna kontrolleras mot servern (403/404 tas bort)
         if model.user != nil { Task { await Downloads.shared.online(model: model) } }
+        // Skärmtidens status, för nedladdade titlar utan nät (OfflineScreen)
+        if model.user != nil { Task { await OfflineScreen.refresh(model) } }
         if model.user != nil, Downloads.shared.needsOwner(server: model.server) {
             Task {
                 guard let l: ProfileList = try? await model.get("/api/profiles"),
@@ -158,8 +160,10 @@ final class PendingPositions {
     }
 
     /// Skickar ett framsteg (kind: ProgressQueue.item, .book eller .pod). Kom det inte fram sparas positionen och när
-    /// den sparades. Ger svaret, eller nil.
-    func post(_ model: AppModel, kind: String, id: Int, position: Double, duration: Double, speed: Double? = nil) async -> Data? {
+    /// den sparades. Ger svaret, eller nil. noAnswer anropas när servern inte svarade alls (inget nät): då räknar
+    /// spelaren skärmtiden själv (OfflineScreen).
+    func post(_ model: AppModel, kind: String, id: Int, position: Double, duration: Double, speed: Double? = nil,
+              noAnswer: (() -> Void)? = nil) async -> Data? {
         attach(model)
         let started = Date()
         let sc = scope
@@ -176,6 +180,7 @@ final class PendingPositions {
                 save(sc, ProgressQueue.record(load(sc), id: id, position: position, duration: duration, kind: kind,
                                               speed: kind == ProgressQueue.book ? speed : nil, now: started))
             }
+            if status == 0 { noAnswer?() }
             return nil
         }
     }
@@ -199,6 +204,81 @@ final class PendingPositions {
             save(sc, ProgressQueue.ack(load(sc), sent: p, status: status))
             if !ProgressQueue.keepGoing(status) { return }
         }
+    }
+}
+
+
+// MARK: - Skärmtid utan nät
+
+/// screenTime i svaret på framstegen (hela statusen, för skärmtiden utan nät)
+struct ProgressScreen: Decodable {
+    let screenTime: ScreenStatus?
+}
+
+/// Skärmtiden när servern inte svarar (nedladdade titlar i flygplansläge): senaste statusen från servern sparas per
+/// server och profil (UserDefaults "screen.<server>-<profil>") med tiden som spelats utan nät sedan dess, och spelaren
+/// stoppar med samma besked som servern ger när tiden är slut eller klockslaget passerat. Reglerna: ScreenClock i
+/// OfflineCore.swift (samma som Android- och Expo-appen). Svarar servern igen ersätter dess status det som räknats här;
+/// positionerna från tiden utan nät skickas med at (PendingPositions), och dem räknar servern inte som skärmtid.
+@MainActor
+enum OfflineScreen {
+    private static func key(_ model: AppModel) -> String? {
+        LoginPrint.scope(server: model.server, token: model.token).map { "screen." + $0 }
+    }
+
+    private static func load(_ k: String) -> ScreenCache? {
+        guard let d = UserDefaults.standard.data(forKey: k) else { return nil }
+        return try? JSONDecoder().decode(ScreenCache.self, from: d)
+    }
+
+    private static func save(_ k: String, _ c: ScreenCache) {
+        if let d = try? JSONEncoder().encode(c) { UserDefaults.standard.set(d, forKey: k) }
+    }
+
+    /// Ny status från servern (GET /api/screentime, screenTime i framstegssvaret – saknas = ingen skärmtid)
+    static func note(_ model: AppModel, _ status: ScreenStatus?) {
+        guard let k = key(model) else { return }
+        save(k, ScreenClock.fresh(status))
+    }
+
+    /// Hämtar statusen nu. false = servern svarade inte – då gäller den sparade
+    @discardableResult
+    static func refresh(_ model: AppModel) async -> Bool {
+        guard model.token != nil, let k = key(model) else { return false }
+        guard let s: ScreenStatus = try? await model.get("/api/screentime") else { return false }
+        // Profilen eller servern byttes under tiden: statusen hör till den förra
+        guard key(model) == k else { return false }
+        save(k, ScreenClock.fresh(s))
+        return true
+    }
+
+    /// Får profilen spela nu, utan kontakt med servern?
+    static func gateNow(_ model: AppModel) -> ScreenGate {
+        guard let k = key(model) else { return ScreenClock.ok }
+        return ScreenClock.gate(load(k), now: Date())
+    }
+
+    /// Tid som spelats utan kontakt med servern: räknas på dagen och ger svaret om det får fortsätta
+    static func played(_ model: AppModel, seconds: Double) -> ScreenGate {
+        guard let k = key(model) else { return ScreenClock.ok }
+        let now = Date()
+        let c = ScreenClock.addOffline(load(k), now: now, seconds: seconds)
+        if let c { save(k, c) }
+        return ScreenClock.gate(c, now: now)
+    }
+
+    /// Samma besked som servern ger (messageOf i server/screentime.js)
+    static func message(_ g: ScreenGate) -> String {
+        if g.reason == "limit" {
+            return String(format: L("Tiden är slut för idag – du har tittat %d av %d minuter. Fråga en vuxen om du behöver mer tid."),
+                          g.usedMinutes, g.totalMinutes)
+        }
+        let win: String
+        if let f = g.from, let u = g.until { win = String(format: L("mellan %@ och %@"), f, u) }
+        else if let f = g.from { win = String(format: L("från %@"), f) }
+        else { win = String(format: L("fram till %@"), g.until ?? "") }
+        let days = [L("söndagar"), L("måndagar"), L("tisdagar"), L("onsdagar"), L("torsdagar"), L("fredagar"), L("lördagar")]
+        return String(format: L("Det går inte att titta just nu. På %@ går det att titta %@."), days[max(0, min(6, g.weekday))], win)
     }
 }
 

@@ -41,6 +41,13 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
   kommer tillbaka, när appen kommer till förgrunden och efter nästa lyckade rapport – filmer, avsnitt, ljudböcker och
   poddar. Servern behåller då ett senare framsteg från en annan enhet (för poddar bara när servern tar emot `at`).
   Reglerna: `Shared/OfflineCore.swift`
+- skärmtid utan nät (iPhone/iPad): appen sparar profilens senaste skärmtid från servern (`GET /api/screentime` när
+  profilen blir känd, `screenTime` i svaret på framstegen) och räknar själv tiden när en nedladdad film spelas och
+  framsteget inte kommer fram. Är dagens tid slut eller klockslaget passerat startar filmen inte, eller stoppas med
+  samma besked som servern ger. En ny dag gäller den dagliga gränsen och klockslagen utan extra tid. Samma regler som
+  Android- och Expo-appen (`ScreenClock` i `Shared/OfflineCore.swift`, sparas i `OfflineScreen` i `Offline.swift`).
+  Servern räknar inte den tiden när nätet kommer tillbaka: positionerna skickas med `at` och serverns skärmtid gäller
+  igen
 - feedback och felrapporter (Inställningar → *Skicka feedback* och *Mina ärenden*), som knappen *Feedback* i webben:
   typ, *Gäller* (förvalt efter skärmen du var på), meddelande och teknisk information med *Visa vad som skickas med*.
   *Mina ärenden* visar status och teamets svar, och där svarar du när teamet ber om mer information. Går en film inte
@@ -53,8 +60,10 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
 - snabb spolning i en omkodad film: spolar du utanför det som är laddat startar appen om strömmen vid målet, med korta
   segment där (`/playback` med `start` och `prev`, servern stoppar den gamla omkodningen), som webben och de andra
   apparna. Ljudspår, undertext, hastighet och paus behålls. På Apple TV samlas klicken åt höger/vänster: omstarten
-  väntar 0,6 s på nästa klick. AVPlayer visar inte serverns `X-Seg-Ready`, så appen gissar ur bufferten vad servern
-  redan kodat. Apple TV skickar inte `nhls=1` (då blir Dolby Digital i TS AAC), så appen lägger själv till `xs` i
+  väntar 0,6 s på nästa klick; på iPhone/iPad väntar den 0,3 s (reglaget som drar ger ett hopp var 0,25 s). AVPlayer
+  visar inte serverns `X-Seg-Ready`, så appen frågar `GET /api/stream/:id/hls/ready` var 4:e sekund medan filmen
+  spelar (som Expo-appen) och använder svaret om det är högst 8 s gammalt och frågades före spolningen. Utan svar
+  (äldre server, inget nät) gissar den ur bufferten vad servern redan kodat. Apple TV skickar inte `nhls=1` (då blir Dolby Digital i TS AAC), så appen lägger själv till `xs` i
   strömmens adress och spelaren börjar vid målet (`EXT-X-START`). Reglerna: `Shared/SeekCore.swift`
 - *Rapportera felet* även i live-TV-spelaren
 
@@ -133,9 +142,10 @@ Workflowet `.github/workflows/apple.yml` kompilerar båda målen på GitHubs mac
 
 Det finns inga XCTest-mål. Valet av hemadress (`LocalPick`), Feedbacks regler (`FeedbackCore` i `Feedback.swift`),
 de sparade bildtoken (`ImageTokenBook` sist i `AppModel.swift`), spolningen (`SeekCore`) och nedladdningarna per profil
-med kön för positioner (`OfflineCore.swift`) är rena typer utan nät och
+med kön för positioner och skärmtiden utan nät (`OfflineCore.swift`) är rena typer utan nät och
 vyer, så att ett testmål kan läggas till för dem utan att något annat behöver ändras. `test/apple-i18n.test.js` (Node,
 utan Xcode) kontrollerar att varje svensk text i koden har en engelsk rad i `en.lproj/Localizable.strings` och att
-Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser är desamma som i Expo- och
-Android-appen; `test/apple-offline.test.js` att nedladdningarnas och köns regler är Android-appens och att appen
-använder dem (profilens lista, utloggningen, kön med `at`).
+Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser och frågan till `/hls/ready` är
+desamma som i Expo- och Android-appen; `test/apple-offline.test.js` att nedladdningarnas, köns och skärmtidens regler
+är Android-appens och att appen använder dem (profilens lista, utloggningen, kön med `at`, skärmtiden i
+nedladdningsspelaren och serverns besked).
