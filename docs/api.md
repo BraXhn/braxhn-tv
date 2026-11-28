@@ -104,7 +104,9 @@ användaren utanför det som är buffrat startar klienten om strömmen vid måle
 Valfritt för klienter som vill starta fortare: skicka samma frågesträng som den kommande uppspelningen (utan `audio`
 och `sub` – servern väljer profilens förval) plus `warm=1` när användaren pekar på eller fokuserar Spela. Svaret är
 `{ warm: true|false, mode }` och ingenting räknas som uppspelning. Begärs uppspelningen inom 20 s med samma val (och
-det förvalda ljudspåret) tar den över den redan startade strömmen. Webben gör detta; apparna behöver inte.
+det förvalda ljudspåret) tar den över den redan startade strömmen. Webben gör detta, liksom Android-appen (när fokus
+stått kvar 0,7 s på en Spela-knapp eller ett avsnitt, med exakt samma fråga inklusive `audio` och `cinema=1`) och
+Expo-appen (när fingret landar på Spela). Ett valt `audio` i förvärmningen gäller som i uppspelningen.
 
 ## API-nycklar: `/api/v1/*`
 
@@ -299,8 +301,8 @@ en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna bör
 (`{ enabled: bool, countdown: heltal sekunder }`). `/api/items/:id` har också `defaultAudio`/`defaultSub`, där
 `defaultSub` kan vara en PGS-bildundertext (webbspelaren ritar dem själv).
 
-Android-appen (från 0.6.0) skickar `cinema=1` bara när `GET /api/me/cinema` visar att bio-läget är på (`trailers > 0`,
-eller `preroll` och `prerollAvailable`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
+Android-appen skickar `cinema=1` vid varje start från början (servern ger trailers bara för filmer och när bio-läget är
+på; förut läste appen först `GET /api/me/cinema`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
 om en trailer inte går att spela. Den skickar också `night=1`/`dialog=1` när nattläge eller tydligare dialog är påslaget.
 
 ## Google TV: ljudspår i appen och skärmens HDR-typer (`atrack=1`, `hdrt=`)

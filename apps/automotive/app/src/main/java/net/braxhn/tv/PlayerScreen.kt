@@ -49,6 +49,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -267,19 +269,19 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         try {
             // Ett stopp av samma titel (omstart med annat ljud, nattläge …) måste nå servern före den nya starten
             StreamGate.awaitStop(req.id)
-            val it: MediaItem = Api.get("/api/items/${req.id}")
+            // Titelns uppgifter och /playback samtidigt (StartCore.together): frågan behöver inget ur titelns svar.
+            // Samma fråga som förvärmningen på titelsidan (Start.query), så att servern tar över den strömmen.
+            // start: servern förbereder strömmen där uppspelningen börjar (Fortsätt titta) – korta segment just där.
+            // cinema=1 vid start från början: servern ger trailers bara för filmer och när bio-läget är på.
+            val (it, p) = coroutineScope {
+                val itemJob = async { Api.get<MediaItem>("/api/items/${req.id}") }
+                val q = Start.query(req.audio, req.sub, req.start, req.skipPreroll)
+                StartCore.together(Api.appScope, { itemJob.await() }, { Api.get<Playback>("/api/items/${req.id}/playback", q) }) { np -> Start.drop(req.id, np) }
+            }
             item = it
+            // Textundertexten väljs i spelaren (den skickas inte till servern): forcerad, annars profilens språk
             val sub = req.sub ?: it.subtitles?.firstOrNull { s -> s.forced == true && s.bitmap != true }
                 ?: it.subtitles?.firstOrNull { s -> Api.subtitleLang.isNotEmpty() && s.lang == Api.subtitleLang && s.bitmap != true }
-            // Bio-läge bara för filmer från början, och bara om det är påslaget (/api/me/cinema; saknas hos äldre servrar)
-            val cinema = !req.skipPreroll && req.start < 1 && it.kind == "movie" &&
-                runCatching { Api.get<CinemaPrefs>("/api/me/cinema").on }.getOrDefault(false)
-            // Avkodarlistan (MediaCodecList) är långsam första gången – inte på huvudtråden
-            val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(req.audio, sub) }
-            // start: servern förbereder strömmen där uppspelningen börjar (Fortsätt titta) – korta segment just där
-            val p: Playback = Api.get("/api/items/${req.id}/playback", caps + Api.comfortQuery() +
-                ("cinema" to (if (cinema) "1" else null)) +
-                ("start" to (if (req.start >= 1 && !cinema) req.start.toLong().toString() else null)))
             pb = p
             currentSub = sub
             status = listOfNotNull(when (p.mode) { "direct" -> context.getString(R.string.player_direct); "remux" -> context.getString(R.string.player_remux); else -> context.getString(R.string.player_transcode) },

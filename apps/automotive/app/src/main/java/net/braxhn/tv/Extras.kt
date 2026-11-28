@@ -58,10 +58,6 @@ import java.util.Locale
 @Serializable data class DayNote(val kind: String? = null, val years: Int? = null, val note: String? = null)
 /** Bio-läge: trailer eller förfilm som spelas före filmen (Playback.preroll) */
 @Serializable data class PrerollEntry(val kind: String = "trailer", val title: String? = null, val url: String, val duration: Double? = null, val itemId: Int? = null)
-/** GET /api/me/cinema – användarens bio-läge (ställs in i webben) */
-@Serializable data class CinemaPrefs(val trailers: Int = 0, val preroll: Boolean = false, val prerollAvailable: Boolean = false) {
-    val on: Boolean get() = trailers > 0 || (preroll && prerollAvailable)
-}
 /** GET /api/profiles */
 @Serializable data class Profile(val id: Int, val name: String, val owner: Boolean = false, val kid: Boolean = false, val maxAge: Int? = null,
                                  val hasPin: Boolean = false, val color: String? = null)

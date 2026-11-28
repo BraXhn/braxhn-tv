@@ -24,6 +24,15 @@
   nu servern vad som redan är klart medan filmen spelar, som Expo-appen, i stället för att bara gissa ur det som är
   laddat. På iPhone och iPad väntar omstarten bara 0,3 s efter att du slutat dra i reglaget (förut 0,6 s, som för
   Apple TV:s fjärrkontroll). Svarar servern inte gissar appen som förut. Inte provat på riktig enhet.
+- **Android- och Expo-appen startar filmer fortare.** Apparna frågade först efter titelns uppgifter och först sedan
+  servern hur filmen ska spelas (Android-appen dessutom efter bio-läget däremellan) – två eller tre rundresor i följd,
+  som märks via reläet eller mobilnätet. Nu går frågorna samtidigt, som i webben: mot en lokal server med 60 ms
+  fördröjning per anrop kom svaret ungefär 130 ms tidigare i Android-appen och 50–90 ms tidigare i Expo-appen. På
+  Google TV förbereder servern dessutom filmen när fokus har stått en stund på *Spela*, *Fortsätt*, *Börja om* eller
+  ett avsnitt (inte när du bara rör dig förbi med fjärrkontrollen): första biten av en omkodad film var då klar cirka
+  0,3 s efter OK i stället för 0,6–1,1 s. Kvalitet, ljudspår och undertext blir desamma som förut – servern använder
+  den förberedda strömmen bara när allt stämmer. Android-appen läser inte längre `/api/me/cinema` (servern avgör
+  bio-läget själv). Expo-appen provad i webbläget i Chrome; Android-appen är inte provad på riktig TV eller telefon.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

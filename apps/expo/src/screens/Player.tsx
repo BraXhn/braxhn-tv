@@ -1,6 +1,7 @@
 // Spelaren: enhetens egen spelare (AVPlayer på iPhone, ExoPlayer på Android) med dess reglage, helskärm och bild-i-bild.
-// Appen frågar servern hur titeln ska spelas (/playback med startpositionen, så att strömmen förbereds där),
-// börjar på rätt ställe, skickar framsteg var 10:e sekund och vid paus/stängning, och fortsätter med nästa avsnitt.
+// Appen frågar servern hur titeln ska spelas (/playback med startpositionen, så att strömmen förbereds där) samtidigt
+// som titelns uppgifter hämtas (startcore.ts), börjar på rätt ställe, skickar framsteg var 10:e sekund och vid
+// paus/stängning, och fortsätter med nästa avsnitt.
 // En nedladdad titel spelas från telefonen (fungerar utan nät), med de nedladdade undertexterna ritade ovanpå bilden.
 // Positionen går till servern som vanligt när den svarar (skärmtiden räknas och kan säga stopp); utan nät sparas den i
 // telefonen och skickas med "at" senare, och den senaste skärmtidsstatusen avgör om det får spelas (offline.ts).
@@ -22,6 +23,7 @@ import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
 import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, READY_EVERY_MS, readyFrom, readyUrl, restartsOn, runAfterSeek, seekJump, type Frag, type Known, type Sample } from '../seekcore';
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
+import { startPlayback } from '../startcore';
 import { t } from '../i18n';
 
 const PROGRESS_EVERY = 10; // sekunder mellan framsteg till servern (som webbspelaren)
@@ -106,12 +108,19 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         return;
       }
       try {
-        const it = await api<ItemDetail>('/api/items/' + id);
-        if (!live) return;
+        // Titeln och /playback samtidigt (startcore.ts): den tidiga frågan är förvärmningens (utan ljudspår) och tar
+        // över en förvärmd ström. Väljer servern ett annat ljud än titelns förval frågar appen igen med prev.
+        const r = await startPlayback({
+          early: () => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start })}`),
+          item: () => api<ItemDetail>('/api/items/' + id),
+          again: (audio, first) => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio, prev: pidOf(first?.url) })}`),
+          drop: (x) => { const pid = pidOf(x.url); if (pid) api(`/api/stream/${id}/stop?pid=${pid}`, { method: 'POST' }).catch(() => {}); },
+          live: () => live,
+        });
+        if (!r || !live) return;
+        const it = r.item, p = r.pb;
         setItem(it);
-        audioParam.current = it.defaultAudio ?? null;
-        const p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio: audioParam.current })}`);
-        if (!live) return;
+        audioParam.current = r.audio;
         setPb(p);
         if (p.mode === 'transcode' && restartsOn(Platform.OS)) watchStream(p.url, start);
         await player.replaceAsync({ uri: absolute(p.url), contentType: p.mode === 'direct' ? 'auto' : 'hls',

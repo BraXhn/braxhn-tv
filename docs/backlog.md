@@ -16,7 +16,7 @@ Teamets arbetslista. Här står vad som pågår, vad som står näst på tur och
 Underlag: [jamforelse.md](jamforelse.md), [funktioner.md](funktioner.md), [testat.md](testat.md),
 [CHANGELOG.md](../CHANGELOG.md) och avsnittet *Testat och otestat* i [README.md](../README.md).
 
-Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiven* i CHANGELOG).
+Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiven* i CHANGELOG).
 
 ## Pågår
 
@@ -49,19 +49,20 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 
 ### 3. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
-- **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
-  fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
-  (2) Alla tre apparna väntar på titelns uppgifter (`/api/items/:id`, i Android också `/api/me/cinema`) innan de
-  skickar `/playback` – två eller tre rundresor i följd (`Player.tsx`, `PlayerScreen.kt` vid `Api.get<Playback>`,
-  `Player.swift` före `model.get("/api/items/\(itemId)/playback", …)`). Webben skickar dem samtidigt sedan 1.5.0
-  (`earlyPlayback`). Kontrollera först: apparna väljer förvald undertext ur titelns spårlista före `/playback`, och
-  det valet behöver då göras på servern eller efteråt.
-- **Varför:** på Google TV och Apple TV står fokus på Spela en stund innan man trycker OK, och via reläet eller
-  mobilnät kostar varje rundresa märkbart (kontrollera först med en mätning).
-- **Filer:** `apps/expo/src/screens/Player.tsx`, `apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt`,
-  `apps/apple/Shared/Player.swift`, `apps/apple/Shared/DetailView.swift`, `test/contracts/apps.json`.
-- **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
-  kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
+Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
+
+- **Vad:** (1) iOS/tvOS-appen anropar inte `/playback?warm=1` när fokus landar på Spela (inget `warm` i
+  `apps/apple`). (2) Den väntar på titelns uppgifter (`/api/items/:id`) och `/api/me/cinema` innan den skickar
+  `/playback` (`Player.swift` före `model.get("/api/items/\(itemId)/playback", …)`). Android-appen visar hur: samma
+  fråga för förvärmning och uppspelning (`Start.query`), `cinema=1` vid start från början (servern avgör bio-läget och
+  titelns typ), förvärmning först när fokus stått kvar 0,7 s (`StartCore.kt`). Kontrollera först: appen väljer förvald
+  undertext ur titelns spårlista före `/playback` – i Android skickas bara en bildundertext som användaren valt.
+- **Varför:** på Apple TV står fokus på Spela en stund innan man trycker OK, och via reläet eller mobilnät kostar
+  varje rundresa märkbart. Uppmätt för Android mot en lokal server med 60 ms fördröjning per anrop: svaret på
+  `/playback` 205–225 ms → cirka 75 ms; första segmentet ~0,3 s efter OK med förvärmning mot 0,6–1,1 s utan.
+- **Filer:** `apps/apple/Shared/Player.swift`, `apps/apple/Shared/DetailView.swift`, `test/contracts/apps.json`.
+- **Klart när:** kontraktet har `GET /api/items/:id/playback?warm=1` även för `ios`, och bygget i GitHub Actions går
+  igenom.
 
 ### 4. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
@@ -224,6 +225,16 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   `OfflineCore.swift` som Androids, `OfflineScreen` i `Offline.swift`). Statiska fall i `apple-seek.test.js` och
   `apple-offline.test.js`, iOS i kontraktet för `/hls/ready` och `/api/screentime`. Inte provat: kompilering (bara i
   `apple.yml`), riktig iPhone i flygplansläge och spolning med Apple TV:s fjärrkontroll.
+- 2026-11-28: Android- och Expo-appen startar fortare (punkt 6, iOS kvar), gren `team/app-start-2026-11-28`.
+  `/playback` går samtidigt som `/api/items/:id` (Android `StartCore.together`, Expo `startcore.ts`
+  `startPlayback`); en ström som aldrig används stoppas med `pid`. Android skickar `cinema=1` vid start från början i
+  stället för att först läsa `/api/me/cinema`, och förvärmer (`warm=1`, exakt samma fråga) när fokus stått 0,7 s på en
+  Spela-knapp eller ett avsnitt (`warmOnFocus`). Expo tar det tidiga svaret när `audioSelected` = titelns
+  `defaultAudio`, annars ny fråga med `prev`. Kontraktet: `GET /api/items/:id/playback?warm=1` för Android,
+  `/api/me/cinema` borttagen för Android. Test: `StartCoreTest.kt` (JVM, 7 fall), `test/expo-start.test.js`; mätt mot
+  lokal server med fördröjning (Android 205–225 → ~75 ms till svaret, förvärmd ström togs över 8/8) och Expo-webbygget
+  i Chrome (`/playback` skickad före titelns svar; svaret 220–230 → 134–145 ms). Inte provat på riktig enhet;
+  Android-bygget bara i CI.
 - 2026-11-27: Webbspelaren stoppar omkodningen när fliken eller TV-webbläsaren stängs (förut punkt 2), gren
   `team/flik-stopp-2026-11-27`. `pagehide` utan `persisted` skickar `/api/stream/:id/stop?pid=&gone=1` med
   `sendBeacon` (reserv: `fetch` med `keepalive`); inte vid bfcache, utan `pid` eller via AirPlay. `gone=1` gör att en

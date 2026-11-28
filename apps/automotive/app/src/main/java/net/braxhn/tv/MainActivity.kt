@@ -569,10 +569,10 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val pos = it.position ?: 0.0
                             if (pos > 30) {
-                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.continue_at, formatTime(pos)), fontSize = 17.sp) }
-                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp)) { Text(tr(R.string.start_over)) }
+                                Button(onClick = { push(Screen.Play(it.id, pos, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, pos, audio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.continue_at, formatTime(pos)), fontSize = 17.sp) }
+                                OutlinedButton(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).warmOnFocus(it.id, 0.0, audio, sub)) { Text(tr(R.string.start_over)) }
                             } else {
-                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.play), fontSize = 17.sp) }
+                                Button(onClick = { push(Screen.Play(it.id, 0.0, audio, sub)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(it.id, 0.0, audio, sub)) { Icon(Icons.Filled.PlayArrow, null); Text(" " + tr(R.string.play), fontSize = 17.sp) }
                             }
                             OutlinedButton(onClick = { scope.launch { runCatching { Api.setWatched(it.id, it.watched != true) }; reload++ } }, Modifier.height(56.dp)) {
                                 Text(tr(if (it.watched == true) R.string.mark_unwatched else R.string.mark_watched))
@@ -596,7 +596,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                     } else {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             it.next?.let { n ->
-                                Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp))) {
+                                Button(onClick = { push(Screen.Play(n.id, n.position ?: 0.0, null, null)) }, Modifier.height(56.dp).focusRequester(playFocus).focusRing(RoundedCornerShape(28.dp)).warmOnFocus(n.id, n.position ?: 0.0)) {
                                     Icon(Icons.Filled.PlayArrow, null); Text(" ${tr(if ((n.position ?: 0.0) > 0) R.string.continue_word else R.string.play)} S${n.season}E${n.episode}", fontSize = 17.sp)
                                 }
                             }
@@ -616,7 +616,7 @@ fun DetailScreen(id: Int, push: (Screen) -> Unit) {
                 }
             }
             items(eps.filter { e -> e.season == season }, key = { e -> e.id }) { e ->
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().clickable { push(Screen.Play(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0, null, null)) }.padding(8.dp),
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).focusRing().warmOnFocus(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0).clickable { push(Screen.Play(e.id, if ((e.position ?: 0.0) > 30) e.position!! else 0.0, null, null)) }.padding(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     PosterCard(e, landscape = true, width = 240, onClick = null)
                     Column(Modifier.weight(1f)) {

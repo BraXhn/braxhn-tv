@@ -362,6 +362,8 @@ const CASES = {
   'GET /api/search': () => [{}],
   'GET /api/items/:id': () => [S.film, S.remux, S.show, S.ep1, S.ep2].map(id => ({ p: { id } })),
   'GET /api/items/:id/playback': () => [S.film, S.remux, S.ep2].map(id => ({ p: { id } })),
+  // Förvärmningen (warm=1): samma titlar; servern svarar { warm, mode } och räknar inget som uppspelning
+  'GET /api/items/:id/playback?warm=1': () => [S.film, S.remux, S.ep2].map(id => ({ p: { id } })),
   // Strömadresserna tas ur playback-svaret med appens förmågor (utom info=1, som bara visar läget)
   'GET /api/stream/:id/direct': (app) => streamCases(app, (pb) => pb.mode === 'direct'),
   'GET /api/stream/:id/hls/master.m3u8': (app) => streamCases(app, (pb) => pb.mode !== 'direct'),
@@ -442,7 +444,6 @@ const CASES = {
   // Profilbyte stänger inloggningen det görs med – en egen inloggning, som vid utloggning
   'POST /api/profiles/switch': async () => [{ token: ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token }],
   'POST /api/stream/:id/stop': () => [{ p: { id: S.remux } }, { p: { id: S.ep2 } }],
-  'GET /api/me/cinema': () => [{}],
   // Skärmtid (Android sparar den för uppspelning utan nät): huvudkontot utan regler och en barnprofil med regler
   'GET /api/screentime': async () => {
     const own = ok(await srv.req('/api/login', { method: 'POST', body: { name: 'admin', password: PW, app: true }, auth: false }), 'inloggning').token;

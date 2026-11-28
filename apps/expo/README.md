@@ -244,6 +244,12 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
 
 - Appen skickar startpositionen till servern, så att strömmen förbereds på rätt ställe (korta segment där).
 - När fingret landar på en Spela-knapp ber appen servern starta strömmen direkt (`warm=1`), innan du släpper.
+- Spelaren frågar `/playback` samtidigt som titelns uppgifter (`/api/items/:id`) i stället för efter, som webben.
+  Frågan är samma som förvärmningen (utan ljudspår – servern väljer profilens förval), så den tar över den förvärmda
+  strömmen. Valde servern ett annat ljudspår än titelns förval frågar appen igen med ljudspåret, och servern stoppar
+  den första strömmen. En ström som aldrig används (spelaren stängd, titeln gick inte att hämta) stoppas. Reglerna:
+  `src/startcore.ts` (testas i `test/expo-start.test.js`). Uppmätt i webbläget med 80 ms fördröjning per anrop: svaret
+  på `/playback` kommer cirka 90 ms tidigare (en rundresa).
 
 ## Begränsningar
 
