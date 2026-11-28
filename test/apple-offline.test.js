@@ -181,15 +181,15 @@ test('när servern svarar: utan rätten att ladda ner tas allt bort, och titler 
 // kunde titta utan gräns i flygplansläge). Samma regler som Android-appens ScreenClock och Expo-appens screenGate.
 test('skärmtiden utan nät: samma regler som Android- och Expo-appen (ScreenClock i OfflineCore.swift)', () => {
   // Högst 45 s per gång (som serverns glapp)
-  assert.match(core, /static let cap: Double = 45\b/); assert.match(ktcore, /const val CAP = 45\.0/); assert.match(ts, /Math\.min\(45, seconds\)/);
+  assert.match(core, /static let cap: Double = 45\b/); assert.match(ktcore, /const val CAP = 45\.0/); assert.match(ts, /OFF_GAP = 45\b/);
   const add = fn(core, 'addOffline');
   assert.match(add, /guard var c, c\.status\.limited, seconds > 0 else \{ return c \}/);
   assert.match(add, /let prev = c\.offDay == day \? c\.offSeconds : 0/, 'en ny dag börjar om');
   assert.match(add, /c\.offSeconds = prev \+ min\(cap, seconds\)/);
-  assert.match(ktcore, /val prev = if \(c\.offDay == day\) c\.offSeconds else 0\.0/);
+  // Android (och Expo) sparar sedan 2026-11-28 en post per uppspelning i stället för en summa per dag – reglerna
+  // för posterna provas i OfflineCoreTest.kt och test/expo-offline.test.js
   // Ny status från servern ersätter det som räknats i appen; saknas status = ingen skärmtid
   assert.match(core, /ScreenCache\(status: status \?\? ScreenStatus\(limited: false\)\)/);
-  assert.match(ktcore, /ScreenCache\(status \?: ScreenStatus\(limited = false\)\)/);
   const g = fn(core, 'gate');
   assert.match(g, /if !s\.limited \|\| \(audio && !s\.audio\) \{ return ok \}/);
   // Samma dag: statusens tid kvar; ny dag: den dagliga gränsen utan extra tid

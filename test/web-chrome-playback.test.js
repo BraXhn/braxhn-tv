@@ -441,7 +441,12 @@ test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren hete
   // Ny sidladdning: med spelaren öppen ändrar en ren hash-navigering sidan, och när spelaren stängs går den ett steg
   // bakåt i historiken – då hamnade testet på startsidan
   await p.goto('about:blank');
-  await p.goto(`${srv.base}/#/item/${lang.id}`);
+  // Webbappen kan själv byta adress precis efter laddningen (spelaren som stängs går bakåt) – försök då igen
+  for (let i = 0; ; i++) {
+    try { await p.goto(`${srv.base}/#/item/${lang.id}`); if (p.url().endsWith(`/#/item/${lang.id}`)) break; }
+    catch (e) { if (i >= 2 || !/interrupted by another navigation/.test(e.message)) throw e; }
+    if (i >= 2) break;
+  }
   // Titelsidan kan vara långsam när hela sviten körs. Faller det: visa vad sidan visade, så att orsaken syns i loggen
   try { await p.waitForSelector(`text=${sv} · ac3`, { timeout: 60000 }); } catch (e) {
     const d = await p.evaluate(() => ({ hash: location.hash, player: document.querySelector('#player') ? getComputedStyle(document.querySelector('#player')).display : null, main: (document.querySelector('main')?.innerText || '').slice(0, 600) })).catch(() => null);
