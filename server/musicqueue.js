@@ -2,20 +2,44 @@
 // upprepning och låtradions start. Webben sparar när kön ändras, vid paus och var 15:e sekund medan musiken spelar,
 // och läser den när sidan startar: kön och platsen överlever omladdning och följer med till nästa enhet.
 // Låtar som tagits bort, eller som profilen inte får se, hoppas över när kön läses.
+// En ljudbok eller ett poddavsnitt ersätter musiken: då sparas bara vilken (`spoken`), positionen är profilens framsteg.
 import { get, all, run, now } from './db.js';
 import { TRACK_SQL, shapeTrack } from './music.js';
-import { libFilter } from './perms.js';
+import { libFilter, libOk } from './perms.js';
 
 /** Längsta kö som sparas (låtradion växer hela tiden): ett fönster runt platsen i kön */
 export const MAX_TRACKS = 1000;
 const BEFORE = 200; // låtar före platsen som behålls när kön kortas
-const EMPTY = { tracks: [], idx: -1, pos: 0, repeat: false, radio: null, updated: 0 };
+const EMPTY = { tracks: [], idx: -1, pos: 0, repeat: false, radio: null, spoken: null, updated: 0 };
+const KINDS = ['book', 'podcast'];
 const okId = (x) => Number.isSafeInteger(x) && x > 0;
 
-/** Kön som webben ska visa: { tracks (som i albumlistorna), idx, pos, repeat, radio, updated }. Tom kö: tracks = []. */
+/**
+ * Boken eller avsnittet i kön, med profilens position: { kind, id, position }, eller null om det inte finns längre
+ * eller inte får höras av profilen (bibliotek utanför profilen; barnprofiler har inga poddar).
+ */
+function spokenOf(uid, raw) {
+  let s = null;
+  try { s = raw ? JSON.parse(raw) : null; } catch {}
+  if (!s || !KINDS.includes(s.kind) || !okId(s.id)) return null;
+  if (s.kind === 'book') {
+    const b = get('SELECT library_id FROM books WHERE id=?', s.id);
+    if (!b || !libOk(uid, b.library_id)) return null;
+    return { kind: 'book', id: s.id, position: get('SELECT position FROM book_progress WHERE user_id=? AND book_id=?', uid, s.id)?.position || 0 };
+  }
+  if (get('SELECT max_age FROM users WHERE id=?', uid)?.max_age != null || !get('SELECT id FROM podcast_episodes WHERE id=?', s.id)) return null;
+  const p = get('SELECT position, played FROM podcast_progress WHERE user_id=? AND episode_id=?', uid, s.id);
+  return { kind: 'podcast', id: s.id, position: p && !p.played ? p.position || 0 : 0 };
+}
+
+/**
+ * Kön som webben ska visa: { tracks (som i albumlistorna), idx, pos, repeat, radio, spoken, updated }. Tom kö: tracks = [].
+ * spoken = { kind: 'book' | 'podcast', id, position } när en bok eller ett avsnitt spelades sist (tracks är då tom).
+ */
 export function load(uid) {
   const r = get('SELECT * FROM music_queue WHERE user_id=?', uid);
   if (!r) return EMPTY;
+  if (r.spoken) { const spoken = spokenOf(uid, r.spoken); return spoken ? { ...EMPTY, spoken, updated: r.updated } : EMPTY; }
   let ids = [], radio = null;
   try { ids = JSON.parse(r.tracks); } catch {}
   try { radio = r.radio ? JSON.parse(r.radio) : null; } catch {}
@@ -35,17 +59,26 @@ export function load(uid) {
   });
   if (idx < 0) { if (!r.rep || !tracks.length) return EMPTY; idx = 0; pos = 0; } // kön var slut
   if (tracks[idx].duration > 0 && pos > tracks[idx].duration - 1) pos = 0;
-  return { tracks, idx, pos, repeat: !!r.rep, radio, updated: r.updated };
+  return { tracks, idx, pos, repeat: !!r.rep, radio, spoken: null, updated: r.updated };
 }
 
 /**
- * Sparar kön. b = { ids, idx, pos, repeat, radio: { seed: { trackId | albumId | artistId }, name }, uid }.
+ * Sparar kön. b = { ids, idx, pos, repeat, radio: { seed: { trackId | albumId | artistId }, name }, uid }, eller
+ * { ids: [], spoken: { kind: 'book' | 'podcast', id }, uid } för en bok eller ett avsnitt (ersätter musiken).
  * uid (webben skickar det) måste vara den inloggade – en flik från före ett profilbyte får inte skriva över den nya
  * profilens kö. Tom lista tar bort kön. Fel: { status, error }.
  */
 export function save(uid, b) {
   if (!b || typeof b !== 'object' || Array.isArray(b)) return { status: 400, error: 'Ogiltig kö' };
   if (b.uid != null && Number(b.uid) !== uid) return { status: 409, error: 'Kön hör till en annan profil' };
+  if (b.spoken != null) {
+    const s = b.spoken;
+    if (typeof s !== 'object' || !KINDS.includes(s.kind) || !okId(s.id)) return { status: 400, error: 'Ogiltig kö' };
+    run(`INSERT INTO music_queue(user_id, tracks, idx, pos, rep, radio, spoken, updated) VALUES(?,'[]',0,0,0,NULL,?,?)
+      ON CONFLICT(user_id) DO UPDATE SET tracks='[]', idx=0, pos=0, rep=0, radio=NULL, spoken=excluded.spoken, updated=excluded.updated`,
+      uid, JSON.stringify({ kind: s.kind, id: s.id }), now());
+    return null;
+  }
   if (!Array.isArray(b.ids) || !b.ids.every(okId)) return { status: 400, error: 'Ogiltig kö' };
   let ids = b.ids, idx = b.idx;
   if (!ids.length) { clear(uid); return null; }
@@ -63,7 +96,7 @@ export function save(uid, b) {
     if (Object.keys(seed).length) radio = { seed, name: String(b.radio.name || '').slice(0, 200) };
   }
   run(`INSERT INTO music_queue(user_id, tracks, idx, pos, rep, radio, updated) VALUES(?,?,?,?,?,?,?)
-    ON CONFLICT(user_id) DO UPDATE SET tracks=excluded.tracks, idx=excluded.idx, pos=excluded.pos, rep=excluded.rep, radio=excluded.radio, updated=excluded.updated`,
+    ON CONFLICT(user_id) DO UPDATE SET tracks=excluded.tracks, idx=excluded.idx, pos=excluded.pos, rep=excluded.rep, radio=excluded.radio, spoken=NULL, updated=excluded.updated`,
     uid, JSON.stringify(ids), idx, pos, b.repeat ? 1 : 0, radio ? JSON.stringify(radio) : null, now());
   return null;
 }

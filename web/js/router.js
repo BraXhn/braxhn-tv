@@ -98,13 +98,13 @@ function showLogin() {
   $('#userbtn').classList.toggle('upd', !!(me.adminHere && me.update));
   screenBadge(me.screenTime);
 }
-// Musikkön från förra gången (server/musicqueue.js): minispelaren visar låten pausad. Ljudspelaren laddas bara när
-// det finns en kö, och bara för profilen som var inloggad när svaret kom.
+// Musikkön, ljudboken eller poddavsnittet från förra gången (server/musicqueue.js): minispelaren visar den pausad.
+// Ljudspelaren laddas bara när det finns något, och bara för profilen som var inloggad när svaret kom.
 function restoreQueue() {
   const uid = me?.id;
   if (!uid) return;
   api('/me/queue', { bg: true }).then(q => {
-    if (q?.tracks?.length && me?.id === uid && !curPlayer()) return need('audio.js').then(m => m.restoreQueue(q, uid));
+    if ((q?.tracks?.length || q?.spoken) && me?.id === uid && !curPlayer()) return need('audio.js').then(m => m.restoreQueue(q, uid));
   }).catch(() => {});
 }
 /** Det som bara görs med serverns svar: mätning, aktivitetsrutan, Spela på… och uppdateringsnotisen */

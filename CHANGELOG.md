@@ -21,6 +21,15 @@
   *Skärmtiden tar slut om 4 min*, som i webben och de andra apparna. VoiceOver läser upp varningen när minuten ändras.
   Tiden följer serverns räkning medan filmen spelar och appens egen räkning utan nät; en paus räknas inte. Förut
   stoppades barnet utan förvarning. Inte byggt eller provat på enhet här.
+- **Ljudboken eller poddavsnittet står kvar i minispelaren efter omladdning.** Förut försvann minispelaren när sidan
+  laddades om eller telefonen rensade fliken, och man fick leta upp boken igen. Nu står boken eller avsnittet kvar
+  pausat på platsen där du slutade – även i en ny flik och på en annan enhet, och bara för profilen som lyssnade, som
+  musikkön. Inget räknas (skärmtid, lyssnad tid) och inget laddas förrän du trycker Spela; hopp bakåt och framåt flyttar
+  bara platsen. ✕ tar bort den. Expo-appen visar den inte än.
+- **Kortet i slutet av ett avsnitt visar vilket avsnitt som kommer.** Webbspelaren sa bara *Nästa avsnitt om N s*.
+  Nu står nästa avsnitts namn, nummer (*S1 · A2*) och bild på kortet, så att man ser om nästa avsnitt börjar en ny
+  säsong och kan välja att stanna. Med fjärrkontroll eller tangentbord har *Spela nu* fokus och pilarna går till
+  *Avbryt*; på en telefon går kortet över hela bredden.
 - **Tiden blinkar inte bort när webbspelaren laddar efter en spolning.** Har filmen redan spelat står tiden kvar
   med *Laddar…* efter sig, i stället för att bytas mot *Startar omkodning…*.
 - **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om

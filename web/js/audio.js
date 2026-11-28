@@ -219,17 +219,37 @@ function setBarMode(spoken) {
   if (spoken) showLyrics(false);
   applyVolume();
 }
+/** Ljudbokens eller avsnittets beskrivning för playSpoken ur /api/audiobooks/book/:id */
+export function bookSpoken(b) {
+  return { kind: 'book', id: b.id, title: b.title, sub: b.author, link: `#/book/${b.id}`, cover: b.cover ? `/api/audiobooks/cover/${b.id}` : null,
+    duration: b.duration, position: b.position, speed: b.speed, chapters: b.chapters,
+    files: b.files.map(f => ({ id: f.id, offset: f.offset, duration: f.duration, url: `/api/audiobooks/files/${f.id}/stream?a=${audioCaps()}` })) };
+}
+/** Samma för ett poddavsnitt (/api/podcasts/episodes/:id eller avsnittslistorna) – lyssnat klart börjar från början */
+export function episodeSpoken(e) {
+  return { kind: 'podcast', id: e.id, title: e.title, sub: e.podcastTitle, link: `#/podcast/${e.podcast}`, cover: `/api/podcasts/${e.podcast}/image`,
+    duration: e.duration || 0, position: e.played ? 0 : e.position || 0, files: [{ id: e.id, offset: 0, duration: e.duration, url: `/api/podcasts/episodes/${e.id}/stream` }] };
+}
+// Var talet börjar: den sparade positionen, utom när mindre än 30 s är kvar (då från början)
+const spokenStart = (s) => s.position && s.duration && s.duration - s.position > 30 ? s.position : 0;
 export function playSpoken(s) {
   ensureBar();
   loadListenPrefs();
   closeAllPlayers();
   if (M.spoken) spokenSave();
-  if (M.queue.length) queueForget(); // boken/avsnittet ersätter musikkön (som förut) – den sparade kön ska inte komma tillbaka
-  queueStop();
+  // Boken/avsnittet ersätter musikkön: kön på servern minns i stället vilken bok (spokenQueue) – inget osparat från
+  // musiken skickas, så att den inte hinner skriva över boken
+  clearTimeout(Q.timer); Q.owner = 0; Q.dirty = false;
   M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null; M.loadSeq++; M.resume = null; M.starting = null;
   clearWait();
   AE.stop(); AE.only(null); AE.E.elT = null; AE.E.paused = false; AE.applyGains(); // tal spelas alltid av elementet (musikens jämna ljudnivå gäller inte)
   if (LPREFS.speechLevel) ensureEngine(); // jämn ljudnivå för tal går genom Web Audio (i användarens klick)
+  spokenBar(s);
+  spokenQueue(s);
+  spokenSeek(spokenStart(s));
+}
+/** Minispelaren visar boken/avsnittet (M.spoken) – utan att något laddas */
+function spokenBar(s) {
   M.spoken = { ...s, speed: s.speed || +store.get('speed', 1), lastSave: Date.now() };
   enginePrefs();
   M.sfile = null;
@@ -240,12 +260,13 @@ export function playSpoken(s) {
   $('#martist').textContent = s.sub || ''; $('#martist').href = s.link || '#';
   $('#mspeed').value = String(M.spoken.speed);
   if (navigator.mediaSession && window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.sub || '', artwork: s.cover ? [{ src: s.cover, sizes: '600x600', type: 'image/jpeg' }] : [] });
-  spokenSeek(s.position && s.duration && s.duration - s.position > 30 ? s.position : 0);
 }
-export const spokenPos = () => M.spoken && M.sfile ? M.sfile.offset + (M.soff || 0) + M.el.currentTime : 0;
+// Återställd bok (M.resume med M.spoken): positionen är den sparade tills man trycker Spela
+export const spokenPos = () => !M.spoken ? 0 : M.resume ? M.resume.pos : M.sfile ? M.sfile.offset + (M.soff || 0) + M.el.currentTime : 0;
 export async function spokenSeek(t) {
   const s = M.spoken, a = M.el; if (!s) return;
   t = Math.max(0, Math.min(t, (s.duration || 1e9) - 0.5));
+  if (M.resume) { M.resume.pos = t; return spokenTick(); } // pausad efter omladdning: bara platsen flyttas
   const f = [...s.files].reverse().find(x => x.offset <= t) || s.files[0];
   const local = t - f.offset;
   const seq = ++M.seekSeq;
@@ -269,7 +290,7 @@ function spokenTick() {
   if (Date.now() - s.lastSave > 15000 && !M.audio.paused) spokenSave();
 }
 function spokenSave(final) {
-  const s = M.spoken; if (!s) return;
+  const s = M.spoken; if (!s || M.resume) return; // en återställd bok som inte startats räknas inte (skärmtid, lyssnad tid)
   s.lastSave = Date.now();
   const position = final ? s.duration : spokenPos();
   if (!final && position < 5) return;
@@ -471,7 +492,13 @@ function queueStop() {
   if (Q.owner && !M.spoken && (Q.dirty || (M.audio && !M.audio.paused))) saveQueue(true);
   clearTimeout(Q.timer); Q.owner = 0; Q.dirty = false;
 }
-/** Kön ska inte komma tillbaka (spelaren stängdes, en bok eller ett avsnitt tog över) */
+/** Kön minns boken eller avsnittet (positionen sparas som vanligt i framstegen) – den här fliken skriver kön nu */
+function spokenQueue(s) {
+  if (!me?.id || !s.id) return;
+  Q.owner = me.id; Q.saved = Date.now();
+  fetch('/api/me/queue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid: Q.owner, ids: [], spoken: { kind: s.kind, id: s.id } }), keepalive: true }).catch(() => {});
+}
+/** Kön ska inte komma tillbaka (spelaren stängdes) */
 function queueForget() {
   if (Q.owner && Q.owner === me?.id) fetch('/api/me/queue', { method: 'DELETE', keepalive: true }).catch(() => {});
   clearTimeout(Q.timer); Q.owner = 0; Q.dirty = false;
@@ -484,6 +511,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
  * spelas eller om en annan profil hunnit logga in. Låtar som inte finns eller som profilen inte får se har servern tagit bort.
  */
 export function restoreQueue(q, uid) {
+  if (q?.spoken) return restoreSpoken(q.spoken, uid);
   if (M.cur || M.spoken || P || LP || RP || !q?.tracks?.length || !me || me.id !== uid) return false;
   const i = Math.max(0, Math.min(q.idx | 0, q.tracks.length - 1));
   ensureBar(); setBarMode(false);
@@ -495,9 +523,38 @@ export function restoreQueue(q, uid) {
   setPlaying(false); timeUI();
   return true;
 }
+/**
+ * Boken eller avsnittet från förra gången, pausat på profilens position. Inget laddas och inget framsteg skickas förrän
+ * man trycker Spela (resumeQueue). Hämtar titeln (kapitel, filer); finns den inte längre visas inget.
+ */
+async function restoreSpoken(sp, uid) {
+  const busy = () => M.cur || M.spoken || P || LP || RP || !me || me.id !== uid;
+  if (busy() || !['book', 'podcast'].includes(sp.kind)) return false;
+  let s;
+  try { s = sp.kind === 'book' ? bookSpoken(await api('/audiobooks/book/' + +sp.id, { bg: true })) : episodeSpoken(await api('/podcasts/episodes/' + +sp.id, { bg: true })); }
+  catch { return false; }
+  if (busy()) return false; // något hann börja spela, eller profilen byttes, medan titeln hämtades
+  ensureBar(); loadListenPrefs();
+  M.queue = []; M.idx = -1; M.cur = { id: null, duration: s.duration, title: s.title }; M.radio = null;
+  spokenBar(s);
+  M.resume = { pos: spokenStart(s) };
+  Q.owner = uid; Q.dirty = false; Q.saved = Date.now();
+  setPlaying(false); spokenTick();
+  return true;
+}
 /** Spela på den återställda kön: låten startar där man var (i användarens klick – ljudsammanhanget får starta då) */
 function resumeQueue() {
   const r = M.resume; if (!r) return Promise.resolve();
+  if (M.spoken) { // återställd bok/avsnitt: som playSpoken, på den sparade (eller flyttade) platsen
+    M.resume = null;
+    closeAllPlayers();
+    AE.stop(); AE.only(null); AE.E.elT = null; AE.E.paused = false; AE.applyGains();
+    if (LPREFS.speechLevel) ensureEngine();
+    enginePrefs();
+    M.spoken.lastSave = Date.now();
+    spokenSeek(r.pos);
+    return Promise.resolve();
+  }
   closeAllPlayers();
   ensureEngine(M.cur);
   loadListenPrefs();

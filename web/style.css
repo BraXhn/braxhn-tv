@@ -208,6 +208,13 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 #player .pbar button{background:rgba(20,22,30,.85)}
 #player .next{position:absolute;right:24px;bottom:90px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:16px;
   display:flex;flex-direction:column;gap:10px;max-width:320px;transition:opacity .3s}
+/* Nästa avsnitt på kortet: stillbild, S1 · A2 och namnet */
+#player .next .nx{display:flex;gap:12px;align-items:center;min-width:0}
+#player .next .nx img{width:128px;height:72px;object-fit:cover;border-radius:8px;flex:none;background:#000}
+#player .next .nxt{display:flex;flex-direction:column;gap:2px;min-width:0}
+#player .next .nxn{font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#player .next button:focus-visible{outline:3px solid var(--accent,#e5a00d);outline-offset:2px}
+@media (max-width:500px){#player .next{left:12px;right:12px;max-width:none}}
 #player .msg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.75);padding:14px 20px;border-radius:10px}
 /* Familjefiltret: liten indikator när ljudet tystas eller en scen hoppas över (syns även när kontrollerna är dolda) */
 #player .ffbadge{position:absolute;top:calc(64px + env(safe-area-inset-top));right:18px;background:rgba(0,0,0,.6);color:#dde;font-size:.75rem;

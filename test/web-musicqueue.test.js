@@ -336,7 +336,9 @@ tw('ljudbok eller podd efter en återställd kö: talet spelar som förut och mu
   assert.deepEqual(st, { spoken: true, resume: null, title: 'Avsnittet', speed: true, q: 0 });
   await sleep(1200);
   assert.deepEqual((await req('/api/me/queue')).data.tracks, [], 'musikkön är borttagen');
-  assert.equal(A.puts.length, 0, 'talet skriver ingen musikkö');
+  // Kön minns bara vilket avsnitt (web-spoken-queue.test.js) – inga låtar. Avsnittet finns inte på servern, så efter
+  // omladdning visas inget alls.
+  assert.deepEqual(A.puts, [{ uid: adminId, ids: [], spoken: { kind: 'podcast', id: 999999 } }], 'talet skriver ingen musikkö');
   await A.page.click('#mplay');
   await A.page.reload();
   await A.page.waitForSelector('#userbtn');

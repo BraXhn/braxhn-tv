@@ -1,8 +1,7 @@
 // Vyer: ljudböcker och poddar
 // @lazy – laddas vid behov (LAZY i js/router.js), förladdas inte från index.html (server/http/static.js)
 import { $, $$, act, api, coverImg, esc, fmtDate, fmtDur, fmtTime, hue, keyClick, later, libs, main, me, store, toast, views, toastErr, t } from '../core.js';
-import { M, playSpoken, spokenPos, spokenSeek } from '../audio.js';
-import { audioCaps } from '../player/caps.js';
+import { M, bookSpoken, episodeSpoken, playSpoken, spokenPos, spokenSeek } from '../audio.js';
 import { downloadBook, stateOf, supported as offlineOk } from '../offline.js';
 import { loadLibs, route } from '../router.js';
 import { emptyState, errorState, loadingState, noLib } from '../ui/states.js';
@@ -52,11 +51,6 @@ views.books = async (lid, filter) => {
   if ($('#bsort')) $('#bsort').onchange = (e) => { store.set('booksort', e.target.value); route(); };
   if ($('#bgroup')) $('#bgroup').onchange = (e) => { store.set('bookgroup', e.target.value); route(); };
 };
-function bookSpoken(b) {
-  return { kind: 'book', id: b.id, title: b.title, sub: b.author, link: `#/book/${b.id}`, cover: b.cover ? `/api/audiobooks/cover/${b.id}` : null,
-    duration: b.duration, position: b.position, speed: b.speed, chapters: b.chapters,
-    files: b.files.map(f => ({ id: f.id, offset: f.offset, duration: f.duration, url: `/api/audiobooks/files/${f.id}/stream?a=${audioCaps()}` })) };
-}
 views.book = async (id) => {
   const b = await api('/audiobooks/book/' + id);
   const left = b.duration ? b.duration - b.position : 0;
@@ -161,9 +155,7 @@ const epRows = (eps, showPod) => `<table class="tracks">${eps.map((e, i) => `<tr
   <div class="muted small">${showPod ? esc(e.podcastTitle || '') + ' · ' : ''}${fmtDate(e.published)}${e.duration ? ' · ' + fmtDur(e.duration) : ''}${e.position > 0 && !e.played ? ` ${t('· {v} kvar', { v: fmtDur((e.duration || 0) - e.position) })}` : ''}${e.downloaded ? t(' · nedladdat') : e.downloading ? t(' · laddas ner…') : ''}</div></td>
   <td class="r" style="white-space:nowrap">${iconButton({ icon: '▶', label: t('Spela {title}', { title: e.title }), data: { epplay: i } })} ${iconButton({ icon: e.played ? '↺' : '✓', label: `${e.played ? t('Markera som ej lyssnad') : t('Markera som lyssnad')}: ${e.title}`, data: { epdone: i } })}</td></tr>`).join('')}</table>`;
 function bindEps(eps) {
-  const sp = (e) => ({ kind: 'podcast', id: e.id, title: e.title, sub: e.podcastTitle, link: `#/podcast/${e.podcast}`, cover: `/api/podcasts/${e.podcast}/image`,
-    duration: e.duration || 0, position: e.played ? 0 : e.position, files: [{ id: e.id, offset: 0, duration: e.duration, url: `/api/podcasts/episodes/${e.id}/stream` }] });
-  $$('[data-epplay]').forEach(b => b.onclick = () => playSpoken(sp(eps[+b.dataset.epplay])));
+  $$('[data-epplay]').forEach(b => b.onclick = () => playSpoken(episodeSpoken(eps[+b.dataset.epplay])));
   $$('[data-epdone]').forEach(b => b.onclick = act(async () => { const e = eps[+b.dataset.epdone]; await api(`/podcasts/episodes/${e.id}/progress`, { method: 'POST', body: { position: 0, played: !e.played } }); route(); }));
 }
 views.podcasts = async () => {

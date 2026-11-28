@@ -89,36 +89,7 @@ GitHub Actions och mätningen i Safari att paus inte räknas.
   i Safari.
 
 
-### 5. Ljudbok eller poddavsnitt finns kvar i minispelaren efter omladdning
-
-- **Vad:** musikkön återställs efter omladdning, i en ny flik och på en annan enhet (`restoreQueue` i
-  `web/js/audio.js`, `server/musicqueue.js`), men en bok eller ett poddavsnitt gör det inte: `saveQueue` och
-  `queueTouch` gör inget när `M.spoken` är satt, `restoreQueue` hoppar över, och `playSpoken` anropar
-  `queueForget`. Positionen finns redan på servern (`/api/audiobooks/book/:id/progress`, poddarnas progress). Visa
-  den senaste boken eller avsnittet pausat i minispelaren efter omladdning, som musiken (t.ex. `spoken: { kind, id }`
-  i kön, eller *Fortsätt lyssna* från `continueBooks`).
-- **Varför:** ljudböcker lyssnar man på i omgångar; i dag försvinner minispelaren när sidan laddas om eller telefonen
-  rensar fliken, och man måste leta upp boken igen. Audiobookshelf och Plexamp har det.
-- **Filer:** `web/js/audio.js` (`saveQueue`, `restoreQueue`, `playSpoken`), `server/musicqueue.js`,
-  `web/js/router.js` (anropet efter start), test i `test/` för köns API.
-- **Klart när:** ett test visar att en bok sparad i kön kommer tillbaka med rätt position för samma profil och inte för
-  en annan, och i Chrome (Playwright) visar minispelaren boken pausad efter omladdning och fortsätter där den var.
-
-### 6. Webbspelaren: kortet i slutet visar vilket avsnitt som kommer
-
-- **Vad:** kortet i slutet säger bara *Nästa avsnitt om N s* med *Spela nu* och *Avbryt* (`onEnded` i
-  `web/js/player/video.js`) – inget namn, nummer eller bild. Svaret från `/api/items/:id` har redan `nextId`
-  (`server/routes/library.js`); lägg till namn, säsong/avsnitt och bild för nästa avsnitt (en rad i samma svar, eller
-  ett anrop när eftertexterna börjar, samtidigt med förvärmningen). Kortet kan gärna komma redan vid eftertexterna
-  (`credits` i svaret från `/playback`), som i Plex och Netflix.
-- **Varför:** man ser inte om nästa avsnitt är början på en ny säsong eller ett dubbelavsnitt, och kan inte välja att
-  stanna. Det är det vanligaste ögonblicket i en serie.
-- **Filer:** `web/js/player/video.js` (`onEnded`), `server/routes/library.js`, `web/style.css` (`.next`),
-  `web/i18n/en.js`.
-- **Klart när:** i Chrome (Playwright, 1280×720 och 390×844) visar kortet nästa avsnitts namn, *S1 · A2* och bild,
-  och texten finns på engelska.
-
-### 7. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
+### 5. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
 
 - **Vad:** bara filmer och avsnitt kan laddas ner i Android- och iOS-appen (`Offline.kt`, `Offline.swift`; inget i
   `Listen.swift` eller `MusicService.kt`). Expo-appen har nedladdade böcker. När det byggs: räkna skärmtid utan nät för
@@ -133,7 +104,7 @@ GitHub Actions och mätningen i Safari att paus inte räknas.
   (`OfflineCoreTest.kt`, `test/apple-offline.test.js`) har en post med `audio: true` från en nedladdad bok, och bygget i
   GitHub Actions går igenom.
 
-### 8. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
+### 6. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
 
 - **Vad:** `test/web-chrome-playback.test.js` (samma mätning som uppspelningsvakten, `installProbes()` i
   `test/helpers/chrome.js`) har enligt dagens agenter fallit ibland när flera ffmpeg-jobb körs samtidigt på maskinen.
@@ -279,6 +250,19 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   `reportProgress` ger spelaren `screenTime` (`onScreen`, även på Apple TV), `ScreenStatus` tar emot `allowed` och
   `left`. `test/apple-screenleft.test.js` (6 fall, webbens `playerLeft` jämförd var 7:e sekund upp till ett dygn),
   `left` i `ScreenStatus.ios` i kontraktet. **Inte provat:** kompilering, riktig enhet, VoiceOver och mätningen i Safari.
+- 2026-11-28: Webbspelaren: kortet i slutet visar vilket avsnitt som kommer (förut punkt 6), gren
+  `team/webb-mini-2026-11-28`. `/api/items/:id` har `nextEpisode` (`{ id, title, season, episode, image }`; bilden är
+  stillbilden, annars seriens bakgrund eller affisch) och `nextCard` i `video.js` ritar bild, *S1 · A2* och namnet.
+  *Spela nu* får fokus (pilarna går till *Avbryt*, Enter startar), kortet går kant i kant med 12 px marginal under
+  500 px. `test/web-next-card.test.js` i Chrome (1280×800 och 390×844): 3 fall, alla föll före ändringen. Kortet kommer
+  fortfarande först när avsnittet är slut, inte redan vid eftertexterna.
+- 2026-11-28: Ljudbok eller poddavsnitt finns kvar i minispelaren efter omladdning (förut punkt 5), samma gren.
+  `PUT /api/me/queue` med `spoken: { kind, id }` (kolumnen `music_queue.spoken`), `GET` svarar med profilens position
+  ur framstegen. Webben visar boken pausad (`restoreSpoken`, `M.resume` + `M.spoken`): ingen fil laddas och inget
+  framsteg skickas (skärmtid, lyssnad tid) förrän Spela; hopp flyttar bara platsen. `test/web-spoken-queue.test.js`:
+  API (rätt position per profil, inte för en annan, inga poddar för barn, felaktiga värden) och Chrome (omladdning,
+  inga anrop före Spela, fortsätter där, ✕ tar bort); de tre fallen föll före ändringen. Expo-appen tar fortfarande bort
+  kön när en bok startar och visar inte boken efter omstart.
 - 2026-11-28: iOS-appen lämnar in skärmtiden från tid utan nät (punkt 6, Android och Expo kvar), gren
   `team/apple-skarmtid-2026-11-28`. En post per uppspelning `{ id, at, seconds, audio }` per server och profil
   (`ScreenLog` i `OfflineCore.swift`): posten växer medan filmen spelar, en ny börjar efter mer än 120 s uppehåll eller

@@ -1,5 +1,5 @@
 // Videospelaren: start, laddning (direkt/HLS), framsteg, nästa avsnitt och stängning
-import { $, $$, api, esc, fmtTime, locale, me, status, store, sxe, toast, toastErr, t } from '../core.js';
+import { $, $$, api, esc, fmtTime, imgUrl, locale, me, status, store, sxe, toast, toastErr, t } from '../core.js';
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
@@ -807,9 +807,12 @@ function onEnded() {
   if (!plan) return closePlayer();
   if (plan.auto && plan.seconds === 0) return goNext(it.nextId);
   const box = document.createElement('div'); box.className = 'next';
+  box.setAttribute('role', 'group'); box.setAttribute('aria-label', t('Nästa avsnitt'));
   let n = plan.seconds;
-  box.innerHTML = `<b>${plan.auto ? `${t('Nästa avsnitt om')} <span class="cd">${n}</span> s` : t('Nästa avsnitt')}</b><div class="row"><button class="primary small" data-go>${t('Spela nu')}</button><button class="ghost small" data-stay>${plan.auto ? t('Avbryt') : t('Stäng')}</button></div>`;
+  box.innerHTML = `<b>${plan.auto ? `${t('Nästa avsnitt om')} <span class="cd">${n}</span> s` : t('Nästa avsnitt')}</b>${nextCard(it.nextEpisode)}<div class="row"><button class="primary small" data-go>${t('Spela nu')}</button><button class="ghost small" data-stay>${plan.auto ? t('Avbryt') : t('Stäng')}</button></div>`;
   cur.el.append(box);
+  // Fjärrkontroll/tangentbord: Spela nu har fokus (pilarna flyttar till Avbryt) – inte om man skriver i ett fält
+  if (!document.activeElement?.matches('input,textarea,select,[contenteditable]')) $('[data-go]', box).focus({ preventScroll: true });
   warmNext(cur); warmOnPoint($('[data-go]', box), cur);
   clearInterval(cur.nextTimer);
   const tm = cur.nextTimer = plan.auto ? setInterval(() => {
@@ -820,6 +823,13 @@ function onEnded() {
   }, 1000) : null;
   $('[data-go]', box).onclick = () => { clearInterval(tm); goNext(it.nextId); };
   $('[data-stay]', box).onclick = () => { clearInterval(tm); box.remove(); };
+}
+
+/** Nästa avsnitt på kortet: bild, S1 · A2 och namnet (nextEpisode i /api/items/:id; saknas det visas bara rubriken) */
+function nextCard(ne) {
+  if (!ne) return '';
+  const num = ne.season != null && ne.episode != null ? (ne.season === 0 ? t('Specialavsnitt') + ' · ' + ne.episode : t('S{season} · A{episode}', { season: ne.season, episode: ne.episode })) : '';
+  return `<div class="nx">${ne.image ? `<img src="${esc(imgUrl(ne.image, 128))}" alt="" width="128" height="72" decoding="async" data-fb="1">` : ''}<div class="nxt">${num ? `<span class="small muted">${esc(num)}</span>` : ''}<span class="nxn">${esc(ne.title || '')}</span></div></div>`;
 }
 
 async function goNext(nextId) {

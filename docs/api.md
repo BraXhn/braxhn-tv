@@ -301,7 +301,10 @@ utan `audio=` spelas det föredragna ljudspåret, utan `q` (eller `q=auto`) gäl
 början om appen inte har ett eget val), `autoSkip` (`{ intro, recap, credits }`, bool: hoppa över automatiskt efter
 en kort nedräkning; `credits` = gå till nästa avsnitt när eftertexterna börjar) och `autoNext`
 (`{ enabled: bool, countdown: heltal sekunder }`). `/api/items/:id` har också `defaultAudio`/`defaultSub`, där
-`defaultSub` kan vara en PGS-bildundertext (webbspelaren ritar dem själv).
+`defaultSub` kan vara en PGS-bildundertext (webbspelaren ritar dem själv). Avsnitt har dessutom `nextEpisode`
+(`{ id, title, season, episode, image }` eller `null` när `nextId` saknas): `image` är avsnittets stillbild
+(`/api/image/<id>/thumb`), annars seriens bakgrund eller affisch, eller `null`. Webbspelaren visar det på kortet i
+slutet av avsnittet.
 
 Android-appen skickar `cinema=1` vid varje start från början (servern ger trailers bara för filmer och när bio-läget är
 på; förut läste appen först `GET /api/me/cinema`), lägger posterna först i spelarens kö och hoppar till filmen vid *Hoppa över* eller
@@ -551,14 +554,20 @@ Bara tillägg (server/gapless.js, server/listening.js) – apparna kan använda 
 Kön i webbens minispelare sparas per användare/profil (server/musicqueue.js), så att den överlever omladdning och följer
 med mellan enheter. Apparna kan använda samma adresser.
 
-- `GET /api/me/queue` → `{ tracks, idx, pos, repeat, radio, updated }`. `tracks` är spår som i albumlistorna, i köns
+- `GET /api/me/queue` → `{ tracks, idx, pos, repeat, radio, spoken, updated }`. `tracks` är spår som i albumlistorna, i köns
   ordning (blandat är redan blandat). Spår som tagits bort eller som profilen inte får se är borttagna; saknas spåret på
   `idx` pekar `idx` på nästa som finns kvar och `pos` är 0. Ingen kö (eller kön var slut): `tracks: []`, `idx: -1`.
+  `spoken` = `{ kind: 'book' | 'podcast', id, position }` när en ljudbok eller ett poddavsnitt spelades sist (då är
+  `tracks` tom), annars `null`. `position` är profilens framsteg (sekunder; ett avsnitt som lyssnats klart ger 0). En bok
+  i ett bibliotek profilen inte får se, ett borttaget avsnitt och poddar i barnprofiler ger ingen kö.
 - `PUT /api/me/queue` `{ ids, idx, pos, repeat, radio: { seed: { trackId | albumId | artistId }, name }, uid }`. `ids` = spårens
   id (heltal > 0), `idx` = platsen i `ids`, `pos` = sekunder. Längre köer än 1000 kortas till ett fönster runt platsen (200
   före). `uid` är valfritt: skickas det och är någon annan än den inloggade svarar servern 409 (en flik från före ett
   profilbyte). Tom `ids` tar bort kön. Fel: 400, högst 64 kB.
-- `DELETE /api/me/queue` tar bort kön (webben gör det när spelaren stängs med ✕ och när en bok eller ett avsnitt tar över).
+- `PUT /api/me/queue` `{ ids: [], spoken: { kind: 'book' | 'podcast', id }, uid }`: boken eller avsnittet ersätter
+  musiken (webben gör det när talet startar; positionen sparas som vanligt med `/progress`). En vanlig kö tar bort det.
+- `DELETE /api/me/queue` tar bort kön (webben gör det när spelaren stängs med ✕; Expo-appen också när en bok eller ett
+  avsnitt tar över).
 
 ## Bibliotekets filter: `/api/libraries/:id/items`, `/facets`, `/shuffle`
 

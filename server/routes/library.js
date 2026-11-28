@@ -314,6 +314,11 @@ route('GET', '/api/items/:id', user, (c) => {
       const sib = all(`SELECT id FROM items WHERE parent_id=? AND version_of IS NULL ORDER BY season, episode`, it.parent_id).map(r => r.id);
       const i = sib.indexOf(it.version_of ?? it.id);
       out.prevId = sib[i - 1] || null; out.nextId = sib[i + 1] || null;
+      // Kortet i slutet (webbspelaren): namn, nummer och bild för nästa avsnitt – stillbilden, annars seriens bild
+      const n = out.nextId && get(`SELECT e.id, e.title, e.season, e.episode, e.thumb, s.id AS sid, s.backdrop AS sb, s.poster AS sp
+        FROM items e JOIN items s ON s.id=e.parent_id WHERE e.id=?`, out.nextId);
+      out.nextEpisode = n ? { id: n.id, title: n.title, season: n.season, episode: n.episode,
+        image: n.thumb ? `/api/image/${n.id}/thumb` : n.sb ? `/api/image/${n.sid}/backdrop` : n.sp ? `/api/image/${n.sid}/poster` : null } : null;
     }
   }
   send(c.res, 200, out);
