@@ -445,9 +445,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     report(final = true)
                     skipCd = null
                     // Kontots val (autoNext i /playback): på = kortet med nedräkningen (0 s = direkt), av = kortet utan
-                    // nedräkning. I bilen inget kort (SkipCore.atEnd). Utan svar från servern gäller 8 s.
+                    // nedräkning. I bilen inget kort (SkipCore.atEnd). Utan /playback (nedladdad titel) är valet okänt: kortet utan nedräkning.
                     val an = pb?.autoNext
-                    val end = SkipCore.atEnd(SkipCore.next(an != null, an?.enabled, an?.countdown?.content, item?.nextId != null), car)
+                    val end = SkipCore.atEnd(SkipCore.next(an != null, an?.enabled, an?.countdown?.content, item?.nextId != null, known = pb != null), car)
                     when (end.action) {
                         SkipCore.EndAction.CLOSE -> onClose()
                         SkipCore.EndAction.PLAY_NEXT -> playNext()

@@ -52,8 +52,14 @@ object SkipCore {
      * (countdown som text, så att både 10 och "10" läses som webbens parseInt). Utan autoNext gäller 8 s.
      * null = inget nästa avsnitt.
      */
-    fun next(present: Boolean, enabled: Boolean?, countdown: String?, hasNext: Boolean): Next? {
+    /**
+     * known = false: inget svar från /playback (nedladdad titel spelad utan nät) – kontots val är okänt, och då startar
+     * nästa avsnitt aldrig av sig självt (kortet utan nedräkning; en barnprofil med valet av ska inte få nästa avsnitt).
+     * present = false med known: en äldre server utan autoNext – 8 s som webben.
+     */
+    fun next(present: Boolean, enabled: Boolean?, countdown: String?, hasNext: Boolean, known: Boolean = true): Next? {
         if (!hasNext) return null
+        if (!known) return Next(false, DEFAULT_COUNTDOWN)
         if (!present) return Next(true, DEFAULT_COUNTDOWN)
         val s = leadingInt(countdown)?.coerceIn(0, 60) ?: DEFAULT_COUNTDOWN
         return Next(enabled == true, s)

@@ -82,4 +82,12 @@ class SkipCoreTest {
         assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, false, "10", true), car = true).action)
         assertEquals(EndAction.CLOSE, SkipCore.atEnd(SkipCore.next(true, true, "10", false), car = true).action)
     }
+
+    @Test fun okantValNedladdadTitel() {
+        // Ingen /playback (nedladdad titel): nästa avsnitt startar aldrig av sig självt, i bilen stängs spelaren
+        assertEquals(SkipCore.End(SkipCore.EndAction.CARD, 0, auto = false), SkipCore.atEnd(SkipCore.next(false, null, null, true, known = false), false))
+        assertEquals(SkipCore.End(SkipCore.EndAction.CLOSE), SkipCore.atEnd(SkipCore.next(false, null, null, true, known = false), true))
+        // Äldre server utan autoNext: 8 s som webben
+        assertEquals(SkipCore.End(SkipCore.EndAction.CARD, 8, auto = true), SkipCore.atEnd(SkipCore.next(false, null, null, true), false))
+    }
 }
