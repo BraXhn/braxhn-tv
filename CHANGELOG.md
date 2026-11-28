@@ -8,6 +8,12 @@
   första biten av filmen 0,35–0,4 s fortare (till exempel 0,4 s i stället för 0,75 s). Väljer spelaren ett annat
   steg stoppas det förberedda direkt, så att servern inte kodar två gånger. Inte provat på riktigt mobilnät eller i
   apparna på enhet.
+- **Nästa avsnitt startar fortare i webbspelaren.** När eftertexterna börjar (knappen *Nästa avsnitt*), när kortet
+  *Nästa avsnitt om …* visas och när pekaren hamnar på knappen för nästa avsnitt förbereder servern redan nästa
+  avsnitt, så att första bilden kommer nästan direkt efter bytet. Förut började förberedelsen först vid bytet. Ett
+  avsnitt som måste kodas om förbereds bara när det egna avsnittet snart är slut och servern har plats för en
+  omkodning till – förberedelsen stoppar aldrig någon annans ström. Mätt i Chrome (median av tre, från klicket till
+  första bilden): remux 175–285 ms → 94–144 ms, omkodning 624–1122 ms → 298–360 ms.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot

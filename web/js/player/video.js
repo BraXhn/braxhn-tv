@@ -224,7 +224,7 @@ export async function play(id, start = 0, opts = {}) {
   if (q('#pair')) q('#pair').onclick = () => v.webkitShowPlaybackTargetPicker();
   // Skicka till en annan inloggad webbläsare (samma position och spår); den egna spelaren stängs
   q('#pdevs').onclick = (e) => { e.stopPropagation(); openRemotePicker(e.currentTarget, { item: it.id, position: v.currentTime, audio: cur.audio, sub: cur.sub, fromPlayer: true }); };
-  if (q('#pnext')) q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); };
+  if (q('#pnext')) { q('#pnext').onclick = () => { sendProgress(true); goNext(it.nextId); }; warmOnPoint(q('#pnext'), cur); }
   // Ögonblick: klipp att spara och dela (player/moments.js laddas först när knappen används)
   q('#pmoment').onclick = () => need('player/moments.js').then(m => { if (P === cur) m.openMoment(cur, v); }).catch(toastErr);
   q('#pparty').onclick = async () => {
@@ -342,6 +342,7 @@ function markers() {
   const cur = P, v = $('#vid', cur.el), b = $('#pskip', cur.el), pb = cur.pb; if (!v || !b || !pb) return;
   const plan = skipPlan(pb, v.currentTime, { hasNext: !!cur.it.nextId, done: cur.skipDone });
   if (!plan) { b.hidden = true; b.dataset.k = ''; stopSkipCountdown(cur); return; }
+  if (plan.to === 'next') warmNext(cur); // eftertexterna går: nästa avsnitt förvärms (och hålls varmt) redan nu
   if (b.dataset.k !== plan.kind) {
     stopSkipCountdown(cur);
     b.dataset.k = plan.kind; b.textContent = SKIP_TEXT[plan.kind][0];
@@ -350,6 +351,15 @@ function markers() {
     if (plan.auto && !cur.party && !(plan.to === 'next' && sleepStopsNext())) startSkipCountdown(cur, plan, v);
   }
   b.hidden = false;
+}
+/** Förvärm nästa avsnitt (warmPlay) – inte när sovtimern stoppar efter det här avsnittet. warmPlay frågar högst var
+ *  15:e sekund, och servern behåller då samma förvärmda ström (stream.js warm), så det går att anropa ofta. */
+function warmNext(cur) {
+  if (P === cur && cur.it.nextId && !sleepStopsNext()) warmPlay(cur.it.nextId, 0);
+}
+/** Pekaren eller fokus på en knapp som startar nästa avsnitt: förvärm det */
+function warmOnPoint(btn, cur) {
+  btn.addEventListener('pointerenter', () => warmNext(cur)); btn.addEventListener('focus', () => warmNext(cur));
 }
 function startSkipCountdown(cur, plan, v) {
   const box = $('#pskipcd', cur.el), t = $('#pskipt', cur.el); if (!box || !t) return;
@@ -795,9 +805,11 @@ function onEnded() {
   let n = plan.seconds;
   box.innerHTML = `<b>${plan.auto ? `${t('Nästa avsnitt om')} <span class="cd">${n}</span> s` : t('Nästa avsnitt')}</b><div class="row"><button class="primary small" data-go>${t('Spela nu')}</button><button class="ghost small" data-stay>${plan.auto ? t('Avbryt') : t('Stäng')}</button></div>`;
   cur.el.append(box);
+  warmNext(cur); warmOnPoint($('[data-go]', box), cur);
   clearInterval(cur.nextTimer);
   const tm = cur.nextTimer = plan.auto ? setInterval(() => {
     if (P !== cur) return clearInterval(tm);
+    warmNext(cur); // lång nedräkning: förvärmningen hålls vid liv
     n--; $('.cd', box).textContent = n;
     if (n <= 0) { clearInterval(tm); goNext(it.nextId); }
   }, 1000) : null;

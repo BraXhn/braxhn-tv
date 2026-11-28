@@ -212,6 +212,53 @@ t('förvärmning: andra val vid uppspelningen ger en egen ström, och en ny för
   assert.ok(sessions().some(x => x.warm), 'info=1 tar inte över förvärmningen');
 });
 
+// Nästa avsnitt förvärms medan eftertexterna går (web/js/player/video.js warmNext) – då kodas det egna avsnittet
+// fortfarande om. Det får inte hindra förvärmningen när avsnittet snart är slut, men förvärmningen får aldrig stoppa
+// en annan ström för att få plats.
+t('förvärmning medan den egna omkodningen spelas: bara nära slutet och bara under taken – och samma val behåller strömmen', async () => {
+  const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(it.id, x.user); st.stopUserSessions(heavy.id, x.user); x.reqAt = 0; } };
+  const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
+  stopAll();
+  const warmNext = async () => (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode&q=480&warm=1`, { headers: A() })).json();
+  // "Avsnittet" som spelas: omkodat, ett segment hämtat (reqAt, reqN) 70 s före slutet
+  const P = await playlist('force=transcode&q=480&start=10');
+  assert.equal((await fetch(P.segs.find(x => x.start === 10).url, { headers: A() })).status, 200);
+  const cur = sessions().find(x => x.d.pid === pidOf(P.pb.url));
+  assert.ok(cur?.proc || cur?.done, 'förutsättning: den egna omkodningen');
+  if (!cur.proc) cur.proc = { kill() {} }; // klar redan (kort fil): räknas som igång, som mitt i en lång film
+  // Mitt i en lång film (mer än WARM_END s kvar): processorn behövs där – ingen förvärmning
+  const segs0 = cur.segs; cur.segs = [...segs0, { start: 10 + st.WARM_END + 30, dur: 6 }];
+  assert.equal((await warmNext()).warm, false, 'mitt i filmen');
+  cur.segs = segs0;
+  // Nära slutet, men en annan profils omkodning: den hindrar fortfarande
+  const u0 = cur.user; cur.user = u0 + 1000;
+  assert.equal((await warmNext()).warm, false, 'någon annan tittar');
+  cur.user = u0;
+  const lim0 = st.limits(), D0 = D;
+  D0.setSetting('max_transcodes_user', '1');
+  assert.equal((await warmNext()).warm, false, 'profilens tak (1) är redan nått – förvärmningen stoppar inte den egna strömmen');
+  assert.ok(sessions().includes(cur) && cur.proc, 'den egna strömmen är kvar');
+  D0.setSetting('max_transcodes_user', '2'); D0.setSetting('max_transcodes', '1');
+  assert.equal((await warmNext()).warm, false, 'serverns tak (1) är redan nått');
+  D0.setSetting('max_transcodes', '4');
+  const w = await warmNext();
+  assert.deepEqual(w, { warm: true, mode: 'transcode' }, 'nära slutet av den egna strömmen');
+  const s = sessions().find(x => x.warm);
+  assert.ok(s?.proc && sessions().includes(cur) && cur.proc, 'förvärmd, och den egna strömmen är kvar');
+  // Webbspelaren frågar igen under nedräkningen: samma ström (inga nya segment från början), ny livslängd
+  const at = s.warm; await sleep(20);
+  assert.equal((await warmNext()).warm, true);
+  assert.deepEqual(sessions().filter(x => x.warm), [s], 'samma förvärmda ström');
+  assert.ok(s.warm > at, 'livslängden förnyad');
+  // Uppspelningen tar över just den strömmen
+  const audio = JSON.parse(heavy.streams).find(x => x.type === 'audio').index;
+  const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode&q=480&audio=${audio}`, { headers: A() })).json();
+  assert.equal(pidOf(pb.url), s.d.pid, 'nästa avsnitt tar över den förvärmda strömmen');
+  if (cur.proc && !cur.proc.pid) cur.proc = null;
+  D0.setSetting('max_transcodes', lim0.global); D0.setSetting('max_transcodes_user', lim0.user);
+  stopAll();
+});
+
 t('Safaris egen HLS (iPhone): startpositionen står i spellistorna, och strömmen förbereds där', async () => {
   for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
   const text = async (u) => (await fetch(new URL(u, B), { headers: A() })).text();

@@ -1546,19 +1546,37 @@ export function prewarm(it, query, userId, start = 0) {
 // ---------------- förvärmning innan klicket ----------------
 // Pekaren eller fokus på en Spela-knapp (/playback?warm=1): ffmpeg startas redan då, så att första segmentet är
 // klart när uppspelningen begärs. Strömmen pausas efter WARM_AHEAD segment och tas bort om ingen tar över den inom
-// WARM_TTL. En förvärmning i taget per profil, och ingen omkodning förvärms medan en annan omkodning pågår.
-export const WARM_TTL = 20000, WARM_AHEAD = 2;
+// WARM_TTL. En förvärmning i taget per profil, och ingen omkodning förvärms medan en annan omkodning pågår – utom
+// profilens egen ström som snart är slut (webbspelaren förvärmer nästa avsnitt medan eftertexterna går, se endsSoon).
+export const WARM_TTL = 20000, WARM_AHEAD = 2, WARM_END = 120;
 function dropWarm(s) {
   s.warm = 0;
   stopProc(s);
   if (sessions.get(s.key) === s) { sessions.delete(s.key); rmLater(s.dir); }
 }
+/** Profilens egen omkodning där uppspelningen är inne på de sista WARM_END sekunderna: den kodar högst det som är
+ *  kvar av avsnittet (oftast redan klart eller pausad, AHEAD_TRANSCODE segment före) och stoppas när nästa startar */
+function endsSoon(x, userId) {
+  const at = x.segs?.[x.reqN], last = x.segs?.at(-1);
+  return x.user === userId && !!at && !!last && last.start + last.dur - at.start <= WARM_END;
+}
 export function warm(it, query, userId, start = 0) {
-  for (const x of [...sessions.values()]) if (x.user === userId && x.warm) dropWarm(x);
   const { d, key } = keyFor(it, query, userId);
+  // Samma titel och val förvärms redan (webbspelaren frågar igen medan nedräkningen går): behåll strömmen och dess
+  // segment, och ge den ny livslängd. query får den förvärmda strömmens pid, så att uppspelningen tar över just den.
+  const sig = key.replace(`-${d.pid}`, '');
+  const same = d.pid && [...sessions.values()].find(x => x.user === userId && x.warm && x.item === it.id && x.d.pid && x.key.replace(`-${x.d.pid}`, '') === sig);
+  if (same) { same.warm = Date.now(); query.set?.('pid', same.d.pid); return true; }
+  for (const x of [...sessions.values()]) if (x.user === userId && x.warm) dropWarm(x);
   if (sessions.has(key) || !it.duration) return false;
-  // Någon tittar på en omkodad ström just nu (segment hämtade senaste halvminuten): låt den ha processorn
-  if (d.mode === 'transcode' && [...sessions.values()].some(x => x.proc && !x.warm && x.d.mode === 'transcode' && Date.now() - (x.reqAt || 0) < 30000)) return false;
+  if (d.mode === 'transcode') {
+    const tc = [...sessions.values()].filter(x => x.proc && !x.warm && x.d.mode === 'transcode');
+    // Någon tittar på en omkodad ström just nu (segment hämtade senaste halvminuten): låt den ha processorn
+    if (tc.some(x => Date.now() - (x.reqAt || 0) < 30000 && !endsSoon(x, userId))) return false;
+    // Bara om det finns plats under taken – förvärmningen stoppar aldrig en annan ström (ensureCapacity gör det)
+    const lim = limits();
+    if (tc.length >= lim.global || tc.filter(x => x.user === userId).length >= lim.user) return false;
+  }
   prewarm(it, query, userId, start);
   const s = sessions.get(key);
   if (!s) return false;

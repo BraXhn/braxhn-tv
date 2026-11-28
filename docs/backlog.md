@@ -24,22 +24,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 
 ## Näst på tur
 
-### 1. Nästa avsnitt startar direkt: förvärm det medan eftertexterna går
-
-- **Vad:** när webbspelaren visar *Hoppa över eftertexterna* med nedräkning (`startSkipCountdown`) eller kortet
-  *Nästa avsnitt om …* (`onEnded`), anropa `warmPlay(nextId, 0)` som Spela-knapparna redan gör, så att disken vaknar
-  och första segmentet är klart när nästa avsnitt startar. I dag går `goNext` → `play()` hela vägen från början.
-- **Varför:** barnen tittar mest på serier i följd, och bytet mellan avsnitt är den start som sker oftast. Plex och
-  Infuse byter avsnitt nästan utan väntan.
-- **Filer:** `web/js/player/video.js` (`markers`, `startSkipCountdown`, `onEnded`, `warmPlay`), `server/stream.js`
-  (`warm`). Kontrollera först: `warm()` vägrar förvärma en omkodning medan någon tittar på en omkodad ström (segment
-  de senaste 30 s) – och det gör ju den egna strömmen just då. Regeln behöver undanta samma profils ström som snart
-  slutar, utan att två omkodningar slåss om processorn.
-- **Klart när:** i riktig Chrome (som `test/web-chrome-playback.test.js`) är tiden från *Spela nu*/nedräkningens slut
-  till första bild i nästa avsnitt mätt före och efter, för remux och omkodning, och vakten är grön.
-
-
-### 2. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
+### 1. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
 
 - **Vad:** Safaris egen HLS (`nativeHls` i `web/js/player/caps.js`) spolar fortfarande inom den gamla spellistan och
   väntar på ett helt 6 s-segment. `seekRestarts` i `web/js/player/video.js` körs bara med hls.js. Gör som iOS-appen:
@@ -51,7 +36,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** testet visar en ny ström med `xs` vid målet för `nhls=1`, och Anton har provat på en riktig iPhone
   (se *Bara Anton kan göra*).
 
-### 3. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -62,7 +47,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 4. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
+### 3. iOS/tvOS-appen: fråga servern vad som är kodat i stället för att gissa
 
 - **Vad:** appen gissar fortfarande ur bufferten (`readyGuess` i `apps/apple/Shared/SeekCore.swift`) och väntar 0,6 s
   på nästa steg vid varje spolning, även med reglaget på iPhone. Fråga `/api/stream/:id/hls/ready` medan strömmen
@@ -74,7 +59,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktstestet har anropet för iOS, `apple-seek.test.js` jämför reglerna med Expo, och bygget i
   `apple.yml` går igenom.
 
-### 5. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 4. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 - **Vad:** två saker som webben redan gör. (1) Android-appen och iOS/tvOS-appen anropar inte `/playback?warm=1` när
   fokus landar på Spela (inget `warm` i `apps/automotive` eller `apps/apple`; webben och Expo gör det med `warmPlay`).
@@ -90,7 +75,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** kontraktet har `warm=1` för båda apparna, Expo i webbläget skickar `/playback` innan titelns svar
   kommit (som `test/web-chrome-playback.test.js` visar för webben), och bygget i GitHub Actions går igenom.
 
-### 6. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
+### 5. Expo-appen: hoppa över sammanfattning och eftertexter, nedräkning till nästa avsnitt
 
 - **Vad:** spelaren har bara *Hoppa över intro* (`apps/expo/src/screens/Player.tsx`) och byter till nästa avsnitt
   först när avsnittet tagit slut. Lägg till sammanfattning och eftertexter (`recap`, `credits` i svaret) och kortet med
@@ -103,7 +88,7 @@ Senast genomgången: 2026-11-27 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** i webbläget (Playwright, 390×844) syns knapparna vid rätt tid och nästa avsnitt startar efter
   nedräkningen; `test/expo-i18n.test.js` är grön.
 
-### 7. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 6. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -229,6 +214,13 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   ögonblick som det stegets ffmpeg startar (aldrig två samtidigt vid mätning var 10:e ms). Genom reläet: `relay.test.js`. **Inte provat:** riktig
   mobilanslutning, Safari/AVPlayer/ExoPlayer på enhet. Utan `bw` (apparna) listas taket först; ExoPlayer och hls.js
   kan då börja lägre, och förstarten blir en kort förvärmning som stoppas.
+- 2026-11-28: Nästa avsnitt förvärms medan eftertexterna går (förut punkt 1), gren `team/nasta-avsnitt-2026-11-28`.
+  Webbspelaren anropar `warmPlay(nextId, 0)` när eftertexterna börjar (`markers`), när kortet i `onEnded` visas och
+  under dess nedräkning, och vid pekare/fokus på `#pnext` och *Spela nu* (`warmNext`). `warm()` i `stream.js`
+  undantar profilens egen omkodning som är inne på sina sista 120 s (`endsSoon`), förvärmer omkodning bara när det
+  finns plats under `limits()` och behåller samma förvärmda ström när samma val frågas igen. Chrome, median av tre
+  (klick → första bild): remux 175–285 → 94–144 ms, omkodning 624–1122 → 298–360 ms
+  (`test/web-next-episode.test.js`); reglerna i `test/fast-resume.test.js`.
 - 2026-11-27: Webbspelaren stoppar omkodningen när fliken eller TV-webbläsaren stängs (förut punkt 2), gren
   `team/flik-stopp-2026-11-27`. `pagehide` utan `persisted` skickar `/api/stream/:id/stop?pid=&gone=1` med
   `sendBeacon` (reserv: `fetch` med `keepalive`); inte vid bfcache, utan `pid` eller via AirPlay. `gone=1` gör att en
