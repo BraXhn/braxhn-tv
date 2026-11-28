@@ -85,8 +85,11 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
-- Skärmtid i Chrome (kontrollera först med ett test): tiden mellan två uppspelningar räknades som skärmtid (+50 s för
-  ~10 s tittande) när nästa start kom inom 45 s, och en paus på 3 s räknades (`server/screentime.js` `heartbeat`).
+
+- Skärmtid: en egen klient som rapporterar att positionen står still strax efter varje HLS-segment (inom 5 s, före
+  nästa) får `heartbeat` att börja om klockan (`b.t = at`, pausregeln) varje gång, så nästan inget räknas. Webbspelaren
+  gör inte så; samma klient kan redan i dag hämta mer än 45 s segment åt gången och vänta. Ett skydd mot båda behöver
+  takt eller räkning per segmentets längd för HLS (som `/direct` i `pace.js`).
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
 - Skärmtid: hls.js hämtar segment i upp till 60 s framåt även när filmen är pausad, och varje segment är ett
@@ -228,6 +231,14 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   API (rätt position per profil, inte för en annan, inga poddar för barn, felaktiga värden) och Chrome (omladdning,
   inga anrop före Spela, fortsätter där, ✕ tar bort); de tre fallen föll före ändringen. Expo-appen tar fortfarande bort
   kön när en bok startar och visar inte boken efter omstart.
+- 2026-11-28: Skärmtiden räknar inte tiden mellan två uppspelningar (förut i Idéer), gren
+  `team/skarmtid-glapp-2026-11-28`. Bekräftat i Chrome (webbspelaren, `/direct` och remux): 10 s film, stäng, 20 s,
+  10 s av en annan film gav 41 s för 20,8 s bild, samma film igen likaså; efter rättningen 21 och 20 s. Pausen var
+  inget fel: 3 s paus gav 40 s för 40,4 s bild och 70 s paus 30 s för 30,4 s, före och efter. `heartbeat` räknar nu per
+  ström (`CAP` 45 s gäller bara mellan livstecken från samma ström), `POST /api/stream/:id/stop` gör nästa start av
+  samma titel till en ny uppspelning (efter 15 s utan data), och en stillastående rapport efter en lång paus blir
+  startpunkt (förut tappades upp till 10 s när data skickats en stund in i pausen). Tre nya fall i
+  `test/screentime-follows.test.js`, bland dem fusk med stopp under hämtning och stillastående rapporter.
 - 2026-11-28: iOS-appen lämnar in skärmtiden från tid utan nät (punkt 6, Android och Expo kvar), gren
   `team/apple-skarmtid-2026-11-28`. En post per uppspelning `{ id, at, seconds, audio }` per server och profil
   (`ScreenLog` i `OfflineCore.swift`): posten växer medan filmen spelar, en ny börjar efter mer än 120 s uppehåll eller

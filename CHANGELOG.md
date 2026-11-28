@@ -30,6 +30,13 @@
   Nu står nästa avsnitts namn, nummer (*S1 · A2*) och bild på kortet, så att man ser om nästa avsnitt börjar en ny
   säsong och kan välja att stanna. Med fjärrkontroll eller tangentbord har *Spela nu* fokus och pilarna går till
   *Avbryt*; på en telefon går kortet över hela bredden.
+- **Skärmtiden räknar inte längre tiden mellan två filmer.** Stängde barnet spelaren och startade nästa film eller
+  nästa avsnitt inom 45 sekunder räknades tiden emellan som tittande: i Chrome gav 10 s av en film, 20 s utan film och
+  10 s av nästa 41 s skärmtid för 21 s bild – samma film igen likaså. Nu räknas tiden per film, och den första stunden
+  av en ny uppspelning räknas från starten. Att stänga spelaren hela tiden medan filmen hämtas ger ingen gratis tid:
+  så länge data skickas räknas tiden. En paus räknades inte förut heller (3 s och 70 s paus gav 40 respektive 30 s för
+  40 och 30 s bild, före och efter rättningen), och efter en lång paus räknas nu även de första sekunderna när spelaren
+  fortsatt hämta data en stund in i pausen.
 - **Tiden blinkar inte bort när webbspelaren laddar efter en spolning.** Har filmen redan spelat står tiden kvar
   med *Laddar…* efter sig, i stället för att bytas mot *Startar omkodning…*.
 - **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om

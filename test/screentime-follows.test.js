@@ -81,11 +81,12 @@ test('skärmtid: tid räknas per användare (ingen dubbelräkning), paus och gla
   screen.heartbeat(uid, 'i:1', 30, { at: t0 + 35e3 });
   screen.heartbeat(uid, 'i:2', 110, { at: t0 + 35e3 });
   assert.equal(screen.status(uid, new Date(t0 + 35e3)).used, 25);
-  // Långt glapp (stoppat en stund): bara tiden efter återstarten räknas
+  // Långt glapp (stoppat en stund): bara tiden efter återstarten räknas. Live startar 10 s efter filmens rapport: en ny
+  // ström, så de 10 s räknas inte (fortsatte filmen räknas den med sin nästa rapport)
   screen.heartbeat(uid, 'i:1', 40, { at: t0 + 600e3 });
   screen.heartbeat(uid, 'l:3', null, { at: t0 + 610e3 }); // live (utan position)
   s = screen.status(uid, new Date(t0 + 610e3));
-  assert.equal(s.used, 35); assert.equal(s.allowed, true); assert.equal(s.remaining, 25);
+  assert.equal(s.used, 25); assert.equal(s.allowed, true); assert.equal(s.remaining, 35);
   for (let i = 1; i <= 4; i++) s = screen.heartbeat(uid, 'l:3', null, { at: t0 + 610e3 + i * 10e3 });
   assert.equal(s.allowed, false); assert.equal(s.reason, 'limit');
   assert.match(s.message, /Tiden är slut för idag/);
@@ -146,6 +147,76 @@ test('skärmtid: en kort paus (under CAP) räknas inte när spelaren rapporterar
   assert.equal(screen.status(uid, new Date(t0 + 75e3)).used, 26 + 7 + 13);
 });
 
+test('skärmtid: tiden mellan två uppspelningar räknas inte (ny titel, samma titel efter stopp)', () => {
+  // Uppmätt i Chrome före rättningen (webbspelaren, originalfilen): 10 s film, stäng, 20 s senare 10 s av en annan film
+  // gav 41 s räknad tid för 20,8 s rörlig bild – samma film igen likaså. Glappet (CAP) gällde mellan alla strömmar.
+  const mk = (n) => { const u = Number(D.run('INSERT INTO users(name,pass,is_admin,created) VALUES(?,\'x\',0,0)', n).lastInsertRowid); screen.setRules(u, { daily: 60 }); return u; };
+  const t0 = new Date(2026, 10, 28, 17).getTime();
+  const used = (uid, s) => screen.status(uid, new Date(t0 + s * 1000)).used;
+  // Två titlar: första strömmen slutar vid 11 s, nästa börjar vid 50 s (inom CAP) – bara bilden räknas
+  let uid = mk('tvåtitlar');
+  let hb = (k, pos, s) => screen.heartbeat(uid, k, pos, { at: t0 + s * 1000 });
+  hb('i:1', null, 0); hb('i:1', 1, 1); hb('i:1', null, 6); hb('i:1', 11, 11);
+  hb('i:2', null, 50); hb('i:2', 1, 51); hb('i:2', null, 56); hb('i:2', 10, 60);
+  assert.equal(used(uid, 60), 11 + 10);
+  // Nästa avsnitt startar direkt (inom några sekunder) efter att det förra tagit slut: inte heller det räknas
+  hb('i:3', null, 63); hb('i:3', 10, 73);
+  assert.equal(used(uid, 73), 21 + 10);
+
+  // Samma titel igen: spelaren stängs (POST /api/stream/:id/stop) och öppnas 20 s senare
+  uid = mk('sammaigen');
+  hb = (k, pos, s) => screen.heartbeat(uid, k, pos, { at: t0 + s * 1000 });
+  hb('i:1', null, 0); hb('i:1', 5, 5); hb('i:1', 10, 10);
+  screen.stopped(uid, 'i:1', t0 + 10.5e3);
+  hb('i:1', null, 30); hb('i:1', 15, 35); hb('i:1', 20, 40);
+  assert.equal(used(uid, 40), 10 + 10, 'stängd i 20 s räknas inte');
+  // Ny ström strax efter stoppet (byte av version, under STOP_GAP): samma uppspelning
+  screen.stopped(uid, 'i:1', t0 + 40.5e3);
+  hb('i:1', null, 42); hb('i:1', 26, 46);
+  assert.equal(used(uid, 46), 26);
+
+  // Fusk: stopp hela tiden medan originalfilen hämtas – datan visar att uppspelningen pågår, allt räknas
+  uid = mk('stoppfusk');
+  const meter = screen.streamMeter(20000, t0, 0);
+  screen.heartbeat(uid, 'i:7', null, { at: t0 });
+  for (let s = 2, n = 0; s <= 120; s += 2) {
+    n += 65536; screen.streamFlow(uid, t0 + s * 1000);
+    screen.stopped(uid, 'i:7', t0 + s * 1000 + 500);
+    const at = meter(t0 + s * 1000, n);
+    if (at != null) screen.heartbeat(uid, 'i:7', null, { at });
+  }
+  assert.equal(used(uid, 120), 120);
+  // Fusk: rapporter om att positionen står still medan originalfilen skickas bryter inte räkningen (en sådan rapport
+  // blir bara en ny startpunkt när strömmen ändå inte hänger ihop)
+  uid = mk('stillfusk');
+  const m2 = screen.streamMeter(20000, t0, 0);
+  screen.heartbeat(uid, 'i:8', null, { at: t0 });
+  screen.heartbeat(uid, 'i:8', 0, { at: t0 + 1000 });
+  for (let s = 2; s <= 120; s += 2) {
+    screen.streamFlow(uid, t0 + s * 1000);
+    const at = m2(t0 + s * 1000, s);
+    if (at != null) screen.heartbeat(uid, 'i:8', null, { at });
+    if (s % 10 === 0) screen.heartbeat(uid, 'i:8', 0, { at: t0 + s * 1000 + 300 }); // var 10:e sekund
+  }
+  assert.equal(used(uid, 120), 120);
+});
+
+test('skärmtid: efter en lång paus räknas uppspelningen från starten, inte från nästa rapport', () => {
+  // Data skickades en stund efter pausen (spelaren fyllde bufferten): rapporten vid starten blev då ingen startpunkt,
+  // och de första 10 s efter pausen räknades inte
+  const uid = Number(D.run("INSERT INTO users(name,pass,is_admin,created) VALUES('långpaus','x',0,0)").lastInsertRowid);
+  screen.setRules(uid, { daily: 60 });
+  const t0 = new Date(2026, 10, 28, 19).getTime(), hb = (pos, s) => screen.heartbeat(uid, 'i:4', pos, { at: t0 + s * 1000 });
+  hb(null, 0); hb(1, 1); hb(10, 10); hb(15, 15); // pausad vid 15 s
+  screen.streamFlow(uid, t0 + 30e3);
+  hb(15, 615); // startar igen 10 min senare
+  hb(25, 625);
+  assert.equal(screen.status(uid, new Date(t0 + 625e3)).used, 15 + 10);
+  // Startrapporten räknas aldrig längre än positionen rört sig (en paus med rapporter som står still)
+  hb(25, 1300); hb(28, 1310);
+  assert.equal(screen.status(uid, new Date(t0 + 1310e3)).used, 25 + 3);
+});
+
 test('skärmtid i spelaren: "X min kvar idag", varning de sista fem minuterna och inget utan skärmtid (playerLeft)', async () => {
   const { playerLeft, WARN_LEFT } = await import('../web/js/player/screenleft.js');
   assert.equal(WARN_LEFT, 300);
@@ -201,6 +272,13 @@ test('skärmtid via API: huvudkontot styr, uppspelning nekas med svensk felkod, 
 
   // Extra tid för idag
   r = await req(ROOTUSER, `/api/screentime/${KID}/extra`, { method: 'POST', body: { minutes: 15 } });
+  // Stoppet (spelaren stängs) gäller titeln: nästa start räknas som en ny uppspelning
+  const t1 = Date.now();
+  screen.heartbeat(KID, 'i:' + ep(2), 5, { at: t1 - 10e3 });
+  assert.equal((await req(KID, `/api/stream/${ep(2)}/stop`, { method: 'POST' })).status, 200);
+  const u0 = screen.status(KID).used;
+  screen.heartbeat(KID, 'i:' + ep(2), 6, { at: t1 + 20e3 }); // 20 s efter stoppet, inom CAP
+  assert.equal(screen.status(KID).used, u0, 'tiden efter stoppet räknas inte');
   assert.equal(r.data.status.allowed, true); assert.equal(r.data.status.remaining, 15 * 60);
   assert.notEqual((await req(KID, `/api/items/${ep(1)}/playback`)).data.code, 'screen_time');
   r = await req(KID, '/api/screentime');

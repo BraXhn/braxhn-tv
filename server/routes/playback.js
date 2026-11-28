@@ -409,7 +409,8 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid, { gone });
   // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden. replaced=1 (webbspelaren): bara
   // en ström som ersatts av en nyare i samma uppspelning (flera spolningar i rad) – uppspelningen fortsätter
-  if (row && !(pid && c.q.get('replaced') === '1')) act.clientStop(c.user.id, ver.mainOf(row).id);
+  // Skärmtiden: nästa start av samma titel är en ny uppspelning – tiden emellan räknas inte (screentime.js heartbeat)
+  if (row && !(pid && c.q.get('replaced') === '1')) { act.clientStop(c.user.id, ver.mainOf(row).id); screen.stopped(c.user.id, 'i:' + ver.mainOf(row).id); }
   send(c.res, 200, { ok: true });
 });
 

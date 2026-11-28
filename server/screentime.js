@@ -15,11 +15,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERE
 // offline = sekunder av dagens tid som kommit från addOffline (för taket per dag). Äldre databaser saknar kolumnen.
 if (!all('PRAGMA table_info(screen_usage)').some(c => c.name === 'offline')) db.exec('ALTER TABLE screen_usage ADD COLUMN offline REAL NOT NULL DEFAULT 0');
 
-/** Längsta glapp (sekunder) mellan två rapporter som räknas som sammanhängande tittande.
- *  Klienterna rapporterar var 10:e sekund; längre glapp betyder paus, stopp eller avbrott. */
+/** Längsta glapp (sekunder) mellan två livstecken från samma ström som räknas som sammanhängande tittande.
+ *  Spelarna rapporterar var 10:e sekund och en lång ström (originalfilen) ger ett livstecken var 20:e – 45 s tål att
+ *  ett livstecken uteblir. Längre glapp betyder paus, stopp eller avbrott. Glappet gäller bara inom samma ström: tiden
+ *  mellan två titlar räknas aldrig (heartbeat). */
 export const CAP = 45;
 /** Millisekunder efter en rapport som strömmens sista data får komma utan att pausen räknas som tittande */
 const PAUSE_SLACK = 5000;
+/** Millisekunder efter att spelaren stängts (stopped) som ett nytt livstecken för samma titel räknas som en ny start.
+ *  Kortare än så är samma uppspelning (t.ex. en ny ström efter ett byte av version) – och den som hämtar strömmen
+ *  själv kan inte dela upp den i delar som inte räknas utan att stå helt utan data i minst så här länge åt gången. */
+const STOP_GAP = 15000;
 const DAYS = ['söndag', 'måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag'];
 // "På måndagar går det att titta …" – nycklar i web/i18n/en.js (server/i18n.js)
 const DAYS_PL = ['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'];
@@ -99,12 +105,20 @@ export function resetToday(uid, d = new Date()) {
   u.seconds = 0; u.offline = 0; saveUsage(uid, u);
 }
 
-// Senaste räknade ögonblick per användare, senaste position och rapport per ström och när data senast skickades
-const beats = new Map(); // uid -> { t (ms), pos: Map(key -> position), last: Map(key -> ms), flow (ms) }
+// Per användare: hur långt tiden är räknad (t), när data senast skickades (flow) och per ström senaste position och
+// positionsrapport (pos, last), senaste livstecken av alla slag (seen) och när spelaren stängdes (stop)
+const beats = new Map(); // uid -> { t (ms), flow (ms), pos, last, seen, stop: Map(key -> …) }
 function beatsOf(uid) {
   let b = beats.get(uid);
-  if (!b) { b = { t: 0, pos: new Map(), last: new Map(), flow: 0 }; beats.set(uid, b); if (beats.size > 2000) beats.delete(beats.keys().next().value); }
+  if (!b) { b = { t: 0, pos: new Map(), last: new Map(), seen: new Map(), stop: new Map(), flow: 0 }; beats.set(uid, b); if (beats.size > 2000) beats.delete(beats.keys().next().value); }
   return b;
+}
+const trim = (m) => { if (m.size > 20) m.delete(m.keys().next().value); };
+/** Spelaren stängdes (POST /api/stream/:id/stop) – nästa start av samma titel är en ny uppspelning (heartbeat) */
+export function stopped(uid, key, at = Date.now()) {
+  if (!rulesFor(uid)) return;
+  const b = beatsOf(uid);
+  b.stop.delete(key); b.stop.set(key, at); trim(b.stop);
 }
 /** Strömmen skickade data just nu (http/context.js countStream, varje gång något skickats) – räknas inte, men visar
  *  att uppspelningen inte står pausad (heartbeat) */
@@ -119,16 +133,21 @@ export const setOnBlocked = (fn) => { onBlocked = fn; };
 /**
  * Registrera att användaren tittar. key identifierar strömmen (t.ex. "i:12", "l:3").
  * position = uppspelningsposition (sekunder) eller null för strömmar utan position (live).
+ * Tiden räknas per ström: från förra livstecknet för samma ström (högst CAP sekunder bakåt) fram till det här, och
+ * aldrig det som redan räknats för en annan ström (väggklockan, b.t). Första livstecknet för en ström räknas inte –
+ * tiden mellan två titlar (förra stängd, nästa startar inom CAP) räknades förut som tittande. Samma titel igen efter att
+ * spelaren stängts (stopped) är också en ny start, om ingen data skickats sedan dess och det gått minst STOP_GAP.
  * Returnerar status efter uppdateringen (eller null om användaren inte har någon skärmtid).
  */
 export function heartbeat(uid, key, position = null, { audio = false, at = Date.now() } = {}) {
   const rules = rulesFor(uid);
   if (!rules || (audio && !rules.audio)) return null;
   const b = beatsOf(uid);
+  const flow0 = b.flow; // data som skickats före det här livstecknet
   if (position == null && at > b.flow) b.flow = at; // segment eller data från strömmen (live, HLS, originalfilen)
-  let moving = true;
+  let moving = true, prev = null;
   if (position != null && Number.isFinite(+position)) {
-    const prev = b.pos.get(key);
+    prev = b.pos.get(key);
     moving = prev == null || Math.abs(+position - prev) >= 1;
     // Positionen står still, och sedan förra rapporten för strömmen har inget annat livstecken kommit och ingen data
     // skickats (utom strax efter, PAUSE_SLACK): den var pausad – webbspelaren rapporterar när den pausas och när den
@@ -136,17 +155,31 @@ export function heartbeat(uid, key, position = null, { audio = false, at = Date.
     // Skickas data under tiden (en klient som spelar men säger att den står still) gäller den vanliga räkningen.
     const since = b.last.get(key);
     if (!moving && b.t && at > b.t && since != null && b.t - since <= PAUSE_SLACK && b.flow - since <= PAUSE_SLACK) b.t = at;
-    b.pos.set(key, +position); b.last.set(key, at);
+    b.pos.delete(key); b.pos.set(key, +position); b.last.delete(key); b.last.set(key, at);
     if (b.pos.size > 20) { const k = b.pos.keys().next().value; b.pos.delete(k); b.last.delete(k); }
   }
-  if (moving) {
-    const gap = (at - b.t) / 1000;
-    if (b.t && gap > 0 && gap <= CAP) {
+  // Förra livstecknet för strömmen – inget (ny ström), för länge sedan eller före ett stopp: ny start, inget räknas
+  const last = b.seen.get(key);
+  let from = last?.t ?? null;
+  const stop = b.stop.get(key);
+  if (stop != null && at - stop >= STOP_GAP) {
+    b.stop.delete(key);
+    if (flow0 <= stop) from = null; // ingen data sedan stoppet: spelaren var stängd
+  }
+  if (from != null && at - from > CAP * 1000) from = null;
+  // En rapport där positionen står still (t.ex. när uppspelningen startar igen efter en lång paus) blir bara en ny
+  // startpunkt när strömmen ändå inte hänger ihop – annars kunde en klient som säger att den står still mellan
+  // strömmens livstecken bryta räkningen. Nästa rapport räknas då bara så länge som positionen rört sig sedan dess.
+  if (from != null && last.still && prev != null) from = Math.max(from, at - Math.abs(+position - prev) * 1000);
+  if ((moving || from == null) && (!last || at > last.t)) { b.seen.delete(key); b.seen.set(key, { t: at, still: !moving }); trim(b.seen); }
+  if (moving && from != null) {
+    const gap = (at - Math.max(from, b.t)) / 1000;
+    if (gap > 0) {
       const u = usageOf(uid, localDay(new Date(at)));
       u.seconds += gap;
       saveUsage(uid, u);
+      b.t = at;
     }
-    if (at > b.t) b.t = at;
   }
   const s = status(uid, new Date(at));
   if (s && !s.allowed && onBlocked) { try { onBlocked(uid, s); } catch (e) { console.warn('[skärmtid]', e.message); } }
