@@ -13,6 +13,9 @@
     "ScreenStatus.ios": { "källa": "apps/apple/Shared/Models.swift:273 (allowed, message) och OfflineCore.swift:202 (ScreenStatus, skärmtiden utan nät: OfflineScreen i Offline.swift; heltal eller decimaltal tas emot)",
       "optional": { "allowed": "boolean", "message": "string", "limited": "boolean", "day": "string", "daily": "number", "used": "number",
         "extra": "number", "remaining": "number", "from": "string", "until": "string", "audio": "boolean" } },
+    "ScreenOfflineReply.ios": { "källa": "apps/apple/Shared/OfflineCore.swift:456 (ScreenOfflineReply; done tas bort ur kön, screenTime sparas: PendingScreenTime i Offline.swift)",
+      "required": { "done": ["string"] },
+      "optional": { "added": "number", "stop": "boolean", "screenTime": "@ScreenStatus.ios" } },
     "ReadyInfo.ios": { "källa": "apps/apple/Shared/SeekCore.swift:104 (SeekCore.ReadyInfo)",
       "optional": { "mode": "string", "from": "number", "to": "number", "encoding": "boolean", "segs": ["integer"] } },
     "LoginResponse.ios": { "källa": "apps/apple/Shared/Models.swift:21",
@@ -504,7 +507,9 @@
       "ios": { "källa": "apps/apple/Shared/Offline.swift:246 (OfflineScreen.refresh: sparas för nedladdade titlar utan nät)", "svar": "@ScreenStatus.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:56 (sparas för uppspelning utan nät, OfflineSync.kt)", "svar": "@ScreenTimeState.android" } },
     "POST /api/screentime/offline": {
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/OfflineSync.kt:212-232 (flushScreen: kön med skärmtid utan nät, ScreenClock i OfflineCore.kt)", "body": { "device": "c0ffee00-0000-4000-8000-000000000001", "entries": [{ "id": "o1795000000", "at": "$nyss", "seconds": 30.5, "audio": false }] }, "svar": "@ScreenOffline.android" } },
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/OfflineSync.kt:212-232 (flushScreen: kön med skärmtid utan nät, ScreenClock i OfflineCore.kt)", "body": { "device": "c0ffee00-0000-4000-8000-000000000001", "entries": [{ "id": "o1795000000", "at": "$nyss", "seconds": 30.5, "audio": false }] }, "svar": "@ScreenOffline.android" },
+      "ios": { "källa": "apps/apple/Shared/Offline.swift:332-366 (PendingScreenTime.flushNow: tiden som spelats utan nät, kroppen ScreenLog.body i OfflineCore.swift)",
+        "body": { "device": "kontrakt-ios", "entries": [{ "id": "kontrakt-ios-1", "at": "$nyss", "seconds": 30.5, "audio": false }] }, "svar": "@ScreenOfflineReply.ios" } },
     "POST /api/items/:id/watched": {
       "ios": { "källa": "apps/apple/Shared/DetailView.swift:137", "body": { "watched": false }, "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:295", "body": { "watched": false }, "svar": null } },

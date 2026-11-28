@@ -121,6 +121,7 @@ enum OfflineProfile {
     /// (alla dess profiler). Utloggning för att servern sa 401 tar inte bort något: det syns igen när profilen loggar in.
     static func signOut(_ model: AppModel) async {
         await PendingPositions.shared.flushNow()
+        await PendingScreenTime.shared.flushNow(model)
         #if os(iOS)
         Downloads.shared.removeServer(model.server)
         #endif
@@ -185,8 +186,9 @@ final class PendingPositions {
         }
     }
 
-    /// Skickar kön i bakgrunden (om något väntar)
+    /// Skickar kön i bakgrunden (om något väntar), och skärmtiden som spelats utan nät (PendingScreenTime)
     func flush() {
+        if let m = model { PendingScreenTime.shared.flush(m) }
         guard !sending, let sc = scope, !load(sc).isEmpty else { return }
         Task { await flushNow() }
     }
@@ -219,7 +221,8 @@ struct ProgressScreen: Decodable {
 /// server och profil (UserDefaults "screen.<server>-<profil>") med tiden som spelats utan nät sedan dess, och spelaren
 /// stoppar med samma besked som servern ger när tiden är slut eller klockslaget passerat. Reglerna: ScreenClock i
 /// OfflineCore.swift (samma som Android- och Expo-appen). Svarar servern igen ersätter dess status det som räknats här;
-/// positionerna från tiden utan nät skickas med at (PendingPositions), och dem räknar servern inte som skärmtid.
+/// positionerna från tiden utan nät skickas med at (PendingPositions), och dem räknar servern inte som skärmtid – den
+/// tiden lämnas in för sig (PendingScreenTime, POST /api/screentime/offline).
 @MainActor
 enum OfflineScreen {
     private static func key(_ model: AppModel) -> String? {
@@ -258,10 +261,12 @@ enum OfflineScreen {
         return ScreenClock.gate(load(k), now: Date())
     }
 
-    /// Tid som spelats utan kontakt med servern: räknas på dagen och ger svaret om det får fortsätta
-    static func played(_ model: AppModel, seconds: Double) -> ScreenGate {
+    /// Tid som spelats utan kontakt med servern: räknas på dagen och ger svaret om det får fortsätta. play =
+    /// uppspelningens id: tiden sparas också för att lämnas in när nätet kommer tillbaka (PendingScreenTime)
+    static func played(_ model: AppModel, seconds: Double, play: String, audio: Bool = false) -> ScreenGate {
         guard let k = key(model) else { return ScreenClock.ok }
         let now = Date()
+        PendingScreenTime.shared.record(model, play: play, seconds: seconds, audio: audio, now: now)
         let c = ScreenClock.addOffline(load(k), now: now, seconds: seconds)
         if let c { save(k, c) }
         return ScreenClock.gate(c, now: now)
@@ -279,6 +284,77 @@ enum OfflineScreen {
         else { win = String(format: L("fram till %@"), g.until ?? "") }
         let days = [L("söndagar"), L("måndagar"), L("tisdagar"), L("onsdagar"), L("torsdagar"), L("fredagar"), L("lördagar")]
         return String(format: L("Det går inte att titta just nu. På %@ går det att titta %@."), days[max(0, min(6, g.weekday))], win)
+    }
+}
+
+/// Skärmtid som spelats utan nät och ska lämnas in (POST /api/screentime/offline): en post per uppspelning
+/// { id, at, seconds, audio } per server och profil (UserDefaults "screenlog.<server>-<profil>"), som får växa medan
+/// uppspelningen pågår. Kön skickas på samma ställen som PendingPositions (nätet kommer tillbaka, förgrunden, profilen
+/// blir känd, efter ett lyckat framsteg); det som svaret listar i done tas bort och svarets screenTime gäller sedan.
+/// Reglerna: ScreenLog i OfflineCore.swift.
+@MainActor
+final class PendingScreenTime {
+    static let shared = PendingScreenTime()
+    private var sending = false
+    private init() {}
+
+    /// Enhetens id i anropet (servern låter samma id från samma enhet växa). Slumpat en gång och sparat
+    private var device: String {
+        if let d = UserDefaults.standard.string(forKey: "screenlog.device"), !d.isEmpty { return d }
+        let d = UUID().uuidString
+        UserDefaults.standard.set(d, forKey: "screenlog.device")
+        return d
+    }
+
+    private func scope(_ model: AppModel) -> String? { LoginPrint.scope(server: model.server, token: model.token) }
+    private func load(_ sc: String) -> [ScreenEntry] {
+        guard let d = UserDefaults.standard.data(forKey: "screenlog." + sc) else { return [] }
+        return (try? JSONDecoder().decode([ScreenEntry].self, from: d)) ?? []
+    }
+    private func save(_ sc: String, _ list: [ScreenEntry]) {
+        if list.isEmpty { UserDefaults.standard.removeObject(forKey: "screenlog." + sc) }
+        else if let d = try? JSONEncoder().encode(list) { UserDefaults.standard.set(d, forKey: "screenlog." + sc) }
+    }
+
+    /// Tid som spelats utan kontakt i uppspelningen play
+    func record(_ model: AppModel, play: String, seconds: Double, audio: Bool, now: Date = Date()) {
+        guard let sc = scope(model) else { return }
+        save(sc, ScreenLog.record(load(sc), play: play, seconds: seconds, audio: audio, now: now))
+    }
+
+    /// Skickar kön i bakgrunden (om något väntar)
+    func flush(_ model: AppModel) {
+        guard !sending, let sc = scope(model), !load(sc).isEmpty else { return }
+        Task { await flushNow(model) }
+    }
+
+    /// Skickar kön nu, högst ScreenLog.batch poster per anrop; stannar vid första anropet utan svar
+    func flushNow(_ model: AppModel) async {
+        guard !sending, let sc = scope(model) else { return }
+        sending = true
+        defer { sending = false }
+        while true {
+            let sent = ScreenLog.next(ScreenLog.prune(load(sc), now: Date()))
+            guard !sent.isEmpty else { save(sc, []); return }
+            let reply: ScreenOfflineReply
+            do {
+                let data = try await model.post("/api/screentime/offline", ScreenLog.body(device: device, sent))
+                guard scope(model) == sc else { return } // profilen eller servern byttes under tiden
+                guard let r = try? JSONDecoder().decode(ScreenOfflineReply.self, from: data) else { return }
+                reply = r
+            } catch {
+                let status = (error as? APIError)?.status ?? 0
+                if ScreenLog.dropAll(status), scope(model) == sc { save(sc, load(sc).filter { !sent.contains($0) }) }
+                return
+            }
+            let before = load(sc)
+            let left = ScreenLog.ack(before, sent: sent, done: reply.done)
+            save(sc, left)
+            // Serverns status har nu tiden utan nät: den ersätter det som räknats i appen
+            OfflineScreen.note(model, reply.screenTime)
+            // Resten nästa varv – men inte om inget togs bort (t.ex. bara poster som vuxit under tiden)
+            if sent.count < ScreenLog.batch || left.count >= before.count { return }
+        }
     }
 }
 

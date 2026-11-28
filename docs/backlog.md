@@ -99,7 +99,9 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
   behövs i båda: posten växer med samma id tills en paus (mer än 15 s) eller en timme, ta bara bort en post ur kön om
   den inte vuxit sedan den skickades, låt poster servern inte fått räknas av från tiden kvar även efter en ny status,
   flytta den sparade summan till poster sist på sin dag, och lägg till `ios` under endpointen i kontraktet.
-- **Varför:** Android lämnar nu in tiden; i Expo och på iPhone/iPad försvinner tiden från en flygresa fortfarande när
+- **iOS är också klart** (`ScreenLog` i `OfflineCore.swift`, `PendingScreenTime` i `Offline.swift`, fall i
+  `test/apple-offline.test.js`); kvar är Expo.
+- **Varför:** Android och iOS lämnar nu in tiden; i Expo försvinner tiden från en flygresa fortfarande när
   serverns status ersätter appens räkning.
 - **Filer:** `apps/expo/src/offlinecore.ts`, `src/offline.ts`, `apps/apple/Shared/OfflineCore.swift`, `Offline.swift`,
   `test/contracts/apps.json`.
@@ -219,6 +221,15 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
 
 ### Ej utgiven
 
+- 2026-11-28: iOS-appen lämnar in skärmtiden från tid utan nät (punkt 6, Android och Expo kvar), gren
+  `team/apple-skarmtid-2026-11-28`. En post per uppspelning `{ id, at, seconds, audio }` per server och profil
+  (`ScreenLog` i `OfflineCore.swift`): posten växer medan filmen spelar, en ny börjar efter mer än 120 s uppehåll eller
+  en timme, och id:t (`<uppspelning>-<at>`) återanvänds aldrig. `PendingScreenTime` i `Offline.swift` skickar kön
+  (högst 200 per anrop) när `PendingPositions.flush` körs (nätet tillbaka, förgrunden, profilen känd, efter ett lyckat
+  framsteg) och före utloggning, tar bort det som `done` listar om posten inte vuxit under tiden och sparar svarets
+  `screenTime`. Statiska fall i `apple-offline.test.js`, iOS i kontraktet för `POST /api/screentime/offline`. Samma
+  regler speglade i JavaScript mot serverns `addOffline`: 30 min spelat med en paus och en inlämning mitt i gav 1800 s
+  på servern, samma poster igen 0 s. Inte provat: kompilering (bara i `apple.yml`) och riktig iPhone i flygplansläge.
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
   först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`

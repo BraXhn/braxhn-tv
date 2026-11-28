@@ -46,8 +46,12 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
   framsteget inte kommer fram. Är dagens tid slut eller klockslaget passerat startar filmen inte, eller stoppas med
   samma besked som servern ger. En ny dag gäller den dagliga gränsen och klockslagen utan extra tid. Samma regler som
   Android- och Expo-appen (`ScreenClock` i `Shared/OfflineCore.swift`, sparas i `OfflineScreen` i `Offline.swift`).
-  Servern räknar inte den tiden när nätet kommer tillbaka: positionerna skickas med `at` och serverns skärmtid gäller
-  igen
+  Tiden sparas också som en post per uppspelning (`{ id, at, seconds, audio }`, per server och profil; posten växer
+  medan filmen spelar och en ny börjar efter en paus på mer än två minuter eller efter en timme) och lämnas in med
+  `POST /api/screentime/offline` när nätet kommer tillbaka, på samma ställen som positionerna. Det som svaret listar
+  i `done` tas bort ur kön, och svarets `screenTime` gäller sedan. Servern räknar varje sekund en gång, så en post som
+  skickas två gånger räknas inte dubbelt (`ScreenLog` i `Shared/OfflineCore.swift`, `PendingScreenTime` i
+  `Offline.swift`)
 - feedback och felrapporter (Inställningar → *Skicka feedback* och *Mina ärenden*), som knappen *Feedback* i webben:
   typ, *Gäller* (förvalt efter skärmen du var på), meddelande och teknisk information med *Visa vad som skickas med*.
   *Mina ärenden* visar status och teamets svar, och där svarar du när teamet ber om mer information. Går en film inte
@@ -148,4 +152,4 @@ utan Xcode) kontrollerar att varje svensk text i koden har en engelsk rad i `en.
 Feedbacks områden är serverns; `test/apple-seek.test.js` att spolningens gränser och frågan till `/hls/ready` är
 desamma som i Expo- och Android-appen; `test/apple-offline.test.js` att nedladdningarnas, köns och skärmtidens regler
 är Android-appens och att appen använder dem (profilens lista, utloggningen, kön med `at`, skärmtiden i
-nedladdningsspelaren och serverns besked).
+nedladdningsspelaren, serverns besked och kön som lämnar in tiden utan nät).

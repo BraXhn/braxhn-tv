@@ -225,10 +225,10 @@ test('nedladdningsspelaren räknar skärmtiden utan nät och stoppar med servern
   // Under uppspelningen: tiden räknas medan bilden rör sig; kommer framsteget inte fram räknas den som skärmtid
   assert.match(fn(player, 'tick'), /if isLocal \{ countLocal\(\) \}/);
   assert.match(fn(player, 'countLocal'), /player\.timeControlStatus == \.playing, let b = localBeat \{ localPlayed \+= min\(1, max\(0, now - b\)\) \}/);
-  assert.match(fn(player, 'tick'), /let secs = takeLocalPlayed\(\)[\s\S]*self\?\.playedOffline\(secs, id: id, gen: gen\)[\s\S]*noAnswer: noAnswer\)/);
-  assert.match(fn(player, 'stopReporting'), /OfflineScreen\.played\(model, seconds: secs\)/, 'den sista biten räknas också');
+  assert.match(fn(player, 'tick'), /let secs = takeLocalPlayed\(\)[\s\S]*self\?\.playedOffline\(secs, play: play, id: id, gen: gen\)[\s\S]*noAnswer: noAnswer\)/);
+  assert.match(fn(player, 'stopReporting'), /OfflineScreen\.played\(model, seconds: secs, play: play\)/, 'den sista biten räknas också');
   const po = fn(player, 'playedOffline');
-  assert.match(po, /let g = OfflineScreen\.played\(model, seconds: secs\)/);
+  assert.match(po, /let g = OfflineScreen\.played\(model, seconds: secs, play: play\)/);
   assert.match(po, /guard !g\.allowed, !closed, gen == generation, currentId == id, isLocal, stopNotice == nil else \{ return \}/);
   assert.match(po, /player\.pause\(\)\s*stopReporting\(\)\s*stopNotice = OfflineScreen\.message\(g\)/);
   // noAnswer = servern svarade inte alls (status 0); ett svar som 403 räknas inte som tid utan nät
@@ -262,4 +262,65 @@ test('beskedet när tiden är slut är serverns (messageOf i server/screentime.j
   for (const [sw, js] of pairs) { assert.ok(msg.includes(`L("${sw}")`), `Swift: ${sw}`); assert.ok(srvSt.includes(`'${js}'`), `servern: ${js}`); }
   assert.match(srvSt, /DAYS_PL = \['söndagar', 'måndagar', 'tisdagar', 'onsdagar', 'torsdagar', 'fredagar', 'lördagar'\]/);
   assert.match(msg, /\[L\("söndagar"\), L\("måndagar"\), L\("tisdagar"\), L\("onsdagar"\), L\("torsdagar"\), L\("fredagar"\), L\("lördagar"\)\]/);
+});
+
+// Skärmtid utan nät lämnas in i efterhand (felet: tiden som räknades i appen försvann när nätet kom tillbaka – serverns
+// status ersatte appens räkning, och servern hade aldrig fått tiden). POST /api/screentime/offline, docs/api.md.
+const log = core.slice(core.indexOf('enum ScreenLog'));
+const pst = off.slice(off.indexOf('final class PendingScreenTime'));
+test('tiden utan nät sparas som en post per uppspelning { id, at, seconds, audio } som får växa (ScreenLog)', () => {
+  assert.match(core, /struct ScreenEntry: Codable, Equatable \{\s*let id: String\s*let play: String\s*let at: Int64\s*var seconds: Double\s*let audio: Bool/);
+  const r = fn(log, 'record');
+  // Högst 45 s per gång (som ScreenClock); samma uppspelning fortsätter på sin post om den hänger ihop med nu
+  assert.match(r, /let s = min\(ScreenClock\.cap, seconds\)/);
+  assert.match(r, /if let i = out\.lastIndex\(where: \{ \$0\.play == play \}\)/);
+  assert.match(r, /if end <= t \+ 1, t - end <= maxGap, e\.seconds \+ s <= maxEntry \{\s*out\[i\]\.seconds = e\.seconds \+ s/);
+  // Annars en ny post som slutar nu, med ett id som aldrig återanvänds (servern räknar inte samma id med annan tid)
+  assert.match(r, /let at = Int64\(\(t - s\)\.rounded\(\.down\)\)/);
+  assert.match(core, /static func id\(play: String, at: Int64\) -> String \{ play \+ "-" \+ String\(at\) \}/);
+  assert.match(r, /guard !out\.contains\(where: \{ \$0\.id == id\(play: play, at: at\) \}\)/);
+  // En ny post minst varje timme (servern tar högst 4 h per post), högst 200 per anrop, inte äldre än 60 dygn
+  assert.match(log, /static let maxEntry: Double = 3600\b/);
+  assert.match(core, /static let batch = 200\b/);
+  const srv = read('server', 'screentime.js');
+  assert.match(srv, /export const OFFLINE_ENTRY = 4 \* 3600;/); assert.match(srv, /export const OFFLINE_MAX = 200;/);
+  assert.match(srv, /const OFFLINE_DAYS = 60;/); assert.match(core, /static let maxAge: Int64 = 60 \* 86400/);
+  // Kroppen: { device, entries: [{ id, at, seconds, audio }] }
+  const b = fn(log, 'body');
+  assert.match(b, /\["device": device,\s*"entries": sent\.map \{ \["id": \$0\.id, "at": \$0\.at, "seconds": [^,]+, "audio": \$0\.audio\]/);
+});
+
+test('svaret: det som done listar tas bort (inte en post som vuxit under tiden), och screenTime gäller sedan', () => {
+  const a = fn(log, 'ack');
+  assert.match(a, /let gone = sent\.filter \{ ok\.contains\(\$0\.id\) \}/);
+  assert.match(a, /return list\.filter \{ !gone\.contains\(\$0\) \}/, 'jämförs med posten som den skickades');
+  assert.match(core, /struct ScreenOfflineReply: Decodable \{[\s\S]*let done: \[String\][\s\S]*let screenTime: ScreenStatus\?/);
+  const f = fn(pst, 'flushNow');
+  assert.match(f, /model\.post\("\/api\/screentime\/offline", ScreenLog\.body\(device: device, sent\)\)/);
+  assert.match(f, /guard scope\(model\) == sc else \{ return \}/, 'profilbyte under tiden: svaret hör till den förra');
+  assert.match(f, /ScreenLog\.ack\(before, sent: sent, done: reply\.done\)/);
+  assert.match(f, /OfflineScreen\.note\(model, reply\.screenTime\)/);
+  assert.match(f, /if sent\.count < ScreenLog\.batch \|\| left\.count >= before\.count \{ return \}/, 'ingen oändlig slinga');
+  // Inget svar eller serverfel: kön står kvar; 403/404 (servern har inte anropet) släpper posterna
+  assert.match(core, /static func dropAll\(_ status: Int\) -> Bool \{ status == 403 \|\| status == 404 \}/);
+});
+
+test('kön för skärmtiden gäller server och profil och skickas på samma ställen som positionerna', () => {
+  assert.match(fn(pst, 'scope'), /LoginPrint\.scope\(server: model\.server, token: model\.token\)/);
+  assert.match(off, /UserDefaults\.standard\.data\(forKey: "screenlog\." \+ sc\)/);
+  // Tiden som räknas utan nät (OfflineScreen.played) sparas också i kön, med uppspelningens id
+  assert.match(fn(off, 'played'), /PendingScreenTime\.shared\.record\(model, play: play, seconds: seconds, audio: audio, now: now\)/);
+  // PendingPositions.flush körs när nätet kommer tillbaka (NWPathMonitor), i förgrunden, när profilen blir känd och
+  // efter ett lyckat framsteg – och skickar då skärmtiden också; utloggning skickar den först
+  const pp = off.slice(off.indexOf('final class PendingPositions'), off.indexOf('// MARK: - Skärmtid utan nät'));
+  assert.match(fn(pp, 'flush'), /if let m = model \{ PendingScreenTime\.shared\.flush\(m\) \}/);
+  assert.match(fn(pp, 'attach'), /pathMonitor\.pathUpdateHandler[\s\S]*PendingPositions\.shared\.flush\(\)/);
+  assert.match(app, /willEnterForegroundNotification\)\) \{ _ in\s*PendingPositions\.shared\.flush\(\)/);
+  assert.match(fn(off, 'signOut'), /await PendingScreenTime\.shared\.flushNow\(model\)\s*#if os\(iOS\)\s*Downloads\.shared\.removeServer/);
+  // Spelaren: en ny uppspelning (nedladdad fil) får ett eget id, som följer med tiden till OfflineScreen.played
+  const player = code(read(...SH, 'Player.swift'));
+  assert.match(player, /isLocal = true\s*localPlay = UUID\(\)\.uuidString/);
+  assert.match(fn(player, 'tick'), /let play = localPlay[\s\S]*self\?\.playedOffline\(secs, play: play, id: id, gen: gen\)/);
+  assert.match(fn(player, 'stopReporting'), /let play = localPlay[\s\S]*OfflineScreen\.played\(model, seconds: secs, play: play\)/);
+  assert.match(fn(player, 'playedOffline'), /OfflineScreen\.played\(model, seconds: secs, play: play\)/);
 });

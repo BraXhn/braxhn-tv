@@ -123,6 +123,8 @@ final class PlayerController: ObservableObject {
     /// framsteget inte fram (inget nät) räknas tiden som skärmtid i appen (OfflineScreen).
     private var localPlayed: Double = 0
     private var localBeat: Double?
+    /// Nedladdad titel: uppspelningens id för tiden som lämnas in i efterhand (PendingScreenTime, en post per uppspelning)
+    private var localPlay = ""
     private var seekGen = 0
     private var seekRestarting = false
 
@@ -171,6 +173,7 @@ final class PlayerController: ObservableObject {
             resetState()
             currentId = itemId
             isLocal = true
+            localPlay = UUID().uuidString
             localDuration = rec?.duration
             self.audio = nil
             title = rec?.title ?? ""
@@ -533,10 +536,11 @@ final class PlayerController: ObservableObject {
             lastReport = Date()
             let gen = generation
             let secs = takeLocalPlayed()
+            let play = localPlay
             var noAnswer: (() -> Void)?
             if isLocal {
                 noAnswer = { [weak self] in
-                    Task { @MainActor [weak self] in self?.playedOffline(secs, id: id, gen: gen) }
+                    Task { @MainActor [weak self] in self?.playedOffline(secs, play: play, id: id, gen: gen) }
                 }
             }
             model.reportProgress(id: id, position: t, duration: duration, onStop: { [weak self] r in
@@ -572,11 +576,12 @@ final class PlayerController: ObservableObject {
             reporting = false
             let t = player.currentTime().seconds
             let secs = takeLocalPlayed()
+            let play = localPlay
             // Nedladdad titel utan nät: den sista biten räknas också som skärmtid (stoppar inget, spelaren stängs)
             var noAnswer: (() -> Void)?
             if isLocal {
                 noAnswer = { [model] in
-                    Task { @MainActor in _ = OfflineScreen.played(model, seconds: secs) }
+                    Task { @MainActor in _ = OfflineScreen.played(model, seconds: secs, play: play) }
                 }
             }
             if t.isFinite, t > 1 { model.reportProgress(id: id, position: t, duration: duration, noAnswer: noAnswer) }
@@ -992,9 +997,10 @@ extension PlayerController {
     }
 
     /// Framsteget för en nedladdad titel kom inte fram (inget nät): tiden räknas som skärmtid i appen, och är dagens
-    /// tid slut eller klockslaget passerat stoppar spelaren med samma besked som servern ger
-    fileprivate func playedOffline(_ secs: Double, id: Int, gen: Int) {
-        let g = OfflineScreen.played(model, seconds: secs)
+    /// tid slut eller klockslaget passerat stoppar spelaren med samma besked som servern ger. Tiden sparas också för att
+    /// lämnas in när nätet kommer tillbaka (PendingScreenTime)
+    fileprivate func playedOffline(_ secs: Double, play: String, id: Int, gen: Int) {
+        let g = OfflineScreen.played(model, seconds: secs, play: play)
         guard !g.allowed, !closed, gen == generation, currentId == id, isLocal, stopNotice == nil else { return }
         player.pause()
         stopReporting()

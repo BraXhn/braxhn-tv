@@ -44,6 +44,12 @@
   0,3 s efter OK i stället för 0,6–1,1 s. Kvalitet, ljudspår och undertext blir desamma som förut – servern använder
   den förberedda strömmen bara när allt stämmer. Android-appen läser inte längre `/api/me/cinema` (servern avgör
   bio-läget själv). Expo-appen provad i webbläget i Chrome; Android-appen är inte provad på riktig TV eller telefon.
+- **Appen för iPhone och iPad lämnar in skärmtiden från tid utan nät.** Förut räknade appen tiden när en nedladdad
+  film spelades utan nät, men när nätet kom tillbaka tog serverns räkning över och tiden försvann – barnet fick dagens
+  tid en gång till efter flygresan. Nu sparar appen en post per uppspelning och skickar dem till servern när nätet
+  kommer tillbaka eller appen öppnas igen (`POST /api/screentime/offline`). Tiden räknas på dagen den spelades och
+  bara en gång, även om appen skickar samma post flera gånger. Inte byggt här och inte provat på riktig iPhone eller
+  iPad.
 - **Skärmtid som spelats utan nät kan räknas på servern.** Tittade ett barn på nedladdade filmer på en flygresa
   räknade appen tiden själv, men när nätet kom tillbaka tog serverns räkning över och tiden från resan försvann – barnet
   fick dagens tid en gång till. Nu tar servern emot tiden i efterhand (`POST /api/screentime/offline`) och räknar den på

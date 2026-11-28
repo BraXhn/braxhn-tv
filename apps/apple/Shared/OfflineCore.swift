@@ -368,3 +368,94 @@ enum ScreenClock {
         return max(0, Int(end.timeIntervalSince(now).rounded()))
     }
 }
+
+// MARK: - Skärmtid utan nät som lämnas in i efterhand
+
+// Tiden som spelats utan kontakt sparas också som poster per uppspelning och lämnas in när nätet kommer tillbaka
+// (POST /api/screentime/offline, server/screentime.js addOffline), så att den räknas på servern på dagen den spelades.
+// Servern räknar varje verklig sekund en gång per profil: en post som skickas igen räknas inte igen, och samma id får
+// växa (bara det nya räknas). Filerna och anropet sköter PendingScreenTime i Offline.swift.
+
+/// En uppspelning utan nät. id = "<uppspelning>-<at>" (stabilt: ändras inte när posten växer), play = uppspelningens
+/// id, at = när posten började (Unix-sekunder), seconds = tiden som spelats sedan dess, audio = ljudbok eller podd
+struct ScreenEntry: Codable, Equatable {
+    let id: String
+    let play: String
+    let at: Int64
+    var seconds: Double
+    let audio: Bool
+}
+
+enum ScreenLog {
+    /// En post växer högst så länge (servern tar högst 4 timmar per post); sedan börjar en ny
+    static let maxEntry: Double = 3600
+    /// Längre uppehåll än så (paus, avbrott) börjar en ny post, så att posten inte täcker tid då inget spelades
+    static let maxGap: Double = 120
+    /// Fler poster än så sparas inte (de äldsta släpps)
+    static let max = 1000
+    /// Äldre än så tar servern inte emot (60 dygn)
+    static let maxAge: Int64 = 60 * 86400
+    /// Högst så många poster per anrop (servern tar 200; resten skickas nästa gång)
+    static let batch = 200
+
+    /// Tid som spelats utan kontakt i uppspelningen play (högst ScreenClock.cap sekunder per gång, som ScreenClock).
+    /// Samma uppspelning fortsätter på sin senaste post om den hänger ihop med nu; annars börjar en ny post som slutar nu.
+    static func record(_ list: [ScreenEntry], play: String, seconds: Double, audio: Bool, now: Date) -> [ScreenEntry] {
+        guard !play.isEmpty, seconds.isFinite, seconds > 0 else { return prune(list, now: now) }
+        let s = min(ScreenClock.cap, seconds)
+        let t = now.timeIntervalSince1970
+        var out = list
+        if let i = out.lastIndex(where: { $0.play == play }) {
+            let e = out[i]
+            let end = Double(e.at) + e.seconds + s
+            // Klockan har inte gått bakåt, inget långt uppehåll och posten är inte full
+            if end <= t + 1, t - end <= maxGap, e.seconds + s <= maxEntry {
+                out[i].seconds = e.seconds + s
+                return prune(out, now: now)
+            }
+        }
+        let at = Int64((t - s).rounded(.down))
+        // En ny post för samma uppspelning får aldrig samma id som en tidigare (servern skulle inte räkna den)
+        guard !out.contains(where: { $0.id == id(play: play, at: at) }) else { return prune(out, now: now) }
+        out.append(ScreenEntry(id: id(play: play, at: at), play: play, at: at, seconds: s, audio: audio))
+        return prune(out, now: now)
+    }
+
+    static func id(play: String, at: Int64) -> String { play + "-" + String(at) }
+
+    /// Ordning (äldst först), högst max poster och inga som är för gamla
+    static func prune(_ list: [ScreenEntry], now: Date) -> [ScreenEntry] {
+        let t = Int64(now.timeIntervalSince1970)
+        return Array(list.filter { t - $0.at <= maxAge }.sorted { $0.at < $1.at }.suffix(max))
+    }
+
+    /// Posterna som skickas nu (de äldsta först, högst batch)
+    static func next(_ list: [ScreenEntry]) -> [ScreenEntry] { Array(list.prefix(batch)) }
+
+    /// Kroppen i POST /api/screentime/offline: { device, entries: [{ id, at, seconds, audio }] }
+    static func body(device: String, _ sent: [ScreenEntry]) -> [String: Any] {
+        ["device": device,
+         "entries": sent.map { ["id": $0.id, "at": $0.at, "seconds": ($0.seconds * 10).rounded() / 10, "audio": $0.audio] as [String: Any] }]
+    }
+
+    /// Svaret listar i done postens id för allt som servern är klar med. Bara posten som den skickades tas bort: har
+    /// den vuxit under tiden ligger den kvar och skickas igen (servern räknar bara det nya)
+    static func ack(_ list: [ScreenEntry], sent: [ScreenEntry], done: [String]) -> [ScreenEntry] {
+        let ok = Set(done)
+        let gone = sent.filter { ok.contains($0.id) }
+        return list.filter { !gone.contains($0) }
+    }
+
+    /// Ett svar utan done (403/404 från en server som inte har anropet än, eller en profil som inte får): posterna
+    /// kan aldrig lämnas in och släpps. Inget svar, utloggad, för många anrop eller serverfel: försök nästa gång
+    static func dropAll(_ status: Int) -> Bool { status == 403 || status == 404 }
+}
+
+/// Svaret på POST /api/screentime/offline: done = postens id för allt som servern är klar med, screenTime = statusen
+/// (samma form som i framstegssvaret, null för profiler utan skärmtid)
+struct ScreenOfflineReply: Decodable {
+    let added: Double?
+    let done: [String]
+    let stop: Bool?
+    let screenTime: ScreenStatus?
+}
