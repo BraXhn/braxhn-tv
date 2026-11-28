@@ -48,10 +48,11 @@ class ScreenLeftCoreTest {
         val c = ScreenClock.fresh(ScreenStatus(limited = true, day = "2026-11-28", daily = 30, used = 1500.0, remaining = 300.0))
         val now = ZonedDateTime.of(2026, 11, 28, 10, 0, 0, 0, zone)
         assertEquals(ScreenLeftCore.Left(5, true), ScreenLeftCore.ofGate(ScreenClock.gate(c, now)))
-        // Två minuter spelade utan nät (45 s per gång som mest, som servern räknar glapp)
+        // Två minuter spelade utan nät, i bitar om 10 s (posterna räknar verklig tid, så klockan går fram)
         var x: ScreenCache? = c
-        repeat(12) { x = ScreenClock.addOffline(x, now, 10.0) }
-        assertEquals(ScreenLeftCore.Left(3, true), ScreenLeftCore.ofGate(ScreenClock.gate(x, now)))
+        repeat(12) { i -> x = ScreenClock.addOffline(x, now.plusSeconds(10L * (i + 1)), 10.0) }
+        val after = now.plusSeconds(120)
+        assertEquals(ScreenLeftCore.Left(3, true), ScreenLeftCore.ofGate(ScreenClock.gate(x, after)))
         // Sluttiden kommer först: 20:00 och klockan är 19:58:30
         val win = ScreenClock.fresh(ScreenStatus(limited = true, day = "2026-11-28", remaining = 3600.0, until = "20:00"))
         assertEquals(ScreenLeftCore.Left(2, true), ScreenLeftCore.ofGate(ScreenClock.gate(win, ZonedDateTime.of(2026, 11, 28, 19, 58, 30, 0, zone))))
