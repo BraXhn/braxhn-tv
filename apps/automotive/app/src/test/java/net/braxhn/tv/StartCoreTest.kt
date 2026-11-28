@@ -67,6 +67,17 @@ class StartCoreTest {
         assertFalse(StartCore.key(7, warm) == StartCore.key(8, warm))
     }
 
+    @Test fun bwUtanforHemmetIBadaFragorna() {
+        // Utanför hemmet: samma bw i förvärmningen och uppspelningen (BwCore.forWarm/forPlay), annars en annan ström
+        val play = caps + StartCore.playExtras(0.0, false) + StartCore.bwPart(5200)
+        assertEquals("5200", play["bw"])
+        assertEquals(play, StartCore.warmQuery(play) - "warm")
+        assertFalse(StartCore.key(7, StartCore.warmQuery(play)) == StartCore.key(7, StartCore.warmQuery(play + StartCore.bwPart(5300))))
+        // Utan mätning (hemma) skickas inget bw – serverns gissning gäller som förut
+        assertNull(StartCore.bwPart(null)["bw"]); assertNull(StartCore.bwPart(0)["bw"])
+        assertEquals(StartCore.key(7, caps), StartCore.key(7, caps + StartCore.bwPart(null)))
+    }
+
     @Test fun sammaFragaForvarmsHogstVar15eSekund() {
         val log = StartCore.WarmLog()
         assertTrue(log.take("a", 1_000))

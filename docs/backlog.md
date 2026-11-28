@@ -24,13 +24,19 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ## Näst på tur
 
-### 1. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
+### 1. Appen för iPhone, iPad och Apple TV mäter uppkopplingen utanför hemmet och skickar `bw`
 
 - **Gjort:** iOS/tvOS-appen (2026-11-28, gren `team/apple-bw-2026-11-28`, se *Klart*). Kvar: Android och Expo, och
   provet med `tc` nedan.
 - **Vad:** Android-, iOS/tvOS- och Expo-appen mäter inte uppkopplingen och skickar inte `bw` till `/playback` (sökt
   i `apps/`: inget `bw` i frågan och inget anrop till `/api/speedtest`; Windows-appen skickar `buf=1` och behöver det
   inte). Servern använder `bw` för att välja startsteget (`fitQ` via `remoteQuality`) och för att koda om en remux
+- **Gjort för Android och Expo** (gren `team/app-bw-2026-11-28`): `BwCore.kt`/`Bandwidth.kt` och `src/bwcore.ts`,
+  testade på JVM och i `test/expo-bw.test.js` (också mot en lokal server strypt till 2, 5 och 20 Mbit/s), kontraktet
+  har `bw` och `GET /api/speedtest` för `android`. Kvar: iOS/tvOS (`ios` i kontraktet), och att prova på riktig
+  enhet via reläet hur lång tid mätningen tar där.
+- **Vad:** iOS/tvOS-appen mäter inte uppkopplingen och skickar inte `bw` till `/playback` (Windows-appen skickar
+  `buf=1` och behöver det inte). Servern använder `bw` för att välja startsteget (`fitQ` via `remoteQuality`) och för att koda om en remux
   eller direktuppspelning som inte ryms i nätet (`o.force = 'transcode'` i `server/routes/playback.js`). Utan `bw`
   börjar en omkodning på taket (1080p ≈ 8 Mbit/s i `QUALITIES`), och en fil upp till ungefär 10 Mbit/s remuxas – utan
   lägre steg att växla till på ett svagt mobilnät. Mät som webben (`sample()` i
@@ -38,10 +44,10 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
   hemmet, och spara mätningen några minuter.
 - **Varför:** på mobilnät och via reläet är det här skillnaden mellan att filmen börjar direkt och att den hackar de
   första minuterna eller aldrig kommer igång. Webbspelaren skickar redan `bw` (`web/js/player/nativeplan.js`).
-- **Filer:** `apps/automotive/.../StartCore.kt`, `Start.kt`, `apps/apple/Shared/AppModel.swift` (`capabilities`),
-  `apps/expo/src/startcore.ts`, `test/contracts/apps.json`.
-- **Klart när:** kontraktet har `bw` i `/playback` för `android` och `ios`, ett test i Expo-appen visar att mätningen
-  bara görs utanför hemmet, och en fil på 8 Mbit/s som annars remuxas startar som omkodning mot en server begränsad
+- **Filer:** `apps/apple/Shared/AppModel.swift` (`capabilities`), `Start.swift`, `StartCore.swift`,
+  `test/contracts/apps.json`. Samma regler som `BwCore.kt` (samma bw i förvärmningen och uppspelningen, ingen
+  förvärmning utan färsk mätning).
+- **Klart när:** kontraktet har `bw` i `/playback` för `ios` (Android och Expo klart), och en fil på 8 Mbit/s som annars remuxas startar som omkodning mot en server begränsad
   till 5 Mbit/s (`tc` lokalt). Kontrollera först hur lång tid mätningen tar via reläet – den får inte göra starten långsammare
   (kan göras samtidigt med förvärmningen).
 
@@ -324,6 +330,8 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   Förvärmningen och uppspelningen skickar samma `bw` (förvärmningens värde i 20 s, även inget – appen förvärmer
   också utan mätning, till skillnad från webben). Kontraktet har `bw` i `/playback` och `warm=1` för `ios` och `GET /api/speedtest`. Inte byggt här
   (Swift kompileras i GitHub Actions), inte provat på enhet, via reläet eller med `tc`.
+- 2026-11-28: Android- och Expo-appen mäter uppkopplingen utanför hemmet och skickar `bw` (punkt 1, iOS kvar), gren
+  `team/app-bw-2026-11-28`.
 - 2026-11-28: Android-appen följer *Spela nästa avsnitt automatiskt* (punkt 1, iOS kvar), gren
   `team/android-nasta-2026-11-28`. `SkipCore.kt` (JVM-test `SkipCoreTest.kt`, samma fall som `test/expo-skip.test.js`):
   knapparna och nedräkningen för sammanfattning, intro och eftertexter (`autoSkip`), `next` som webbens `nextPlan` och

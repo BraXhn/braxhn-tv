@@ -3,6 +3,7 @@
 import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { isLocalUrl, pickLocal, type LocalInfo } from './localpick';
+import * as bwc from './bwcore';
 import { acceptLanguage, t } from './i18n';
 
 export class ApiError extends Error {
@@ -69,6 +70,7 @@ export async function selectServer(id: string): Promise<boolean> {
   if (!sv) return false;
   currentId = id;
   session.server = sv.url; session.saved = sv.url; session.token = (await store.get(tokenKey(id))) || '';
+  resetBandwidth();
   session.userId = 0; session.imgToken = ''; session.imgUntil = 0;
   return !!session.token;
 }
@@ -119,6 +121,7 @@ export async function switchProfile(id: number, secret: { pin?: string; password
 export async function signOut() {
   if (currentId) { await store.set(tokenKey(currentId), null); await store.set(imgKey(currentId), null); }
   session.token = ''; session.userId = 0; session.imgToken = ''; session.imgUntil = 0;
+  resetBandwidth();
 }
 
 function netError(e: any): ApiError {
@@ -300,22 +303,62 @@ export function playbackCaps(): Record<string, string> {
 }
 /** Frågesträngen till /playback. Förvärmningen (warm) skickar samma utan ljudspår – servern väljer profilens förval. */
 // prev: strömmen som den nya ersätter (spolning i en omkodning, seekcore.ts) – servern stoppar den direkt.
-export function playbackQuery(o: { start?: number; audio?: number | null; warm?: boolean; prev?: string }): string {
+// bw: uppkopplingen utanför hemmet (kbit/s, bandwidth nedan) – förvärmningen och uppspelningen skickar samma.
+export function playbackQuery(o: { start?: number; audio?: number | null; warm?: boolean; prev?: string; bw?: number | null }): string {
   const q: Record<string, string> = { ...playbackCaps() };
   if (o.start && o.start >= 1) q.start = String(Math.floor(o.start));
+  if (o.bw && o.bw > 0) q.bw = String(Math.round(o.bw));
   if (o.warm) q.warm = '1'; else if (o.audio != null) q.audio = String(o.audio);
   if (o.prev && !o.warm) q.prev = o.prev;
   return Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }
-/** Servern startar strömmen redan när fingret landar på Spela (se docs/api.md, warm=1) – tyst om det inte går */
+/** Servern startar strömmen redan när fingret landar på Spela (se docs/api.md, warm=1) – tyst om det inte går.
+ *  Utanför hemmet utan färsk mätning förvärms inget (servern kan inte förutse valet utan bw); appen mäter i stället. */
 const warmed = new Map<string, number>();
 export function warmPlay(id: number, start = 0) {
-  const key = `${id}:${Math.floor(start)}`;
+  const key = bwc.pairKey(id, start);
+  const bw = warmBw(id, start);
+  if (bw == null && bwAway()) { measureBandwidth().catch(() => {}); return; }
   if (Date.now() - (warmed.get(key) || 0) < 15000) return;
   if (warmed.size > 100) warmed.clear();
   warmed.set(key, Date.now());
-  api(`/api/items/${id}/playback?${playbackQuery({ start, warm: true })}`).catch(() => {});
+  api(`/api/items/${id}/playback?${playbackQuery({ start, warm: true, bw })}`).catch(() => {});
 }
+
+// ---------- uppkopplingen utanför hemmet ----------
+// Reglerna står i bwcore.ts. here = servern såg förfrågan som hemma (/api/local), null = okänt.
+const net = { meter: new bwc.Meter(), pairs: new bwc.Pairs(), here: null as boolean | null, running: null as Promise<number> | null };
+/** Är appen utanför hemmet (då skickas bw)? */
+export const bwAway = () => bwc.away({ savedIsLocal: !session.saved || isLocalUrl(session.saved), viaHome: viaHome(), here: net.here });
+/** Mätningen som pågår, annars en ny: 4 MB från /api/speedtest i högst en sekund */
+export function measureBandwidth(): Promise<number> {
+  if (net.running) return net.running;
+  const base = session.server, token = session.token;
+  if (!base || !token || typeof XMLHttpRequest === 'undefined') return Promise.resolve(0);
+  net.running = bwc.sample(`${base}/api/speedtest?kb=${bwc.SAMPLE_KB}&n=${Date.now()}`, { Authorization: 'Bearer ' + token },
+    { xhr: () => new XMLHttpRequest() as unknown as bwc.XhrLike, now: () => globalThis.performance?.now?.() ?? Date.now() })
+    .then((k) => { if (k > 0 && token === session.token) net.meter.note(k, Date.now()); return k; })
+    .finally(() => { net.running = null; });
+  return net.running;
+}
+/** Mät i bakgrunden om appen är utanför hemmet och saknar en färsk mätning (appen öppnas, titelsidan öppnas) */
+export function refreshBandwidth() { if (session.token && bwAway() && !net.meter.fresh(Date.now())) measureBandwidth().catch(() => {}); }
+/** bw till förvärmningen (null = förvärm inte nu); kommer ihåg värdet för uppspelningen */
+function warmBw(id: number, start: number): number | null {
+  const key = bwc.pairKey(id, start), now = Date.now();
+  const bw = bwc.forWarm(bwAway(), net.pairs.get(key, now), net.meter.fresh(now));
+  if (bw != null) net.pairs.put(key, bw, now);
+  return bw;
+}
+/** bw till uppspelningen: samma som förvärmningen, annars färsk mätning, annars en mätning som får ta högst 1,5 s */
+export function playBw(id: number, start = 0): Promise<number | null> {
+  const now = Date.now();
+  return bwc.forPlay(bwAway(), net.pairs.get(bwc.pairKey(id, start), now), net.meter.fresh(now), measureBandwidth);
+}
+/** Färsk mätning utanför hemmet utan att vänta (spolning i en omkodning), annars null */
+export const currentBw = (): number | null => (bwAway() ? net.meter.fresh(Date.now()) || null : null);
+/** Ny server eller utloggning: mätningen gäller inte längre */
+function resetBandwidth() { net.meter.clear(); net.pairs.clear(); net.here = null; }
 
 // ---------- hemma via den publika adressen ----------
 // Servern ger sina adresser på hemnätet (/api/local). Svarar en av dem rätt på provet inom 800 ms (localpick.ts)
@@ -343,6 +386,9 @@ export async function goHomeIfHere(): Promise<boolean> {
   // Servern, profilen eller ett nyare prov kom emellan: låt det gälla
   if (gen !== localGen || saved !== session.saved || token !== session.token) return session.server !== session.saved;
   session.server = hit || saved;
+  net.here = !!info?.here;
+  // Utanför hemmet: uppkopplingen mäts nu i bakgrunden, så att starten inte behöver vänta på den
+  refreshBandwidth();
   return !!hit;
 }
 /** Hemadressen svarade inte (t.ex. en nedladdning som avbröts när man lämnade hemmet): tillbaka till den sparade */

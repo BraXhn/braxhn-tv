@@ -30,13 +30,25 @@ object Start {
         return caps + Api.comfortQuery() + StartCore.playExtras(start, skipPreroll)
     }
 
-    /** /playback?warm=1 – tyst; servern svarar { warm, mode } och räknar inget som uppspelning */
+    /**
+     * Uppspelningens fråga: query plus bw utanför hemmet (Bandwidth.kt) – samma bw som en förvärmning av titeln och
+     * positionen nyss skickade, annars den färska mätningen (eller en mätning som får ta högst 1,5 s).
+     */
+    suspend fun playQuery(id: Int, audio: Int?, sub: SubtitleTrack?, start: Double, skipPreroll: Boolean): Map<String, String?> =
+        query(audio, sub, start, skipPreroll) + StartCore.bwPart(Bandwidth.forPlay(id, start))
+
+    /**
+     * /playback?warm=1 – tyst; servern svarar { warm, mode } och räknar inget som uppspelning. Utanför hemmet utan färsk
+     * mätning förvärms inget (servern kan inte förutse valet utan bw) – appen mäter i stället, till nästa gång.
+     */
     fun warm(id: Int, start: Double, audio: Int?, sub: SubtitleTrack?) {
         if (id <= 0) return
         Api.appScope.launch {
             runCatching {
                 if (Downloads.localFile(id) != null) return@launch // en nedladdad titel spelas från enheten
-                val q = StartCore.warmQuery(query(audio, sub, start, false))
+                val bw = Bandwidth.forWarm(id, start)
+                if (bw == null && Bandwidth.away()) { Bandwidth.measure(); return@launch }
+                val q = StartCore.warmQuery(query(audio, sub, start, false) + StartCore.bwPart(bw))
                 if (!log.take(StartCore.key(id, q), System.currentTimeMillis())) return@launch
                 Api.requestPublic("/api/items/$id/playback", "GET", q, null)
             }

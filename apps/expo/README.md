@@ -270,6 +270,15 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   den första strömmen. En ström som aldrig används (spelaren stängd, titeln gick inte att hämta) stoppas. Reglerna:
   `src/startcore.ts` (testas i `test/expo-start.test.js`). Uppmätt i webbläget med 80 ms fördröjning per anrop: svaret
   på `/playback` kommer cirka 90 ms tidigare (en rundresa).
+- Utanför hemmet (inte hemadressen, och servern ser inte förfrågan som hemma) mäter appen uppkopplingen och skickar
+  den som `bw` (kbit/s) till `/playback`, så att servern listar och förstartar steget som ryms – och kodar om en fil
+  som annars skulle remuxas men inte ryms i nätet. Utan mätning gäller serverns gissning som förut. Provet är som
+  webbens (4 MB från `/api/speedtest`, avbrutet efter 1 s, takten efter första tredjedelen) och görs med
+  `XMLHttpRequest`, eftersom React Natives `fetch` inte ger svaret bit för bit. Det görs i bakgrunden när appen öppnas
+  eller kommer tillbaka och när en titelsida öppnas, och gäller i 10 minuter. Utan färsk mätning förvärms inget (appen
+  mäter i stället), och uppspelningen väntar högst 1,5 s på en mätning. Förvärmningen och uppspelningen skickar samma
+  `bw`. Reglerna: `src/bwcore.ts` (testas i `test/expo-bw.test.js`, också mot en lokal server strypt till 2, 5 och
+  20 Mbit/s: mätt inom 1 % på cirka 1,2 s).
 
 ## Begränsningar
 
@@ -281,6 +290,8 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   nästa/föregående på låsskärmen, utan helt glapplösa låtbyten och utan jämn ljudnivå (ReplayGain), övertoning,
   sovtimer, låttexter, bokmärken och redigering av spellistor – det finns i webben.
 - Undertexter och val av ljudspår sköts av telefonens spelare, för de spår som strömmen innehåller.
+- Mätningen av uppkopplingen utanför hemmet uppdateras inte från segmenten under uppspelningen (expo-video ger ingen
+  mätning av takten, som ExoPlayer i Android-appen) och glöms inte när telefonen byter nät, bara efter 10 minuter.
 
 ## Utveckling
 

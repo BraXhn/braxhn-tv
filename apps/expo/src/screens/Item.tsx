@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { C, R } from '../theme';
-import { api, ensureImageToken, fmtDur, fmtTime, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem } from '../api';
+import { api, ensureImageToken, fmtDur, fmtTime, refreshBandwidth, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem } from '../api';
 import { Art, Button, ErrorState, Loading, Shelf } from '../components/ui';
 import { DownloadSeason, DownloadVideo, EpisodeDownload } from '../components/download';
 import type { Props } from '../nav';
@@ -22,7 +22,8 @@ export default function ItemScreen({ navigation, route }: Props<'Item'>) {
     catch (e: any) { setError(e?.message || t('Kunde inte hämta titeln')); }
   }, [route.params.id]);
   // Hämtas på nytt efter uppspelning: positionen och "sedd" har ändrats
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Utanför hemmet utan färsk mätning: uppkopplingen mäts nu, så att Spela kan förvärmas och starta med rätt steg
+  useFocusEffect(useCallback(() => { load(); refreshBandwidth(); }, [load]));
 
   const play = (x: MediaItem, start: number) => navigation.push('Player', { id: x.id, start, title: x.kind === 'episode' ? `${x.showTitle || ''} · ${sxe(x)}` : x.title });
   const seasons = useMemo(() => [...new Set((it?.children || []).map((c) => c.season ?? 0))].sort((a, b) => a - b), [it]);

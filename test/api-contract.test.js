@@ -364,6 +364,7 @@ const CASES = {
   'GET /api/items/:id/playback': () => [S.film, S.remux, S.ep2].map(id => ({ p: { id } })),
   // Förvärmningen (warm=1): samma titlar; servern svarar { warm, mode } och räknar inget som uppspelning
   'GET /api/items/:id/playback?warm=1': () => [S.film, S.remux, S.ep2].map(id => ({ p: { id } })),
+  // Mätningen av uppkopplingen utanför hemmet (appen skickar resultatet som bw till /playback)
   'GET /api/speedtest': () => [{}],
   // Strömadresserna tas ur playback-svaret med appens förmågor (utom info=1, som bara visar läget)
   'GET /api/stream/:id/direct': (app) => streamCases(app, (pb) => pb.mode === 'direct'),
