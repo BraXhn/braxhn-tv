@@ -24,7 +24,43 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ## Näst på tur
 
-### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Android- och iOS/tvOS-appen: följ *Spela nästa avsnitt automatiskt*, med nedräkning och förvärmning (fel)
+
+- **Vad:** båda apparna startar nästa avsnitt direkt när filmen tar slut och bryr sig inte om kontots val
+  (`onPlaybackStateChanged` → `STATE_ENDED` i `PlayerScreen.kt`, `ended()` i `apps/apple/Shared/Player.swift`; inget
+  `autoNext` i `apps/automotive` eller `apps/apple`). Svaret från `/playback` har `autoNext: { enabled, countdown }`
+  (`server/routes/playback.js`). Gör som webben (`nextPlan` i `web/js/player/autoskip.js`) och Expo-appen
+  (`src/skipcore.ts` i grenen `team/expo-skarmtid-2026-11-28`): kortet *Nästa avsnitt om N s* med *Spela nu* och
+  *Avbryt*, inget nästa avsnitt när valet är av. Förvärm nästa avsnitt (`/playback?warm=1`) när eftertexterna börjar,
+  som webben – Android har redan `Start.warm`, iOS saknar förvärmning helt (se punkt 5).
+- **Varför:** föräldern som stängt av *Spela nästa avsnitt automatiskt* för att barnet inte ska fastna i en serie får
+  ändå nästa avsnitt på Google TV och Apple TV, där barnen tittar mest. Utan förvärmning börjar nästa avsnitt från
+  noll med en ny omkodning.
+- **Filer:** `apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt`, `Api.kt` (fältet `autoNext`),
+  `apps/apple/Shared/Player.swift`, `Models.swift`, `test/contracts/apps.json` (`warm=1` från spelaren).
+- **Klart när:** ett enhetstest i varje app (Android `src/test`, `test/apple-*.test.js`) visar att `autoNext.enabled =
+  false` stänger spelaren i slutet och att nedräkningen följer `countdown`; bygget i GitHub Actions går igenom.
+
+### 2. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
+
+- **Vad:** Android-, iOS/tvOS- och Expo-appen mäter inte uppkopplingen och skickar inte `bw` till `/playback` (sökt
+  i `apps/`: inget `bw` i frågan och inget anrop till `/api/speedtest`; Windows-appen skickar `buf=1` och behöver det
+  inte). Servern använder `bw` för att välja startsteget (`fitQ` via `remoteQuality`) och för att koda om en remux
+  eller direktuppspelning som inte ryms i nätet (`o.force = 'transcode'` i `server/routes/playback.js`). Utan `bw`
+  börjar en omkodning på taket (1080p ≈ 8 Mbit/s i `QUALITIES`), och en fil upp till ungefär 10 Mbit/s remuxas – utan
+  lägre steg att växla till på ett svagt mobilnät. Mät som webben (`sample()` i
+  `web/js/player/caps.js`: 4 MB från `/api/speedtest`, högst 1 s, takten efter första tredjedelen) – bara utanför
+  hemmet, och spara mätningen några minuter.
+- **Varför:** på mobilnät och via reläet är det här skillnaden mellan att filmen börjar direkt och att den hackar de
+  första minuterna eller aldrig kommer igång. Webbspelaren skickar redan `bw` (`web/js/player/nativeplan.js`).
+- **Filer:** `apps/automotive/.../StartCore.kt`, `Start.kt`, `apps/apple/Shared/AppModel.swift` (`capabilities`),
+  `apps/expo/src/startcore.ts`, `test/contracts/apps.json`.
+- **Klart när:** kontraktet har `bw` i `/playback` för `android` och `ios`, ett test i Expo-appen visar att mätningen
+  bara görs utanför hemmet, och en fil på 8 Mbit/s som annars remuxas startar som omkodning mot en server begränsad
+  till 5 Mbit/s (`tc` lokalt). Kontrollera först hur lång tid mätningen tar via reläet – den får inte göra starten långsammare
+  (kan göras samtidigt med förvärmningen).
+
+### 3. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -35,7 +71,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 2. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 4. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
 
@@ -52,16 +88,68 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
   i Safari.
 
 
-## Idéer
+### 5. Ljudbok eller poddavsnitt finns kvar i minispelaren efter omladdning
 
-- Skärmtid utan nät för ljudböcker och poddar: Android (`MusicService.kt`, `OfflineSync.playedOffline(audio = true)`
-  finns men anropas inte) och iOS (`Listen.swift`, `audio` alltid false) räknar bara video; Expo räknar ljudböcker.
+- **Vad:** musikkön återställs efter omladdning, i en ny flik och på en annan enhet (`restoreQueue` i
+  `web/js/audio.js`, `server/musicqueue.js`), men en bok eller ett poddavsnitt gör det inte: `saveQueue` och
+  `queueTouch` gör inget när `M.spoken` är satt, `restoreQueue` hoppar över, och `playSpoken` anropar
+  `queueForget`. Positionen finns redan på servern (`/api/audiobooks/book/:id/progress`, poddarnas progress). Visa
+  den senaste boken eller avsnittet pausat i minispelaren efter omladdning, som musiken (t.ex. `spoken: { kind, id }`
+  i kön, eller *Fortsätt lyssna* från `continueBooks`).
+- **Varför:** ljudböcker lyssnar man på i omgångar; i dag försvinner minispelaren när sidan laddas om eller telefonen
+  rensar fliken, och man måste leta upp boken igen. Audiobookshelf och Plexamp har det.
+- **Filer:** `web/js/audio.js` (`saveQueue`, `restoreQueue`, `playSpoken`), `server/musicqueue.js`,
+  `web/js/router.js` (anropet efter start), test i `test/` för köns API.
+- **Klart när:** ett test visar att en bok sparad i kön kommer tillbaka med rätt position för samma profil och inte för
+  en annan, och i Chrome (Playwright) visar minispelaren boken pausad efter omladdning och fortsätter där den var.
+
+### 6. Webbspelaren: kortet i slutet visar vilket avsnitt som kommer
+
+- **Vad:** kortet i slutet säger bara *Nästa avsnitt om N s* med *Spela nu* och *Avbryt* (`onEnded` i
+  `web/js/player/video.js`) – inget namn, nummer eller bild. Svaret från `/api/items/:id` har redan `nextId`
+  (`server/routes/library.js`); lägg till namn, säsong/avsnitt och bild för nästa avsnitt (en rad i samma svar, eller
+  ett anrop när eftertexterna börjar, samtidigt med förvärmningen). Kortet kan gärna komma redan vid eftertexterna
+  (`credits` i svaret från `/playback`), som i Plex och Netflix.
+- **Varför:** man ser inte om nästa avsnitt är början på en ny säsong eller ett dubbelavsnitt, och kan inte välja att
+  stanna. Det är det vanligaste ögonblicket i en serie.
+- **Filer:** `web/js/player/video.js` (`onEnded`), `server/routes/library.js`, `web/style.css` (`.next`),
+  `web/i18n/en.js`.
+- **Klart när:** i Chrome (Playwright, 1280×720 och 390×844) visar kortet nästa avsnitts namn, *S1 · A2* och bild,
+  och texten finns på engelska.
+
+### 7. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
+
+- **Vad:** bara filmer och avsnitt kan laddas ner i Android- och iOS-appen (`Offline.kt`, `Offline.swift`; inget i
+  `Listen.swift` eller `MusicService.kt`). Expo-appen har nedladdade böcker. När det byggs: räkna skärmtid utan nät för
+  ljud (`audio = true` i posterna till `POST /api/screentime/offline`). Kontrollera först efter att grenarna
+  `team/android-ljud-2026-11-28` och `team/apple-skarmtid-2026-11-28` är ihopslagna: i dag räknar Android bara video
+  (`OfflineSync.playedOffline` anropas bara från `PlayerScreen.kt`) och iOS skickar `audio` som false.
+- **Varför:** ljudböcker i bilen och på resor är en av de vanligaste användningarna utan nät; Audiobookshelf och Plexamp
+  har det. Med en profil där ljud räknas som skärmtid får tiden inte försvinna.
+- **Filer:** `apps/automotive/.../Offline.kt`, `MusicService.kt`, `OfflineSync.kt`, `apps/apple/Shared/Offline.swift`,
+  `Listen.swift`, `OfflineCore.swift`, `test/contracts/apps.json`.
+- **Klart när:** en bok och ett poddavsnitt går att ladda ner och spela utan nät i båda apparna, enhetstesterna
+  (`OfflineCoreTest.kt`, `test/apple-offline.test.js`) har en post med `audio: true` från en nedladdad bok, och bygget i
+  GitHub Actions går igenom.
+
+### 8. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
+
+- **Vad:** `test/web-chrome-playback.test.js` (samma mätning som uppspelningsvakten, `installProbes()` i
+  `test/helpers/chrome.js`) har enligt dagens agenter fallit ibland när flera ffmpeg-jobb körs samtidigt på maskinen.
+  Kontrollera först: kör testet tio gånger med och utan en annan omkodning i bakgrunden och notera vilket fall som
+  faller och varför (tidsgräns eller verkligt fel). Rätta sedan väntan i testet (vänta på händelser, inte fasta tider)
+  eller felet i spelaren om det är ett riktigt fel.
+- **Varför:** testet skyddar uppspelningen i webben före varje utgåva. Ett test som faller utan orsak gör att riktiga
+  fel ses som brus.
+- **Filer:** `test/web-chrome-playback.test.js`, `test/helpers/chrome.js`, `test/vakt.mjs` (samma prober).
+- **Klart när:** tio körningar i rad under last går igenom, eller felet som syns under last är rättat i spelaren.
+
+## Idéer
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
-- Skärmtid som räknats utan nät försvinner när appen får nät: servern räknar inte framsteg som skickas med `at`
-  (`server/routes/library.js`), och serverns status ersätter appens räkning i alla tre apparna. Ett anrop som tar emot
-  tid spelad utan nät (per dag, med tak) skulle göra att barnet inte får dagens tid en gång till efter flygresan.
+- Skärmtid i Chrome (kontrollera först med ett test): tiden mellan två uppspelningar räknades som skärmtid (+50 s för
+  ~10 s tittande) när nästa start kom inom 45 s, och en paus på 3 s räknades (`server/screentime.js` `heartbeat`).
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
 - Skärmtid: hls.js hämtar segment i upp till 60 s framåt även när filmen är pausad, och varje segment är ett
