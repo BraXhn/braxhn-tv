@@ -994,14 +994,18 @@ function subsMedia(it, query, d) {
 }
 // Mastern listar steget som ryms i den uppmätta bandbredden (sbw) först – iPhone/Safari börjar på första varianten
 // och byter annars ner först efter att ha fastnat på ett för tungt steg. hls.js väljer samma steg: webbspelaren ger
-// den 80 % av samma mätning som bandbreddsgissning (video.js), och hls.js tar det högsta steg som ryms i gissningen.
+// den 80 % av samma mätning som bandbreddsgissning (hlsconfig.js startEstimate), och hls.js tar det högsta steg som
+// ryms i gissningen.
+// Utan mätning (provet misslyckades eller hann inte, eller en app som inte mäter) gäller gissningen UNKNOWN_KBPS –
+// samma som webbspelaren ger hls.js. Förut listades taket (1080, ≈ 9 Mbit/s) först medan hls.js gissade 6 Mbit/s och
+// började på 720, så att förstarten var bortkastad. En okänd uppkoppling börjar hellre på ett steg som kommer snabbt
+// (ett mätprov som inte hinner på 1,5 s tyder på en långsam uppkoppling): spelaren byter upp när den mätt själv.
+const UNKNOWN_KBPS = 6000;
 function abrOrder(it, d) {
-  let vs = abrVariants(it, d);
-  if (d.startBw) {
-    const fit = vs.find(x => x.bw <= d.startBw * 1000 * 0.8) || vs[vs.length - 1];
-    vs = [fit, ...vs.filter(x => x !== fit)];
-  }
-  return vs;
+  const vs = abrVariants(it, d);
+  const budget = (d.startBw ? d.startBw * 0.8 : UNKNOWN_KBPS) * 1000;
+  const fit = vs.find(x => x.bw <= budget) || vs[vs.length - 1];
+  return [fit, ...vs.filter(x => x !== fit)];
 }
 /** ABR: strömadressen (hlsParams) för steget som mastern listar först – det spelaren troligast börjar med och som
  *  /playback förstartar. Annat än ABR: adressen oförändrad. */

@@ -408,6 +408,52 @@ test('omkodning: spolning utanför bufferten startar en ny ström med korta segm
   await close();
 });
 
+// Safaris egen HLS (iPhone, iPad): spolning utanför bufferten i en omkodning startar om strömmen vid målet
+// (player/nativeseek.js). Safari finns inte här – Chrome med Safaris användaragent använder samma väg i webbappen
+// (nativeHls: Chrome svarar också ja på canPlayType för HLS, strömmen spelas i v.src). Chromes inbyggda HLS är inte
+// Safaris: den bryr sig inte om EXT-X-START och buffrar på sitt sätt, så tiderna här säger inget om en iPhone.
+const SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15';
+test('Safaris egen HLS (Chrome med Safaris användaragent): spolning i en omkodning startar en ny ström vid målet', { skip }, async () => {
+  const { p, close } = await page(SAFARI);
+  await helpers(p);
+  const reqs = [];
+  p.on('request', (q) => { const u = q.url(); if (/\/playback\?|\/hls\/(ready|index\.m3u8)|\/seg-\d+\./.test(u) && !/warm=1/.test(u)) reqs.push(u); });
+  const r = await p.evaluate(async (id) => {
+    const native = (await import('/m/js/player/caps.js')).nativeHls();
+    window.__L.play(id, 0); const f = await window.__frame(x => x >= 0, 30000);
+    const v = document.querySelector('#vid'), pb0 = window.__V.P.pb.url, hls = !!window.__V.P.hls;
+    const w0 = performance.now(); while (!(v.currentTime > 0.5 && !v.paused) && performance.now() - w0 < 15000) await new Promise(x => setTimeout(x, 50));
+    const b = []; for (let i = 0; i < v.buffered.length; i++) b.push([v.buffered.start(i), v.buffered.end(i)]);
+    const to = 150, t0 = performance.now(); v.currentTime = to;
+    // Tidslinjen står på målet medan strömmen startas om (holdTime)
+    await new Promise(x => setTimeout(x, 100)); const held = v.currentTime;
+    const g = await window.__frame(x => x >= to - 0.6 && x < to + 6, 30000);
+    const ms = Math.round(performance.now() - t0), mv = g.ms == null ? null : await window.__moves(1500);
+    return { native, hls, f, g, b, to, held, ms, mv, pb0, pb1: window.__V.P.pb.url, errors: window.__errors, errlog: window.__errlog, modes: window.__modes, state: window.__state() };
+  }, ten.id);
+  assert.equal(r.native, true, 'förutsättning: webbappen använder webbläsarens egen HLS-spelare');
+  assert.equal(r.hls, false, 'ingen hls.js');
+  assert.ok(r.f.ms != null, `ingen bild vid start: ${r.f.state}`);
+  assert.ok(!r.b.some(([a, b]) => r.to >= a && r.to < b), `förutsättning: ${r.to} s låg utanför bufferten (${JSON.stringify(r.b)})`);
+  assert.deepEqual(r.modes, ['transcode']);
+  const pid0 = new URL(r.pb0, srv.base).searchParams.get('pid'), u1 = new URL(r.pb1, srv.base);
+  assert.ok(reqs.some(u => u.includes('/hls/index.m3u8') && u.includes(`pid=${pid0}`)), 'spelaren läste spellistans segment');
+  assert.ok(reqs.some(u => u.includes('/hls/ready') && u.includes(`pid=${pid0}`)), 'spelaren frågade vad servern har klart');
+  const i = reqs.findIndex(u => /\/playback\?/.test(u) && /[?&]start=150(&|$)/.test(u));
+  assert.ok(i > 0, 'ny fråga till /playback vid spolningen: ' + reqs.filter(u => /playback/.test(u)).join(' | '));
+  assert.match(reqs[i], new RegExp(`[?&]prev=${pid0}(&|$)`), 'servern stoppar den gamla strömmen');
+  assert.match(reqs[i], /[?&]nhls=1(&|$)/);
+  assert.equal(u1.searchParams.get('xs'), String(r.to), 'den nya strömmen börjar vid målet (EXT-X-START): ' + r.pb1);
+  assert.equal(u1.searchParams.get('hs'), String(r.to), 'korta segment vid målet');
+  assert.ok(Math.abs(r.held - r.to) < 1, `tidslinjen på målet under omstarten (${r.held})`);
+  assert.ok(r.g.ms != null, `spolning till ${r.to} s gav ingen bild: ${r.g.state} (${r.state})`);
+  assert.ok(r.mv.frames >= 1.5 * FPS * 0.8 && !r.mv.paused, `bilden rör sig efteråt (${r.mv.frames} bildrutor)`);
+  // Chromes inbyggda HLS (inte Safaris) ger ibland DEMUXER_ERROR_COULD_NOT_PARSE när den gamla strömmen avbryts mitt i
+  // ett segment, och spelaren återhämtar sig. Felen skrivs ut men fäller inte testet – det säger inget om Safari.
+  console.log(`Safaris väg i Chrome: spolning till ${r.to} s gav bild efter ${r.ms} ms (Chromes inbyggda HLS, inte Safari)${r.errors ? '; fel i Chromes HLS: ' + r.errlog.join('; ') : ''}`);
+  await close();
+});
+
 test('kvalitetsmenyn erbjuder inget över källans upplösning, och spåren heter som språket (spelaren, Chromecast, fjärrstyrning)', { skip }, async () => {
   const { p, close } = await page();
   const r = await p.evaluate(async ([small, mid]) => {

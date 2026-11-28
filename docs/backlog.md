@@ -24,19 +24,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ## Näst på tur
 
-### 1. Spolning i Safari på iPhone och iPad: starta om vid målet som webben gör
-
-- **Vad:** Safaris egen HLS (`nativeHls` i `web/js/player/caps.js`) spolar fortfarande inom den gamla spellistan och
-  väntar på ett helt 6 s-segment. `seekRestarts` i `web/js/player/video.js` körs bara med hls.js. Gör som iOS-appen:
-  ny `/playback` med `start=` och `prev=` när spolningen landar utanför det som är kodat (`EXT-X-START` finns redan,
-  `startTag` i `server/stream.js`).
-- **Varför:** iPhone och iPad i webbläsaren är vanliga i familjen; spolning i en omkodad film tar där 3–4,5 s mot
-  ungefär 1 s i Chrome sedan 1.5.0.
-- **Filer:** `web/js/player/video.js`, `web/js/player/hlsconfig.js` (`seekRestart`), `test/fast-resume.test.js`.
-- **Klart när:** testet visar en ny ström med `xs` vid målet för `nhls=1`, och Anton har provat på en riktig iPhone
-  (se *Bara Anton kan göra*).
-
-### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 1. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -47,7 +35,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 3. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
+### 2. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
 
 Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
 
@@ -64,7 +52,7 @@ Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen
 - **Klart när:** kontraktet har `GET /api/items/:id/playback?warm=1` även för `ios`, och bygget i GitHub Actions går
   igenom.
 
-### 4. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 3. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -216,6 +204,18 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   knappen, `warm=1` för avsnitt 2 när eftertexterna började och samma frågesträng i uppspelningen 9,6 s senare,
   kortet räknade 5 → 3 → avsnitt 2; med automatisk överhoppning av eftertexter väntade nedräkningen under 2,5 s paus;
   avsnitt 2 utan nästa stängde spelaren. **Inte provat:** telefonens egen spelare (helskärm, bild-i-bild).
+- 2026-11-28: Spolning i Safari på iPhone och iPad startar om vid målet (förut punkt 1), gren
+  `team/webb-safari-2026-11-28`. `web/js/player/nativeseek.js` (`watchNativeSeeks`): `seeking`, `v.buffered`,
+  medialistans segment och `/hls/ready` (var 4:e s medan filmen spelar) → `seekRestart` → `load(t)` med `holdTime` och
+  `/playback?start=&prev=` (`nhls=1` → `xs`, `EXT-X-START`). Prov: låtsad video med regler (i bufferten, servern har
+  målet, för gammalt svar, före första bilden, början och slutet) och mot servern (ny ström med `xs=57`,
+  `EXT-X-START`, 1 s-segment vid 57 s, den gamla stoppad) i `test/fast-resume.test.js`; i Chrome med Safaris
+  användaragent (`test/web-chrome-playback.test.js`, faller utan ändringen) gav spolning till 150 s bild efter 0,51–0,75 s.
+  **Inte provat:** riktig Safari (WebKit saknas här, Playwrights WebKit är inte installerat), iPhone, iPad – Antons
+  prov står under *Bara Anton kan göra*.
+  Samma gren: utan uppmätt bandbredd listar mastern steget som ryms i 6 Mbit/s först (förut taket), samma som hls.js
+  startgissning – webbens startsteg och det förstartade är nu desamma även utan `bw` (`stream-smooth.test.js`).
+  Apparna utan `bw` får också det steget först.
 
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
@@ -224,8 +224,7 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   segmentet på median 385–600 ms mot 715–960 ms utan förstart (350–400 ms snabbare varje gång). hls.js väljer samma startsteg som mastern listar först när webben skickat `bw` (testat i
   Chromium mot den inbäddade hls.js för 1,5–30 Mbit/s). Väljer spelaren ett annat steg stoppas det förstartade i samma
   ögonblick som det stegets ffmpeg startar (aldrig två samtidigt vid mätning var 10:e ms). Genom reläet: `relay.test.js`. **Inte provat:** riktig
-  mobilanslutning, Safari/AVPlayer/ExoPlayer på enhet. Utan `bw` (apparna) listas taket först; ExoPlayer och hls.js
-  kan då börja lägre, och förstarten blir en kort förvärmning som stoppas.
+  mobilanslutning, Safari/AVPlayer/ExoPlayer på enhet. Utan `bw` listades taket först (rättat samma dag, se ovan).
 - 2026-11-28: Nästa avsnitt förvärms medan eftertexterna går (förut punkt 1), gren `team/nasta-avsnitt-2026-11-28`.
   Webbspelaren anropar `warmPlay(nextId, 0)` när eftertexterna börjar (`markers`), när kortet i `onEnded` visas och
   under dess nedräkning, och vid pekare/fokus på `#pnext` och *Spela nu* (`warmNext`). `warm()` i `stream.js`
@@ -531,7 +530,9 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   på en nedladdad film i flygplansläge, slå av flygplansläget (positionen ska synas i webben) och logga ut (frågan,
   sedan borta).
 - **iPhone (Safari):** börja på en film, stäng, öppna igen – fortsätter den på rätt ställe direkt? Spola långt fram i
-  en film som kodas om och säg ungefär hur länge det tar innan bilden kommer.
+  en film som kodas om och säg ungefär hur länge det tar innan bilden kommer (sedan *Ej utgiven* startar webben om
+  strömmen vid målet även i Safari – förut 3–4,5 s; fastnar bilden, hoppar den tillbaka eller syns *Förbereder…* länge
+  vill vi veta det).
 - **Appen för iPhone, iPad och Apple TV** (bygg med `apple.yml`): Fortsätt titta och spolning långt fram i en omkodad
   film (även med fjärrkontrollen), *Skicka feedback* och *Mina ärenden*, att bilderna kommer tillbaka efter en stund,
   och *Hemma: direkt via …* med reläets adress.

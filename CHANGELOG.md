@@ -22,6 +22,16 @@
   *Nästa avsnitt* när eftertexterna börjar, med kontots val för att hoppa över automatiskt (tre sekunders nedräkning
   med *Avbryt*), och när avsnittet är slut kortet *Nästa avsnitt om … s* efter kontots val – som i webben. Nästa avsnitt
   förbereds på servern redan när eftertexterna börjar. Provat i webbläget i Chrome; inte på riktig telefon.
+- **Spolning i en omkodad film i Safari på iPhone och iPad går fortare.** Safaris egen spelare väntade förut på en
+  hel bit på 6 sekunder av filmen där du spolade till, vilket tog 3–4,5 s. Nu startar webbspelaren om strömmen vid
+  målet, som den redan gör i Chrome och som apparna gör: servern börjar då med korta bitar just där och Safari börjar
+  spela vid målet. Tidslinjen står kvar på målet medan det sker. Spolar du inom det som redan är laddat, eller har
+  servern redan målet klart, spolar Safari som förut. Provat med en låtsad spelare och i Chrome med Safaris väg
+  (där kom bilden efter ungefär 0,6 s), men inte i en riktig Safari, iPhone eller iPad.
+- **Utanför hemmet utan uppmätt uppkoppling börjar filmen på rätt steg.** Hann webbspelaren inte mäta uppkopplingen
+  förberedde servern den högsta kvaliteten (1080p), medan spelaren började på 720p – förberedelsen gick till spillo.
+  Nu utgår båda från samma gissning (6 Mbit/s): servern förbereder och listar det steget först, och webben, Safari
+  och appen för iPhone och iPad börjar där. Spelaren byter upp när den själv mätt att nätet räcker.
 - **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
   hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
   flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren

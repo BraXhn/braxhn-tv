@@ -659,6 +659,7 @@ Det jag inte har kunnat prova här:
 - iOS/tvOS-appen på riktiga enheter efter omarbetningen för 1.0: väntan på grafikkortets första segment (förklaringen efter 4 s, nya försök med samma ström), Föräldraöversiktens *Stoppa* och skärmtiden i spelaren och ljudspelaren (även för nedladdningar i flygplansläge), spolningen med `/hls/ready`, att poddarna döljs för barnprofiler, inloggning och strömning/AirPlay via BraXhn Relay, de engelska texterna och Siri Remote-fokus i felrutorna – svaren är kontrollerade med kontraktstestet, Swift-koden kompileras bara i GitHub Actions (Swift-koden har inte kompilerats här; serverns svar är kontrollerade med kontraktstestet)
 - anpassningsbar kvalitet i Safari, AVPlayer, ExoPlayer och Chromecast
 - timeshift i Safari/AVPlayer och reklamdetektering på riktiga sändningar
+- spolning som startar om strömmen vid målet i Safari på iPhone och iPad – bara provad med en låtsad spelare och i Chrome med Safaris väg
 - DLNA mot en riktig TV, och import mot riktiga Plex- och Jellyfin-servrar (plex.tv:s växling av hemanvändare och `resources`, och en riktig `com.plexapp.plugins.library.db` från en aktuell Plex-version, är simulerade efter Plex dokumenterade/kända format)
 - TMDB-rollistor och personbilder mot riktiga TMDB (simulerat här)
 

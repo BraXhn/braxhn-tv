@@ -427,6 +427,103 @@ t('/hls/ready: samma segment som X-Seg-Ready, i sekunder, utan sidoeffekter och 
   for (const x of sessions()) st.stopUserSessions(it.id, x.user);
 });
 
+// ---------- Safaris egen HLS (iPhone, iPad): spolning startar om strömmen vid målet ----------
+// web/js/player/nativeseek.js: ingen hls.js, inga svarshuvuden – seeking-händelsen, v.buffered, spellistan och /hls/ready.
+// Videon är låtsad (Safari finns inte här): ett EventTarget med currentTime, paused och buffered som HTMLMediaElement.
+class FakeVideo extends EventTarget {
+  currentTime = 0; paused = true; ranges = [];
+  get buffered() { const r = this.ranges; return { length: r.length, start: (i) => r[i][0], end: (i) => r[i][1] }; }
+  seek(t) { this.currentTime = t; this.dispatchEvent(new Event('seeking')); }
+}
+const flush = () => new Promise(r => setTimeout(r, 0));
+test('Safaris egen HLS: spolning utanför bufferten startar om vid målet – inte i bufferten, när servern har målet klart eller före första bilden', async () => {
+  const ns = await import('../web/js/player/nativeseek.js');
+  const starts = st.transcodeStarts(180); // 0, 2, 4, 6, 12, 18, 24, 30 …
+  const index = '#EXTM3U\n' + starts.map((x, i) => `#EXTINF:${((starts[i + 1] ?? 180) - x).toFixed(6)},\nseg-${i}.ts?pid=abcd1234\n`).join('') + '#EXT-X-ENDLIST\n';
+  let ready = { segs: [0, 6] }, clock = 1e6;
+  const asked = [];
+  const fetchFn = async (u) => {
+    asked.push(u);
+    if (u.includes('/hls/index.m3u8')) return { ok: true, text: async () => index };
+    if (u.includes('/hls/ready')) return { ok: true, json: async () => ready };
+    return { ok: false };
+  };
+  const url = '/api/stream/7/hls/master.m3u8?mode=transcode&pid=abcd1234';
+  // En bevakad video som spelar med 0–20 s buffrat; poll var 10:e ms i testet
+  const watch = async (o = {}) => {
+    const v = new FakeVideo(), restarts = [];
+    const stop = ns.watchNativeSeeks(v, { url, fetchFn, now: () => clock, every: 10, onRestart: (t) => restarts.push(t), ...o });
+    await flush();
+    return { v, restarts, stop, play: async () => { v.paused = false; v.ranges = [[0, 20]]; v.dispatchEvent(new Event('playing')); await flush(); } };
+  };
+  const a = await watch();
+  assert.equal(asked[0], '/api/stream/7/hls/index.m3u8?mode=transcode&pid=abcd1234', 'spellistan med strömmens frågesträng');
+  // Startpositionen (EXT-X-START, eller spelarens egen inställning efter en omstart) innan bilden kommit räknas inte
+  a.v.seek(120); assert.deepEqual(a.restarts, [], 'före första bilden');
+  await a.play();
+  assert.ok(asked.includes('/api/stream/7/hls/ready?mode=transcode&pid=abcd1234'), 'frågar servern vad den har klart');
+  a.v.seek(10); assert.deepEqual(a.restarts, [], 'i bufferten');
+  await sleep(30); // nytt svar efter spolningen (det förra gällde före den)
+  // Servern har segmenten 0–6 klara (till 30 s): 31 s ligger i segment 7, som den kodar just nu (n ≤ till + 1)
+  a.v.seek(31); assert.deepEqual(a.restarts, [], 'servern kodar segmentet efter de klara');
+  // Inget svar sedan förra spolningen: utanför bufferten i ett 6 s-segment → omstart
+  a.v.seek(150); assert.deepEqual(a.restarts, [150], 'utanför bufferten');
+  a.stop();
+  a.v.seek(100); assert.deepEqual(a.restarts, [150], 'slutat bevaka');
+  // Servern har segmentet med 150 s klart: ingen omstart – men ett svar som är över 8 s gammalt räknas inte
+  ready = { segs: [0, 30] };
+  const b = await watch({ every: 1e9 }); await b.play();
+  b.v.seek(150); assert.deepEqual(b.restarts, [], 'servern har målet klart');
+  b.stop();
+  const c = await watch({ every: 1e9 }); await c.play();
+  clock += ns.READY_FRESH_MS + 1;
+  c.v.seek(150); assert.deepEqual(c.restarts, [150], 'svaret är för gammalt');
+  // De korta segmenten i början och nära slutet: ingen omstart (där ger servern inga kortare segment)
+  c.v.ranges = []; c.v.seek(3); c.v.seek(178); assert.deepEqual(c.restarts, [150]);
+  c.stop();
+  // Spelaren stängd eller strömmen ersatt (own() falsk): ingen omstart, och frågorna till servern slutar
+  let mine = true;
+  const d = await watch({ own: () => mine }); await d.play();
+  mine = false; d.v.seek(150); assert.deepEqual(d.restarts, []);
+  await sleep(30); const n = asked.length; await sleep(60);
+  assert.equal(asked.length, n, 'ingen fråga efter att spelaren stängts');
+});
+
+t('Safaris egen HLS: spolning ger en ny ström med EXT-X-START och korta segment vid målet, och den gamla stoppas', async () => {
+  for (const x of sessions()) { st.stopUserSessions(it.id, x.user); x.reqAt = 0; }
+  const ns = await import('../web/js/player/nativeseek.js');
+  const text = async (u) => (await fetch(new URL(u, B), { headers: A() })).text();
+  const pb0 = await getJson('force=transcode&q=480&nhls=1');
+  const pid0 = pidOf(pb0.url);
+  // Långsam omkodning (som en riktig film): servern har inte hunnit till målet
+  const old = sessions().find(x => x.d.pid === pid0);
+  for (let i = 0; i < 50 && !old?.proc; i++) await sleep(20);
+  old?.proc?.kill('SIGSTOP');
+  const v = new FakeVideo();
+  let restart = null;
+  const fetchFn = (u, o) => fetch(new URL(u, B), { ...o, headers: A() });
+  const stop = ns.watchNativeSeeks(v, { url: pb0.url, fetchFn, every: 1e9, onRestart: (t) => { restart = t; } });
+  v.paused = false; v.ranges = [[0, 12]];
+  v.dispatchEvent(new Event('playing'));
+  for (let i = 0; i < 100; i++) { await sleep(20); if (restart != null) break; v.seek(57.4); }
+  stop();
+  assert.equal(restart, 57.4, 'spolning till 57,4 s (mitt i 6 s-segmentet 54–60) startar om');
+  // Det video.js load(t) skickar: start och prev (och nhls som förut)
+  const pb = await getJson(`force=transcode&q=480&nhls=1&start=${restart}&prev=${pid0}`);
+  assert.match(pb.url, /[?&]xs=57(&|$)/); assert.match(pb.url, /[?&]hs=57(&|$)/);
+  assert.notEqual(pidOf(pb.url), pid0);
+  assert.match(await text(pb.url), /#EXT-X-START:TIME-OFFSET=57,PRECISE=YES/, 'mastern: Safari börjar vid målet');
+  const media = await text(ns.indexUrl(pb.url));
+  assert.match(media, /#EXT-X-START:TIME-OFFSET=57,PRECISE=YES/, 'medialistan också');
+  const segs = (await import('../web/js/player/hlsconfig.js')).parseFrags(media);
+  const at = segs.find(x => x.start === 57);
+  assert.ok(at && Math.abs(at.duration - 1) < 0.01, 'kort segment (1 s) vid målet: ' + JSON.stringify(at));
+  assert.ok(!old.proc && !sessions().includes(old), 'den gamla strömmen är stoppad');
+  const s = sessions().find(x => x.d.pid === pidOf(pb.url));
+  assert.ok(s?.proc && s.segs[s.start].start === 57, `förstartad vid målet (${s?.segs?.[s?.start]?.start})`);
+  for (const x of sessions()) st.stopUserSessions(it.id, x.user);
+});
+
 t('första segmentet vid omkodning är 1 s och kommer fortare än med 2 s (tidsmått, omväxlande körningar)', async () => {
   const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
   assert.ok(heavy?.duration > 15, 'den tunga filen är inläst');
@@ -469,7 +566,8 @@ t('utanför hemmet med automatisk kvalitet: steget som mastern listar först fö
   const heavy = D.get('SELECT * FROM items WHERE path=?', HEAVY);
   const stopAll = () => { for (const x of sessions()) { st.stopUserSessions(heavy.id, x.user); st.stopUserSessions(it.id, x.user); x.reqAt = 0; } };
   const H = { ...A(), ...FAR };
-  for (const [q, first] of [['', '1080'], ['&bw=3000', '480'], ['&bw=20000', '1080']]) {
+  // Utan mätning: gissningen 6 Mbit/s – för den här filen (720p, taket ≈ 9 Mbit/s) är 480 det högsta steg som ryms
+  for (const [q, first] of [['', '480'], ['&bw=3000', '480'], ['&bw=20000', '1080']]) {
     stopAll();
     const pb = await (await fetch(`${B}/api/items/${heavy.id}/playback?force=transcode${q}`, { headers: H })).json();
     assert.equal(pb.mode, 'transcode'); assert.match(pb.url, /[?&]abr=1(&|$)/, 'flera steg utanför hemmet');

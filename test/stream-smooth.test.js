@@ -154,7 +154,9 @@ test('hls.js i Chromium: den riktiga biblioteksversionen tar emot inställningar
 });
 
 // Utanför hemmet förstartar /playback steget som mastern listar först (abrStartQuery). Webbspelaren ger hls.js 80 % av
-// den uppmätta bandbredden (samma bw som /playback fick, video.js) – då ska hls.js börja på samma steg.
+// den uppmätta bandbredden (samma bw som /playback fick, video.js startEstimate) – då ska hls.js börja på samma steg.
+// Även utan mätning (0: provet misslyckades eller hann inte på 1,5 s): förut gissade hls.js 6 Mbit/s och började på
+// 720 medan mastern listade taket (1080) först, så att förstarten var bortkastad.
 test('hls.js i Chromium: startsteget är steget som mastern listar först (det som förstartas vid /playback)', { skip: !chromium && 'Playwright saknas' }, async () => {
   const st = await import('../server/stream.js');
   const item = { id: 1, duration: 600, size: 0, streams: JSON.stringify([{ index: 0, type: 'video', codec: 'h264', width: 1920, height: 1080 }]) };
@@ -177,11 +179,11 @@ test('hls.js i Chromium: startsteget är steget som mastern listar först (det s
     await page.setContent('<!doctype html><video style="width:1920px;height:1080px"></video>');
     await page.addScriptTag({ content: fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'vendor', 'hls.min.js'), 'utf8') });
     const src = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'js', 'player', 'hlsconfig.js'), 'utf8').replace(/export /g, '');
-    for (const bw of [1500, 2500, 4000, 6000, 8000, 12000, 30000]) {
+    for (const bw of [0, 1500, 2500, 4000, 6000, 8000, 12000, 30000]) {
       masters[bw] = masterFor(bw);
       const picked = await page.evaluate(([code, bw]) => new Promise(ok => {
-        const m = new Function(`${code}; return { hlsConfig, abrClass };`)();
-        const hls = new Hls(m.hlsConfig({ start: 0, est: bw * 1000 * 0.8, Abr: m.abrClass(Hls) })); // som video.js
+        const m = new Function(`${code}; return { hlsConfig, abrClass, startEstimate };`)();
+        const hls = new Hls(m.hlsConfig({ start: 0, est: m.startEstimate(bw), Abr: m.abrClass(Hls) })); // som video.js
         hls.on(Hls.Events.LEVEL_LOADING, (_, d) => { ok(new URL(d.url).searchParams.get('q')); hls.destroy(); });
         setTimeout(() => ok('ingen'), 5000);
         hls.attachMedia(document.querySelector('video'));

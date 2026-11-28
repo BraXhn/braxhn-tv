@@ -3,7 +3,8 @@ import { $, $$, api, esc, fmtTime, locale, me, status, store, sxe, toast, toastE
 import { M, musicSession, videoSession } from '../audio.js';
 import { canAirPlay, capsQuery, lastBandwidth, measureBandwidth, nativeHls, noteBandwidth, saveData } from './caps.js';
 import { watchStall } from './stall.js';
-import { abrClass, cleanRange, hlsConfig, openGopSeek, qualitySteps, randomAccess, randomAccessUrl, readyRange, recoverPlan, seekRestart, segNo } from './hlsconfig.js';
+import { watchNativeSeeks } from './nativeseek.js';
+import { abrClass, cleanRange, hlsConfig, openGopSeek, qualitySteps, randomAccess, randomAccessUrl, readyRange, recoverPlan, seekRestart, segNo, startEstimate } from './hlsconfig.js';
 import { stopStats, toggleStats, watchPlayback } from './stats.js';
 import { castItem, castReady } from './cast.js';
 import { runPreroll } from './cinema.js';
@@ -519,6 +520,8 @@ async function load(start, { play = true } = {}) {
   v.autoplay = play; // pausad vid bytet: den nya strömmen ska inte starta av sig själv
   if (pb.mode === 'direct' || nativeHls(v)) {
     v.src = pb.url;
+    // Safaris egen HLS i en omkodning: spolning utanför bufferten startar om strömmen vid målet, som med hls.js nedan
+    if (pb.mode === 'transcode') cur.unseek = watchNativeSeeks(v, { url: pb.url, own: live, onRestart: (t) => load(t, { play: !!cur.wantPlay }) });
   } else {
     let Hls;
     try { Hls = await loadHls(); if (!Hls.isSupported()) throw new Error(); }
@@ -528,7 +531,9 @@ async function load(start, { play = true } = {}) {
     // abrEwmaDefaultEstimate: startgissning för bandbredden när mastern har flera kvalitetssteg (annars börjar
     // hls.js på lägsta steget); spelaren mäter sedan själv och växlar upp eller ner. Buffertar, glapp, väntetider
     // och bandbreddsmätningen (från första byte – serverns omkodning är inte nätet): se hlsconfig.js
-    const est = lastBandwidth() ? lastBandwidth() * 1000 * 0.8 : 6e6;
+    // Utan mätning samma gissning som servern (UNKNOWN_KBPS): hls.js börjar då på steget som mastern listar först och
+    // som /playback redan förstartat (abrStartQuery)
+    const est = startEstimate(lastBandwidth());
     // Remux i TS: segment som avkodningen börjar i hämtas med ra=<sekunder in> – se hlsconfig.js (randomAccess).
     // clean: segmentnummer → [från, till] där nyckelbilderna är rensade (för spolning i bufferten, guardSeeks)
     const ra = pb.mode === 'remux' ? new Map() : null, clean = new Map();

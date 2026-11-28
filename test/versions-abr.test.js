@@ -193,8 +193,9 @@ t('ABR: automatisk kvalitet vid omkodning ger flera varianter med samma segmentg
   assert.equal((await req(home.url)).data.toString().match(/#EXT-X-STREAM-INF/g).length, 1, 'hemma: ett steg');
   const master = (await req(pb.url)).data.toString();
   const inf = [...master.matchAll(/#EXT-X-STREAM-INF:BANDWIDTH=(\d+),RESOLUTION=(\d+)x(\d+)\n(\S+)/g)];
-  assert.deepEqual(inf.map(m => +m[3]), [720, 480, 360], master);
-  assert.ok(+inf[0][1] > +inf[1][1]);
+  // Utan uppmätt bandbredd står steget som ryms i gissningen (6 Mbit/s) först – här 480p, taket (≈ 9 Mbit/s) sedan
+  assert.deepEqual(inf.map(m => +m[3]), [480, 720, 360], master);
+  assert.ok(+inf[1][1] > +inf[0][1] && +inf[0][1] > +inf[2][1]);
   const pids = inf.map(m => new URLSearchParams(m[4].split('?')[1]).get('pid'));
   assert.equal(pids[0], pids[1], 'samma uppspelning');
   // Manuell kvalitet: en variant
@@ -321,7 +322,8 @@ test('ABR: med uppmätt bandbredd listas steget som ryms först (iPhone börjar 
     st.serveMaster(res, fake(1920, 1080), new URLSearchParams({ mode: 'transcode', q: '1080', am: 'aac', ab: '128', abr: '1', ...(sbw ? { sbw } : {}) }));
     return [...body.matchAll(/[?&]q=(\w+)/g)].map(m => m[1]);
   };
-  assert.deepEqual(master(0), ['1080', '720', '480', '360']);
+  // Utan mätning: steget som ryms i gissningen (6 Mbit/s, som webbspelarens hls.js) först – inte taket
+  assert.deepEqual(master(0), ['720', '1080', '480', '360']);
   assert.deepEqual(master('3000'), ['480', '1080', '720', '360']);
   assert.deepEqual(master('300'), ['360', '1080', '720', '480']);
 });

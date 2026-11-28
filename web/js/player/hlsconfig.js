@@ -37,6 +37,13 @@ export function hlsConfig({ start = 0, est = 6e6, Abr = null, xhrSetup = null } 
   return c;
 }
 
+/** Gissad bandbredd (kbit/s) när uppkopplingen utanför hemmet inte har kunnat mätas – samma som UNKNOWN_KBPS i
+ *  server/stream.js (abrOrder): mastern listar då steget som ryms i gissningen först, och hls.js börjar på det. */
+export const UNKNOWN_KBPS = 6000;
+/** hls.js startgissning (bit/s, abrEwmaDefaultEstimate) ur uppmätt bandbredd i kbit/s (0 = okänd): 80 % av mätningen,
+ *  som marginal mot mobilnätets svängningar – servern räknar likadant när den väljer steget som listas först. */
+export const startEstimate = (kbps) => (kbps > 0 ? kbps * 0.8 : UNKNOWN_KBPS) * 1000;
+
 /** Ska nödbytet nedåt (hls.js "loading too slowly") hoppas över? Ja medan inget byte kommit: servern förbereder
  *  segmentet (omkodning, uppvaknande disk) – att byta steg då startar bara om arbetet. */
 export const holdEmergency = (stats) => !!stats && !stats.aborted && !(stats.loading?.first > 0);
@@ -195,3 +202,16 @@ export function seekRestart(buffered, t, { frags = [], ready = null } = {}) {
 }
 /** X-Seg-Ready från servern ("12-20") → [12, 20], annars null */
 export function readyRange(h) { const m = /^(\d+)-(\d+)$/.exec(String(h || '').trim()); return m ? [+m[1], +m[2]] : null; }
+/** Spellistans segment [{ start, duration }] ur texten i en medialista (index.m3u8) – för spelare som inte ger
+ *  segmenten själva (Safaris egna HLS, nativeseek.js). Tom lista om texten inte är en spellista. */
+export function parseFrags(text) {
+  const out = []; let at = 0;
+  for (const line of String(text || '').split('\n')) {
+    const m = /^#EXTINF:([\d.]+)/.exec(line.trim());
+    if (m) { const duration = +m[1]; out.push({ start: at, duration }); at += duration; }
+  }
+  return out;
+}
+/** Segmenten servern har klara (/hls/ready, [från, till]) om svaret är högst max ms gammalt, annars null.
+ *  known = { segs, at } där at är när frågan skickades. */
+export const freshReady = (known, now, max = 8000) => known && now - known.at <= max && Array.isArray(known.segs) ? known.segs : null;
