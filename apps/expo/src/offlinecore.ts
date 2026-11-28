@@ -165,6 +165,16 @@ export function nextLocalEpisode(list: DlEntry[], cur: DlEntry): DlEntry | null 
   const n = (e: DlEntry) => (e.season ?? 0) * 10000 + (e.episode ?? 0);
   return list.filter((e) => e.kind === 'episode' && e.state === 'done' && e.show?.id === cur.show!.id && n(e) > n(cur)).sort((a, b) => n(a) - n(b))[0] || null;
 }
+/**
+ * Sedd (som serverns isWatched i server/resume.js): eftertexterna har börjat (credits, om markeringen ligger i andra
+ * halvan) eller högst 8 % av längden är kvar. Fasta 2 minuter gjorde korta avsnitt sedda för tidigt.
+ */
+export const WATCHED_LEFT = 0.08, CREDITS_FROM = 0.5;
+export function isWatched(pos: number, dur: number, credits?: number | null): boolean {
+  if (!(dur > 0) || !(pos > 0)) return false;
+  if (credits != null && credits > dur * CREDITS_FROM && credits < dur && pos >= credits) return true;
+  return dur - pos <= dur * WATCHED_LEFT;
+}
 /** Var uppspelningen ska börja (som api.ts resumeAt): under två minuter, eller en fjärdedel av korta klipp, börjar den om */
 export function startAt(e: DlEntry): number {
   const p = e.position || 0, d = e.duration > 0 ? e.duration : 1e9;

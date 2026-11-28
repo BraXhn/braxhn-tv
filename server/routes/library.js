@@ -27,7 +27,7 @@ import * as playprefs from '../playprefs.js';
 import * as libfilter from '../libfilter.js';
 import { sized } from '../imgsize.js';
 import { reqLang, subsIn } from '../i18n.js';
-import { startedSql } from '../resume.js';
+import { isWatched, startedSql } from '../resume.js';
 import * as photos from '../photos.js';
 import * as ebooks from '../ebooks.js';
 import * as prestart from '../prestart.js';
@@ -320,10 +320,11 @@ route('GET', '/api/items/:id', user, (c) => {
 });
 route('POST', '/api/items/:id/progress', user, async (c) => {
   const { position, duration, at: atRaw } = await readJson(c.req);
-  let it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
+  let it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode, credits_start FROM items WHERE id=? AND kind!=\'show\'', c.p.id);
   if (!it) return fail(c.res, 404, 'Finns inte');
+  const credits = it.credits_start; // eftertexterna i filen som spelades (versioner kan skilja sig)
   // Framsteg gäller filmen oavsett vilken version som spelades
-  if (it.version_of) it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode FROM items WHERE id=?', it.version_of) || it;
+  if (it.version_of) it = get('SELECT id, kind, parent_id, version_of, age, duration, title, tmdb_id, season, episode, credits_start FROM items WHERE id=?', it.version_of) || it;
   if (!allowedFor(c.user.id, it)) return fail(c.res, 403, 'Inte tillgänglig i den här profilen');
   const dur = it.duration || +duration || 0;
   const rawPos = Math.max(0, +position || 0);
@@ -334,7 +335,8 @@ route('POST', '/api/items/:id/progress', user, async (c) => {
   // annan enhet vinner – den gamla positionen skrivs då inte över. Ingen "spelas nu" eller skärmtid för det.
   const at = syncAt(atRaw);
   if (at && prev && prev.updated >= at) return send(c.res, 200, { watched: wasWatched, stale: true, stop: false });
-  const watched = dur && (pos / dur > 0.92 || dur - pos < 120 && pos > 60) ? 1 : 0;
+  // Sedd: eftertexterna har börjat eller högst 8 % är kvar (server/resume.js)
+  const watched = isWatched(pos, dur, credits ?? it.credits_start) ? 1 : 0;
   // Omtittning av en sedd titel: sedd-markeringen behålls men positionen sparas (syns i "Fortsätt titta")
   // när man kommit en bit in – att bara öppna titeln en kort stund lägger inte till den.
   if (wasWatched && !watched && pos < 60) pos = 0;

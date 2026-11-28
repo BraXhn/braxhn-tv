@@ -144,6 +144,21 @@ class OfflineCoreTest {
         assertEquals(600.0, ResumePoint.start(600.0, 0.0), 0.0)    // okänd längd
     }
 
+    // Samma fall som test/watched.test.js (serverns isWatched)
+    @Test fun seddForKortaOchLangaTitlar() {
+        val cases = listOf(
+            listOf(61.0, 180.0, null, false), listOf(150.0, 180.0, null, false), listOf(166.0, 180.0, null, true),
+            listOf(150.0, 180.0, 150.0, true), listOf(140.0, 180.0, 150.0, false),
+            listOf(181.0, 300.0, null, false), listOf(240.0, 300.0, null, false), listOf(276.0, 300.0, null, true), listOf(272.0, 300.0, 270.0, true),
+            listOf(1201.0, 1320.0, null, false), listOf(1215.0, 1320.0, null, true), listOf(1250.0, 1320.0, 1240.0, true), listOf(500.0, 1320.0, 400.0, false),
+            listOf(6510.0, 7200.0, 6500.0, true), listOf(6700.0, 7200.0, null, true), listOf(6500.0, 7200.0, null, false),
+            listOf(7100.0, 7200.0, null, true), listOf(3600.0, 7200.0, 6900.0, false),
+            listOf(100.0, 0.0, null, false), listOf(0.0, 300.0, null, false), listOf(300.0, 300.0, 9999.0, true))
+        for (c in cases) assertEquals("$c", c[3], Watched.isWatched(c[0] as Double, c[1] as Double, c[2] as Double?))
+        assertEquals(240.0, ResumePoint.start(240.0, 300.0), 0.0)      // 5 min, en minut kvar: inte sedd, fortsätt
+        assertEquals(0.0, ResumePoint.start(272.0, 300.0, 270.0), 0.0) // eftertexterna har börjat
+    }
+
     // ---------- skärmtid ----------
 
     private val st = ScreenStatus(limited = true, day = "2026-11-26", daily = 60, used = 1800.0, extra = 0, remaining = 1800.0,

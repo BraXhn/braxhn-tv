@@ -8,7 +8,7 @@ import { parseQuery } from '../searchkey.js';
 import { ageOk } from './channels.js';
 import { sourceRow, ctxOf } from './sources.js';
 import * as xt from './xtream.js';
-import { startedSql } from '../resume.js';
+import { isWatched, startedSql } from '../resume.js';
 
 const allowUnrated = () => getSetting('allow_unrated', '0') === '1';
 const JOIN = `FROM iptv_vod v JOIN tuners t ON t.id=v.tuner_id LEFT JOIN iptv_sources s ON s.tuner_id=t.id
@@ -109,7 +109,7 @@ export function playable(u, kind, id) {
 }
 export function saveProgress(u, kind, id, position, duration) {
   position = Math.max(0, +position || 0); duration = +duration > 0 ? +duration : null;
-  const watched = duration && position / duration > 0.92 ? 1 : 0;
+  const watched = isWatched(position, duration) ? 1 : 0;
   run(`INSERT INTO iptv_vod_progress(user_id, kind, ref_id, position, duration, watched, updated) VALUES(?,?,?,?,?,?,?)
     ON CONFLICT(user_id, kind, ref_id) DO UPDATE SET position=excluded.position, duration=COALESCE(excluded.duration, duration), watched=excluded.watched, updated=excluded.updated`,
   u.id, kind, id, watched ? 0 : position, duration, watched, now());

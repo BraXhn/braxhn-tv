@@ -76,12 +76,27 @@ object ProgressQueue {
     fun keepGoing(status: Int) = status != 0 && status != 401 && status != 429 && status < 500
 }
 
+/**
+ * Sedd (som serverns isWatched i server/resume.js och Expo-appens offlinecore.ts): eftertexterna har börjat (credits,
+ * om markeringen ligger i andra halvan) eller högst 8 % av längden är kvar. Fasta 2 minuter gjorde korta avsnitt
+ * sedda för tidigt.
+ */
+object Watched {
+    const val LEFT = 0.08
+    const val CREDITS_FROM = 0.5
+    fun isWatched(position: Double, duration: Double, credits: Double? = null): Boolean {
+        if (!(duration > 0) || !(position > 0)) return false
+        if (credits != null && credits > duration * CREDITS_FROM && credits < duration && position >= credits) return true
+        return duration - position <= duration * LEFT
+    }
+}
+
 /** Var en nedladdad titel ska börja, ur positionen som sparats i appen (som servern och Expo-appens startAt) */
 object ResumePoint {
-    /** Under två minuter (eller en fjärdedel av ett kort klipp) och nästan slut (sedd, serverns regel): från början */
-    fun start(position: Double, duration: Double): Double {
+    /** Under två minuter (eller en fjärdedel av ett kort klipp) och sedd (serverns regel): från början */
+    fun start(position: Double, duration: Double, credits: Double? = null): Double {
         if (!(position > 0)) return 0.0
-        if (duration > 0 && (position / duration > 0.92 || (duration - position < 120 && position > 60))) return 0.0
+        if (Watched.isWatched(position, duration, credits)) return 0.0
         val d = if (duration > 0) duration else 1e9
         return if (position >= min(120.0, d * 0.25)) position else 0.0
     }

@@ -41,6 +41,13 @@
   filmen är pausad och varningen hela tiden. I bilen visas bara tiden kvar (gul de sista minuterna), ingen extra rad
   att läsa. Android-appen läser serverns nya fält `left` (en äldre server ger dagens tid kvar). Inte provat på
   telefon, Google TV eller i bilen; iPhone, iPad och Apple TV kommer senare.
+- **Korta avsnitt räknas inte längre som sedda för tidigt.** Förut blev en titel sedd när mindre än 2 minuter var
+  kvar, så ett avsnitt på 5 minuter blev sett efter 3:01 och ett på 3 minuter efter 1:01 – det försvann ur *Fortsätt
+  titta* och började om från början. Nu räknas en titel som sedd när eftertexterna har börjat (om de har hittats eller
+  lagts in), annars när högst 8 % av längden är kvar: 14 s för 3 minuter, 24 s för 5 minuter, 1:46 för 22 minuter och
+  9,6 min för en film på 2 timmar (samma som förut för titlar över 25 minuter). Med eftertexterna markerade räknas en
+  lång film som sedd även när eftertexterna är längre än så. Samma regel i Android- och Expo-appen för nedladdade
+  titlar och för filmer från IPTV.
 - **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
   hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
   flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren

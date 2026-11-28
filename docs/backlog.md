@@ -226,6 +226,10 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   Expo i webbläget (Chrome via Playwright, 390×844 och 1280×800, svenska och engelska): varningen syns medan filmen
   spelar, tiden kvar när den är pausad, och en paus på 60 s gav 0 s skärmtid på servern.
   **Inte provat:** Android-bygget (bara GitHub Actions), riktig telefon, Google TV och bil.
+- 2026-11-28: Korta titlar blir inte sedda för tidigt, gren `team/sett-kort-2026-11-28`. `isWatched` i
+  `server/resume.js` (eftertexterna har börjat, annars högst 8 % kvar) ersätter `< 120 s kvar` i `/progress`, IPTV,
+  Expo (`offlinecore.ts`) och Android (`OfflineCore.kt` `Watched`). `test/watched.test.js` (3/5/22/120 min, även mot
+  servern) och `OfflineCoreTest.kt` föll före ändringen.
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
   först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`

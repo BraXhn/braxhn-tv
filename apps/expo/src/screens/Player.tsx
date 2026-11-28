@@ -21,7 +21,7 @@ import { absolute, api, playbackQuery, resumeAt, sxe, warmPlay, type ItemDetail,
 import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
-import { cueAt, parseVtt, startAt, type Cue, type ScreenStatus } from '../offlinecore';
+import { cueAt, isWatched, parseVtt, startAt, type Cue, type ScreenStatus } from '../offlinecore';
 import { gateLeft, leftView, playerLeft, type Left } from '../screenleft';
 import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, READY_EVERY_MS, readyFrom, readyUrl, restartsOn, runAfterSeek, seekJump, type Frag, type Known, type Sample } from '../seekcore';
 import type { Props } from '../nav';
@@ -47,6 +47,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const { id, start } = route.params;
   const insets = useSafeAreaInsets();
   const [pb, setPb] = useState<Playback | null>(null);
+  const pbNow = useRef(pb); pbNow.current = pb; // senaste pb i återanrop som inte byggs om (eftertexterna för isWatched)
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [next, setNext] = useState<{ id: number; start: number; title: string } | null>(null);
   // Nedladdad fil (bestäms när spelaren öppnas) och dess undertexter
@@ -284,7 +285,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
 
   /** Nedladdad titel: till servern när den svarar, annars i telefonen (skickas med "at" senare) och skärmtiden räknas här */
   const sendLocal = useCallback(async (secs: number, d: number) => {
-    const done = d > 0 && (secs / d > 0.92 || (d - secs < 120 && secs > 60));
+    const done = isWatched(secs, d, pbNow.current?.credits);
     const now = Date.now(), played = beat.current ? (now - beat.current) / 1000 : 0;
     beat.current = player.playing ? now : 0;
     try {
@@ -386,7 +387,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     const secs = player.currentTime || 0, d = player.duration || 0;
     if (local) {
       // Sparas i telefonen först (appen kan stängas innan servern svarat), skickas sedan
-      if (secs > 0 && d > 0) { off.savePosition('movie', id, secs, { done: secs / d > 0.92 || (d - secs < 120 && secs > 60) }); off.syncSoon(300); }
+      if (secs > 0 && d > 0) { off.savePosition('movie', id, secs, { done: isWatched(secs, d, pbNow.current?.credits) }); off.syncSoon(300); }
       return;
     }
     if (secs > 0 && d > 0) api(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } }).catch(() => {});

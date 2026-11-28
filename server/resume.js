@@ -11,3 +11,19 @@ export const resumeAt = (pos, dur) => isStarted(pos, dur) ? pos : 0;
 /** Samma villkor i SQL. pos/dur = kolumnuttryck (t.ex. 'q.position', 'e.duration'); NULL-position ger falskt. */
 export const startedSql = (pos = 'p.position', dur = 'i.duration') =>
   `(COALESCE(${pos}, 0) > 0 AND ${pos} >= MIN(${CONTINUE_MIN}, COALESCE(NULLIF(${dur}, 0), 1e9) * 0.25))`;
+
+// "Sedd" för filmer och avsnitt – regeln finns här; Expo-appen (apps/expo/src/offlinecore.ts isWatched) och
+// Android-appen (OfflineCore.kt Watched) har samma regel för nedladdade titlar (test/watched.test.js).
+// Sedd när eftertexterna har börjat (markeringen credits_start, om den ligger i andra halvan av titeln), annars när
+// högst 8 % av längden är kvar. Procent i stället för fasta 2 minuter: ett avsnitt på 5 minuter blev förr sett efter
+// 3:01. 8 % är samma gräns som förut för titlar över 25 minuter (en film på 2 timmar: 9,6 min kvar), och långa
+// eftertexter fångas av markeringen.
+export const WATCHED_LEFT = 0.08;
+/** Eftertexter före halva titeln räknas inte (en felplacerad markering ska inte göra titeln sedd för tidigt) */
+export const CREDITS_FROM = 0.5;
+/** Är positionen pos (s) i en titel som är dur s lång sedd? credits = där eftertexterna börjar (s), om det är känt */
+export function isWatched(pos, dur, credits = null) {
+  if (!(dur > 0) || !(pos > 0)) return false;
+  if (credits > dur * CREDITS_FROM && credits < dur && pos >= credits) return true;
+  return dur - pos <= dur * WATCHED_LEFT;
+}
