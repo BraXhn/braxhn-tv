@@ -643,7 +643,32 @@ Bara tillägg – apparna påverkas inte.
   `POST /api/podcasts/episodes/:eid/progress` (tillägg, bakåtkompatibelt): när positionen sparades offline. Finns ett
   framsteg som är minst lika nytt som `at` ändras inget och svaret har `stale: true` (poddar: `{ played, stale: true }`);
   annars sparas positionen med `updated = at`. Ett `at` i framtiden räknas som nu, och `0`, negativa tal eller text som
-  inget `at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid.
+  inget `at`. Anrop med `at` räknas inte som "spelas nu" eller skärmtid – tiden lämnas in med
+  `POST /api/screentime/offline` (nedan).
+
+## Skärmtid utan nät: `POST /api/screentime/offline`
+
+Tillägg (bakåtkompatibelt). Appen räknar skärmtiden själv när den spelar nedladdat utan nät och lämnar in tiden när
+nätet kommer tillbaka; förut ersatte serverns status appens räkning och tiden försvann.
+
+- Kropp: `{ device: "<enhetens id>", entries: [{ id: "<postens id>", at, seconds, audio }] }`. `at` = när
+  uppspelningen började (Unix-sekunder), `seconds` = hur länge den pågick (väggklocka, utan pauser), `audio: true` för
+  ljudböcker och poddar. En post per uppspelning; spelar man länge börjar appen en ny post minst varje timme.
+- Svar: `{ added, done: [id], stop, screenTime }`. `added` = sekunder som räknades nu, `done` = postens id för allt
+  med ett id (även det som inte räknades) – appen tar bort dem ur sin kö. `screenTime` har samma form som i
+  framstegssvaret (`GET /api/screentime`), `null` för profiler utan skärmtid; `stop` som i framstegssvaret.
+- Tiden räknas på dagen den spelades (serverns lokala tid, TZ), delad vid midnatt, i verkliga sekunder (natten till
+  29 mars har 23 timmar, natten till 25 oktober 25).
+- Varje verklig sekund räknas en gång per profil: samma post skickad igen, samma tid från en annan enhet eller med ett
+  annat id räknas inte igen. Samma `id` från samma `device` får växa (bara det nya räknas); en post med samma id men en
+  tid som inte hänger ihop med den sparade räknas inte. Anropet kan bara öka den räknade tiden.
+- Tak: högst 4 timmar per post, högst fram till nu (en post i framtiden räknas inte), högst 12 timmar tid utan nät
+  per dag, högst 200 poster per anrop (resten kommer inte med i `done` och skickas igen), inte äldre än 60 dagar. Fel
+  form (text, negativa tal, inget id) räknas inte. Ljud räknas bara när profilens regel gäller ljud.
+- Alltid den inloggade profilen (samma inloggning som framstegen); det finns inget sätt att lämna in åt någon
+  annan. Fungerar utanför hemmet och genom reläet. Profiler utan skärmtid får `200` med `added: 0` och `screenTime: null`.
+- Servern vet inte vad som räknats medan appen var ansluten: appen lämnar bara in tid den inte fått något svar för
+  (framsteg som inte kom fram).
 ## Undertexter i offline-filen (`/api/items/:id/offline`, `/api/stream/:id/offline-file`)
 
 Inga nya fält – anropen och svaren är desamma. MP4-filen som apparna laddar ner (`q` = 480/720/1080/orig) har nu

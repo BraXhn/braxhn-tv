@@ -81,6 +81,13 @@ route('POST', '/api/screentime/:uid/extra', user, async (c) => {
   audit('screentime_extra', { ...ctx(c), detail: `${t.name}: ${reset ? 'nollställd, ' : ''}${m >= 0 ? '+' : ''}${m} min` });
   send(c.res, 200, { status: screen.inLang(screen.status(t.id), reqLang(c.req)) });
 });
+// Tid som spelats utan nät (nedladdningar i apparna), inlämnad när nätet kommer tillbaka – alltid den egna profilen.
+// { device, entries: [{ id, at, seconds, audio }] } → { added, done, stop, screenTime } (screentime.js addOffline)
+route('POST', '/api/screentime/offline', user, async (c) => {
+  const { entries, device } = await readJson(c.req);
+  const r = screen.addOffline(c.user.id, entries, { device: typeof device === 'string' ? device : '' });
+  send(c.res, 200, { added: Math.round(r.added), done: r.done, stop: !!r.status && !r.status.allowed, screenTime: screen.inLang(r.status, reqLang(c.req)) });
+});
 // Tittande som inte annars rapporteras (t.ex. inspelningar i webben)
 route('POST', '/api/screentime/ping', user, async (c) => {
   const { key, position } = await readJson(c.req);

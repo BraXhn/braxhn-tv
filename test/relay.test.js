@@ -29,6 +29,7 @@ const auth = await import('../server/auth.js');
 const app = await import('../server/app.js');
 const relay = await import('../server/relay.js');
 const { imageFile } = await import('../server/localmeta.js');
+const screen = await import('../server/screentime.js');
 
 const REPO = path.join(import.meta.dirname, '..');
 const RELAY_PORT = await freePort(1);
@@ -47,6 +48,9 @@ const ANNA = Number(D.run('INSERT INTO users(name,pass,is_admin,created) VALUES(
 D.run('INSERT INTO users(name,pass,is_admin,created) VALUES(?,?,0,0)', 'bo', await auth.hashPw(PW));
 D.run('INSERT INTO users(name,pass,is_admin,created,remote_allowed) VALUES(?,?,0,0,0)', 'hemma', await auth.hashPw(PW));
 const annaTok = auth.createSession(ANNA, 'app');
+// Barnprofil med skärmtid (tid utan nät lämnas in genom reläet)
+const LINA = Number(D.run("INSERT INTO users(name,pass,is_admin,created,parent_id,max_age) VALUES('lina','x',0,0,?,7)", ANNA).lastInsertRowid);
+const linaTok = auth.createSession(LINA, 'app');
 
 // Media: en riktig kort film (Range, HLS) och en stor gles fil (minnet)
 const FILM = path.join(MEDIA, 'Filmer', 'Testfilm (2020).mp4');
@@ -184,6 +188,17 @@ test('inloggning, API och bilder genom reläet', async () => {
   assert.ok(many.every(r => r.status === 200 && r.data.equals(POSTER)));
   // Felaktig inloggning: 401 som vanligt
   assert.equal((await req(R, '/api/login', { method: 'POST', body: { name: 'bo', password: 'fel' }, ck: false })).status, 401);
+});
+
+test('skärmtid utan nät lämnas in genom reläet (POST /api/screentime/offline)', async () => {
+  screen.setRules(LINA, { daily: 60 });
+  const at = Math.floor(Date.now() / 1000) - 3600;
+  const body = { device: 'tel', entries: [{ id: 'flyg-1', at, seconds: 600 }] };
+  const r = await req(R, '/api/screentime/offline', { method: 'POST', body, headers: { authorization: 'Bearer ' + linaTok }, ck: false });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.added, 600); assert.equal(r.data.screenTime.used, 600); assert.equal(r.data.stop, false);
+  const again = await req(R, '/api/screentime/offline', { method: 'POST', body, headers: { authorization: 'Bearer ' + linaTok }, ck: false });
+  assert.equal(again.data.added, 0); assert.equal(again.data.screenTime.used, 600);
 });
 
 test('direktuppspelning med Range (206) och HEAD genom reläet', async () => {

@@ -2,12 +2,18 @@
 // Tittartiden räknas på servern från framstegsrapporter och live-segment. Tiden räknas per användare
 // (väggklocka), inte per ström – två samtidiga strömmar ger alltså inte dubbel tid. Pausad uppspelning
 // (positionen står still) räknas inte. Dagen och klockslagen följer serverns lokala tid (TZ).
-import { db, get, run } from './db.js';
+// Tid som spelats utan nät lämnar apparna in i efterhand (addOffline, POST /api/screentime/offline).
+import { db, get, all, run } from './db.js';
 import { tr } from './i18n.js';
 import { localDate } from './util.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS screen_usage(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  day TEXT NOT NULL, seconds REAL NOT NULL DEFAULT 0, extra INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));`);
+  day TEXT NOT NULL, seconds REAL NOT NULL DEFAULT 0, extra INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));
+  CREATE TABLE IF NOT EXISTS screen_offline(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device TEXT NOT NULL, entry TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, PRIMARY KEY(user_id, device, entry));
+  CREATE INDEX IF NOT EXISTS screen_offline_span ON screen_offline(user_id, start);`);
+// offline = sekunder av dagens tid som kommit från addOffline (för taket per dag). Äldre databaser saknar kolumnen.
+if (!all('PRAGMA table_info(screen_usage)').some(c => c.name === 'offline')) db.exec('ALTER TABLE screen_usage ADD COLUMN offline REAL NOT NULL DEFAULT 0');
 
 /** Längsta glapp (sekunder) mellan två rapporter som räknas som sammanhängande tittande.
  *  Klienterna rapporterar var 10:e sekund; längre glapp betyder paus, stopp eller avbrott. */
@@ -69,16 +75,16 @@ const usage = new Map(); // uid -> { day, seconds, extra }
 function usageOf(uid, day) {
   let u = usage.get(uid);
   if (!u || u.day !== day) {
-    const r = get('SELECT seconds, extra FROM screen_usage WHERE user_id=? AND day=?', uid, day);
-    u = { day, seconds: r?.seconds || 0, extra: r?.extra || 0 };
+    const r = get('SELECT seconds, extra, offline FROM screen_usage WHERE user_id=? AND day=?', uid, day);
+    u = { day, seconds: r?.seconds || 0, extra: r?.extra || 0, offline: r?.offline || 0 };
     usage.set(uid, u);
     if (usage.size > 2000) usage.delete(usage.keys().next().value);
   }
   return u;
 }
 function saveUsage(uid, u) {
-  run(`INSERT INTO screen_usage(user_id,day,seconds,extra) VALUES(?,?,?,?)
-    ON CONFLICT(user_id,day) DO UPDATE SET seconds=excluded.seconds, extra=excluded.extra`, uid, u.day, u.seconds, u.extra);
+  run(`INSERT INTO screen_usage(user_id,day,seconds,extra,offline) VALUES(?,?,?,?,?)
+    ON CONFLICT(user_id,day) DO UPDATE SET seconds=excluded.seconds, extra=excluded.extra, offline=excluded.offline`, uid, u.day, u.seconds, u.extra, u.offline);
 }
 /** Ge extra tid för idag (minuter, kan vara negativt). Extra tid förlänger även dagens sluttid. */
 export function addExtra(uid, min, d = new Date()) {
@@ -90,7 +96,7 @@ export function addExtra(uid, min, d = new Date()) {
 /** Nollställ dagens förbrukning (t.ex. om något räknats fel) */
 export function resetToday(uid, d = new Date()) {
   const u = usageOf(uid, localDay(d));
-  u.seconds = 0; saveUsage(uid, u);
+  u.seconds = 0; u.offline = 0; saveUsage(uid, u);
 }
 
 // Senaste räknade ögonblick per användare, senaste position och rapport per ström och när data senast skickades
@@ -145,6 +151,77 @@ export function heartbeat(uid, key, position = null, { audio = false, at = Date.
   const s = status(uid, new Date(at));
   if (s && !s.allowed && onBlocked) { try { onBlocked(uid, s); } catch (e) { console.warn('[skärmtid]', e.message); } }
   return s;
+}
+
+// ---------- tid som spelats utan nät ----------
+/** Längsta tid (sekunder) som en post räknas för – appen börjar en ny post för varje uppspelning (och minst varje timme) */
+export const OFFLINE_ENTRY = 4 * 3600;
+/** Mest tid utan nät som räknas per dag (sekunder) – en app som räknat fel ska inte kunna låsa barnet i flera dagar */
+export const OFFLINE_DAY = 12 * 3600;
+/** Poster per anrop, och hur gamla de får vara (dagar, som statistiken i screen_usage) */
+export const OFFLINE_MAX = 200;
+const OFFLINE_DAYS = 60;
+
+/** Lägg [a, b) (Unix-sekunder) på de dagar (lokal tid) som spannet täcker, inom taket per dag. Returnerar räknade sekunder. */
+function addSpan(uid, a, b) {
+  let total = 0;
+  while (a < b) {
+    const d = new Date(a * 1000);
+    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() / 1000; // midnatt, även vid sommartid
+    const e = Math.min(b, next);
+    const u = usageOf(uid, localDay(d));
+    const s = Math.min(e - a, Math.max(0, OFFLINE_DAY - u.offline));
+    if (s > 0) { u.seconds += s; u.offline += s; saveUsage(uid, u); total += s; }
+    a = e;
+  }
+  return total;
+}
+
+/**
+ * Tid som spelats utan nät (nedladdningar), inlämnad i efterhand: entries = [{ id, at, seconds, audio }], där at är när
+ * uppspelningen började (Unix-sekunder) och seconds hur länge den pågick. Tiden räknas på dagen den spelades, högst fram
+ * till nu och högst OFFLINE_ENTRY per post och OFFLINE_DAY per dag. Varje verklig sekund räknas en gång per användare
+ * (väggklocka, som heartbeat): det som redan lämnats in – samma post igen, en annan enhet eller ett annat id – räknas
+ * inte igen. Samma id från samma enhet får växa (appen fortsatte räkna), men en post som inte hänger ihop med den
+ * sparade räknas inte. Kan bara öka den räknade tiden. Tid som räknats medan appen var ansluten känner servern inte
+ * till här: appen lämnar bara in tid den inte fått svar för.
+ * Returnerar { added (sekunder), done (id:n appen kan ta bort ur sin kö), status } – status null utan skärmtid.
+ */
+export function addOffline(uid, entries, { device = '', now = Date.now() } = {}) {
+  const rules = rulesFor(uid), done = [];
+  let added = 0;
+  if (!Array.isArray(entries)) return { added, done, status: rules ? status(uid, new Date(now)) : null };
+  const nowS = now / 1000, dev = String(device ?? '').slice(0, 64);
+  const d0 = new Date(now - OFFLINE_DAYS * 86400e3), oldest = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime() / 1000;
+  for (const e of entries.slice(0, OFFLINE_MAX)) {
+    const id = typeof e?.id === 'string' && e.id ? e.id.slice(0, 64) : Number.isFinite(e?.id) ? String(e.id) : null;
+    if (id == null) continue;
+    done.push(id);
+    if (!rules || (e.audio && !rules.audio)) continue;
+    const at = Number(e.at), secs = Number(e.seconds);
+    if (!Number.isFinite(at) || !Number.isFinite(secs) || secs <= 0 || at >= nowS || at < oldest) continue;
+    let start = at, end = Math.min(at + Math.min(secs, OFFLINE_ENTRY), nowS);
+    const prev = get('SELECT start, end FROM screen_offline WHERE user_id=? AND device=? AND entry=?', uid, dev, id);
+    if (prev) {
+      if (start > prev.end || end < prev.start) continue; // samma id men en annan tid: första vinner
+      start = Math.min(start, prev.start); end = Math.max(end, prev.end);
+      if (end - start > OFFLINE_ENTRY) end = start + OFFLINE_ENTRY;
+    }
+    // Bara det som ingen sparad post (från någon enhet) redan täcker
+    let cur = start;
+    for (const s of all('SELECT start, end FROM screen_offline WHERE user_id=? AND end>? AND start<? ORDER BY start', uid, start, end)) {
+      if (s.start > cur) added += addSpan(uid, cur, Math.min(s.start, end));
+      cur = Math.max(cur, s.end);
+      if (cur >= end) break;
+    }
+    if (cur < end) added += addSpan(uid, cur, end);
+    run(`INSERT INTO screen_offline(user_id,device,entry,start,end) VALUES(?,?,?,?,?)
+      ON CONFLICT(user_id,device,entry) DO UPDATE SET start=excluded.start, end=excluded.end`, uid, dev, id, start, end);
+  }
+  if (!rules) return { added, done, status: null };
+  const s = status(uid, new Date(now));
+  if (added > 0 && !s.allowed && onBlocked) { try { onBlocked(uid, s); } catch (err) { console.warn('[skärmtid]', err.message); } }
+  return { added, done, status: s };
 }
 
 /**
@@ -211,4 +288,9 @@ export function check(uid, { audio = false, d = new Date() } = {}) {
 }
 
 // Gamla rader behövs inte (statistik över skärmtid sparas i 60 dagar)
-setInterval(() => { try { run('DELETE FROM screen_usage WHERE day < ?', localDay(new Date(Date.now() - 60 * 86400e3))); } catch {} }, 12 * 3600e3).unref();
+setInterval(() => {
+  try {
+    run('DELETE FROM screen_usage WHERE day < ?', localDay(new Date(Date.now() - 60 * 86400e3)));
+    run('DELETE FROM screen_offline WHERE end < ?', Date.now() / 1000 - (OFFLINE_DAYS + 1) * 86400);
+  } catch {}
+}, 12 * 3600e3).unref();

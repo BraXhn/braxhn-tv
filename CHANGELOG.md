@@ -33,6 +33,11 @@
   0,3 s efter OK i stället för 0,6–1,1 s. Kvalitet, ljudspår och undertext blir desamma som förut – servern använder
   den förberedda strömmen bara när allt stämmer. Android-appen läser inte längre `/api/me/cinema` (servern avgör
   bio-läget själv). Expo-appen provad i webbläget i Chrome; Android-appen är inte provad på riktig TV eller telefon.
+- **Skärmtid som spelats utan nät kan räknas på servern.** Tittade ett barn på nedladdade filmer på en flygresa
+  räknade appen tiden själv, men när nätet kom tillbaka tog serverns räkning över och tiden från resan försvann – barnet
+  fick dagens tid en gång till. Nu tar servern emot tiden i efterhand (`POST /api/screentime/offline`) och räknar den på
+  dagen den spelades, en gång även om appen skickar den flera gånger, och aldrig mer än vad som kan ha hunnit spelas.
+  Det gäller bara profiler med skärmtid, och tiden kan bara öka. Apparna använder det inte än.
 - **Omkodningen stoppas när du stänger fliken eller TV-webbläsaren mitt i en film.** Förut sparades bara var du
   var, och servern fortsatte koda filmen i upp till en minut – det tog kraft från andra som tittade och gjorde att
   nästa film inte kunde förberedas. Nu stoppar webbspelaren sin egen ström när sidan stängs, laddas om eller byts mot
