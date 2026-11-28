@@ -24,24 +24,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ## Näst på tur
 
-### 1. iOS/tvOS-appen: följ *Spela nästa avsnitt automatiskt*, med nedräkning och förvärmning (fel)
-
-- **Vad:** appen startar nästa avsnitt direkt när filmen tar slut och bryr sig inte om kontots val (`ended()` i
-  `apps/apple/Shared/Player.swift`; inget `autoNext` i `apps/apple`). Svaret från `/playback` har
-  `autoNext: { enabled, countdown }` och `autoSkip` (`server/routes/playback.js`). Gör som Android-appen
-  (`SkipCore.kt`, klart 2026-11-28), webben (`nextPlan` i `web/js/player/autoskip.js`) och Expo-appen
-  (`src/skipcore.ts`): kortet *Nästa avsnitt om N s* med *Spela nu* och *Avbryt*, och när valet är av kortet *Nästa
-  avsnitt* utan nedräkning (*Spela nu* och *Stäng*) – inget startar av sig självt.
-  Förvärm nästa avsnitt (`/playback?warm=1`) när eftertexterna börjar – iOS saknar förvärmning helt (se punkt 5).
-- **Varför:** föräldern som stängt av *Spela nästa avsnitt automatiskt* för att barnet inte ska fastna i en serie får
-  ändå nästa avsnitt på Apple TV, där barnen tittar mycket. Utan förvärmning börjar nästa avsnitt från noll med en ny
-  omkodning.
-- **Filer:** `apps/apple/Shared/Player.swift`, `Models.swift`, `test/contracts/apps.json` (`autoNext`, `warm=1` från
-  spelaren).
-- **Klart när:** ett test (`test/apple-*.test.js`) visar att `autoNext.enabled = false` inte startar nästa avsnitt
-  (kortet utan nedräkning) och att nedräkningen följer `countdown`; bygget i GitHub Actions går igenom.
-
-### 2. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
+### 1. Apparna mäter uppkopplingen utanför hemmet och skickar `bw`
 
 - **Vad:** Android-, iOS/tvOS- och Expo-appen mäter inte uppkopplingen och skickar inte `bw` till `/playback` (sökt
   i `apps/`: inget `bw` i frågan och inget anrop till `/api/speedtest`; Windows-appen skickar `buf=1` och behöver det
@@ -60,7 +43,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
   till 5 Mbit/s (`tc` lokalt). Kontrollera först hur lång tid mätningen tar via reläet – den får inte göra starten långsammare
   (kan göras samtidigt med förvärmningen).
 
-### 3. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -71,25 +54,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 4. Skärmtiden i apparna: tiden kvar och varningen i spelaren
-
-Android-, Expo- och iOS/tvOS-appen är klara i koden (se *Klart*, 2026-11-28). Kvar: bygget av iOS/tvOS-appen i
-GitHub Actions och mätningen i Safari att paus inte räknas.
-
-- **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i iOS/tvOS-appen. Fältet
-  `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa (`AppModel.swift`).
-  Android (`ScreenLeftCore.kt`) och Expo (`src/screenleft.ts`) visar hur: `screenTime.left` (en äldre server utan
-  `left` ger `remaining`), utan nät appens egen räkning, samma ord som webben. Mät också i Safari att paus inte räknas
-  (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`).
-- **Varför:** webben visar tiden kvar sedan 1.4.0, Android och Expo nu; på iPhone, iPad och Apple TV stoppas barnet
-  fortfarande utan förvarning.
-- **Filer:** `apps/apple` (spelaren), `test/contracts/apps.json` (`left` i `ScreenStatus.ios`), `server/screentime.js`
-  bara om mätningen visar fel.
-- **Klart när:** varningen syns i iOS-appen (byggd i GitHub Actions), och tio minuters paus ger högst en halv minut
-  i Safari.
-
-
-### 5. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
+### 3. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
 
 - **Vad:** bara filmer och avsnitt kan laddas ner i Android- och iOS-appen (`Offline.kt`, `Offline.swift`; inget i
   `Listen.swift` eller `MusicService.kt`). Expo-appen har nedladdade böcker. När det byggs: räkna skärmtid utan nät för
@@ -104,7 +69,7 @@ GitHub Actions och mätningen i Safari att paus inte räknas.
   (`OfflineCoreTest.kt`, `test/apple-offline.test.js`) har en post med `audio: true` från en nedladdad bok, och bygget i
   GitHub Actions går igenom.
 
-### 6. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
+### 4. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
 
 - **Vad:** `test/web-chrome-playback.test.js` (samma mätning som uppspelningsvakten, `installProbes()` i
   `test/helpers/chrome.js`) har enligt dagens agenter fallit ibland när flera ffmpeg-jobb körs samtidigt på maskinen.
