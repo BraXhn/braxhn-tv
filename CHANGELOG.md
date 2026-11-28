@@ -34,6 +34,13 @@
   förberedde servern den högsta kvaliteten (1080p), medan spelaren började på 720p – förberedelsen gick till spillo.
   Nu utgår båda från samma gissning (6 Mbit/s): servern förbereder och listar det steget först, och webben, Safari
   och appen för iPhone och iPad börjar där. Spelaren byter upp när den själv mätt att nätet räcker.
+- **Android- och Expo-appen visar hur mycket skärmtid som är kvar.** För en profil med skärmtid och en gräns i dag
+  visar spelaren *12 min kvar idag*, och de sista fem minuterna syns *Skärmtiden tar slut om 4 min*, som i webben.
+  Förut stoppades filmen i apparna utan förvarning. Tiden följer serverns räkning var tionde sekund medan filmen
+  spelar och appens egen räkning utan nät; en paus räknas inte, så tiden står still. I Expo-appen syns tiden kvar när
+  filmen är pausad och varningen hela tiden. I bilen visas bara tiden kvar (gul de sista minuterna), ingen extra rad
+  att läsa. Android-appen läser serverns nya fält `left` (en äldre server ger dagens tid kvar). Inte provat på
+  telefon, Google TV eller i bilen; iPhone, iPad och Apple TV kommer senare.
 - **Filmer som kodas om startar fortare utanför hemmet.** Med automatisk kvalitet utanför hemmet (via reläet eller
   hemadressen) började servern koda filmen först när spelaren hade valt kvalitetssteg och bett om den första biten –
   flera rundresor efter att du tryckt på Spela. Nu börjar den redan när uppspelningen begärs, på steget som spelaren

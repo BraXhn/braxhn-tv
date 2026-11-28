@@ -37,14 +37,19 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 ### 2. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
-- **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
-  Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
-  (`Player.tsx`, `PlayerScreen.kt`, `AppModel.swift`). Mät också i Safari att paus inte räknas (skript: spela, pausa
-  60 s och 10 min, läs `/api/screentime`).
-- **Varför:** webben visar tiden kvar sedan 1.4.0; i apparna stoppas barnet fortfarande utan förvarning.
-- **Filer:** `apps/*` (spelarna), `server/screentime.js` bara om mätningen visar fel.
-- **Klart när:** varningen syns i apparna (Expo i webbläget, de andra byggda i GitHub Actions), och tio minuters paus
-  ger högst en halv minut i Safari.
+Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
+
+- **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i iOS/tvOS-appen. Fältet
+  `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa (`AppModel.swift`).
+  Android (`ScreenLeftCore.kt`) och Expo (`src/screenleft.ts`) visar hur: `screenTime.left` (en äldre server utan
+  `left` ger `remaining`), utan nät appens egen räkning, samma ord som webben. Mät också i Safari att paus inte räknas
+  (skript: spela, pausa 60 s och 10 min, läs `/api/screentime`).
+- **Varför:** webben visar tiden kvar sedan 1.4.0, Android och Expo nu; på iPhone, iPad och Apple TV stoppas barnet
+  fortfarande utan förvarning.
+- **Filer:** `apps/apple` (spelaren), `test/contracts/apps.json` (`left` i `ScreenStatus.ios`), `server/screentime.js`
+  bara om mätningen visar fel.
+- **Klart när:** varningen syns i iOS-appen (byggd i GitHub Actions), och tio minuters paus ger högst en halv minut
+  i Safari.
 
 
 ## Idéer
@@ -213,6 +218,14 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   profilen vill ha svenska): förvärmd ström togs över 4/4 (tvOS/iOS, från början och vid 20 s), `audioSelected` =
   svenska utan `audio` i frågan, eget val `audio=1` gav engelska. Inte provat: kompilering (bara i `apple.yml`),
   riktig Apple TV/iPhone och tiden till första bilden.
+- 2026-11-28: Skärmtiden kvar och varningen i Android- och Expo-appens spelare (punkt 5, iOS kvar), gren
+  `team/skarmtid-kvar-2026-11-28`. Reglerna som webbens `playerLeft`: `ScreenLeftCore.kt` (JVM-test
+  `ScreenLeftCoreTest.kt`, 6 fall, körda i ett eget Gradle-projekt) och `src/screenleft.ts`
+  (`test/expo-screenleft.test.js`, samma svar som webben för varje sjunde sekund upp till tre timmar). Bilen visar bara
+  tiden kvar, ingen varningsrad eller uppläsning. Android har `left` i kontraktet (`ScreenTimeState.android`).
+  Expo i webbläget (Chrome via Playwright, 390×844 och 1280×800, svenska och engelska): varningen syns medan filmen
+  spelar, tiden kvar när den är pausad, och en paus på 60 s gav 0 s skärmtid på servern.
+  **Inte provat:** Android-bygget (bara GitHub Actions), riktig telefon, Google TV och bil.
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
   först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`

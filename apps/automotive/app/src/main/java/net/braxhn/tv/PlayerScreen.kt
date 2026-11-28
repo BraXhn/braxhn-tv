@@ -22,7 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,6 +94,10 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     var note by remember { mutableStateOf<String?>(null) }; var noteSticky by remember { mutableStateOf(false) }
     // Stoppad av servern (en vuxen i Föräldraöversikten, administratören eller skärmtiden): serverns/appens förklaring
     var stopped by remember(req) { mutableStateOf<String?>(null) }
+    // Skärmtiden kvar idag (ScreenLeftCore): först appens senast kända status, sedan serverns svar på varje
+    // framstegsrapport och utan nät appens egen räkning. null = ingen skärmtid eller ingen gräns idag.
+    var screenLeft by remember(req) { mutableStateOf<ScreenLeftCore.Left?>(null) }
+    val car = remember { isCar(context) }
     // Slutrapport och stopp av strömmen skickas en gång per uppspelning (Stäng + att vyn stängs gav dubbla anrop)
     val finalSent = remember(req) { booleanArrayOf(false) }
     // Ett framstegsanrop åt gången: report körs var tionde sekund, men utan nät tar ett anrop upp till 15 s (tidsgränsen)
@@ -157,10 +165,11 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                 val r: ProgressResult? = Api.reportProgress(id, pos, dur)
                 if (r != null) {
                     OfflineSync.noteScreen(r.screenTime); OfflineSync.flush()
+                    if (!final && item?.id == id) screenLeft = r.screenTime?.let { st -> ScreenLeftCore.ofServer(st.limited, st.allowed, st.left, st.remaining) }
                     if (!final && r.stop && item?.id == id) stoppedByServer(r)
                 } else {
                     OfflineSync.savePosition(id, pos, dur, atMs = started) // en senare sparad position vinner
-                    if (offline) { val g = OfflineSync.playedOffline(secs, started); if (!final && req.id == id) stoppedOffline(g) }
+                    if (offline) { val g = OfflineSync.playedOffline(secs, started); if (!final && req.id == id) { stoppedOffline(g); screenLeft = ScreenLeftCore.ofGate(g) } }
                 }
             }
             if (final) Api.appScope.launch { send() }
@@ -250,6 +259,8 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     LaunchedEffect(req) {
         // Nytt avsnitt i samma spelare: en omstart vid spolning i det förra gäller inte
         settleJob?.cancel(); restartGen[0]++; pendingSeek[0] = -1; firstFrame[0] = false
+        // Tiden kvar direkt (senast kända status och tid räknad utan nät); serverns svar tar över efter tio sekunder
+        screenLeft = ScreenLeftCore.ofGate(OfflineSync.gateNow())
         // Nedladdad fil: spela lokalt (fungerar utan nät)
         Downloads.localFile(req.id)?.let { f ->
             status = context.getString(R.string.player_offline); offline = true
@@ -493,6 +504,17 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             }
             Spacer(Modifier.width(12.dp))
             Text(item?.let { if (it.isEpisode) "${it.showTitle} · ${it.sxe} · ${it.title}" else it.title } ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            // Skärmtiden kvar idag (kort text på en smal telefon, som webben)
+            val left = screenLeft
+            val show = ScreenLeftCore.show(left, car)
+            if (left != null && show != null && stopped == null) {
+                val amount = left.hours?.let { h -> tr(R.string.player_screen_left_hours, h, left.restMinutes) } ?: tr(R.string.player_screen_left_min, left.minutes)
+                val compact = LocalConfiguration.current.screenWidthDp < 600
+                Text(tr(if (compact) R.string.player_screen_left_short else R.string.player_screen_left_today, amount),
+                    color = if (show.low) LowTime else Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 4.dp))
+                Spacer(Modifier.width(8.dp))
+            }
             Text(prerollLabel ?: modeNote ?: note ?: listOfNotNull(status.takeIf { x -> x.isNotEmpty() }, extraStatus).joinToString(" · "), color = Color.LightGray, fontSize = 12.sp)
             val p = pb
             Spacer(Modifier.width(8.dp))
@@ -517,6 +539,16 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     Icon(Icons.Filled.List, tr(R.string.player_chapters), tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
+        }
+        // Varningen de sista fem minuterna (inte i bilen, se ScreenLeftCore.show): texten byts bara när minuten ändras
+        val warnLeft = screenLeft
+        val warnShow = ScreenLeftCore.show(warnLeft, car)
+        if (warnLeft != null && warnShow != null && warnShow.banner && stopped == null) {
+            val announce = warnShow.announce
+            Text(tr(R.string.player_screen_warn, warnLeft.minutes), color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 84.dp).background(LowTime, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .semantics { if (announce) liveRegion = LiveRegionMode.Polite })
         }
         if (menu != null) {
             val p = pb
@@ -607,6 +639,9 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
 private fun hdrLabel(hdr: String?): String? = when (hdr) {
     "hdr10" -> "HDR10"; "hlg" -> "HLG"; "dovi" -> "Dolby Vision"; else -> hdr?.uppercase()
 }
+
+/** Skärmtiden de sista minuterna (tiden kvar och varningen) */
+private val LowTime = Color(0xFFFFC857)
 
 private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 

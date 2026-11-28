@@ -157,6 +157,13 @@ hamnar du också här.
 - **Poddar:** poddarna och de senaste avsnitten; tryck på ett avsnitt för att spela det där du slutade. Poddar läggs
   till i webbgränssnittet.
 - **Skärmtid:** säger servern stopp (skärmtiden är slut eller en vuxen stoppade) pausar spelaren och visar varför.
+  För en profil med skärmtid och en gräns idag visar spelaren *12 min kvar idag* (*⏱ 12 min kvar* på en smal skärm,
+  *1 h 5 min* från en timme), som webben: i appens överkant innan bilden kommer och när filmen är pausad (telefonens
+  egna reglage syns inte för appen). De sista fem minuterna syns varningen *Skärmtiden tar slut om 4 min* hela tiden,
+  även när filmen spelar, och läses upp när minuten ändras. Tiden kommer från serverns svar på framstegen
+  (`screenTime.left`, var tionde sekund medan filmen spelar), direkt när spelaren öppnas från den senast kända statusen,
+  och utan nät från appens egen räkning. En paus räknas inte: tiden kvar står still. Reglerna och texterna:
+  `src/screenleft.ts` (testas i repots `test/expo-screenleft.test.js`, med samma svar som webben för varje sekund).
 - Startar du en film eller ett avsnitt pausas musiken.
 
 ### Låsskärm, hörlurar och bakgrund
@@ -287,6 +294,7 @@ Nedladdningen använder `expo-file-system` (`DownloadTask`). Det här står i Ex
   Spolning i en omkodning: `src/seekcore.ts` (reglerna, testas i repots `test/expo-seek.test.js`) och `src/screens/Player.tsx`.
   Sammanfattning, intro, eftertexter och kortet för nästa avsnitt: `src/skipcore.ts` (reglerna, samma som webbens
   `web/js/player/autoskip.js`; testas i repots `test/expo-skip.test.js`, som jämför med webben) och `src/screens/Player.tsx`.
+  Skärmtiden kvar i spelaren: `src/screenleft.ts` (testas i `test/expo-screenleft.test.js`).
 - **Texter:** skriv all text som syns på svenska i `t('…')` från `src/i18n.ts` (variabler `t('Säsong {n}', { n })`,
   plural `tn(n, '1 avsnitt', '{n} avsnitt')`) och lägg den engelska raden i `src/i18n-en.ts`. Finns texten redan i
   webbens `web/i18n/en.js` ska den engelska vara exakt densamma. Text som ska följa språket får inte ligga i en konstant

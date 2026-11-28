@@ -910,7 +910,7 @@ Bara webben. Huvudkontot (ingen `parent_id`, ingen åldersgräns) ser sina barnp
 - `POST /api/parents/:pid/stop` → `{ stopped }`: stoppar barnets pågående uppspelningar (som administratörens stopp – spelaren får `stop: true` i framstegssvaret).
 - `/api/status` → `user.kidProfiles` (nytt fält): antal barnprofiler under huvudkontot, 0 för profiler.
 - **Android-appen** (0.7.0) läser också `donateUrl` i `/api/status` (valfritt, toppnivå): visas som *Stöd projektet* i Inställningar bara om det är en https-adress till `paypal.com`/`paypal.me`, aldrig för barnprofiler.
-- **Android-appen** (0.7.0) läser `stop` och `screenTime` (`allowed`, `message`) i svaret på `POST /api/items/:id/progress` och `user.kid`/`user.canDownload` i `/api/status` (alla valfria i kontraktet). Texten vid Stoppa väljer appen själv som webben (*En vuxen stoppade uppspelningen* för barnprofiler); skärmtidens `message` visas som den är.
+- **Android-appen** (0.7.0) läser `stop` och `screenTime` (`allowed`, `message`, och `left` – annars `remaining` – för *X min kvar idag* i spelaren) i svaret på `POST /api/items/:id/progress` och `user.kid`/`user.canDownload` i `/api/status` (alla valfria i kontraktet). Texten vid Stoppa väljer appen själv som webben (*En vuxen stoppade uppspelningen* för barnprofiler); skärmtidens `message` visas som den är.
 ## Fjärråtkomst via BraXhn Relay: `/api/relay*` (admin, betrott nät) och apparna genom reläet
 
 **Apparna behöver ingen ändring.** Genom reläet (`https://<reläets domän>`) är API:t exakt detsamma som direkt mot

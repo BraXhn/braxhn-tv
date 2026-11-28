@@ -170,6 +170,11 @@
     <string name="live_tuners_busy">All tuners are in use</string>
     <string name="live_skip_ad">Skip commercials</string>
     <string name="player_screen_time_up">Screen time is up for today.</string>
+    <string name="player_screen_left_today">%1$s left today</string>
+    <string name="player_screen_left_short">⏱ %1$s left</string>
+    <string name="player_screen_left_hours">%1$d h %2$d min</string>
+    <string name="player_screen_left_min">%1$d min</string>
+    <string name="player_screen_warn">Screen time runs out in %1$d min</string>
     <string name="player_stopped_by_adult">A grown-up stopped playback</string>
     <string name="player_stopped_by_admin">Playback was stopped by the administrator</string>
     <string name="player_offline">Offline</string>

@@ -168,6 +168,11 @@
     <string name="live_tuners_busy">Alla tuners används</string>
     <string name="live_skip_ad">Hoppa över reklam</string>
     <string name="player_screen_time_up">Skärmtiden är slut för idag.</string>
+    <string name="player_screen_left_today">%1$s kvar idag</string>
+    <string name="player_screen_left_short">⏱ %1$s kvar</string>
+    <string name="player_screen_left_hours">%1$d h %2$d min</string>
+    <string name="player_screen_left_min">%1$d min</string>
+    <string name="player_screen_warn">Skärmtiden tar slut om %1$d min</string>
     <string name="player_stopped_by_adult">En vuxen stoppade uppspelningen</string>
     <string name="player_stopped_by_admin">Uppspelningen stoppades av administratören</string>
     <string name="player_offline">Offline</string>

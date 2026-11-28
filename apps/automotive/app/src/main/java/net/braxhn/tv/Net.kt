@@ -29,8 +29,10 @@ import javax.net.ssl.SSLHandshakeException
 
 // ---------- modeller ----------
 
-/** Skärmtiden (GET /api/screentime, screenTime i framstegssvaret): message är serverns förklaring, resten används utan nät (OfflineSync) */
-@Serializable data class ScreenTimeState(val allowed: Boolean = true, val message: String? = null, val limited: Boolean = true, val day: String? = null, val daily: Int? = null, val used: Double = 0.0, val extra: Int = 0, val remaining: Double? = null, val from: String? = null, val until: String? = null, val audio: Boolean = false)
+/** Skärmtiden (GET /api/screentime, screenTime i framstegssvaret): message är serverns förklaring, left tiden kvar i spelaren (ScreenLeftCore), resten används utan nät (OfflineSync) */
+@Serializable data class ScreenTimeState(val allowed: Boolean = true, val message: String? = null, val limited: Boolean = true, val day: String? = null, val daily: Int? = null, val used: Double = 0.0, val extra: Int = 0, val remaining: Double? = null, val from: String? = null, val until: String? = null, val audio: Boolean = false,
+    /** Sekunder kvar av det som tar slut först, dagens tid eller sluttiden (null = ingen gräns idag): spelarens "X min kvar" */
+    val left: Double? = null)
 /** POST /api/items/:id/progress – stop = en vuxen/administratören stoppade uppspelningen eller skärmtiden är slut */
 @Serializable data class ProgressResult(val watched: Boolean = false, val stop: Boolean = false, val screenTime: ScreenTimeState? = null)
 

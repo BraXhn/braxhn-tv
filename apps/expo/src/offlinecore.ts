@@ -204,6 +204,8 @@ export function cueAt(cues: Cue[], t: number): string {
 export interface ScreenStatus {
   limited: boolean; day?: string; daily?: number | null; used?: number; extra?: number; remaining?: number | null;
   from?: string | null; until?: string | null; audio?: boolean; allowed?: boolean; reason?: string | null; message?: string | null;
+  /** Sekunder kvar av det som tar slut först, dagens tid eller sluttiden (null = ingen gräns idag): spelarens tid kvar (screenleft.ts) */
+  left?: number | null;
 }
 /** En uppspelning utan nät: at = start (Unix-sekunder), seconds = väggklocka utan pauser, sent = sekunder servern redan har */
 export interface OffPlay { id: string; at: number; seconds: number; audio: boolean; sent?: number }

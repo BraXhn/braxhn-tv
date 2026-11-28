@@ -50,6 +50,8 @@ Appen frågar enheten vilka format den avkodar själv, och servern väljer sedan
 
 **Barnprofiler:** poddar visas inte (servern stänger dem för barn), och när en vuxen trycker *Stoppa* i Föräldraöversikten stannar filmen inom ungefär tio sekunder med beskedet *En vuxen stoppade uppspelningen*. Samma sak när skärmtiden tar slut, med serverns förklaring – även utan nät för en nedladdad titel (se *Nedladdat och utan nät*).
 
+**Skärmtiden i spelaren:** för en profil med skärmtid och en gräns idag visar spelarens överkant *12 min kvar idag* (*⏱ 12 min kvar* på en smal telefon, *1 h 5 min* från en timme), som webben. De sista fem minuterna blir texten gul och en rad under den säger *Skärmtiden tar slut om 4 min*; raden läses upp av TalkBack när minuten ändras. Tiden kommer från serverns svar på framstegen (`screenTime.left`, det som tar slut först av dagens tid och sluttiden; en äldre server utan `left` ger `remaining`) var tionde sekund medan filmen spelar, och direkt när spelaren öppnas från den senast kända statusen. Utan nät räknar appen själv (`ScreenGate`). En paus räknas inte: inga rapporter skickas och tiden kvar står still. **I bilen** visas bara tiden kvar (gul de sista minuterna), ingen varningsrad och ingen uppläsning – bilen spärrar appen och pausar filmen när den rullar (*Körning*), och föraren ska inte få något nytt att läsa. Reglerna: `ScreenLeftCore.kt` (JVM-test i `ScreenLeftCoreTest.kt`, samma fall som webben).
+
 ## Nedladdat och utan nät
 
 Nedladdade filmer och avsnitt spelas från filen under *Inställningar → Nedladdat för offline*, även helt utan nät.
@@ -181,6 +183,6 @@ Intern testning kräver ingen granskning av bilanpassningen. Läs Googles regler
 
 ## Status
 
-Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil, bildtoken, feedbackens regler och spolningen i en omkodning): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
+Koden är skriven och granskad men har **inte kompilerats** där den skapades, eftersom miljön saknade Android SDK. Kör GitHub-workflowet eller bygg i Android Studio för att verifiera. Enhetstester på JVM (`app/src/test`: valet av hemadress, uppspelning utan nät, nedladdningar per profil, bildtoken, feedbackens regler, spolningen i en omkodning och skärmtiden kvar i spelaren): `gradle testReleaseUnitTest` – körs av workflowet före bygget. Serverns svar på appens anrop kontrolleras av kontraktstestet (`test/api-contract.test.js`).
 
 **Inte provat på riktig enhet (appversion 0.7.0):** spolningen i en omkodning (omstarten vid målet, fjärrkontrollens steg, bilen), att 60 s räcker mot NVENC på en riktig server, Stoppa från Föräldraöversikten och skärmtidens stopp, fokus och Bakåt med en riktig Google TV-fjärrkontroll, https via BraXhn Relay från bilen och ett självsignerat certifikat som installerats på telefonen.

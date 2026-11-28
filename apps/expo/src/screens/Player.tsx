@@ -9,7 +9,7 @@
 // telefonen och skickas med "at" senare, och den senaste skärmtidsstatusen avgör om det får spelas (offline.ts).
 // Spolning utanför bufferten i en omkodning startar om strömmen vid målet med korta segment där (seekcore.ts).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useVideoPlayer, VideoView, type AudioTrack, type SubtitleTrack } from 'expo-video';
 import { useEvent, useEventListener } from 'expo';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -21,7 +21,8 @@ import { absolute, api, playbackQuery, resumeAt, sxe, warmPlay, type ItemDetail,
 import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
-import { cueAt, parseVtt, startAt, type Cue } from '../offlinecore';
+import { cueAt, parseVtt, startAt, type Cue, type ScreenStatus } from '../offlinecore';
+import { gateLeft, leftView, playerLeft, type Left } from '../screenleft';
 import { decideSeek, fragAt, indexUrl, parseFrags, pidOf, READY_EVERY_MS, readyFrom, readyUrl, restartsOn, runAfterSeek, seekJump, type Frag, type Known, type Sample } from '../seekcore';
 import type { Props } from '../nav';
 import { notePlayback } from '../feedback';
@@ -76,10 +77,16 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   const restartGen = useRef(0), audioParam = useRef<number | null>(null);
   const keepTracks = useRef<{ audio: AudioTrack | null; sub: SubtitleTrack | null } | null>(null);
   const [restarting, setRestarting] = useState(false);
+  // Skärmtiden kvar idag (screenleft.ts): först den senast kända statusen och tiden räknad utan nät, sedan serverns svar
+  // på varje framstegsrapport och utan nät appens egen räkning. null = ingen skärmtid eller ingen gräns idag.
+  const [left, setLeft] = useState<Left | null>(() => gateLeft(off.screenGate(false)));
+  const leftFromProgress = useRef(false);
+  const { width } = useWindowDimensions();
 
   // Mätningen var 0,25 s (inte 1 s) så att en spolning märks direkt – annars hinner spelaren börja hämta 6 s-segmentet
   const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = 0.25; p.staysActiveInBackground = true; });
   const { status, error: playerError } = useEvent(player, 'statusChange', { status: player.status });
+  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
   // Liggande läge går bra i spelaren; resten av appen är stående. Musik eller en ljudbok som spelar pausas.
   useEffect(() => {
@@ -100,6 +107,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         if (!live) return;
         const g = off.screenGate(false);
         if (!g.allowed) { setError(g.message); return; }
+        setLeft(gateLeft(g));
         setPb({ mode: 'direct', url: local.uri, duration: e.duration || null });
         await player.replaceAsync({ uri: local.uri, contentType: 'auto', metadata: { title: e.kind === 'episode' ? `${e.show?.title || ''} – ${e.title}` : e.title } }).catch(() => {});
         const loaded: { label: string; cues: Cue[]; forced: boolean }[] = [];
@@ -124,6 +132,12 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         } catch {}
         return;
       }
+      // Skärmtiden kvar direkt (bredvid starten, väntar inte på den): serverns status, sparad för uppspelning utan nät.
+      // Framstegssvaren tar över; ett svar som kommer efter ett av dem gäller inte.
+      api<ScreenStatus>('/api/screentime', { timeout: 6000 }).then((sc) => {
+        off.noteScreen(sc);
+        if (live && !leftFromProgress.current) setLeft(playerLeft(sc));
+      }).catch(() => {});
       try {
         // Titeln och /playback samtidigt (startcore.ts): den tidiga frågan är förvärmningens (utan ljudspår) och tar
         // över en förvärmd ström. Väljer servern ett annat ljud än titelns förval frågar appen igen med prev.
@@ -260,7 +274,9 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     lastSent.current = secs;
     if (local) { await sendLocal(secs, d); return; }
     try {
-      const r = await api<{ stop?: boolean | string; error?: string }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } });
+      const r = await api<{ stop?: boolean | string; error?: string; screenTime?: ScreenStatus | null }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d } });
+      // Skärmtiden kvar (null = ingen skärmtid), och sparad för uppspelning utan nät
+      if (!closed.current) { off.noteScreen(r?.screenTime || { limited: false }); leftFromProgress.current = true; setLeft(playerLeft(r?.screenTime)); }
       // Servern kan stoppa uppspelningen (föräldraöversikten, skärmtid, administratören)
       if (r?.stop && !closed.current) { player.pause(); setError(typeof r.stop === 'string' ? r.stop : r.error || t('Uppspelningen stoppades')); }
     } catch {}
@@ -275,12 +291,14 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       const r = await api<{ stop?: boolean | string; error?: string; screenTime?: any }>(`/api/items/${id}/progress`, { method: 'POST', body: { position: secs, duration: d }, timeout: 6000 });
       off.savePosition('movie', id, secs, { sent: true, done });
       off.noteScreen(r?.screenTime || { limited: false });
+      if (!closed.current) setLeft(playerLeft(r?.screenTime));
       if (r?.stop && !closed.current) { player.pause(); setError(r?.screenTime?.allowed === false ? r.screenTime.message || t('Skärmtiden är slut för i dag.') : typeof r.stop === 'string' ? r.stop : r.error || t('Uppspelningen stoppades')); }
     } catch (err: any) {
       if (err?.status !== 0) return; // servern svarade (secs.ex. 403): inget att spara här
       off.savePosition('movie', id, secs, { done });
       off.countOffline(played);
       const g = off.screenGate(false);
+      if (!closed.current) setLeft(gateLeft(g));
       if (!g.allowed && !closed.current) { player.pause(); setError(g.message); }
     }
   }, [player, id]);
@@ -386,6 +404,9 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
   // Under en omstart vid spolning kan den gamla strömmens fel komma fram – det gäller inte längre
   const msg = error || (status === 'error' && !restarting ? playerError?.message || t('Uppspelningen misslyckades') : '');
   const failed = !!msg && (startFailed || status === 'error');
+  // Skärmtiden: tiden kvar medan appens överkant syns och när filmen är pausad, varningen de sista fem minuterna hela tiden
+  const lv = msg ? null : leftView(left, { paused: !isPlaying && !!pb && status === 'readyToPlay', chrome, compact: width < 600 });
+  const pill = lv?.pill ? <Text style={[st.left, lv.low && st.leftLow]} numberOfLines={1}>{lv.pill}</Text> : null;
   // Till Feedback: titeln som spelas och felet (förval och teknisk information i felrapporten)
   useEffect(() => { notePlayback(id, failed ? msg : ''); }, [id, failed, msg]);
   return (
@@ -413,6 +434,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
         <View style={[st.top, { paddingTop: insets.top + 6, paddingLeft: insets.left + 6 }]} pointerEvents="box-none">
           <Pressable onPress={() => navigation.goBack()} style={st.close} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Tillbaka')}><Ionicons name="chevron-back" size={24} color="#fff" /></Pressable>
           <Text style={st.title} numberOfLines={1}>{route.params.title || item?.title || local?.entry.title || ''}</Text>
+          {pill}
           {local ? <Ionicons name="download" size={18} color={C.ok} accessibilityLabel={t('Spelas från telefonen')} /> : null}
           {ccBtn}
         </View>
@@ -421,7 +443,12 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </Pressable>
       )}
-      {!(chrome || msg) && ccBtn ? <View style={{ position: 'absolute', top: insets.top + 11, right: insets.right + 12 }}>{ccBtn}</View> : null}
+      {!(chrome || msg) && (ccBtn || pill) ? <View style={[st.floatRight, { top: insets.top + 11, right: insets.right + 12 }]} pointerEvents="box-none">{pill}{ccBtn}</View> : null}
+      {lv?.warn ? (
+        <View style={[st.warnWrap, { top: insets.top + 62 }]} pointerEvents="none">
+          <Text style={st.warn} accessibilityLiveRegion="polite">{lv.warn}</Text>
+        </View>
+      ) : null}
       {cue && !msg ? <View style={[st.subWrap, { bottom: insets.bottom + 70 }]} pointerEvents="none"><Text style={st.subText}>{cue}</Text></View> : null}
       {plan && !msg && !endCard ? (
         <View style={[st.skip, { bottom: insets.bottom + 90, right: insets.right + 16 }]} pointerEvents="box-none">
@@ -469,4 +496,9 @@ const st = StyleSheet.create({
   subText: { color: '#fff', fontSize: 18, lineHeight: 24, textAlign: 'center', backgroundColor: 'rgba(0,0,0,.6)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
   cc: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 34, paddingHorizontal: 10, borderRadius: 17, backgroundColor: 'rgba(255,255,255,.15)', maxWidth: 140 },
   ccText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  floatRight: { position: 'absolute', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  left: { color: '#fff', fontSize: 13, fontWeight: '600', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: 'rgba(0,0,0,.55)', overflow: 'hidden' },
+  leftLow: { color: '#ffc857' },
+  warnWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
+  warn: { color: '#111', backgroundColor: '#ffc857', fontSize: 15, fontWeight: '700', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, overflow: 'hidden', textAlign: 'center' },
 });
