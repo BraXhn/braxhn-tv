@@ -187,6 +187,11 @@
     <string name="player_skip_recap">Hoppa över sammanfattning</string>
     <string name="player_skip_intro">Hoppa över intro</string>
     <string name="player_next_episode">Nästa avsnitt</string>
+    <string name="player_skipping_recap">Hoppar över sammanfattningen…</string>
+    <string name="player_skipping_intro">Hoppar över intro…</string>
+    <string name="player_next_starting">Nästa avsnitt startar…</string>
+    <string name="player_next_in">Nästa avsnitt om %1$d s</string>
+    <string name="player_play_now">Spela nu</string>
     <string name="player_skipped_scene">Hoppade över: %1$s</string>
     <string name="player_marked_scene">markerad scen</string>
     <string name="player_frame_rate">Anpassar skärmen till %1$.3f bilder/s</string>

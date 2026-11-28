@@ -104,8 +104,19 @@ fun castLine(cast: List<CastMember>?): String? {
     val mode: String, val url: String, val reasons: List<String> = emptyList(), val subtitles: List<PlaybackSubtitle> = emptyList(),
     val intro: Marker? = null, val recap: Marker? = null, val credits: Double? = null, val duration: Double? = null, val quality: String? = null,
     val remote: Boolean? = null, val tonemap: Boolean? = null,
-    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null, val preroll: List<PrerollEntry> = emptyList(), val filter: FamilyPlan? = null, val subAutoSync: Boolean? = null
-)
+    val chapters: List<Chapter> = emptyList(), val audio: List<AudioStream> = emptyList(), val audioSelected: String? = null, val preroll: List<PrerollEntry> = emptyList(), val filter: FamilyPlan? = null, val subAutoSync: Boolean? = null,
+    /** Kontots val: hoppa över delarna av sig självt och spela nästa avsnitt automatiskt (saknas hos äldre servrar) */
+    val autoSkip: AutoSkip? = null, val autoNext: AutoNext? = null
+) {
+    /** Delarna och valen för SkipCore (knapparna, nedräkningen och förvärmningen i PlayerScreen.kt) */
+    val marks: SkipCore.Marks get() = SkipCore.Marks(
+        recap?.let { m -> SkipCore.Part(m.start, m.end) }, intro?.let { m -> SkipCore.Part(m.start, m.end) }, credits,
+        setOfNotNull(SkipCore.Kind.RECAP.takeIf { autoSkip?.recap == true }, SkipCore.Kind.INTRO.takeIf { autoSkip?.intro == true },
+            SkipCore.Kind.CREDITS.takeIf { autoSkip?.credits == true }))
+}
+@Serializable data class AutoSkip(val intro: Boolean? = null, val recap: Boolean? = null, val credits: Boolean? = null)
+/** countdown: sekunder (0–60); läses som text, så att både tal och text tas emot (SkipCore.next) */
+@Serializable data class AutoNext(val enabled: Boolean? = null, val countdown: JsonPrimitive? = null)
 @Serializable data class Chapter(val start: Double, val end: Double, val title: String)
 
 class ApiException(msg: String, val need2fa: Boolean = false, val needPassword: Boolean = false, val code: Int = 0) : IOException(msg)

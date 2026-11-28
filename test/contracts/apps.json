@@ -221,7 +221,11 @@
       "optional": { "reasons": ["string"], "subtitles": ["@PlaybackSubtitle.android"], "intro": "@Marker.android", "recap": "@Marker.android",
         "credits": "number", "duration": "number", "quality": "string", "remote": "boolean", "tonemap": "boolean",
         "chapters": ["@Chapter.android"], "audio": ["@AudioStream.android"], "audioSelected": "string", "preroll": ["@PrerollEntry.android"],
-        "filter": "@FamilyPlan.android", "subAutoSync": "boolean" } },
+        "filter": "@FamilyPlan.android", "subAutoSync": "boolean", "autoSkip": "@AutoSkip.android", "autoNext": "@AutoNext.android" } },
+    "AutoSkip.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:117 (knapparna och nedräkningen: SkipCore.plan, PlayerScreen.kt:362-375)",
+      "optional": { "intro": "boolean", "recap": "boolean", "credits": "boolean" } },
+    "AutoNext.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:119 (slutet: SkipCore.next och atEnd, PlayerScreen.kt:442-455; countdown läses som JsonPrimitive, tal eller text)",
+      "optional": { "enabled": "boolean", "countdown": "number" } },
     "Chapter.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:104",
       "required": { "start": "number", "end": "number", "title": "string" } },
     "TokenResponse.android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Api.kt:111",
@@ -488,10 +492,11 @@
           { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "audio": "1", "night": "1", "dialog": "1", "cinema": "1", "warm": "1" }
         ],
         "svar": null },
-      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Start.kt:41 (fokus en stund på Spela, Fortsätt, Börja om eller ett avsnitt: warmOnFocus i Start.kt, MainActivity.kt:572-619; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
+      "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Start.kt:41 (fokus en stund på Spela, Fortsätt, Börja om eller ett avsnitt: warmOnFocus i Start.kt, MainActivity.kt:572-619; nästa avsnitt när eftertexterna börjar och under kortet i slutet: warmNext i PlayerScreen.kt:271, tredje varianten; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
         "query": [
           { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "audio": "1", "cinema": "1", "warm": "1" },
-          { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "start": "30", "warm": "1" }
+          { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "start": "30", "warm": "1" },
+          { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "cinema": "1", "warm": "1" }
         ],
         "svar": null } },
     "GET /api/stream/:id/direct": {

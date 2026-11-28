@@ -1,6 +1,13 @@
 # Ändringar
 
 ## Ej utgiven
+- **Android-appen följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt alltid direkt när ett
+  avsnitt tog slut, även om en förälder stängt av valet. Nu stängs spelaren när valet är av, och annars visas kortet
+  *Nästa avsnitt om 8 s* med *Spela nu* och *Avbryt* (sekunderna följer kontots val, 0 = direkt). På Google TV står
+  fokus på *Spela nu*. I bilen visas inget kort; nästa avsnitt startar direkt när valet är på. Valen att hoppa över
+  sammanfattning, intro och eftertexter av sig självt gäller också, med *Hoppar över intro… 3* och *Avbryt*. Nästa
+  avsnitt förbereds på servern redan när eftertexterna börjar, så att det startar snabbare. Inte provat på riktig
+  enhet; appen för iPhone, iPad och Apple TV gör fortfarande som förut.
 - **Tiden blinkar inte bort när webbspelaren laddar efter en spolning.** Har filmen redan spelat står tiden kvar
   med *Laddar…* efter sig, i stället för att bytas mot *Startar omkodning…*.
 - **Android-appen väljer talet efter profilens språk.** Titelsidan valde filens förvalda ljudspår och bad servern om

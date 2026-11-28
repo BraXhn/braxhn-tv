@@ -189,6 +189,11 @@
     <string name="player_skip_recap">Skip recap</string>
     <string name="player_skip_intro">Skip intro</string>
     <string name="player_next_episode">Next episode</string>
+    <string name="player_skipping_recap">Skipping the recap…</string>
+    <string name="player_skipping_intro">Skipping intro…</string>
+    <string name="player_next_starting">The next episode is starting…</string>
+    <string name="player_next_in">Next episode in %1$d s</string>
+    <string name="player_play_now">Play now</string>
     <string name="player_skipped_scene">Skipped: %1$s</string>
     <string name="player_marked_scene">marked scene</string>
     <string name="player_frame_rate">Matching the screen to %1$.3f frames/s</string>

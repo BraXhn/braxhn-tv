@@ -1,6 +1,7 @@
 // Expo-appens knappar för sammanfattning, intro och eftertexter och kortet när avsnittet är slut
 // (apps/expo/src/skipcore.ts): samma regler som webbspelaren (web/js/player/autoskip.js, test/playprefs.test.js) –
 // här jämförs de två fall för fall. Telefonens spelare (expo-video) provas inte här. Node 22.18+ läser TypeScript.
+// Android-appens kärna (apps/automotive, SkipCore.kt) har samma fall i SkipCoreTest.kt (JVM).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

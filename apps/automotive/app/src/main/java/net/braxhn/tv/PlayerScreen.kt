@@ -70,6 +70,14 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     // Till Feedback: titeln och felet (förval och teknisk information i en felrapport)
     LaunchedEffect(req.id, error) { Feedback.notePlayback(req.id, error) }
     var skip by remember(req) { mutableStateOf<String?>(null) } // "pre" | "recap" | "intro" | "next"
+    // Sammanfattning, intro och eftertexter (SkipCore): delen som spelas, nedräkningen innan spelaren hoppar av sig
+    // självt (kontots val, autoSkip) och delarna som redan hoppats över eller avbrutits
+    var plan by remember(req) { mutableStateOf<SkipCore.Plan?>(null) }
+    var skipCd by remember(req) { mutableStateOf<Pair<SkipCore.Kind, Int>?>(null) }
+    val skipDone = remember(req) { mutableSetOf<SkipCore.Kind>() }
+    // Kortet "Nästa avsnitt om N s" när avsnittet är slut (autoNext): sekunderna kvar, null = inget kort
+    var endCard by remember(req) { mutableStateOf<Int?>(null) }
+    val nextFocus = remember { FocusRequester() }
     var status by remember(req) { mutableStateOf("") }
     var currentSub by remember(req) { mutableStateOf<SubtitleTrack?>(null) }
     var menu by remember { mutableStateOf<String?>(null) } // "tracks" | "chapters" | "speed"
@@ -255,6 +263,28 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
     /** Appens egna hopp (kapitel, intro, sammanfattning, familjefiltret): som en spolning i tidslinjen */
     fun seekMain(ms: Long) { if (!onSeek(ms, false)) player.seekTo(ms) }
 
+    /**
+     * Förvärm nästa avsnitt (/playback?warm=1) med samma fråga som uppspelningen sedan skickar: Screen.Play(next, 0.0,
+     * null, null) ger Start.query(null, null, 0.0, false). Start.warm frågar högst var 15:e sekund (WarmLog) och hoppar
+     * över ett nedladdat avsnitt.
+     */
+    fun warmNext() { item?.nextId?.let { next -> Start.warm(next, 0.0, null, null) } }
+
+    /** Till nästa avsnitt (knappen, kortet, nedräkningen): positionen först, sedan nästa i samma spelare */
+    fun playNext() {
+        val next = item?.nextId ?: return
+        endCard = null; skipCd = null
+        report(final = true); player.stop()
+        onPlay(Screen.Play(next, 0.0, null, null))
+    }
+
+    /** Knappen eller nedräkningen: hoppa förbi delen (eller till nästa avsnitt); delen hoppas inte över igen */
+    fun doSkip(p: SkipCore.Plan) {
+        skipDone.add(p.kind); skipCd = null
+        val to = p.to
+        if (to == null) playNext() else seekMain((to * 1000).toLong())
+    }
+
     // Läs in objekt + uppspelningsbeslut och starta
     LaunchedEffect(req) {
         // Nytt avsnitt i samma spelare: en omstart vid spolning i det förra gäller inte
@@ -329,13 +359,20 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             // Bild-i-bild får videons format
             val vs = player.videoSize
             if (pipOk) Pip.aspect = Pip.ratio((vs.width * vs.pixelWidthHeightRatio).toInt(), vs.height)
+            // Delen som spelas (inte under trailers, inte när kortet i slutet visas). En ny del (eller ett ändrat
+            // auto) startar nedräkningen när kontot valt att hoppa över den, annars visas bara knappen.
+            val np = if (idx >= mainIndex && endCard == null) SkipCore.plan(p?.marks, t, item?.nextId != null, skipDone) else null
+            if (np?.kind != plan?.kind || np?.auto != plan?.auto) skipCd = if (np != null && np.auto) np.kind to SkipCore.SKIP_DELAY else null
+            plan = np
             skip = when {
                 idx < mainIndex -> "pre"
-                p?.recap != null && t >= p.recap.start && t < p.recap.end - 1 -> "recap"
-                p?.intro != null && t >= p.intro.start && t < p.intro.end - 1 -> "intro"
-                p?.credits != null && item?.nextId != null && t >= p.credits && t < p.credits + 60 -> "next"
+                np?.kind == SkipCore.Kind.RECAP -> "recap"
+                np?.kind == SkipCore.Kind.INTRO -> "intro"
+                np?.kind == SkipCore.Kind.CREDITS -> "next"
                 else -> null
             }
+            // Eftertexterna går: nästa avsnitt förvärms (och hålls varmt) redan nu, som webben
+            if (SkipCore.warmsNext(np) && !offline) warmNext()
             // Familjefiltret i läget "hoppa över scener": planen från /playback (servern tystar svordomarna själv)
             val f = p?.filter
             if (f != null && f.mode == "skip" && idx >= mainIndex && player.isPlaying) {
@@ -404,10 +441,20 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) {
                     report(final = true)
-                    val next = item?.nextId
-                    if (next != null) onPlay(Screen.Play(next, 0.0, null, null)) else onClose()
+                    skipCd = null
+                    // Kontots val (autoNext i /playback): av = spelaren stängs, 0 s = direkt, annars kortet med
+                    // nedräkningen. I bilen inget kort (SkipCore.atEnd). Utan svar från servern gäller 8 s.
+                    val an = pb?.autoNext
+                    val end = SkipCore.atEnd(SkipCore.next(an != null, an?.enabled, an?.countdown?.content, item?.nextId != null), car)
+                    when (end.action) {
+                        SkipCore.EndAction.CLOSE -> onClose()
+                        SkipCore.EndAction.PLAY_NEXT -> playNext()
+                        SkipCore.EndAction.CARD -> { if (!offline) warmNext(); endCard = end.seconds }
+                    }
                 }
             }
+            // Spolar man tillbaka och spelar igen medan kortet visas gäller det inte längre
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) endCard = null }
             override fun onRenderedFirstFrame() { firstFrame[0] = true }
             override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
                 // En omstart vid spolning pågår: den gamla strömmen gäller inte längre
@@ -435,6 +482,32 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
+    }
+    // Nedräkningen innan spelaren hoppar över en del: väntar medan filmen är pausad (och i bakgrunden)
+    LaunchedEffect(skipCd?.first) {
+        val kind = skipCd?.first ?: return@LaunchedEffect
+        while (true) {
+            delay(1000)
+            if (!player.isPlaying) continue
+            val c = skipCd ?: break
+            if (c.first != kind) break
+            if (c.second - 1 > 0) { skipCd = kind to c.second - 1; continue }
+            skipCd = null
+            plan?.takeIf { p -> p.kind == kind }?.let { p -> doSkip(p) }
+            break
+        }
+    }
+    // Kortet i slutet: en sekund i taget, nästa avsnitt hålls varmt. Väntar när appen ligger i bakgrunden (annars
+    // skulle nästa avsnitt börja spela där); bild-i-bild räknas som synlig.
+    LaunchedEffect(endCard != null) {
+        if (endCard == null) return@LaunchedEffect
+        while (true) {
+            delay(1000)
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) continue
+            val n = endCard ?: break
+            if (!offline) warmNext()
+            if (n - 1 > 0) endCard = n - 1 else { playNext(); break }
+        }
     }
     // Skärmläget tillbaka till det vanliga när spelaren stängs
     DisposableEffect(Unit) { onDispose { Pip.aspect = null; latestReport(true); player.release(); if (frameMode != "off") TvOutput.restore(activity) } }
@@ -599,19 +672,51 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
                     }
                 })
         }
-        skip?.let { kind ->
-            Button(onClick = {
-                val p = pb
-                if (kind == "pre") player.seekTo(mainIndex, 0L)
-                else if (kind == "recap" && p?.recap != null) seekMain((p.recap.end * 1000).toLong())
-                else if (kind == "intro" && p?.intro != null) seekMain((p.intro.end * 1000).toLong())
-                else item?.nextId?.let { next -> report(final = true); player.stop(); onPlay(Screen.Play(next, 0.0, null, null)) }
-            }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).height(60.dp)
-                .focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
-                Icon(Icons.Filled.SkipNext, null); Text(" " + tr(when (kind) { "pre" -> R.string.player_skip; "recap" -> R.string.player_skip_recap; "intro" -> R.string.player_skip_intro; else -> R.string.player_next_episode }), fontSize = 18.sp)
+        if (endCard == null) skip?.let { kind ->
+            Row(Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Nedräkningen innan spelaren hoppar av sig självt (kontots val), med Avbryt
+                val cd = skipCd
+                if (cd != null && kind != "pre") {
+                    Text(tr(when (cd.first) { SkipCore.Kind.RECAP -> R.string.player_skipping_recap; SkipCore.Kind.INTRO -> R.string.player_skipping_intro; else -> R.string.player_next_starting }) + " " + cd.second,
+                        color = Color.White, fontSize = 16.sp,
+                        modifier = Modifier.background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(24.dp)).padding(horizontal = 16.dp, vertical = 10.dp)
+                            .semantics { liveRegion = LiveRegionMode.Polite })
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { skipDone.add(cd.first); skipCd = null }, modifier = Modifier.height(60.dp).focusRing(RoundedCornerShape(30.dp)),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
+                        Text(tr(R.string.cancel), fontSize = 18.sp)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Button(onClick = {
+                    val p = plan
+                    if (kind == "pre") player.seekTo(mainIndex, 0L) else if (p != null) doSkip(p)
+                }, modifier = Modifier.height(60.dp).focusRequester(skipFocus).focusRing(RoundedCornerShape(30.dp)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.75f), contentColor = Color.White)) {
+                    Icon(Icons.Filled.SkipNext, null); Text(" " + tr(when (kind) { "pre" -> R.string.player_skip; "recap" -> R.string.player_skip_recap; "intro" -> R.string.player_skip_intro; else -> R.string.player_next_episode }), fontSize = 18.sp)
+                }
             }
         }
+        // Avsnittet är slut: "Nästa avsnitt om N s" med Spela nu och Avbryt (Avbryt lämnar spelaren kvar i slutet)
+        endCard?.let { n ->
+            Column(Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 110.dp).widthIn(max = 460.dp)
+                .background(Surface2, RoundedCornerShape(14.dp)).padding(20.dp)) {
+                Text(tr(R.string.player_next_in, n), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                item?.showTitle?.let { st -> Text(st, color = Color.LightGray, fontSize = 15.sp, maxLines = 1) }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { playNext() }, modifier = Modifier.height(52.dp).focusRequester(nextFocus).focusRing(RoundedCornerShape(26.dp))) {
+                        Icon(Icons.Filled.SkipNext, null); Text(" " + tr(R.string.player_play_now), fontSize = 17.sp)
+                    }
+                    OutlinedButton(onClick = { endCard = null }, modifier = Modifier.height(52.dp).focusRing(RoundedCornerShape(26.dp))) {
+                        Text(tr(R.string.cancel), fontSize = 17.sp)
+                    }
+                }
+            }
+        }
+        // Google TV: fokus på Spela nu när kortet dyker upp (OK startar nästa avsnitt, pilarna når Avbryt)
+        LaunchedEffect(endCard != null) { if (tv && endCard != null) runCatching { nextFocus.requestFocus() } }
         // Google TV: flytta fokus till knappen när den dyker upp så att den kan väljas direkt med fjärrkontrollen
         LaunchedEffect(skip) { if (tv && skip != null) runCatching { skipFocus.requestFocus() } }
         val failure: Pair<String, String>? = stopped?.let { s -> tr(R.string.player_stopped) to s } ?: error?.let { e -> tr(R.string.player_failed) to e }
