@@ -41,6 +41,10 @@ struct ItemDetailView: View {
     @State private var play: PlayRequest?
     @State private var season: Int = -1
     @State private var audio: Int = -1
+    /// Titelsidans förvalda ljudspår (profilens språk, StartCore.titleAudio) – skickas inte till /playback
+    @State private var presetAudio: Int?
+    /// Titelsidan har förvärmt Spela-knappens ström (iPhone/iPad, en gång per titelsida)
+    @State private var warmed = false
     @State private var subtitle: String = ""
     /// Min lista efter att användaren tryckt (nil = som servern sa i item.inWatchlist)
     @State private var inList: Bool?
@@ -71,12 +75,39 @@ struct ItemDetailView: View {
             item = it
             inList = nil
             if season < 0 { season = it.next?.season ?? it.children?.first?.season ?? 1 }
-            if audio < 0 { audio = (it.audio?.first { $0.default == true } ?? it.audio?.first)?.index ?? -1 }
+            // Ljudspåret: profilens förval som webben och Android-appen. Det skickas bara om man valt ett annat – annars
+            // väljer servern, så att förvärmningen och uppspelningen får samma ström (StartCore.playAudio)
+            presetAudio = StartCore.titleAudio(defaultAudio: it.defaultAudio, tracks: it.audio, index: { $0.index }, isDefault: { $0.default == true })
+            if audio < 0 { audio = presetAudio ?? -1 }
             if subtitle.isEmpty, let subs = it.subtitles {
                 subtitle = (subs.first { $0.forced == true && $0.bitmap != true }
                             ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true })?.id ?? "none"
             }
+            #if os(iOS)
+            // iPhone/iPad: ingen fokus att vänta på – förvärm det som Spela-knappen spelar när titelsidan öppnas
+            // (en gång: load körs igen när spelaren stängs, då behövs ingen ström)
+            if !warmed { warmed = true; warmPrimary(it) }
+            #endif
         } catch { if !isCancellation(error) { self.error = error.localizedDescription } }
+    }
+
+    /// Ljudspåret i frågan till /playback: inget när det är förvalet (servern väljer profilens språk)
+    private var playAudio: Int? { StartCore.playAudio(chosen: audio >= 0 ? audio : nil, preset: presetAudio) }
+
+    /// Det som Spela-knappen (Fortsätt, Spela eller nästa avsnitt) spelar: titel och position
+    @MainActor private func primary(_ it: MediaItem) -> (id: Int, start: Double, own: Bool)? {
+        if it.isShow {
+            guard let n = it.next else { return nil }
+            return (id: n.id, start: n.position ?? 0, own: false)
+        }
+        if let p = it.position, p > 30 { return (id: it.id, start: p, own: true) }
+        return (id: it.id, start: 0, own: true)
+    }
+
+    /// Förvärm Spela-knappens ström (samma fråga som uppspelningen, Start.warm)
+    @MainActor private func warmPrimary(_ it: MediaItem) {
+        guard let p = primary(it) else { return }
+        Start.warm(model, id: p.id, start: p.start, audio: p.own ? playAudio : nil, subtitle: p.own ? selectedSubtitle(it) : nil)
     }
 
     @MainActor @ViewBuilder func header(_ it: MediaItem) -> some View {
@@ -127,15 +158,18 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
                 if let p = it.position, p > 30 {
-                    Button { play = PlayRequest(itemId: it.id, start: p, audio: audio >= 0 ? audio : nil, subtitle: selectedSubtitle(it)) } label: {
+                    Button { play = PlayRequest(itemId: it.id, start: p, audio: playAudio, subtitle: selectedSubtitle(it)) } label: {
                         Label("Fortsätt från \(formatTime(p))", systemImage: "play.fill")
                     }.buttonStyle(.borderedProminent)
-                    Button("Börja om") { play = PlayRequest(itemId: it.id, start: 0, audio: audio >= 0 ? audio : nil, subtitle: selectedSubtitle(it)) }
+                    .warmOnFocus(it.id, start: p, audio: playAudio, subtitle: selectedSubtitle(it))
+                    Button("Börja om") { play = PlayRequest(itemId: it.id, start: 0, audio: playAudio, subtitle: selectedSubtitle(it)) }
                         .buttonStyle(.bordered)
+                        .warmOnFocus(it.id, start: 0, audio: playAudio, subtitle: selectedSubtitle(it))
                 } else {
-                    Button { play = PlayRequest(itemId: it.id, start: 0, audio: audio >= 0 ? audio : nil, subtitle: selectedSubtitle(it)) } label: {
+                    Button { play = PlayRequest(itemId: it.id, start: 0, audio: playAudio, subtitle: selectedSubtitle(it)) } label: {
                         Label("Spela", systemImage: "play.fill")
                     }.buttonStyle(.borderedProminent)
+                    .warmOnFocus(it.id, start: 0, audio: playAudio, subtitle: selectedSubtitle(it))
                 }
                 Button(it.watched == true ? "Markera osedd" : "Markera sedd") {
                     Task { try? await model.post("/api/items/\(it.id)/watched", ["watched": !(it.watched ?? false)]); await load() }
@@ -173,6 +207,7 @@ struct ItemDetailView: View {
                     Label(String(format: L((n.position ?? 0) > 0 ? "Fortsätt S%dE%d" : "Spela S%dE%d"), n.season ?? 0, n.episode ?? 0), systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
+                .warmOnFocus(n.id, start: n.position ?? 0)
             }
             watchlistButton(it)
             if let o = it.overview { Text(o).foregroundStyle(.secondary) }
@@ -201,6 +236,7 @@ struct ItemDetailView: View {
                     }
                 }
                 .cardButton()
+                .warmOnFocus(e.id, start: (e.position ?? 0) > 30 ? (e.position ?? 0) : 0)
             }
         }
         .padding(.horizontal)

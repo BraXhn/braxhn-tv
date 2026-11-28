@@ -35,24 +35,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 2. Apparna startar fortare: förvärmning och /playback samtidigt med titeln
-
-Android- och Expo-appen är klara (se *Klart*, 2026-11-28). Kvar: iOS/tvOS-appen.
-
-- **Vad:** (1) iOS/tvOS-appen anropar inte `/playback?warm=1` när fokus landar på Spela (inget `warm` i
-  `apps/apple`). (2) Den väntar på titelns uppgifter (`/api/items/:id`) och `/api/me/cinema` innan den skickar
-  `/playback` (`Player.swift` före `model.get("/api/items/\(itemId)/playback", …)`). Android-appen visar hur: samma
-  fråga för förvärmning och uppspelning (`Start.query`), `cinema=1` vid start från början (servern avgör bio-läget och
-  titelns typ), förvärmning först när fokus stått kvar 0,7 s (`StartCore.kt`). Kontrollera först: appen väljer förvald
-  undertext ur titelns spårlista före `/playback` – i Android skickas bara en bildundertext som användaren valt.
-- **Varför:** på Apple TV står fokus på Spela en stund innan man trycker OK, och via reläet eller mobilnät kostar
-  varje rundresa märkbart. Uppmätt för Android mot en lokal server med 60 ms fördröjning per anrop: svaret på
-  `/playback` 205–225 ms → cirka 75 ms; första segmentet ~0,3 s efter OK med förvärmning mot 0,6–1,1 s utan.
-- **Filer:** `apps/apple/Shared/Player.swift`, `apps/apple/Shared/DetailView.swift`, `test/contracts/apps.json`.
-- **Klart när:** kontraktet har `GET /api/items/:id/playback?warm=1` även för `ios`, och bygget i GitHub Actions går
-  igenom.
-
-### 3. Skärmtiden i apparna: tiden kvar och varningen i spelaren
+### 2. Skärmtiden i apparna: tiden kvar och varningen i spelaren
 
 - **Vad:** visa *X min kvar idag* och varningen de sista fem minuterna i spelaren i Expo-, Android- och iOS/tvOS-appen.
   Fältet `screenTime` finns i svaret på framstegsrapporten och läses redan, men bara för att stoppa
@@ -217,6 +200,19 @@ Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHAN
   startgissning – webbens startsteg och det förstartade är nu desamma även utan `bw` (`stream-smooth.test.js`).
   Apparna utan `bw` får också det steget först.
 
+- 2026-11-28: iOS/tvOS-appen startar fortare (förut punkt 3, sista delen efter Android och Expo), gren
+  `team/apple-start-2026-11-28`. `/playback` går samtidigt som `/api/items/:id` (`StartCore.together` i
+  `StartCore.swift`, bara Foundation); en ström som aldrig används (titeln gick inte att hämta, spelaren stängdes eller
+  byttes) stoppas med `pid`. `cinema=1` vid start från början i stället för att först läsa `/api/me/cinema`
+  (`cinemaEnabled` och `CinemaPrefs` borttagna). Förvärmning (`warm=1`, exakt uppspelningens fråga, `Start.query`) när
+  fokus stått 0,7 s på Spela, Fortsätt, Börja om, nästa avsnitt eller ett avsnitt (`warmOnFocus` i `Start.swift`), och
+  på iPhone/iPad en gång när titelsidan öppnas. Ljudspåret på titelsidan: profilens `defaultAudio` (förut filens
+  förvalda spår), och förvalet skickas inte – servern väljer, samma regel som Android (`titleAudio`/`playAudio`).
+  Kontrakt: `warm=1` och `stop?pid=` för ios, `defaultAudio` i `MediaItem.ios`. Test: `test/apple-start.test.js`
+  (7 fall, statiskt; 4 föll före ändringen). Mätt mot en lokal server med appens frågor (engelska förvalt i filen,
+  profilen vill ha svenska): förvärmd ström togs över 4/4 (tvOS/iOS, från början och vid 20 s), `audioSelected` =
+  svenska utan `audio` i frågan, eget val `audio=1` gav engelska. Inte provat: kompilering (bara i `apple.yml`),
+  riktig Apple TV/iPhone och tiden till första bilden.
 - 2026-11-28: Utanför hemmet förstartas omkodningen redan vid `/playback` (förut punkt 5), gren
   `team/abr-forstart-2026-11-28`. Med automatisk kvalitet startar `/playback` ffmpeg för steget som mastern listar
   först (`abrStartQuery` i `stream.js`, samma ordning som `serveAbrMaster`). Uppmätt i `test/fast-resume.test.js`

@@ -215,27 +215,31 @@ final class PlayerController: ObservableObject {
         beginPreparing(gen: gen)
         retries = 0
         do {
-            let it: MediaItem = try await model.get("/api/items/\(itemId)")
+            // Titelns uppgifter hämtas redan medan ett stopp av förra strömmen går iväg
+            let itemTask = Task { [model] () async throws -> MediaItem in try await model.get("/api/items/\(itemId)") }
+            // Vänta tills föregående session stoppats så att stoppet inte når servern efter den nya starten
+            await stopping?.value
             guard isLive(gen) else { return }
-            // Standardundertext om ingen valts
+            // Titelns uppgifter och /playback samtidigt (StartCore.together): frågan behöver inget ur titelns svar.
+            // Samma fråga som förvärmningen på titelsidan (Start.query), så att servern tar över den strömmen.
+            // start: servern förstartar omkodningen där uppspelningen börjar; cinema=1 vid start från början – servern
+            // ger trailers bara för filmer och när bio-läget är på. Undertexten väljs nedan ur titelns spårlista, men
+            // en textundertext skickas aldrig till servern (bara en bildundertext som användaren valt).
+            let q = Start.query(model, audio: audio, subtitle: subtitle, start: start, cinema: cinema)
+            let (it, p): (MediaItem, Playback) = try await StartCore.together(
+                item: { try await itemTask.value },
+                playback: { [model] () async throws -> Playback in try await model.get("/api/items/\(itemId)/playback", q) },
+                drop: { [model] (np: Playback) in await Start.drop(model, id: itemId, np) })
+            guard isLive(gen) else {
+                // Ersatt eller stängd medan servern förberedde strömmen – stäng den strömmen igen (pid: inte en nyare)
+                Task { [model] in await Start.drop(model, id: itemId, p) }
+                return
+            }
+            // Standardundertext om ingen valts (textundertexter: spelaren visar dem själv)
             var sub = subtitle
             if sub == nil, let subs = it.subtitles {
                 sub = subs.first { $0.forced == true && $0.bitmap != true }
                     ?? subs.first { !model.subtitleLang.isEmpty && $0.lang == model.subtitleLang && $0.bitmap != true }
-            }
-            // Vänta tills föregående session stoppats så att stoppet inte når servern efter den nya starten
-            await stopping?.value
-            guard isLive(gen) else { return }
-            let cinemaQ = await cinemaQuery(it, start: start, cinema: cinema)
-            guard isLive(gen) else { return }
-            // start: servern förstartar omkodningen där uppspelningen börjar (annars från början och en gång till här)
-            let startQ: [URLQueryItem] = start > 1 ? [URLQueryItem(name: "start", value: String(Int(start)))] : []
-            let extra = model.comfortQuery() + cinemaQ + startQ
-            let p: Playback = try await model.get("/api/items/\(itemId)/playback", model.capabilities(audio: audio, subtitle: sub) + extra)
-            guard isLive(gen) else {
-                // Ersatt eller stängd medan servern förberedde strömmen – stäng sessionen igen
-                Task { [model] in try? await model.post("/api/stream/\(itemId)/stop") }
-                return
             }
             // xs: spellistan säger var uppspelningen börjar (EXT-X-START) – även på Apple TV (SeekCore.withStart)
             guard let url = model.absolute(p.mode == "direct" ? p.url : SeekCore.withStart(p.url, at: start)) else { throw APIError(message: L("Ogiltig ström-URL")) }
@@ -299,13 +303,6 @@ final class PlayerController: ObservableObject {
         if play { player.play() } else { preparing = false; slowStart = false }
         installObservers()
         if let s = subtitle { await loadCues(for: s, gen: gen) }
-    }
-
-    /// cinema=1 bara för filmer från början och när bio-läget är påslaget på servern (GET /api/me/cinema)
-    private func cinemaQuery(_ it: MediaItem, start: Double, cinema: Bool) async -> [URLQueryItem] {
-        guard cinema, it.kind == "movie", start < 1 else { return [] }
-        let on = await model.cinemaEnabled()
-        return on ? [URLQueryItem(name: "cinema", value: "1")] : []
     }
 
     // MARK: - bio-läge (trailers före filmen)

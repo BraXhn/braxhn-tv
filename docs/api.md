@@ -106,7 +106,9 @@ och `sub` – servern väljer profilens förval) plus `warm=1` när användaren 
 `{ warm: true|false, mode }` och ingenting räknas som uppspelning. Begärs uppspelningen inom 20 s med samma val (och
 det förvalda ljudspåret) tar den över den redan startade strömmen. Webben gör detta, liksom Android-appen (när fokus
 stått kvar 0,7 s på en Spela-knapp eller ett avsnitt, med exakt samma fråga inklusive `audio` och `cinema=1`) och
-Expo-appen (när fingret landar på Spela). Ett valt `audio` i förvärmningen gäller som i uppspelningen.
+Expo-appen (när fingret landar på Spela) och iOS/tvOS-appen (som Android-appen på Apple TV, och när titelsidan öppnas
+på iPhone/iPad; `audio` bara när det inte är titelns `defaultAudio`). Ett valt `audio` i förvärmningen gäller som i
+uppspelningen.
 
 ## API-nycklar: `/api/v1/*`
 

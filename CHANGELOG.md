@@ -72,6 +72,14 @@
   kommer tillbaka eller appen öppnas igen (`POST /api/screentime/offline`). Tiden räknas på dagen den spelades och
   bara en gång, även om appen skickar samma post flera gånger. Inte byggt här och inte provat på riktig iPhone eller
   iPad.
+- **Appen för iPhone, iPad och Apple TV startar filmer fortare.** Appen frågade först efter titelns uppgifter, sedan
+  efter bio-läget och först därefter servern hur filmen ska spelas – tre rundresor i följd, som märks via reläet eller
+  mobilnätet. Nu går frågorna samtidigt, som i webben och Android-appen, och bio-läget avgör servern själv. På Apple TV
+  förbereder servern dessutom filmen när fokus har stått en stund på *Spela*, *Fortsätt*, *Börja om*, nästa avsnitt
+  eller ett avsnitt (inte när du bara rör dig förbi med fjärrkontrollen), och på iPhone och iPad när titelsidan
+  öppnas. Ljudspåret följer nu profilens språk även i den här appen (förut valdes filens förvalda spår, så ett barn
+  kunde få engelskt tal fast profilen vill ha svenskt). Kvalitet, ljudspår och undertext blir desamma som förut –
+  servern använder den förberedda strömmen bara när allt stämmer. Inte provat på riktig Apple TV, iPhone eller iPad.
 - **Skärmtid som spelats utan nät kan räknas på servern.** Tittade ett barn på nedladdade filmer på en flygresa
   räknade appen tiden själv, men när nätet kom tillbaka tog serverns räkning över och tiden från resan försvann – barnet
   fick dagens tid en gång till. Nu tar servern emot tiden i efterhand (`POST /api/screentime/offline`) och räknar den på

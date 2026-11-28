@@ -36,14 +36,14 @@
       "optional": { "lang": "string", "forced": "boolean", "bitmap": "boolean" } },
     "Marker.ios": { "källa": "apps/apple/Shared/Models.swift:50",
       "required": { "start": "number", "end": "number" } },
-    "MediaItem.ios": { "källa": "apps/apple/Shared/Models.swift:56",
+    "MediaItem.ios": { "källa": "apps/apple/Shared/Models.swift:63 (defaultAudio: profilens ljudspår på titelsidan, StartCore.titleAudio)",
       "required": { "id": "integer", "kind": "string", "title": "string", "poster": "boolean", "backdrop": "boolean", "thumb": "boolean" },
       "optional": { "year": "integer", "duration": "number", "rating": "number", "overview": "string", "hdr": "string",
         "season": "integer", "episode": "integer", "show": "integer", "showTitle": "string",
         "position": "number", "watched": "boolean", "episodes": "integer", "watchedEpisodes": "integer",
         "intro": "@Marker.ios", "recap": "@Marker.ios", "credits": "number",
         "children": ["@MediaItem.ios"], "next": "@MediaItemRef.ios", "audio": ["@AudioStream.ios"], "subtitles": ["@SubtitleTrack.ios"],
-        "nextId": "integer", "prevId": "integer", "height": "integer", "cast": ["@CastMember.ios"], "inWatchlist": "boolean" } },
+        "nextId": "integer", "prevId": "integer", "height": "integer", "cast": ["@CastMember.ios"], "inWatchlist": "boolean", "defaultAudio": "integer" } },
     "CastMember.ios": { "källa": "apps/apple/Shared/Models.swift:114",
       "required": { "id": "integer", "name": "string" },
       "optional": { "role": "string", "character": "string" } },
@@ -462,13 +462,14 @@
       "ios": { "källa": "apps/apple/Shared/Views.swift:376", "query": { "q": "$sök" }, "svar": ["@MediaItem.ios"] },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:371", "query": { "q": "$sök" }, "svar": ["@MediaItem.android"] } },
     "GET /api/items/:id": {
-      "ios": { "källa": "apps/apple/Shared/DetailView.swift:70, Player.swift:142, :162", "svar": "@MediaItem.ios" },
+      "ios": { "källa": "apps/apple/Shared/DetailView.swift:74, Player.swift:193 (nedladdad titel), :216 (samtidigt med /playback, StartCore.together)", "svar": "@MediaItem.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/MainActivity.kt:531, PlayerScreen.kt:259, :277", "svar": "@MediaItem.android" } },
     "GET /api/items/:id/playback": {
-      "ios": { "källa": "apps/apple/Shared/Player.swift:176 (förmågor: AppModel.swift:154-172, nattläge/dialog: AppModel.swift:291-296, cinema=1 bara när GET /api/me/cinema säger på: Player.swift:237-241; tvOS skickar inte nhls; spolning i en omkodning: Player.swift seekRestart med start och prev=<förra strömmens pid>, sista varianten som på Apple TV – appen lägger själv till xs i strömmens adress, SeekCore.withStart)",
+      "ios": { "källa": "apps/apple/Shared/Player.swift:228 (samtidigt med /api/items/:id på :216, StartCore.together; frågan: Start.swift:19-21 = förmågor AppModel.swift:206-224, nattläge/dialog AppModel.swift:362-367, cinema=1 vid start från början och start: StartCore.playExtras – servern avgör bio-läget; ljudspåret bara när det inte är titelsidans förval, StartCore.playAudio; tvOS skickar inte nhls; spolning i en omkodning: Player.swift seekRestart med start och prev=<förra strömmens pid>, sista varianten som på Apple TV – appen lägger själv till xs i strömmens adress, SeekCore.withStart)",
         "query": [{ "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "night": "1", "dialog": "1", "cinema": "1" },
+                  { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0", "audio": "1", "start": "30" },
                   { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "audio": "1", "start": "30", "prev": "0123abcd" }],
         "svar": "@Playback.ios" },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/PlayerScreen.kt:279 (samtidigt med /api/items/:id på :277, StartCore.together; frågan: Start.kt:28-31 = förmågor Api.kt:335-349 och TvOutput.kt (bitström, HDR), nattläge/dialog Api.kt:414, cinema=1 vid start från början och start: StartCore.playExtras – servern avgör bio-läget; utan Dolby-avkodare/bitström blir a/v kortare, Google TV med förstärkare: femte varianten; :265 skickar info=1; spolning i en omkodning: :202 med start och prev=<förra strömmens pid>, sista varianten)",
@@ -480,6 +481,13 @@
                   { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis,ac3,eac3", "atrack": "1", "audio": "1", "hdr": "0", "start": "30", "prev": "0123abcd" }],
         "svar": "@Playback.android" } },
     "GET /api/items/:id/playback?warm=1": {
+      "ios": { "källa": "apps/apple/Shared/Start.swift:31 (Apple TV: fokus en stund på Spela, Fortsätt, Börja om, nästa avsnitt eller ett avsnitt – warmOnFocus i Start.swift, DetailView.swift:164-239; iPhone/iPad: när titelsidan öppnas, DetailView.swift:89; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
+        "query": [
+          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "cinema": "1", "warm": "1" },
+          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "1", "dv": "0", "start": "30", "warm": "1" },
+          { "c": "mp4", "v": "h264,hevc", "a": "aac,ac3,eac3,mp3,flac,alac", "hdr": "0", "dv": "0", "nhls": "1", "audio": "1", "night": "1", "dialog": "1", "cinema": "1", "warm": "1" }
+        ],
+        "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Start.kt:41 (fokus en stund på Spela, Fortsätt, Börja om eller ett avsnitt: warmOnFocus i Start.kt, MainActivity.kt:572-619; samma fråga som uppspelningen plus warm=1, StartCore.warmQuery; svaret läses inte)",
         "query": [
           { "c": "mp4,mkv,webm", "v": "h264,hevc", "a": "aac,mp3,opus,flac,vorbis", "atrack": "1", "hdr": "0", "audio": "1", "cinema": "1", "warm": "1" },
@@ -675,7 +683,7 @@
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Guide.kt:383 (bildtoken i ?t=)", "svar": { "media": "^image/" } } },
 
     "POST /api/stream/:id/stop": {
-      "ios": { "källa": "apps/apple/Shared/Player.swift:179, :481", "svar": null },
+      "ios": { "källa": "apps/apple/Shared/Player.swift:583 (spelaren stängs eller byter titel); pid för en ström som aldrig användes: Start.swift:37 (StartCore.together, Player.swift:229-232); pid och replaced=1 för en ström som ersatts vid spolning: Player.swift:1165", "query": [{}, { "pid": "0123abcd" }, { "pid": "0123abcd", "replaced": "1" }], "svar": null },
       "android": { "källa": "apps/automotive/app/src/main/java/net/braxhn/tv/Net.kt:203 (StreamGate, från PlayerScreen.kt:167); pid och replaced=1 för en ström som ersatts vid spolning: PlayerScreen.kt:206", "query": [{}, { "pid": "0123abcd", "replaced": "1" }], "svar": null } },
     "POST /api/logout": {
       "ios": { "källa": "apps/apple/Shared/AppModel.swift:187-190", "svar": null },

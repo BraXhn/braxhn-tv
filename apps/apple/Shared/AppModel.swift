@@ -348,12 +348,6 @@ extension AppModel {
         try await post("/api/items/\(id)/watchlist", ["add": on])
     }
 
-    /// Bio-läget (trailers före filmen) är påslaget på servern. Äldre servrar saknar /api/me/cinema – då av.
-    func cinemaEnabled() async -> Bool {
-        guard let c: CinemaPrefs = try? await get("/api/me/cinema") else { return false }
-        return (c.trailers ?? 0) > 0 || (c.preroll == true && c.prerollAvailable != false)
-    }
-
     /// Nattläge (jämnare ljudnivå) och tydligare dialog – sparas på enheten (vyerna använder @AppStorage med samma nycklar)
     var nightMode: Bool {
         get { UserDefaults.standard.bool(forKey: "nightMode") }

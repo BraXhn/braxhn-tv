@@ -70,6 +70,14 @@ En och samma SwiftUI-app för iOS/iPadOS 16+ och tvOS 16+.
   (äldre server, inget nät) gissar den ur bufferten vad servern redan kodat. Apple TV skickar inte `nhls=1` (då blir Dolby Digital i TS AAC), så appen lägger själv till `xs` i
   strömmens adress och spelaren börjar vid målet (`EXT-X-START`). Reglerna: `Shared/SeekCore.swift`
 - *Rapportera felet* även i live-TV-spelaren
+- snabbare start: titelns uppgifter och `/playback` hämtas samtidigt (inte efter varandra), och bio-läget (`cinema=1`
+  vid start från början) avgör servern – appen frågar inte `/api/me/cinema` först. På Apple TV förbereder servern
+  strömmen när fokus stått 0,7 s på *Spela*, *Fortsätt*, *Börja om*, nästa avsnitt eller ett avsnitt
+  (`/playback?warm=1`), på iPhone/iPad när titelsidan öppnas – med exakt samma fråga som uppspelningen, så att den
+  tar över strömmen. En ström som aldrig används (spelaren stängdes, titeln gick inte att hämta) stoppas med `pid`.
+  Ljudspåret på titelsidan är profilens förval (`defaultAudio`) och skickas inte till servern – den väljer profilens
+  språk; ett eget val skickas. Samma regler som Android-appen. Reglerna: `Shared/StartCore.swift`, anropen:
+  `Shared/Start.swift`
 
 ## Bygga och installera (kräver en Mac)
 

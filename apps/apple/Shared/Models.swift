@@ -89,6 +89,8 @@ struct MediaItem: Decodable, Identifiable, Hashable {
     let children: [MediaItem]?
     let next: MediaItemRef?
     let audio: [AudioStream]?
+    /// Ljudspåret efter profilens språk (index i audio; bara i detaljvyn, saknas hos äldre servrar)
+    let defaultAudio: Int?
     let subtitles: [SubtitleTrack]?
     let nextId: Int?
     let prevId: Int?

@@ -72,13 +72,6 @@ struct PrerollEntry: Decodable, Hashable {
     let duration: Double?
 }
 
-/// GET /api/me/cinema (saknas hos äldre servrar)
-struct CinemaPrefs: Decodable {
-    let trailers: Int?
-    let preroll: Bool?
-    let prerollAvailable: Bool?
-}
-
 struct Profile: Decodable, Identifiable, Hashable {
     let id: Int
     let name: String
