@@ -230,7 +230,10 @@ route('GET', '/api/items/:id/playback', user, async (c) => {
       if (w.sig === warmSig(hp) && st.claimWarm(it, q2, c.user.id)) hp.set('pid', w.pid);
     }
   }
-  const url = d.mode === 'direct' ? `${base}/direct${tq}` : `${base}/hls/master.m3u8?${hp}`;
+  // Direktuppspelning har också ett eget pid (som HLS-strömmarna i hlsParams): stoppet (/stop?pid=) gäller då bara den
+  // här uppspelningen – utan pid stoppades profilens alla sessioner av titeln, även en annan enhets omkodning
+  const dpid = crypto.randomBytes(4).toString('hex');
+  const url = d.mode === 'direct' ? `${base}/direct${tq ? tq + '&' : '?'}pid=${dpid}` : `${base}/hls/master.m3u8?${hp}`;
   // info=1: titelsidan visar bara uppspelningsläget – det är ingen uppspelning.
   // queue=1: Chromecast köar nästa avsnitt (länkar och token nu, uppspelningen börjar senare) – ingen förstart eller "spelas nu".
   const queued = c.q.get('queue') === '1';
@@ -401,12 +404,14 @@ route('POST', '/api/stream/:id/stop', user, (c) => {
   // Klienten anger filmen; omkodningen kan gälla vilken version som helst av den
   const row = get('SELECT * FROM items WHERE id=?', +c.p.id);
   const ids = row ? ver.versionsOf(ver.mainOf(row)).map(v => v.id) : [+c.p.id];
-  // pid (webbspelaren): bara den uppspelningen – en Chromecast eller annan enhet på samma konto fortsätter.
-  // Utan pid (apparna) stoppas alla användarens sessioner av titeln som förut.
+  // pid (webbspelaren, även vid direktuppspelning): bara den uppspelningen – en Chromecast eller annan enhet på samma
+  // konto fortsätter. Utan pid (apparna) stoppas användarens sessioner av titeln, utom de som en annan enhet (annan
+  // adress) hämtat segment från den senaste minuten (stream.js stopUserSessions).
   const pid = /^[0-9a-f]{8}$/.test(c.q.get('pid') || '') ? c.q.get('pid') : '';
   // gone=1: sidan stängdes (webbspelaren vid pagehide) – en sen begäran från den startar ingen ny omkodning
   const gone = !!pid && c.q.get('gone') === '1';
-  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid, { gone });
+  const ip = clientIp(c.req);
+  for (const id of new Set([+c.p.id, ...ids])) st.stopUserSessions(id, c.user.id, pid, { gone, ip });
   // Statistik och webhooks (media.stop): uppspelningen räknas på filmen/huvudraden. replaced=1 (webbspelaren): bara
   // en ström som ersatts av en nyare i samma uppspelning (flera spolningar i rad) – uppspelningen fortsätter
   // Skärmtiden: nästa start av samma titel är en ny uppspelning – tiden emellan räknas inte (screentime.js heartbeat)

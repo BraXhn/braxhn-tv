@@ -847,8 +847,8 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   clearInterval(P.nextTimer); clearInterval(P.skipTimer);
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   const el = P.el, v = $('#vid', el), id = P.it.id, P0 = P;
-  // pid i strömlänken = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
-  let pid = ''; try { pid = new URL(P.pb?.url || '', location.origin).searchParams.get('pid') || ''; } catch {}
+  // pid i strömlänken (även direktuppspelning) = just den här uppspelningen; servern stoppar då inte andra enheters sessioner
+  const pid = pidOf(P.pb);
   if (v && P.lmd) v.removeEventListener('loadedmetadata', P.lmd);
   sleepClosed();
   dropHold(P);
@@ -856,7 +856,10 @@ export function closePlayer(refresh = true, { cast = false } = {}) {
   P.tok = null; P.lmd = null;
   P = null;
   stopVideo(v);
-  if (pid || !cast) fetch(`/api/stream/${id}/stop${pid ? '?pid=' + encodeURIComponent(pid) : ''}`, { method: 'POST' }).catch(() => {});
+  // keepalive: stoppet når fram även när spelaren stängs för att sidan lämnas (en annan adress, fliken stängs).
+  // cast: uppspelningen fortsätter på Chromecast (replaced=1) – inget stopp i aktiviteten eller skärmtiden
+  const q = pid ? `?pid=${encodeURIComponent(pid)}${cast ? '&replaced=1' : ''}` : '';
+  if (pid || !cast) fetch(`/api/stream/${id}/stop${q}`, { method: 'POST', keepalive: true }).catch(() => {});
   document.removeEventListener('keydown', keys);
   if (P0.keyWake) document.removeEventListener('keydown', P0.keyWake, true);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

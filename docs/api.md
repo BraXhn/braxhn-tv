@@ -81,7 +81,14 @@ användaren utanför det som är buffrat startar klienten om strömmen vid måle
 - `POST /api/stream/:id/stop?pid=<pid>&replaced=1`: stoppar bara den strömmen (med `pid`) och räknas inte som att
   uppspelningen slutade (ingen `media.stop`, ingen rad i aktiviteten). Använd det för en ström som ersattes innan den
   användes, till exempel när användaren spolade igen medan omstarten pågick. Utan `replaced=1` är det ett vanligt stopp
-  (med `pid` bara den uppspelningen, utan `pid` alla användarens strömmar av titeln).
+  (med `pid` bara den uppspelningen, utan `pid` användarens strömmar av titeln – se nedan).
+- `pid` finns i alla strömlänkar från `/playback`, även direktuppspelning: `/api/stream/:id/direct?pid=<pid>` (med
+  token `…/direct?t=<token>&pid=<pid>`). Servern bryr sig inte om `pid` när filen hämtas; det är bara till för
+  `stop` och `prev`. Klienten ska använda adressen som den är.
+- `POST /api/stream/:id/stop` utan `pid` (apparna): stoppar användarens strömmar av titeln, utom en HLS-ström som en
+  annan adress än den som stoppar har hämtat segment från de senaste 60 s (en annan enhet med samma profil som ser
+  samma titel). En sådan ström som slutar hämtas stoppas ändå av städningen efter 60 s. Stopp från administratören,
+  föräldern och skärmtiden stoppar som förut alla strömmar.
 - `POST /api/stream/:id/stop?pid=<pid>&gone=1`: sidan eller appen som spelade har stängts och uppspelningen används
   aldrig igen (webbspelaren skickar det med `sendBeacon` vid `pagehide`). Ett vanligt stopp, och dessutom svarar
   servern **409** på senare begäran till den strömmen i stället för att starta en ny omkodning (en begäran som var på

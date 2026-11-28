@@ -1,6 +1,11 @@
 # Ändringar
 
 ## Ej utgiven
+- **En stängd film på en enhet stoppar inte längre samma film på en annan.** Två i familjen med samma profil som såg
+  samma film på varsin enhet (till exempel TV:n och en dator) kunde få TV:ns film stoppad när datorn stängde sin, om
+  datorn spelade filen direkt utan omkodning. Nu har även direktuppspelningen en egen märkning, så att bara den egna
+  uppspelningen stoppas – också när fliken stängs. Windows-appens inbyggda spelare gör likadant. Apparna för telefon
+  och TV stoppar som förut, men en film som en annan enhet hämtar just nu får fortsätta.
 - **Android-appen följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt alltid direkt när ett
   avsnitt tog slut, även om en förälder stängt av valet. Nu visas kortet *Nästa avsnitt om 8 s* med *Spela nu* och
   *Avbryt* (sekunderna följer kontots val, 0 = direkt), och när valet är av kortet *Nästa avsnitt* utan nedräkning,

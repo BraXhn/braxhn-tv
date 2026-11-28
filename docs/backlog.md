@@ -283,11 +283,27 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
   `videoEntry`, `offline.ts` `friendly`) – byts språket står de kvar på det gamla. Spara delarna och skriv texten vid
   visning.
 
+- Stopp av en uppspelning (`/stop`) avslutar aktiviteten och markerar skärmtidens ström per profil och titel
+  (`act.clientStop`, `screen.stopped` i `server/routes/playback.js`), inte per enhet: stänger en enhet sin film medan
+  en annan med samma profil ser samma titel räknas den andras nästa livstecken inte i skärmtiden, och aktiviteten
+  avslutas om inga framsteg kommer under väntetiden. Kontrollera först om det märks; nyckla i så fall per `pid`.
+
 ## Klart
 
 Nyast först, grupperat efter utgåva. Detaljerna står i [CHANGELOG.md](../CHANGELOG.md).
 
 ### Ej utgiven
+
+- 2026-11-28: Stängd direktuppspelning stoppade samma titel på profilens andra enheter (punkt 7 i
+  `team/backlogg3-2026-11-28`), gren `team/direct-pid-2026-11-28`. `/playback` ger `/direct` ett eget `pid`
+  (`…/direct?pid=` eller `?t=…&pid=`), så webbens `closePlayer` (nu med `keepalive`) och `pagehide` stoppar bara den
+  egna uppspelningen; Windows-appens `finish` (`native.js`) skickar också `pid`. Vid överlämning till Chromecast
+  skickar `closePlayer` `replaced=1` (uppspelningen fortsätter där; förut ett vanligt stopp för HLS och inget för
+  direkt). Stopp utan `pid` (apparna) hoppar
+  över en HLS-session som en annan adress hämtat segment från de senaste 60 s (`stopUserSessions`, `s.ip` i
+  `serveSegment`); admin, förälder och skärmtid stoppar allt som förut. `test/direct-pid.test.js` (föll i 4 av 5 fall
+  före): direkt + HLS med samma profil, appstopp från annan och samma adress, Chrome (`pid`, `keepalive`, `pagehide`).
+  Kvar: `act.clientStop`/`screen.stopped` gäller profil + titel, inte enhet (se Idéer).
 
 - 2026-11-28: Android-appen följer *Spela nästa avsnitt automatiskt* (punkt 1, iOS kvar), gren
   `team/android-nasta-2026-11-28`. `SkipCore.kt` (JVM-test `SkipCoreTest.kt`, samma fall som `test/expo-skip.test.js`):

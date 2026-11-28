@@ -8,6 +8,8 @@ import { screenBadge, timeUp } from '../screentime.js';
 import { route } from '../router.js';
 import { inWindowsApp, nativePlan, nativeQuery, progressBody, skipMessage } from './nativeplan.js';
 
+/** pid i strömlänken (just den här uppspelningen), eller '' */
+const pidIn = (url) => { try { return new URL(url || '', location.origin).searchParams.get('pid') || ''; } catch { return ''; } };
 let N = null;          // { id, it, nextId, autoNext, onNext } – det mpv spelar just nu
 let waiters = [];      // svar från appen som väntas på: { type, resolve }
 let listening = false;
@@ -70,7 +72,7 @@ export async function playNative(it, o = {}) {
     if (!r) send({ t: 'native-stop', id: it.id });
     return false;
   }
-  N = { id: it.id, it, duration: plan.msg.duration, nextId: plan.msg.nextId, autoNext: plan.msg.autoNext, onNext: o.onNext, lastPos: o.start || 0 };
+  N = { id: it.id, it, pid: pidIn(pb.url), duration: plan.msg.duration, nextId: plan.msg.nextId, autoNext: plan.msg.autoNext, onNext: o.onNext, lastPos: o.start || 0 };
   return true;
 }
 
@@ -98,7 +100,8 @@ function finish(pos) {
   const cur = N; if (!cur) return;
   sendProgress(pos, true);
   N = null;
-  fetch(`/api/stream/${cur.id}/stop`, { method: 'POST' }).catch(() => {});
+  // pid (strömlänken, även direktuppspelning): bara mpv:s egen uppspelning – inte samma titel på en annan enhet
+  fetch(`/api/stream/${cur.id}/stop${cur.pid ? '?pid=' + cur.pid : ''}`, { method: 'POST', keepalive: true }).catch(() => {});
 }
 
 function onHost(m) {

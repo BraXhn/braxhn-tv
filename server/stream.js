@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream';
-import { send, fail, MIME, streamFile, writeAtomic, lowPriority } from './util.js';
+import { send, fail, MIME, streamFile, writeAtomic, lowPriority, clientIp } from './util.js';
 import { CACHE, SUBS_DIR, getSetting } from './db.js';
 import { fastKeyframes } from './keyframes.js';
 import * as jobs from './jobs.js';
@@ -1687,7 +1687,7 @@ export async function serveSegment(req, res, it, n, query, userId) {
   s.total = total;
   if (!(Number.isInteger(n) && n >= 0 && n < total)) return fail(res, 404, 'Segment finns inte');
   let waitMs = 0;
-  s.reqN = n; s.reqAt = Date.now();
+  s.reqN = n; s.reqAt = Date.now(); s.ip = clientIp(req); // ip: vilken enhet som hämtar (stopUserSessions)
   if (!complete(s, n)) {
     s.waiting++;
     const w0 = Date.now();
@@ -1839,8 +1839,14 @@ setInterval(() => {
 /** Stoppar användarens sessioner av titeln. Med pid bara den uppspelningen (t.ex. webbspelaren som stängs
  *  medan Chromecast fortsätter med en egen session); utan pid alla (appar och adminens stopp). */
 /** gone: sidan som spelade har stängts (webbspelarens stopp vid pagehide) – uppspelningen (pid) används aldrig igen */
-export function stopUserSessions(itemId, userId, pid = '', { gone = false } = {}) {
-  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid)) { s.stoppedAt = Date.now(); stopProc(s); }
+// Stopp utan pid (apparna): en session som en annan enhet hämtat segment från så här nyligen rörs inte. Samma tid som
+// städningen stoppar en ffmpeg som ingen hämtar från (60 s) – efter det sköts den ändå av städningen.
+const OTHER_DEVICE_MS = 60000;
+/** Stoppa användarens sessioner av titeln. pid: bara den uppspelningen. Utan pid alla, utom de som en annan adress än
+ *  ip (den som stoppar) hämtat segment från inom OTHER_DEVICE_MS – två enheter med samma profil som ser samma titel. */
+export function stopUserSessions(itemId, userId, pid = '', { gone = false, ip = '' } = {}) {
+  const other = (s) => !pid && ip && s.ip && s.ip !== ip && Date.now() - (s.reqAt || 0) < OTHER_DEVICE_MS;
+  for (const [, s] of sessions) if (s.key.startsWith(`${userId}-${itemId}-`) && (!pid || s.d.pid === pid) && !other(s)) { s.stoppedAt = Date.now(); stopProc(s); }
   // En begäran från den stängda sidan som kommer fram efter stoppet (fliken stängdes medan ett segment hämtades) ska
   // inte starta en ny ffmpeg, som annars kodade vidare tills städningen efter 60 s
   if (pid && gone) noteDropped(userId, pid);
