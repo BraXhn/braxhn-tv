@@ -43,7 +43,31 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
   till 5 Mbit/s (`tc` lokalt). Kontrollera först hur lång tid mätningen tar via reläet – den får inte göra starten långsammare
   (kan göras samtidigt med förvärmningen).
 
-### 2. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
+### 2. Skärmtiden räknar inte musik och inte färdiga inspelningar i apparna (riktigt fel)
+
+- **Vad:** dialogen för skärmtid lovar *Gäller även ljud (musik, ljudböcker och poddar)* (`screenDialog` i
+  `web/js/screentime.js`), men lyssnad musik räknas aldrig: `heartbeat` anropas bara för böcker och poddar
+  (`server/routes/books.js`), live- och inspelningssegment (`server/routes/livetv.js`), titlarnas strömmar
+  (`countStream` i `server/http/context.js`, bara `/direct` och HLS för titlar) och `/api/screentime/ping`. Låtarnas
+  `/api/music/tracks/:tid/stream` och `/play` nekar bara när tiden redan är slut (`screenBlock`), och varken
+  `web/js/audio.js`, Expo- eller Android-appen rapporterar musik. Samma sak för färdiga inspelningar i iOS- och
+  Android-appen: `/api/dvr/recordings/:rid/stream` räknar inget på servern, och bara webben skickar `screentime/ping`
+  (`screenPing` i `web/js/player/live.js`) – apparna (`Live.swift`, `Live.kt`) gör det inte. Dessutom skickar
+  webbens musikvideor nyckeln `mv:<id>`, som `/api/screentime/ping` inte godtar (`/^[a-z]:\d{1,12}$/` i
+  `server/routes/social.js`) – alla musikvideor räknas som samma ström `x:0`, så tiden mellan två videor räknas.
+- **Varför:** ett barn med skärmtid för ljud kan lyssna på musik hela dagen, och ett barn med skärmtid kan se färdiga
+  inspelningar i appen utan att tiden går. Föräldern tror att gränsen gäller. En hel låt hämtas på några sekunder, så
+  `countStream` (räknar medan data skickas) räcker inte för musik.
+- **Filer:** `server/routes/music.js`, `server/routes/social.js` (`/api/screentime/ping`: ta emot `audio` och fler
+  nyckeltyper), `server/routes/livetv.js` (`/stream` för inspelningar, som `/direct` med `countStream` och takt),
+  `web/js/audio.js`, `web/js/player/musicvideo.js`, `apps/expo/src/music.ts`,
+  `apps/automotive/.../MusicService.kt`, `test/screentime-*.test.js`.
+- **Klart när:** ett test visar att tio minuters musik i webben ger ungefär tio minuter skärmtid för en profil med
+  `audio: true` och noll utan, att en färdig inspelning som hämtas med `/stream` räknas utan `ping`, och att två
+  musikvideor efter varandra räknas som två strömmar. Kontrollera först om apparnas musik ska rapportera positionen
+  (som böckerna) eller om servern kan räkna låtarna själv.
+
+### 3. Fortsätt titta på iPhone: mät startpositionen med Apples spelare
 
 - **Vad:** lägg till ett fall med startposition (`start=` och `EXT-X-START`) i `test/media/AVPlayerCheck.swift` och
   `test/media/apple-check.mjs`, som redan körs på macOS i `conformance.yml`. I dag provar de inte startposition.
@@ -54,7 +78,7 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 - **Klart när:** körningen på macOS visar att uppspelningen börjar inom två sekunder från begärd position utan att
   segment 0 hämtas först.
 
-### 3. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
+### 4. Ljudböcker och poddar för nedladdning i Android- och iOS/tvOS-appen, med skärmtid utan nät
 
 - **Vad:** bara filmer och avsnitt kan laddas ner i Android- och iOS-appen (`Offline.kt`, `Offline.swift`; inget i
   `Listen.swift` eller `MusicService.kt`). Expo-appen har nedladdade böcker. När det byggs: räkna skärmtid utan nät för
@@ -69,7 +93,80 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
   (`OfflineCoreTest.kt`, `test/apple-offline.test.js`) har en post med `audio: true` från en nedladdad bok, och bygget i
   GitHub Actions går igenom.
 
-### 4. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
+### 5. iOS-appen hoppar inte över intro, sammanfattning och eftertexter av sig själv (`autoSkip`)
+
+- **Vad:** webben, Expo-appen (`apps/expo/src/skipcore.ts`) och Android-appen (`SkipCore.kt`) följer kontots val
+  `autoSkip` i `/playback` och trycker på knappen själva efter en kort nedräkning. iOS/tvOS-appen visar bara knappen
+  (`skipTitle` i `apps/apple/Shared/Player.swift`, rad ~556) och avkodar inte `autoSkip` (bara `autoNext` i
+  `Models.swift`).
+- **Varför:** barnserier med samma intro i varje avsnitt är vardag; på iPaden och Apple TV:n måste någon trycka varje
+  gång, fast valet är påslaget i kontot. Plex och Netflix hoppar själva.
+- **Filer:** `apps/apple/Shared/Player.swift`, `Models.swift`, en `SkipCore.swift` med samma regler som
+  `web/js/player/autoskip.js`, `test/apple-next.test.js` eller ett nytt test, `test/contracts/apps.json` (`autoSkip`
+  för `ios`).
+- **Klart när:** kontraktet har `autoSkip` för `ios`, ett test visar samma plan som webben för intro, sammanfattning och
+  eftertexter (även att en del som redan hoppats över inte hoppas igen efter spolning bakåt), och bygget i GitHub
+  Actions går igenom.
+
+### 6. Expo-appen: ljudboken och poddavsnittet försvinner ur minispelaren efter omstart och ur webben (riktigt fel)
+
+- **Vad:** `restoreQueue` i `apps/expo/src/music.ts` läser bara `tracks` ur `/api/me/queue` och struntar i `spoken`,
+  som servern nu skickar med profilens position (`spokenOf` i `server/musicqueue.js`). Värre: när en bok eller ett
+  avsnitt startar i appen tar `leaveMusic` bort kön (`DELETE /api/me/queue`) utan att spara `spoken` (webben gör
+  `PUT` med `spoken`, `spokenQueue` i `web/js/audio.js`). Efter en bok i telefonen visar alltså varken appen efter
+  omstart eller webben boken i minispelaren.
+- **Varför:** ljudböcker lyssnas i omgångar – i bilen, vid läggdags, på en annan enhet. Webben har det redan (*Boken
+  står kvar pausad … på en annan enhet*, `docs/funktioner.md`), och Audiobookshelf gör likadant.
+- **Filer:** `apps/expo/src/music.ts` (`restoreQueue`, `playBook`, poddens start, `leaveMusic`), `test/expo-*.test.js`
+  (ny fil eller `expo-offline.test.js` med låtsasmodulerna i `test/helpers/expo-loader.mjs`).
+- **Klart när:** ett test visar att en bok som spelats i appen ger `PUT /api/me/queue` med `spoken`, och att
+  `restoreQueue` med `spoken` i svaret visar boken pausad på positionen utan att ladda ljud (som `restoreSpoken` i
+  webben); en nedladdad bok spelas från telefonen även då.
+
+### 7. Stängd spelare vid direktuppspelning stoppar samma titel på profilens andra enheter (riktigt fel)
+
+- **Vad:** `closePlayer` i `web/js/player/video.js` skickar `POST /api/stream/:id/stop` med `pid` bara när
+  strömlänken har ett. Vid direktuppspelning är länken `/api/stream/:id/direct` utan `pid` (`server/routes/playback.js`
+  rad ~233), och stoppet utan `pid` stoppar alla profilens sessioner av titeln (`stopUserSessions`), markerar
+  `clientStop` och `screen.stopped`. Samma sak i `pagehide`, som då inte skickar något alls (kräver `pid`).
+- **Varför:** två barn på samma profil som ser samma film på varsin enhet, eller en film som spelas på TV:n medan
+  telefonen stänger sin – den andra strömmen bryts. Kontrollera först hur ofta en direktuppspelning har en omkodad
+  syskonsession (förvärmning, Chromecast) som träffas.
+- **Filer:** `server/routes/playback.js` (ge `/direct` ett `pid` som de andra lägena), `web/js/player/video.js`
+  (`closePlayer`, `pagehide`), `test/` (stoppets test för `pid`).
+- **Klart när:** ett test visar att stängd direktuppspelning i en webbläsare inte stoppar profilens HLS-session av samma
+  titel på en annan enhet, och att stoppet skickas med `keepalive` även från `closePlayer` när sidan lämnas.
+
+### 8. Kortet *Nästa avsnitt* i apparna visar vad som kommer (`nextEpisode`)
+
+- **Vad:** `/api/items/:id` har nu `nextEpisode` (`{ id, title, season, episode, image }`, `server/routes/library.js`)
+  och webbens kort visar bild, S1 · A2 och namnet (`nextCard` i `web/js/player/video.js`). Android-appens kort visar
+  bara rubriken och seriens namn (`endCard` i `PlayerScreen.kt`), iOS bara rubriken (`Player.swift`, kortet ~rad 966)
+  och Expo-appen bara rubriken (`Player.tsx`, `endCard`).
+- **Varför:** man ser direkt om nästa avsnitt är det man vill se, eller om det är dags att stänga – som Plex och
+  Netflix. Mest nytta på TV:n där kortet syns stort.
+- **Filer:** `apps/automotive/.../Api.kt` (`ItemDetail`), `PlayerScreen.kt`, `apps/apple/Shared/Models.swift`,
+  `Player.swift`, `apps/expo/src/screens/Player.tsx`, `test/contracts/apps.json` (`nextEpisode` som valfritt fält).
+- **Klart när:** kontraktet har `nextEpisode` för `android` och `ios`, korten visar namn, nummer och bild när fältet
+  finns och bara rubriken som i dag när det saknas (äldre server, nedladdad titel), och bygget i GitHub Actions går
+  igenom.
+
+### 9. Skärmtiden kan räknas lågt av en egen klient (kontrollera först)
+
+- **Vad:** två sätt att få `heartbeat` (`server/screentime.js`) att räkna nästan inget, båda lästa i koden men inte
+  uppmätta med en riktig klient: (1) en klient som rapporterar att positionen står still strax efter varje HLS-segment
+  (inom `PAUSE_SLACK` 5 s, före nästa) får pausregeln att börja om klockan (`b.t = at`) varje gång; (2) en klient som
+  hämtar mer än `CAP` (45 s) segment åt gången och sedan väntar får glappet att räknas som paus. Webbspelaren gör inget
+  av det. `/direct` har redan takt (`server/pace.js`), HLS inte.
+- **Varför:** skärmtiden är det som skiljer BraXhn TV från Plex och Jellyfin för en barnfamilj; den ska inte gå att
+  komma runt med en enkel nedladdare. Risken är liten (kräver en egen klient), därför längre ner.
+- **Filer:** `server/screentime.js` (`heartbeat`), `server/http/context.js` (`countStream`), `server/pace.js`,
+  `server/stream.js`, `test/screentime-*.test.js`.
+- **Klart när:** ett test som hämtar segment i förväg och skickar "står still" efter varje segment får minst så mycket
+  skärmtid som innehållet det hämtat (räknat per segmentets längd för HLS, som takten för `/direct`), och
+  webbspelarens vanliga paus räknas fortfarande inte (`test/web-chrome-playback.test.js` eller skärmtidens test).
+
+### 10. Uppspelningstestet i Chrome blir ostadigt under last (kontrollera först)
 
 - **Vad:** `test/web-chrome-playback.test.js` (samma mätning som uppspelningsvakten, `installProbes()` i
   `test/helpers/chrome.js`) har enligt dagens agenter fallit ibland när flera ffmpeg-jobb körs samtidigt på maskinen.
@@ -85,11 +182,12 @@ Senast genomgången: 2026-11-28 (version 1.5.0 och det som står under *Ej utgiv
 
 Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 
-
-- Skärmtid: en egen klient som rapporterar att positionen står still strax efter varje HLS-segment (inom 5 s, före
-  nästa) får `heartbeat` att börja om klockan (`b.t = at`, pausregeln) varje gång, så nästan inget räknas. Webbspelaren
-  gör inte så; samma klient kan redan i dag hämta mer än 45 s segment åt gången och vänta. Ett skydd mot båda behöver
-  takt eller räkning per segmentets längd för HLS (som `/direct` i `pace.js`).
+**Från genomgången 2026-11-28 (backlogg, sett i koden men inte gjort)**
+- Live-TV: `/api/live/programs/:pid` listar kommande sändningar av samma titel (`airings`) och regeln från alla
+  kanaler, även kanaler som barnprofilen inte får se (`server/routes/livetv.js`). Bara titel, kanalnamn och tid – filtrera
+  med `channelAllowed` som guiden.
+- Feedback-knappen ligger enligt dagens agenter bakom minispelaren på telefon (kontrollera först: `#fbbox` flyttas
+  upp med `hasbar`/`hasmini` i `web/style.css`, men inte provat med flikraden, radiobaren och musikfältet samtidigt i 390 px).
 
 **Från arbetspasset 2026-11-25 (sett men inte gjort)**
 - Skärmtid: hls.js hämtar segment i upp till 60 s framåt även när filmen är pausad, och varje segment är ett
@@ -114,8 +212,6 @@ Kortare rader, inte rangordnade. Flytta upp en punkt när den blir aktuell.
 - Musik: en bok eller podd återställs inte i minispelaren efter omladdning (`playSpoken` i `web/js/audio.js`).
 - Musik: spolning i elementet efter att nästa buffert startat tappas tyst (`web/js/audio.js`).
 - Musikfältets knappar är 34 px på telefon, under 44 px som rekommenderas för fingrar (`.mic` i `web/style.css`).
-- Expo-appen: en ljudbok eller ett poddavsnitt visas inte i minispelaren efter omstart (bara musikkön återställs);
-  boksidan har *Fortsätt från …* (`restoreQueue` i `apps/expo/src/music.ts`).
 - Expo-appen: jämn ljudnivå (ReplayGain, fälten `gain`/`albumGain` finns i spåren), övertoning, sovtimer, låttexter,
   bokmärken, favoriter och spellistor går inte att ändra i appen än (`apps/expo/src/music.ts`, `screens/Music.tsx`).
 - Expo-appen saknas i `test/contracts/apps.json`: testet känner bara `ios` och `android` (`APPS`, typnamnens slut,
