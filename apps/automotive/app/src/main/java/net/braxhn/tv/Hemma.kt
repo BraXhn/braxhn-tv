@@ -69,6 +69,7 @@ object Home {
         runCatching {
             m.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
+                    Bandwidth.reset() // uppkopplingen mättes på ett annat nät
                     if (via.value != null && network != homeNet) leave()
                     check(force = true)
                 }
@@ -83,7 +84,8 @@ object Home {
     fun check(force: Boolean = false) {
         if (!force && System.currentTimeMillis() - lastCheck < 30_000L) return
         lastCheck = System.currentTimeMillis()
-        Api.appScope.launch { runCatching { checkNow() } }
+        // Efter provet: utanför hemmet mäts uppkopplingen i bakgrunden (Bandwidth.kt), så att starten inte väntar på den
+        Api.appScope.launch { runCatching { checkNow() }; Bandwidth.refresh() }
     }
 
     /** Byter till serverns hemadress när appen är hemma, annars tillbaka till den sparade. true = hemadressen används. */
@@ -98,6 +100,7 @@ object Home {
         val hit = LocalPick.pick(info, Api.appScope) { url, ms -> ping(url, ms) }
         // Servern, profilen eller ett nyare prov kom emellan: låt det gälla
         if (g != gen.get() || saved != Api.saved || token != Api.token.value) return via.value != null
+        Bandwidth.here = info.here // servern ser förfrågan som hemma (då mäts inget)
         if (hit == null || hit == saved || net == null) { leave(); return false }
         proven.add(hit)
         homeNet = net
@@ -118,6 +121,7 @@ object Home {
     /** Ny server eller utloggning: glöm hemadressen och avbryt prov som pågår */
     fun reset() {
         gen.incrementAndGet()
+        Bandwidth.reset()
         via.value = null
         homeNet = null
     }

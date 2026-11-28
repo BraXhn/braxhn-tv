@@ -17,7 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C } from '../theme';
-import { absolute, api, playbackQuery, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem, type Playback } from '../api';
+import { absolute, api, currentBw, playBw, playbackQuery, resumeAt, sxe, warmPlay, type ItemDetail, type MediaItem, type Playback } from '../api';
 import { Button } from '../components/ui';
 import { nowPlaying, pause as pauseAudio } from '../music';
 import * as off from '../offline';
@@ -142,10 +142,12 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
       try {
         // Titeln och /playback samtidigt (startcore.ts): den tidiga frågan är förvärmningens (utan ljudspår) och tar
         // över en förvärmd ström. Väljer servern ett annat ljud än titelns förval frågar appen igen med prev.
+        // Utanför hemmet: samma bw som förvärmningen (eller färsk mätning, högst 1,5 s väntan) i båda frågorna.
+        const bw = playBw(id, start);
         const r = await startPlayback({
-          early: () => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start })}`),
+          early: async () => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, bw: await bw })}`),
           item: () => api<ItemDetail>('/api/items/' + id),
-          again: (audio, first) => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio, prev: pidOf(first?.url) })}`),
+          again: async (audio, first) => api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start, audio, prev: pidOf(first?.url), bw: await bw })}`),
           drop: (x) => { const pid = pidOf(x.url); if (pid) api(`/api/stream/${id}/stop?pid=${pid}`, { method: 'POST' }).catch(() => {}); },
           live: () => live,
         });
@@ -206,7 +208,7 @@ export default function PlayerScreen({ navigation, route }: Props<'Player'>) {
     // Den gamla källan bort direkt: spelaren slutar hämta 6 s-segmentet (servern stoppar den strömmen ändå)
     player.replace(null);
     let p: Playback;
-    try { p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start: to, audio: audioParam.current, prev: pidOf(old.url) })}`); }
+    try { p = await api<Playback>(`/api/items/${id}/playback?${playbackQuery({ start: to, audio: audioParam.current, prev: pidOf(old.url), bw: currentBw() })}`); }
     catch (e: any) {
       if (gen !== restartGen.current || closed.current) return;
       setRestarting(false);

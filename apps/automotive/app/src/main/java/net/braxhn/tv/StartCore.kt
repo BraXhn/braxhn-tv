@@ -52,6 +52,9 @@ object StartCore {
      */
     fun playAudio(chosen: Int?, preset: Int?): Int? = chosen?.takeIf { it != preset }
 
+    /** bw (kbit/s, utanför hemmet) i frågan till /playback – inget när det saknas (då gäller serverns gissning) */
+    fun bwPart(bw: Int?): Map<String, String?> = mapOf("bw" to bw?.takeIf { it > 0 }?.toString())
+
     /** Förvärmningens fråga: uppspelningens fråga plus warm=1 (inget annat får skilja, då passar strömmen inte) */
     fun warmQuery(play: Map<String, String?>): Map<String, String?> = play + ("warm" to "1")
 

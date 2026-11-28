@@ -1,6 +1,8 @@
 package net.braxhn.tv
 
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -50,6 +52,8 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.BandwidthMeter
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -131,7 +135,10 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         // bitström (Dolby/DTS till förstärkaren) och hastighetsändring fungerar ihop
         val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
         if (tv) renderers.setEnableAudioTrackPlaybackParams(true)
-        ExoPlayer.Builder(context, renderers).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
+        // Spelarens mätning av uppkopplingen (samma som ExoPlayer annars använder) – utanför hemmet blir den bw till
+        // nästa /playback (Bandwidth.note nedan)
+        ExoPlayer.Builder(context, renderers).setMediaSourceFactory(DefaultMediaSourceFactory(http))
+            .setBandwidthMeter(DefaultBandwidthMeter.getSingletonInstance(context)).build().apply {
             setAudioAttributes(androidx.media3.common.AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true) // hanterar ljudfokus
             // Egen växling av skärmläget: ExoPlayers Surface.setFrameRate (bara sömlösa byten) stängs av så att de inte krockar
@@ -219,7 +226,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             val r = runCatching {
                 val caps: Map<String, String?> = withContext(Dispatchers.IO) { Api.capabilities(audio, sub) }
                 Api.get<Playback>("/api/items/${it.id}/playback", caps + Api.comfortQuery() +
-                    ("start" to (ms / 1000).toString()) + ("prev" to SeekCore.pidOf(old.url)))
+                    ("start" to (ms / 1000).toString()) + ("prev" to SeekCore.pidOf(old.url)) + ("bw" to Bandwidth.current()?.toString()))
             }
             val np = r.getOrNull()
             if (gen != restartGen[0] || item?.id != it.id) {
@@ -267,7 +274,7 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
 
     /**
      * Förvärm nästa avsnitt (/playback?warm=1) med samma fråga som uppspelningen sedan skickar: Screen.Play(next, 0.0,
-     * null, null) ger Start.query(null, null, 0.0, false). Start.warm frågar högst var 15:e sekund (WarmLog) och hoppar
+     * null, null) ger Start.playQuery(next, null, null, 0.0, false). Start.warm frågar högst var 15:e sekund (WarmLog) och hoppar
      * över ett nedladdat avsnitt.
      */
     fun warmNext() { item?.nextId?.let { next -> Start.warm(next, 0.0, null, null) } }
@@ -313,12 +320,12 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
             // Ett stopp av samma titel (omstart med annat ljud, nattläge …) måste nå servern före den nya starten
             StreamGate.awaitStop(req.id)
             // Titelns uppgifter och /playback samtidigt (StartCore.together): frågan behöver inget ur titelns svar.
-            // Samma fråga som förvärmningen på titelsidan (Start.query), så att servern tar över den strömmen.
+            // Samma fråga som förvärmningen på titelsidan (Start.playQuery, med samma bw), så att servern tar över den strömmen.
             // start: servern förbereder strömmen där uppspelningen börjar (Fortsätt titta) – korta segment just där.
             // cinema=1 vid start från början: servern ger trailers bara för filmer och när bio-läget är på.
             val (it, p) = coroutineScope {
                 val itemJob = async { Api.get<MediaItem>("/api/items/${req.id}") }
-                val q = Start.query(req.audio, req.sub, req.start, req.skipPreroll)
+                val q = Start.playQuery(req.id, req.audio, req.sub, req.start, req.skipPreroll)
                 StartCore.together(Api.appScope, { itemJob.await() }, { Api.get<Playback>("/api/items/${req.id}/playback", q) }) { np -> Start.drop(req.id, np) }
             }
             item = it
@@ -512,6 +519,13 @@ fun PlayerScreen(req: Screen.Play, onClose: () -> Unit, onPlay: (Screen.Play) ->
         }
     }
     // Skärmläget tillbaka till det vanliga när spelaren stängs
+    // Uppkopplingen mätt på riktiga segment: färskare än provet, och nästa start (nästa avsnitt, spolning) använder den
+    DisposableEffect(Unit) {
+        val bwm = DefaultBandwidthMeter.getSingletonInstance(context)
+        val l = BandwidthMeter.EventListener { _, bytes, estimate -> BwCore.fromPlayer(bytes, estimate).takeIf { it > 0 }?.let { Bandwidth.note(it) } }
+        bwm.addEventListener(Handler(Looper.getMainLooper()), l)
+        onDispose { bwm.removeEventListener(l) }
+    }
     DisposableEffect(Unit) { onDispose { Pip.aspect = null; latestReport(true); player.release(); if (frameMode != "off") TvOutput.restore(activity) } }
 
     /** Startar om samma titel där man är (t.ex. nytt ljud från servern), utan bio-läge */

@@ -1,6 +1,15 @@
 # Ändringar
 
 ## Ej utgiven
+- **Android- och Expo-appen startar på rätt kvalitet utanför hemmet.** Förut visste servern inte hur snabb
+  uppkopplingen var när appen användes på mobilnätet eller via reläet: en omkodning började på taket (1080p) och en fil
+  upp till ungefär 10 Mbit/s packades bara om, utan lägre steg att växla till – filmen kunde hacka de första minuterna.
+  Nu mäter apparna uppkopplingen som webben (4 MB i högst en sekund, i bakgrunden när appen öppnas, sparad i
+  10 minuter; Android-appen håller den färsk med spelarens egen mätning) och skickar den till servern, som börjar på
+  steget som ryms och kodar om en fil som inte ryms i nätet. Hemma mäts inget. Provat mot en lokal server bakom en
+  anslutning strypt till 5 Mbit/s: mätt 5000 kbit/s på 1,2 s, och en fil på 8 Mbit/s som förut direktspelades startar
+  som omkodning med 480p först. Inte provat på riktig enhet eller via reläet; appen för iPhone, iPad och Apple TV gör
+  fortfarande som förut.
 - **Android-appen följer *Spela nästa avsnitt automatiskt*.** Förut startade nästa avsnitt alltid direkt när ett
   avsnitt tog slut, även om en förälder stängt av valet. Nu visas kortet *Nästa avsnitt om 8 s* med *Spela nu* och
   *Avbryt* (sekunderna följer kontots val, 0 = direkt), och när valet är av kortet *Nästa avsnitt* utan nedräkning,

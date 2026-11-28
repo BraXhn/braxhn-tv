@@ -77,7 +77,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Offline-synk, provet av hemadressen och positioner som spelats utan nät när appen öppnas eller kommer tillbaka
-        Downloads.autoSync(); Home.check(); OfflineSync.flush()
+        Downloads.autoSync(); Bandwidth.visible = true; Home.check(); OfflineSync.flush()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Bandwidth.visible = false // musiken i bilen eller i bakgrunden behöver ingen mätning
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
